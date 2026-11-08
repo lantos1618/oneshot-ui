@@ -1,6 +1,6 @@
 import { useEffect, useLayoutEffect, useRef, useState, useSyncExternalStore, type KeyboardEvent as RKeyboardEvent, type PointerEvent as RPointerEvent, type ReactNode, type RefObject } from 'react'
 import { AnimatePresence, animate, motion, useInView, useMotionValue, useReducedMotion } from 'motion/react'
-import { Avatar, Button, Chip, Icon, IconButton, TOUCH, clamp, cn, fmt, mix, seeded, spring, surface, useFocusTrap, useWidth } from './core'
+import { Avatar, Button, Chip, Icon, IconButton, TOUCH, clamp, cn, cssUrl, fmt, mix, safeMediaUrl, seeded, spring, surface, useFocusTrap, useWidth } from './core'
 import { Slider } from './forms'
 import { useToast } from './feedback'
 import { OverlayPortal, useScrollLock } from './overlay'
@@ -81,7 +81,7 @@ export function mediaSynthTrack(seconds = 24, bpm = 92, sr = 22050): { url: stri
   for (let k = 0; k < N; k++) v.setInt16(44 + k * 2, Math.max(-1, Math.min(1, out[k] * norm)) * 32767, true)
   const bars = 96, seg = Math.floor(N / bars), peaks: number[] = []
   for (let b = 0; b < bars; b++) { let sum = 0; for (let k = b * seg; k < (b + 1) * seg; k++) sum += (out[k] * norm) ** 2; peaks.push(Math.sqrt(sum / seg)) }
-  const pm = Math.max(...peaks)
+  let pm = 0; for (const p of peaks) if (p > pm) pm = p
   return { url: URL.createObjectURL(new Blob([buf], { type: 'audio/wav' })), peaks: peaks.map(p => Math.round(p / pm * 100) / 100) }
 }
 
@@ -177,7 +177,7 @@ export function createAudioTrack(src: string, fallbackDuration = 0): AudioTrackH
   const halt = () => { if (raf) cancelAnimationFrame(raf); raf = 0 }
   const audio = () => {
     if (el || typeof Audio === 'undefined') return el
-    const a = el = new Audio(); a.preload = 'metadata'; a.src = src; a.playbackRate = state.rate
+    const a = el = new Audio(); a.preload = 'metadata'; a.src = safeMediaUrl(src, 'audio'); a.playbackRate = state.rate
     a.addEventListener('play', () => { mediaLive.forEach(o => { if (o !== a) o.pause() }); mediaLive.add(a); emit(); kick() })
     a.addEventListener('pause', () => { mediaLive.delete(a); halt(); emit() })
     a.addEventListener('ended', () => { a.currentTime = 0; emit() })
@@ -409,7 +409,7 @@ export function VideoPlayer({ src, poster, title, meta, duration: fallback = 0, 
         else if (k === 'm') toggleMute()
         else if (k === 'f') fullscreen()
       }}>
-      <video ref={vid} src={src ?? undefined} poster={poster} playsInline preload="metadata" className="block h-full w-full object-cover"
+      <video ref={vid} src={safeMediaUrl(src, 'video') || undefined} poster={safeMediaUrl(poster) || undefined} playsInline preload="metadata" className="block h-full w-full object-cover"
         onPointerUp={onTouchTap} onClick={() => { if (!fromTouch()) toggle() }} onDoubleClick={() => { if (!fromTouch()) fullscreen() }}
         onPlay={() => { setPlaying(true); wake() }} onPause={() => { setPlaying(false); setIdle(false); sync() }} onEnded={e => { e.currentTarget.currentTime = 0 }}
         onTimeUpdate={sync} onProgress={sync} onDurationChange={sync}
@@ -512,7 +512,7 @@ export function AudioPlayer({ track: shared, src, title, meta, cover, peaks, dur
       <div className="flex items-center gap-3">
         <motion.div key={plays} initial={plays ? { scale: 1 } : false} animate={{ scale: [1, 1.05, 1] }} transition={{ duration: 0.5 }}
           className={cn(surface.muted, 'h-14 w-14 flex-none overflow-hidden')}>
-          {typeof cover === 'string' ? <img src={cover} alt="" className="block h-full w-full object-cover" /> : cover}
+          {typeof cover === 'string' ? <img src={safeMediaUrl(cover) || undefined} alt="" className="block h-full w-full object-cover" /> : cover}
         </motion.div>
         <div className="min-w-0 flex-1">
           <b className="block truncate font-semibold">{title}</b>
@@ -705,7 +705,7 @@ function LightboxView({ items, index, onIndexChange, onClose, originFor }:
       <div ref={stage} className="absolute inset-x-0 top-[calc(64px+env(safe-area-inset-top))] bottom-[calc(130px+env(safe-area-inset-bottom))] flex touch-none items-center justify-center overflow-hidden"
         onClick={() => { if (bgDown.current && !moved.current) close(); bgDown.current = false }} {...gesture.bind}>
         <motion.div ref={frame} style={{ x: fx, y: fy, scale: fs, opacity: fo, width: w, height: h }} className="relative flex-none">
-          <motion.img src={hiSrc ?? it.src} alt={it.title} draggable={false} style={{ x: zx, y: zy, scale: zs, backgroundImage: `url(${it.src})` }}
+          <motion.img src={safeMediaUrl(hiSrc ?? it.src) || undefined} alt={it.title} draggable={false} style={{ x: zx, y: zy, scale: zs, backgroundImage: cssUrl(it.src) }}
             onClick={() => { if (ptrType.current === 'mouse' && zoomRef.current === 1 && !moved.current) setZoom(2.2) }} onDoubleClick={() => { if (ptrType.current === 'mouse') setZoom(zoomRef.current > 1 ? 1 : 2.2) }}
             className={cn('block h-full w-full rounded-[10px] bg-cover object-cover shadow-[0_20px_60px_rgba(0,0,0,.5)] select-none', zoom > 1 ? 'cursor-grab active:cursor-grabbing' : 'cursor-zoom-in')} />
         </motion.div>
@@ -719,7 +719,7 @@ function LightboxView({ items, index, onIndexChange, onClose, originFor }:
         {items.map((t, k) => (
           <button key={t.id} type="button" aria-label={t.title} aria-current={k === index} onClick={() => go(k)}
             className={cn('h-[52px] w-[52px] flex-none cursor-pointer overflow-hidden rounded-lg border-0 bg-[#222] p-0 transition-[opacity,transform] duration-200', k === index ? '-translate-y-0.5 opacity-100 shadow-[0_0_0_2px_#fff]' : 'opacity-45 hover:opacity-80')}>
-            <img src={t.src} alt="" className="block h-full w-full object-cover" />
+            <img src={safeMediaUrl(t.src) || undefined} alt="" className="block h-full w-full object-cover" />
           </button>
         ))}
       </motion.div>
@@ -742,7 +742,7 @@ function MasonryTile({ it, x, y, width, imgH, delay, saved, onSave, onOpen, imgR
       className="group absolute top-0 left-0" style={{ width }}>
       <div className="relative overflow-hidden rounded-[var(--r-lg)] bg-[var(--muted)] has-[button:focus-visible]:shadow-[0_0_0_2px_var(--accent)]" style={{ height: imgH }}>
         <button type="button" onClick={onOpen} aria-label={`Open ${it.title} by ${it.author}`} className="absolute inset-0 block cursor-zoom-in border-0 bg-transparent p-0 outline-none">
-          <img ref={imgRef} src={it.src} alt="" draggable={false} className="block h-full w-full object-cover transition-transform duration-500 ease-[cubic-bezier(.22,1,.36,1)] group-hover:scale-[1.04]" />
+          <img ref={imgRef} src={safeMediaUrl(it.src) || undefined} alt="" draggable={false} className="block h-full w-full object-cover transition-transform duration-500 ease-[cubic-bezier(.22,1,.36,1)] group-hover:scale-[1.04]" />
           <span aria-hidden className="absolute inset-0 flex items-end justify-between gap-2 bg-gradient-to-b from-transparent from-55% to-black/55 p-2.5 text-xs font-medium text-white opacity-0 transition-opacity group-hover:opacity-100 group-focus-within:opacity-100 [@media(pointer:coarse)]:opacity-100 max-sm:p-2">
             <span className="min-w-0 truncate">{it.title}</span><span className="flex-none">♥ {it.likes}</span>
           </span>
@@ -782,13 +782,15 @@ export function MasonryGallery({ items, categories, onLoadMore, hasMore = true, 
   const hs = new Array<number>(cols).fill(0)
   let fresh = 0
   const placed = visible.map(it => {
-    const c = hs.indexOf(Math.min(...hs)), x = c * (cw + gap), y = hs[c], imgH = cw * it.ratio
+    let c = 0; for (let k = 1; k < hs.length; k++) if (hs[k] < hs[c]) c = k
+    const x = c * (cw + gap), y = hs[c], imgH = cw * it.ratio
     hs[c] += imgH + 30 + gap
     const delay = prevIds.current.has(it.id) ? 0 : Math.min(12, fresh++) * 0.04
     return { it, x, y, imgH, delay }
   })
   useEffect(() => { prevIds.current = new Set(visible.map(v => v.id)) })
-  const height = visible.length ? Math.max(...hs) - gap : 240
+  let tallest = 0; for (const v of hs) if (v > tallest) tallest = v
+  const height = visible.length ? tallest - gap : 240
   const lbItems = visible.map(it => ({ ...it, meta: `${it.author} · ${it.category} · ♥ ${it.likes}` }))
   return (
     <div className={cn('flex flex-col gap-3', className)}>
@@ -845,7 +847,7 @@ export function MediaCard({ image, title, description, tag, duration, date, auth
     <motion.article initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }} whileHover={{ y: -4 }} transition={{ opacity: { duration: 0.4, delay: index * 0.07 }, y: spring(0.3, 0.35) }}
       className={cn(shell, 'transition-shadow hover:shadow-[var(--shadow)]', className)}>
       <div className="relative aspect-[4/3] overflow-hidden bg-[var(--muted)]">
-        {image && <img src={image} alt={title} className="block h-full w-full object-cover" />}
+        {image && <img src={safeMediaUrl(image) || undefined} alt={title} className="block h-full w-full object-cover" />}
         {tag && <span className="absolute top-2.5 left-2.5 rounded-full bg-black/50 px-2 py-1 text-[11px] font-medium text-white backdrop-blur-sm">{tag}</span>}
         {duration && <span className="absolute right-2.5 bottom-2.5 rounded-[5px] bg-black/65 px-1.5 py-0.5 font-[family-name:var(--mono)] text-[11px] font-medium text-white">{duration}</span>}
       </div>
@@ -877,13 +879,13 @@ export function ProgressiveImage({ src, placeholder, alt, aspect = '4/3', delay 
   const [attempt, setAttempt] = useState(0)
   useEffect(() => {
     setState('loading'); let live = true
-    const t = setTimeout(() => { const im = new Image(); im.onload = () => live && setState('loaded'); im.onerror = () => live && setState('error'); im.src = src }, delay)
+    const t = setTimeout(() => { const im = new Image(); im.onload = () => live && setState('loaded'); im.onerror = () => live && setState('error'); im.src = safeMediaUrl(src) }, delay)
     return () => { live = false; clearTimeout(t) }
   }, [src, attempt, delay])
   return (
     <div className={cn('relative overflow-hidden rounded-[var(--r-lg)] bg-[var(--muted)]', className)} style={{ aspectRatio: aspect }} aria-busy={state === 'loading'}>
-      {state !== 'error' && placeholder && <img src={placeholder} alt="" aria-hidden className="absolute inset-0 h-full w-full scale-110 object-cover blur-[14px]" />}
-      {state === 'loaded' && <motion.img key={`${src}-${attempt}`} src={src} alt={alt} initial={{ opacity: 0 }} animate={{ opacity: 1 }} transition={{ duration: 0.6 }} className="absolute inset-0 h-full w-full object-cover" />}
+      {state !== 'error' && placeholder && <img src={safeMediaUrl(placeholder) || undefined} alt="" aria-hidden className="absolute inset-0 h-full w-full scale-110 object-cover blur-[14px]" />}
+      {state === 'loaded' && <motion.img key={`${src}-${attempt}`} src={safeMediaUrl(src) || undefined} alt={alt} initial={{ opacity: 0 }} animate={{ opacity: 1 }} transition={{ duration: 0.6 }} className="absolute inset-0 h-full w-full object-cover" />}
       <AnimatePresence>
         {state === 'error' && (
           <motion.div role="alert" initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} transition={{ duration: 0.25 }}
@@ -904,17 +906,37 @@ const CROP_BOX = 160, CROP_CIRCLE = 140
  * Avatar cropper: the photo sits under a circular mask; drag (or arrow keys) to reposition, clamped so the
  * circle stays covered; zoom with the slider, the wheel, a two-finger pinch or + / −. "Choose photo" loads a local file and
  * 48 / 32 / 22 px previews update live. `onChange` receives the 256 px circle crop as a PNG data URL once the crop
- * settles (not on every pointer move).
+ * settles (not on every pointer move). Chosen files must be images of at most `maxBytes` (15 MB) and `maxPixels`
+ * (40 megapixels, checked from the header before anything is drawn); they load as object URLs, revoked when replaced
+ * or on unmount. A rejected file shows why (and calls `onError`).
  */
-export function AvatarCropper({ src: initial, defaultZoom = 1.2, onChange, className }: { src: string; defaultZoom?: number; onChange?: (dataUrl: string) => void; className?: string }) {
-  const [src, setSrc] = useState(initial)
+export function AvatarCropper({ src: initial, defaultZoom = 1.2, onChange, onError, maxBytes = 15 * 1024 * 1024, maxPixels = 40e6, className }:
+  { src: string; defaultZoom?: number; onChange?: (dataUrl: string) => void; onError?: (message: string) => void; maxBytes?: number; maxPixels?: number; className?: string }) {
+  const [src, setSrc] = useState(() => safeMediaUrl(initial))
+  const [err, setErr] = useState<string | null>(null)
+  const ownUrl = useRef<string | null>(null) // object URL of the chosen file (ours to revoke)
   const [z, setZ] = useState(defaultZoom)
   const [off, setOff] = useState({ x: 0, y: 0 })
   const [nat, setNat] = useState<{ w: number; h: number } | null>(null)
   const [loads, setLoads] = useState(0)
   const box = useRef<HTMLDivElement>(null), img = useRef<HTMLImageElement>(null), outs = useRef<(HTMLCanvasElement | null)[]>([])
   const from = useRef({ x: 0, y: 0 }), emit = useRef(onChange); emit.current = onChange
-  useEffect(() => setSrc(initial), [initial])
+  const adopt = (url: string, own: boolean) => { if (ownUrl.current && ownUrl.current !== url) URL.revokeObjectURL(ownUrl.current); ownUrl.current = own ? url : null; setSrc(url) }
+  useEffect(() => adopt(safeMediaUrl(initial), false), [initial]) // eslint-disable-line react-hooks/exhaustive-deps
+  useEffect(() => () => { if (ownUrl.current) URL.revokeObjectURL(ownUrl.current) }, [])
+  const fail = (m: string) => { setErr(m); onError?.(m) }
+  const choose = (f: File) => {
+    if (!/^image\//.test(f.type)) return fail('Choose an image file (JPEG, PNG, WebP…).')
+    if (f.size > maxBytes) return fail(`That photo is ${fmt.bytes(f.size)}; the limit is ${fmt.bytes(maxBytes)}.`)
+    const url = URL.createObjectURL(f), probe = new Image()
+    probe.onload = () => { // the size comes from the header, before the image is decoded or drawn
+      const pw = probe.naturalWidth, ph = probe.naturalHeight
+      if (!pw || !ph || pw * ph > maxPixels || Math.max(pw, ph) > 16384) { URL.revokeObjectURL(url); return fail(`That photo is ${pw} × ${ph} px; the limit is ${Math.round(maxPixels / 1e6)} megapixels.`) }
+      setErr(null); adopt(url, true); setZ(defaultZoom); setLoads(n => n + 1)
+    }
+    probe.onerror = () => { URL.revokeObjectURL(url); fail('That file couldn’t be read as an image.') }
+    probe.src = url
+  }
   const base = nat ? CROP_BOX / Math.min(nat.w, nat.h) : 1
   const w = nat ? nat.w * base * z : CROP_BOX, h = nat ? nat.h * base * z : CROP_BOX
   const clampOff = (o: { x: number; y: number }, ww = w, hh = h) => { const mx = Math.max(0, (ww - CROP_CIRCLE) / 2), my = Math.max(0, (hh - CROP_CIRCLE) / 2); return { x: clamp(o.x, -mx, mx), y: clamp(o.y, -my, my) } }
@@ -926,7 +948,10 @@ export function AvatarCropper({ src: initial, defaultZoom = 1.2, onChange, class
     outs.current.forEach(c => draw(c, 96)) // the small previews follow every move (cheap)
     if (!emit.current) return
     // the PNG export is expensive: only once the crop has stopped changing for a moment
-    const t = setTimeout(() => { const c = document.createElement('canvas'); c.width = c.height = 256; const g = c.getContext('2d')!; g.beginPath(); g.arc(128, 128, 128, 0, Math.PI * 2); g.clip(); draw(c, 256); emit.current?.(c.toDataURL('image/png')) }, 250)
+    const t = setTimeout(() => {
+      const c = document.createElement('canvas'); c.width = c.height = 256; const g = c.getContext('2d')!; g.beginPath(); g.arc(128, 128, 128, 0, Math.PI * 2); g.clip(); draw(c, 256)
+      try { emit.current?.(c.toDataURL('image/png')) } catch { /* a cross-origin src taints the canvas: previews still work, there's just no export */ }
+    }, 250)
     return () => clearTimeout(t)
   }, [nat, w, h, o.x, o.y, src])
   const gesture = usePinchPan({ getZoom: () => z, onZoom: setZ, min: 1, max: 3, wheel: box, wheelStep: 0.06,
@@ -956,10 +981,11 @@ export function AvatarCropper({ src: initial, defaultZoom = 1.2, onChange, class
         <div className="mt-2.5 flex flex-wrap items-center gap-2">
           <label className={cn(surface.md, 'inline-flex h-[30px] cursor-pointer items-center px-3 text-xs font-medium hover:bg-[var(--muted)] focus-within:shadow-[0_0_0_2px_var(--accent)] [@media(pointer:coarse)]:h-10 [@media(pointer:coarse)]:px-4')}>
             Choose photo
-            <input type="file" accept="image/*" className="sr-only" onChange={e => { const f = e.target.files?.[0]; if (!f) return; const r = new FileReader(); r.onload = () => { setSrc(String(r.result)); setZ(defaultZoom); setLoads(n => n + 1) }; r.readAsDataURL(f); e.target.value = '' }} />
+            <input type="file" accept="image/*" className="sr-only" onChange={e => { const f = e.target.files?.[0]; e.target.value = ''; if (f) choose(f) }} />
           </label>
           <span className="text-[11px] text-[var(--fg3)]"><span className="[@media(pointer:coarse)]:hidden">Drag the image to reposition</span><span className="hidden [@media(pointer:coarse)]:inline">Drag to move, pinch to zoom</span></span>
         </div>
+        {err && <p role="alert" className="m-0 mt-2 text-xs text-[var(--bad)]">{err}</p>}
       </div>
     </div>
   )

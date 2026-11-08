@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useLayoutEffect, useRef, useState, type CSSProperties, type ReactNode, type KeyboardEvent as RKeyboardEvent, type PointerEvent as RPointerEvent } from 'react'
 import { AnimatePresence, motion } from 'motion/react'
-import { Avatar, AvatarStack, Button, useCoarsePointer, IconButton, ScrollEdges, TOUCH, addDays, addMonths, cn, dayKey, fmtDate, sameDay, spring, startOfDay, startOfWeek, surface, useControllable, usePointerDrag, useScrollEdges, useWidth } from './core'
+import { Avatar, AvatarStack, Button, useCoarsePointer, IconButton, ScrollEdges, TOUCH, addDays, addMonths, cn, dayKey, fmtDate, maxOf, safeColor, sameDay, spring, startOfDay, startOfWeek, surface, useControllable, usePointerDrag, useScrollEdges, useWidth } from './core'
 import { SegmentedControl } from './forms'
 import { useToast } from './feedback'
 
@@ -315,7 +315,7 @@ export function Scheduler({ events, defaultEvents = [], onChange, defaultView = 
                   [0, 6].includes(d.getDay()) && 'bg-[color-mix(in_srgb,var(--muted)_45%,transparent)]', out && 'opacity-45')}>
                 <span className={cn('grid h-[26px] w-[26px] place-items-center rounded-full text-[13px] font-medium', sameDay(d, today) ? 'bg-[var(--bad)] text-[var(--card)]' : 'text-[var(--fg2)]')}>{d.getDate()}</span>
                 <span className="flex flex-wrap justify-center gap-[3px]">
-                  {evs.slice(0, 3).map(e => <i key={e.id} className="h-1.5 w-1.5 rounded-full" style={{ background: e.color ?? 'var(--accent)' }} />)}
+                  {evs.slice(0, 3).map(e => <i key={e.id} className="h-1.5 w-1.5 rounded-full" style={{ background: safeColor(e.color, 'var(--accent)') }} />)}
                   {evs.length > 3 && <span className="text-[11px] leading-[6px] text-[var(--fg3)]">+</span>}
                 </span>
               </button>
@@ -330,7 +330,7 @@ export function Scheduler({ events, defaultEvents = [], onChange, defaultView = 
                   <div key={e.id} onPointerDown={ev => downChip(ev, e)} title={`${e.title} · ${scHM(e.start)}`} role="button" tabIndex={0}
                     onKeyDown={k => k.key === 'Enter' && go('day', new Date(e.date))}
                     className={cn('flex cursor-grab items-center gap-1.5 overflow-hidden rounded-md px-1.5 py-0.5 text-xs leading-tight whitespace-nowrap select-none [-webkit-touch-callout:none] hover:bg-[var(--muted)] [@media(pointer:coarse)]:min-h-8 [@media(pointer:fine)]:touch-none', out && 'opacity-45', chipDrag?.ev.id === e.id && 'opacity-30')}>
-                    <i className="h-1.5 w-1.5 flex-none rounded-full" style={{ background: e.color ?? 'var(--accent)' }} />
+                    <i className="h-1.5 w-1.5 flex-none rounded-full" style={{ background: safeColor(e.color, 'var(--accent)') }} />
                     <span className="hidden flex-none font-[family-name:var(--mono)] text-[11px] text-[var(--fg3)] sm:inline">{scHM(e.start)}</span><span className="truncate">{e.title}</span>
                   </div>
                 ))}
@@ -341,7 +341,7 @@ export function Scheduler({ events, defaultEvents = [], onChange, defaultView = 
         </div>
         {chipDrag && (
           <div className="pointer-events-none fixed z-[150] flex items-center gap-1.5 rounded-md bg-[var(--card)] px-1.5 py-0.5 text-xs whitespace-nowrap shadow-[var(--shadow)]" style={{ left: chipDrag.x, top: chipDrag.y, width: chipDrag.w }}>
-            <i className="h-1.5 w-1.5 flex-none rounded-full" style={{ background: chipDrag.ev.color ?? 'var(--accent)' }} />
+            <i className="h-1.5 w-1.5 flex-none rounded-full" style={{ background: safeColor(chipDrag.ev.color, 'var(--accent)') }} />
             <span className="font-[family-name:var(--mono)] text-[11px] text-[var(--fg3)]">{scHM(chipDrag.ev.start)}</span><span className="truncate">{chipDrag.ev.title}</span>
           </div>
         )}
@@ -481,7 +481,7 @@ export function OrgChart({ root, defaultCollapsed = [], height = 420, className 
   all.forEach(({ n, parent }) => { if (!pos.has(n.id)) { const p = pos.get(parent!.id)!; pos.set(n.id, { x: p.x, y: p.y, shown: false, parent }) } })
   const treeW = x - OC_GX, shown = all.filter(a => pos.get(a.n.id)!.shown)
   const innerW = Math.max(treeW, width - 2), off = Math.max(0, (width - 2 - treeW) / 2)
-  const innerH = Math.max(Math.max(...shown.map(a => pos.get(a.n.id)!.y)) + OC_H + 30, height - 2)
+  const innerH = Math.max(maxOf(shown.map(a => pos.get(a.n.id)!.y)) + OC_H + 30, height - 2)
 
   const [edgeRef, edges] = useScrollEdges<HTMLDivElement>()
   const setBox = useCallback((el: HTMLDivElement | null) => { box.current = el; edgeRef(el) }, []) // eslint-disable-line react-hooks/exhaustive-deps

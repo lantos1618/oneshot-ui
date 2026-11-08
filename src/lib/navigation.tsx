@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useId, useLayoutEffect, useRef, useState, type ReactNode } from 'react'
 import { AnimatePresence, motion, type Variants } from 'motion/react'
-import { Avatar, Button, Icon, IconButton, type IconName, StatusIcon, cn, spring, useCoarsePointer, useControllable, useHotkey, useOutside, useRoving } from './core'
+import { Avatar, Button, Icon, IconButton, type IconName, StatusIcon, cn, safeUrl, spring, useCoarsePointer, useControllable, useHotkey, useOutside, useRoving } from './core'
 import { ActiveIndicator } from './forms'
 import { Tooltip } from './overlay'
 
@@ -259,7 +259,8 @@ const megaSlide: Variants = {
  * Site header whose menus share one panel. Hover or focus a top item to open it (it waits `closeDelay` ms
  * before closing, so you can travel to the panel); moving to another item morphs the panel's size and
  * position while the content slides in from that side. Escape closes, ↓ moves into the panel.
- * Items with `href` and no `content` are plain links. `children` is the page under the header.
+ * Items with `href` and no `content` are plain links (`href` passes through safeUrl: http(s), mailto, tel or relative).
+ * `children` is the page under the header.
  */
 export function MegaMenu({ items, brand, actions, children, closeDelay = 160, className }:
   { items: MegaMenuItem[]; brand?: ReactNode; actions?: ReactNode; children?: ReactNode; closeDelay?: number; className?: string }) {
@@ -337,7 +338,7 @@ export function MegaMenu({ items, brand, actions, children, closeDelay = 160, cl
               {it.label}<Icon name="chevronDown" size={12} className={cn('opacity-60 transition-transform duration-200', cur === i && 'rotate-180')} />
             </button>
           ) : (
-            <a key={it.label} href={it.href ?? '#'} onFocus={() => close(true)}
+            <a key={it.label} href={safeUrl(it.href)} onFocus={() => close(true)}
               className="inline-flex h-[34px] flex-none items-center rounded-[var(--r-md)] px-3 text-[13px] font-medium text-[var(--fg2)] no-underline hover:text-[var(--fg)] [@media(pointer:coarse)]:h-10">{it.label}</a>
           ))}
         </nav>
@@ -369,7 +370,7 @@ export function MegaMenu({ items, brand, actions, children, closeDelay = 160, cl
 
 /* Breadcrumbs, pagination, steps ───────────────────────────────────────────── */
 
-/** Trail of links to the current page (the last item, marked aria-current). Wraps on narrow screens; links grow their tap area on touch. */
+/** Trail of links to the current page (the last item, marked aria-current). Wraps on narrow screens; links grow their tap area on touch. Hrefs pass through safeUrl. */
 export function Breadcrumbs({ items, className }: { items: { label: string; href?: string; onClick?: () => void }[]; className?: string }) {
   return (
     <nav aria-label="Breadcrumb" className={cn('flex flex-wrap items-center gap-1.5 text-[13px] text-[var(--fg3)]', className)}>
@@ -378,7 +379,7 @@ export function Breadcrumbs({ items, className }: { items: { label: string; href
         return (
           <span key={i} className="flex items-center gap-1.5">
             {last ? <b aria-current="page" className="font-medium text-[var(--fg)]">{it.label}</b>
-              : <a href={it.href ?? '#'} onClick={e => { if (it.onClick) { e.preventDefault(); it.onClick() } }} className="text-[var(--fg2)] no-underline hover:text-[var(--fg)] [@media(pointer:coarse)]:-my-2 [@media(pointer:coarse)]:-mx-1 [@media(pointer:coarse)]:px-1 [@media(pointer:coarse)]:py-2">{it.label}</a>}
+              : <a href={safeUrl(it.href)} onClick={e => { if (it.onClick) { e.preventDefault(); it.onClick() } }} className="text-[var(--fg2)] no-underline hover:text-[var(--fg)] [@media(pointer:coarse)]:-my-2 [@media(pointer:coarse)]:-mx-1 [@media(pointer:coarse)]:px-1 [@media(pointer:coarse)]:py-2">{it.label}</a>}
             {!last && <Icon name="chevronRight" size={12} />}
           </span>
         )

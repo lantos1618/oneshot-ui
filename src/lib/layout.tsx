@@ -1,6 +1,6 @@
 import { useEffect, useId, useLayoutEffect, useRef, useState, type CSSProperties, type ReactNode, type RefObject, type KeyboardEvent as RKeyboardEvent, type PointerEvent as RPointerEvent } from 'react'
 import { AnimatePresence, LayoutGroup, motion } from 'motion/react'
-import { AvatarStack, Badge, DeltaBadge, Icon, type IconName, ScrollEdges, StatusIcon, type StatusIconStatus, TOUCH, type Tone, clamp, cn, prefersReducedMotion, spring, surface, useCoarsePointer, useControllable, useLongPress, usePointerDrag, useScrollEdges, SparkChart } from './core'
+import { AvatarStack, Badge, DeltaBadge, Icon, type IconName, ScrollEdges, StatusIcon, type StatusIconStatus, TOUCH, type Tone, clamp, cn, prefersReducedMotion, safeColor, spring, surface, useCoarsePointer, useControllable, useLongPress, usePointerDrag, useScrollEdges, SparkChart } from './core'
 import { Collapse, useToast } from './feedback'
 
 /* ════════════════════════════════════════════════════════════════════════════
@@ -335,7 +335,7 @@ export function Kanban({ value, defaultValue = [], onChange, doneColumn, newCard
                 <div {...columns.handleProps(col.id)} title="Drag to reorder columns"
                   className={cn('group flex cursor-grab items-center gap-2 rounded-[var(--r-md)] px-1 pt-0.5 pb-1 text-[13px] font-semibold select-none [-webkit-touch-callout:none] active:cursor-grabbing', TOUCH.tap36)}>
                   <span className="-ml-0.5 text-[var(--fg3)] opacity-35 transition-opacity group-hover:opacity-100"><Icon name="grip" size={12} strokeWidth={3.2} /></span>
-                  <i className="h-2 w-2 rounded-full" style={{ background: col.color ?? 'var(--fg3)' }} />{col.title}
+                  <i className="h-2 w-2 rounded-full" style={{ background: safeColor(col.color, 'var(--fg3)') }} />{col.title}
                   <motion.span key={col.cards.length} initial={{ scale: 1.3 }} animate={{ scale: 1 }} transition={spring(0.5, 0.3)}
                     className={cn('ui-num rounded-full px-2 py-px text-[11px] font-medium', over ? 'bg-[var(--bad-soft)] text-[var(--bad)]' : 'bg-[var(--card)] text-[var(--fg3)]')}>{col.cards.length}</motion.span>
                   {col.limit && <span className="ml-auto text-[11px] font-normal text-[var(--fg3)]">Limit {col.limit}</span>}
@@ -474,7 +474,7 @@ export function SortableList<T extends { id: string; color?: string }>({ items, 
               lifted === it.id && 'shadow-[0_0_0_2px_var(--accent),0_8px_20px_rgba(0,0,0,.12)]')}>
             <span {...sort.handleProps(it.id)} aria-hidden title="Drag to reorder"
               className="grid h-[22px] w-[18px] flex-none cursor-grab touch-none place-items-center rounded-[5px] text-[var(--fg3)] hover:bg-[var(--muted)] hover:text-[var(--fg)] active:cursor-grabbing [@media(pointer:coarse)]:-my-1.5 [@media(pointer:coarse)]:-ml-1 [@media(pointer:coarse)]:h-9 [@media(pointer:coarse)]:w-9"><Icon name="grip" size={12} strokeWidth={3.2} /></span>
-            {it.color && <span className="h-2 w-2 flex-none rounded-full" style={{ background: it.color }} />}
+            {it.color && <span className="h-2 w-2 flex-none rounded-full" style={{ background: safeColor(it.color) }} />}
             <span className="min-w-0 flex-1 truncate">{render(it)}</span>
             {ranked && <span className="ui-num text-[11px] font-medium text-[var(--fg3)]">#{i + 1}</span>}
           </motion.div>

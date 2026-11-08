@@ -1,7 +1,7 @@
 import { useState } from 'react'
 import { AICanvas, AgentComposer, AgentPlan, AgentTransitMap, AssistantChat, Badge, Button, Chart, ChatApproval, ChatCard, ChatChecklist, type ChatScript, ChatSources, Citation, CodeBlock, type ComposerModel,
-  type ComposerSample, type ComposerSendMeta, ConfidenceField, type Connector, GhostTextInput, LOCALE, ModelComparison, PermissionRequest, type SlashCommand, type Source, SourcesPanel, SuggestedEdit, ThinkingSteps, VoiceInput,
-  type WorkspaceItem } from '../lib'
+  type ComposerAction, type ComposerReply, type ComposerSample, type ComposerSendMeta, ConfidenceField, type Connector, GhostTextInput, LOCALE, ModelComparison, PermissionRequest, type SlashCommand, type Source, SourcesPanel, SuggestedEdit, ThinkingSteps, VoiceInput,
+  type WorkspaceItem, sleep } from '../lib'
 import { Section, Spec } from './kit'
 
 export type Invoice = { id: string; customer: string; status: string; amount: number }
@@ -91,10 +91,35 @@ const AI_DEMO_MODELS: ComposerModel[] = [
   { name: 'Open 70B', vendor: 'Fast host', speeds: ['Normal', 'Fast', 'Ultra fast'], efforts: ['Off', 'Low', 'High'] },
 ]
 const AC_SAMPLES: ComposerSample[] = [{ title: 'Attach sample', desc: 'Adds a demo report.pdf', files: () => [new File([new Uint8Array(248000)], 'Q3 report.pdf', { type: 'application/pdf' })] }]
-/** The demo's "agent": a canned reply that mentions what was attached. */
-function acDemoReply(_text: string, files: File[], context: string[], { settings }: ComposerSendMeta) {
+/**
+ * The demo's "agent": a canned reply that mentions what was attached. Anything that would act (send, remind, create,
+ * deploy…) comes back as an action for approval and is NOT run here; the permission mode decides whether to ask.
+ */
+function acDemoReply(text: string, files: File[], context: string[], { settings, mode }: ComposerSendMeta): string | ComposerReply {
   const about = context[0] || files[0]?.name || 'that', more = context.length + files.length - 1
-  return `Looking at ${about}${more > 0 ? ` and ${more} more` : ''}. ${/fast|priority/i.test(settings.speed) ? 'Quick take:' : 'Here’s what I found:'} the key points are clear and I’ve drafted next steps below.`
+  const reply = `Looking at ${about}${more > 0 ? ` and ${more} more` : ''}. ${/fast|priority/i.test(settings.speed) ? 'Quick take:' : 'Here’s what I found:'} the key points are clear and I’ve drafted next steps below.`
+  const email = /send|email|remind/i.test(text), act = email || /create|open|post|deploy|delete/i.test(text)
+  if (!act || mode.id === 'yolo' || (mode.id === 'approve' && !email)) return reply // routine (or YOLO): no card
+  return { text: reply, needsApproval: email
+    ? { tool: 'gmail.send', summary: 'Send “Invoice #1042 is overdue” to the Northwind billing contacts', recipients: ['ap@northwind.example', 'sam.lee@northwind.example'],
+        args: { subject: 'Invoice #1042 is overdue', attachments: files.map(f => f.name).join(', ') || 'none' } }
+    : { tool: 'linear.createIssue', summary: `Create an issue: “${text.length > 60 ? text.slice(0, 57) + '…' : text}”`, args: { team: 'Launch', priority: 'High' } } }
+}
+/** The demo host: pretends to run an approved action; on deny it runs nothing, so it confirms that. */
+const acDemoApprove = async (_action: ComposerAction, approved: boolean) => { await sleep(approved ? 700 : 150); return true }
+
+/** PermissionRequest wired to a pretend mail host: progress is simulated here, not in the component. */
+function PermissionDemo() {
+  const [progress, setProgress] = useState<{ sent: number; total: number }>()
+  const [got, setGot] = useState<string | null>(null)
+  const onDecide = async (allowed: boolean, _always: boolean, draft: { subject: string; body: string }) => {
+    setGot(allowed ? draft.subject : null); if (!allowed) return
+    for (let i = 0; i <= 12; i++) { setProgress({ sent: i, total: 12 }); await sleep(110 + Math.random() * 90) }
+  }
+  return <>
+    <PermissionRequest reason="You asked to “let the launch list know about the delay”. Sending email is never automatic." progress={progress} onDecide={onDecide} onUndo={async () => { await sleep(500); return true }} />
+    {got && <span className="text-xs text-[var(--fg3)]">The host received the subject “{got}”</span>}
+  </>
 }
 
 export function AISection() {
@@ -105,7 +130,7 @@ export function AISection() {
         <AssistantChat starters={STARTERS} commands={COMMANDS} respond={respond} />
       </Spec>
       <Spec title="Chat composer" desc="A composer that doubles as a control panel: attach (+, drag, paste), add context from the workspace, pick a permission mode, configure the model, toggle connectors. Keep typing while it works and follow-ups queue. The first send glides it into the conversation." span={3}>
-        <AgentComposer onSend={acDemoReply} items={AC_ITEMS} doc={AC_DOC} connectors={AC_CONNECTORS} models={AI_DEMO_MODELS} samples={AC_SAMPLES} hint="Try: “Summarise the invoice and draft a reminder”" />
+        <AgentComposer onSend={acDemoReply} onApprovalRequest={acDemoApprove} items={AC_ITEMS} doc={AC_DOC} connectors={AC_CONNECTORS} models={AI_DEMO_MODELS} samples={AC_SAMPLES} hint="Try: “Summarise the invoice and draft a reminder”" />
       </Spec>
       <Spec title="Thinking steps" desc="Vertical stepper for reasoning. Collapses to a summary when done.">
         <Button size="sm" className="self-start" onClick={() => setReplay(r => r + 1)}>Replay</Button>
@@ -115,7 +140,7 @@ export function AISection() {
         <AgentPlan steps={['Read the brief', 'Search 12 sources', 'Compare findings', 'Write summary']} />
       </Spec>
       <Spec title="Permission request" desc="Say what, to whom, and why. Then show the outcome." span={2}>
-        <PermissionRequest reason="You asked to “let the launch list know about the delay”. Sending email is never automatic." />
+        <PermissionDemo />
       </Spec>
       <Spec title="Citations" desc="Hover or tap a number">
         <p className="m-0 text-[13px] leading-loose">Most users finish onboarding in under 3 minutes<Citation n={1} source={SRC[0]} />, though mobile is 40% slower<Citation n={2} source={SRC[1]} />.</p>

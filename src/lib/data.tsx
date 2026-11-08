@@ -278,7 +278,39 @@ export function InlineDatePicker({ value, defaultValue = [null, null], onChange,
 
 type JvCtx = { closed: Set<string>; toggle: (p: string) => void; q: string; copy: (p: string) => void }
 
+/** Stands in for a value JsonViewer won't expand: a reference back to an ancestor, a branch past the depth cap, the rest of a huge tree. */
+class JvMarker { readonly text: string; constructor(text: string) { this.text = text } }
+const JV_MAX_DEPTH = 64
+const JV_MAX_NODES = 5000
+const jvIsObj = (v: unknown): v is object => v !== null && typeof v === 'object' && !(v instanceof JvMarker)
+/**
+ * A copy of `data` that is safe to render: cycles become [Circular] (tracked per path with a WeakSet, so shared but
+ * acyclic references still show), nesting stops at JV_MAX_DEPTH levels, and the tree stops after JV_MAX_NODES values.
+ * Objects are rebuilt with a null prototype, so a `__proto__` key is just a key. Throwing getters show as [Unreadable].
+ */
+function jvSafe(data: unknown): unknown {
+  const path = new WeakSet<object>(); let nodes = 0
+  const go = (v: unknown, depth: number): unknown => {
+    if (v === null || typeof v !== 'object') return v
+    if (path.has(v)) return new JvMarker('[Circular]')
+    if (depth >= JV_MAX_DEPTH) return new JvMarker('[…deeper levels hidden]')
+    let entries: [string, unknown][]
+    try { entries = Object.entries(v) } catch { return new JvMarker('[Unreadable]') }
+    path.add(v)
+    const arr = Array.isArray(v), out: Record<string, unknown> | unknown[] = arr ? [] : Object.create(null)
+    for (let i = 0; i < entries.length; i++) {
+      if (++nodes > JV_MAX_NODES) { const more = new JvMarker(`[…${entries.length - i} more]`); if (Array.isArray(out)) out.push(more); else out['…'] = more; break }
+      const x = go(entries[i][1], depth + 1)
+      if (Array.isArray(out)) out.push(x); else out[entries[i][0]] = x
+    }
+    path.delete(v)
+    return out
+  }
+  return go(data, 0)
+}
+
 function JsonValue({ v }: { v: unknown }) {
+  if (v instanceof JvMarker) return <span className="text-[var(--fg3)] italic">{v.text}</span>
   if (v === null) return <span className="text-[var(--fg3)] italic">null</span>
   if (typeof v === 'string') return <span className="text-[color-mix(in_srgb,var(--ok)_85%,var(--fg))]">"{v}"</span>
   if (typeof v === 'number') return <span className="text-[color-mix(in_srgb,var(--c3)_70%,var(--fg))]">{v}</span>
@@ -286,7 +318,7 @@ function JsonValue({ v }: { v: unknown }) {
 }
 
 function JsonNode({ k, v, path, last, ctx }: { k: string | number | null; v: unknown; path: string; last: boolean; ctx: JvCtx }) {
-  const isObj = v !== null && typeof v === 'object', arr = Array.isArray(v)
+  const isObj = jvIsObj(v), arr = Array.isArray(v)
   const hit = k !== null && !!ctx.q && String(k).toLowerCase().includes(ctx.q)
   const key = k !== null && (
     <><button data-jv-path={path} data-hit={hit || undefined} onClick={() => ctx.copy(path)} title={`Copy path ${path}`}
@@ -324,7 +356,8 @@ function JsonNode({ k, v, path, last, ctx }: { k: string | number | null; v: unk
 /**
  * JSON tree with typed colours (strings, numbers, booleans, null). Filter highlights matching keys, opens their
  * branches and scrolls to the first hit; click a key to copy its path (e.g. `steps[1].failed`); collapse or
- * expand everything at once. Branches animate open and shut.
+ * expand everything at once. Branches animate open and shut. Cyclic data shows [Circular]; very deep or very large
+ * data is cut off with a marker instead of overflowing the stack.
  */
 export function JsonViewer({ data, defaultCollapsed = [], onCopyPath, maxHeight = 330, className }:
   { data: unknown; /** paths to start closed, e.g. ['flow.owner'] */ defaultCollapsed?: string[]; onCopyPath?: (path: string) => void; maxHeight?: number; className?: string }) {
@@ -332,11 +365,12 @@ export function JsonViewer({ data, defaultCollapsed = [], onCopyPath, maxHeight 
   const [q, setQ] = useState('')
   const box = useRef<HTMLDivElement>(null)
   const toast = useToast()
+  const safe = useMemo(() => jvSafe(data), [data])
   const containers = useMemo(() => {
     const out: string[] = []
-    const walk = (v: unknown, p: string) => { if (v && typeof v === 'object') { if (p) out.push(p); Object.entries(v).forEach(([k, x]) => walk(x, Array.isArray(v) ? `${p}[${k}]` : p ? `${p}.${k}` : k)) } }
-    walk(data, ''); return out
-  }, [data])
+    const walk = (v: unknown, p: string) => { if (jvIsObj(v)) { if (p) out.push(p); Object.entries(v).forEach(([k, x]) => walk(x, Array.isArray(v) ? `${p}[${k}]` : p ? `${p}.${k}` : k)) } }
+    walk(safe, ''); return out
+  }, [safe])
   const allClosed = containers.length > 0 && containers.every(p => closed.has(p))
   const copy = (p: string) => {
     if (onCopyPath) return onCopyPath(p)
@@ -349,10 +383,10 @@ export function JsonViewer({ data, defaultCollapsed = [], onCopyPath, maxHeight 
     // first key that matches, in document order
     let first: string | null = null
     const walk = (v: unknown, p: string) => {
-      if (first || !v || typeof v !== 'object') return
+      if (first || !jvIsObj(v)) return
       for (const [k, x] of Object.entries(v)) { const np = Array.isArray(v) ? `${p}[${k}]` : p ? `${p}.${k}` : k; if (k.toLowerCase().includes(s)) { first = np; return } walk(x, np); if (first) return }
     }
-    walk(data, '')
+    walk(safe, '')
     if (first) {
       const target: string = first
       setClosed(c => { const n = new Set(c); [...n].forEach(p => { if (target.startsWith(p) && /^[.[]/.test(target.slice(p.length))) n.delete(p) }); return n })
@@ -370,7 +404,7 @@ export function JsonViewer({ data, defaultCollapsed = [], onCopyPath, maxHeight 
       {/* touch: 32px rows so every key and toggle is a finger-sized target; the box scrolls both ways */}
       <div ref={box} className="overflow-auto overscroll-x-contain rounded-[var(--r-md)] border border-[var(--line)] bg-[color-mix(in_srgb,var(--muted)_35%,var(--card))] px-2.5 py-2 font-[family-name:var(--mono)] text-[12.5px] leading-[1.75] [@media(pointer:coarse)]:text-[13px] [@media(pointer:coarse)]:leading-8" style={{ maxHeight }}>
 
-        <JsonNode k={null} v={data} path="" last ctx={ctx} />
+        <JsonNode k={null} v={safe} path="" last ctx={ctx} />
       </div>
     </div>
   )

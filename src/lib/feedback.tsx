@@ -13,15 +13,20 @@ const ToastCtx = createContext<(t: ToastInput) => void>(() => {})
 /** const toast = useToast(); toast({ title: 'Saved', tone: 'ok', action: { label: 'Undo', onClick } }) */
 export const useToast = () => useContext(ToastCtx)
 
-export function ToastProvider({ children }: { children: ReactNode }) {
+/**
+ * Hosts toasts (UIProvider includes one). At most `max` (default 5) are on screen: a new toast drops the oldest, so a
+ * burst of notifications can't pile up without limit. The region stays usable while a modal makes the page inert.
+ */
+export function ToastProvider({ children, max = 5 }: { children: ReactNode; max?: number }) {
   const [items, setItems] = useState<ToastItem[]>([])
   const close = useCallback((id: number) => setItems(x => x.filter(t => t.id !== id)), [])
-  const push = useCallback((t: ToastInput) => setItems(x => [...x, { ...t, id: Date.now() + Math.random() }]), [])
+  const limit = Math.max(1, Math.floor(Number.isFinite(max) ? max : 5))
+  const push = useCallback((t: ToastInput) => setItems(x => [...x, { ...t, id: Date.now() + Math.random() }].slice(-limit)), [limit])
   return (
     <ToastCtx.Provider value={push}>
       {children}
       {/* one live region for all toasts (the toasts themselves carry no role, so nothing is announced twice) */}
-      <div role="region" aria-label="Notifications" className="pointer-events-none fixed right-[max(16px,env(safe-area-inset-right))] bottom-[max(16px,env(safe-area-inset-bottom))] z-[80] flex flex-col items-end gap-2 max-[640px]:left-[max(12px,env(safe-area-inset-left))] max-[640px]:right-[max(12px,env(safe-area-inset-right))] max-[640px]:items-stretch" aria-live="polite">
+      <div role="region" aria-label="Notifications" data-modal-keep className="pointer-events-none fixed right-[max(16px,env(safe-area-inset-right))] bottom-[max(16px,env(safe-area-inset-bottom))] z-[80] flex flex-col items-end gap-2 max-[640px]:left-[max(12px,env(safe-area-inset-left))] max-[640px]:right-[max(12px,env(safe-area-inset-right))] max-[640px]:items-stretch" aria-live="polite">
         <AnimatePresence initial={false}>
           {items.map(t => <Toast key={t.id} t={t} onClose={() => close(t.id)} />)}
         </AnimatePresence>
@@ -277,6 +282,8 @@ export function CopyButton({ text, label = 'Copy', size = 'icon', iconOnly = siz
 }
 
 type HoldPhase = 'idle' | 'holding' | 'cancelled' | 'done'
+/** Shortest hold HoldToConfirm accepts, whatever `duration` says. */
+const HOLD_MIN_MS = 500
 const HOLD_STATUS: Record<HoldPhase, string> = { idle: 'Release early to cancel', holding: 'Keep holding…', cancelled: 'Cancelled. Release early to cancel', done: 'Deleted' }
 
 /**
@@ -284,6 +291,8 @@ const HOLD_STATUS: Record<HoldPhase, string> = { idle: 'Release early to cancel'
  * across and the label inverts exactly where the fill has reached; releasing early springs it back.
  * When it completes the button pops, shows `doneLabel`, and resets after `resetAfter` ms.
  * A status line under it reads Keep holding… / Cancelled / done (`status={false}` hides it).
+ * `duration` is at least 500 ms. It guards against slips, not against a hostile page: serve pages that use it with
+ * `frame-ancestors 'none'` (or 'self') so another site can't frame it and coach a user into holding.
  */
 export function HoldToConfirm({ onConfirm, duration = 1200, children = 'Hold to delete', doneLabel = 'Deleted', resetAfter = 2000, status, className }:
   { onConfirm: () => void; duration?: number; children?: ReactNode; doneLabel?: ReactNode; resetAfter?: number; status?: Partial<Record<HoldPhase, ReactNode>> | false; className?: string }) {
@@ -303,10 +312,11 @@ export function HoldToConfirm({ onConfirm, duration = 1200, children = 'Hold to 
     if (scope.current) animateEl(scope.current, { scale: [1, 1.06, 1] }, { duration: 0.35, ease: 'easeOut' })
     reset.current = setTimeout(() => { p.set(0); set('idle') }, resetAfter)
   }
+  const ms = Math.max(HOLD_MIN_MS, Number.isFinite(duration) ? duration : 1200) // never instant: a hold must be a hold
   const start = () => {
     if (phaseRef.current === 'done' || phaseRef.current === 'holding') return
     set('holding'); ctl.current?.stop()
-    ctl.current = animate(p, 1, { duration: (duration / 1000) * (1 - p.get()), ease: 'linear', onComplete: finish })
+    ctl.current = animate(p, 1, { duration: (ms / 1000) * (1 - p.get()), ease: 'linear', onComplete: finish })
   }
   const stop = () => {
     if (phaseRef.current !== 'holding') return

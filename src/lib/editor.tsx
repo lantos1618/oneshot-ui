@@ -1,6 +1,6 @@
 import { useEffect, useId, useLayoutEffect, useRef, useState, type ReactNode, type KeyboardEvent as RKeyboardEvent } from 'react'
 import { AnimatePresence, motion } from 'motion/react'
-import { Avatar, Button, Icon, type IconName, Spinner, cn, inputClass, isCoarsePointer, spring, useOutside, useRoving, useTheme } from './core'
+import { Avatar, Button, Icon, type IconName, Spinner, cn, inputClass, isCoarsePointer, safeUrl, spring, useOutside, useRoving, useTheme } from './core'
 import { play, shake } from './motion'
 import { FloatingPanel, MenuLabel } from './overlay'
 import { OptionList, type Option } from './forms'
@@ -32,14 +32,71 @@ const rteContent =
   '[&_h2]:m-0 [&_h2]:mb-2 [&_h2]:text-xl [&_h2]:font-semibold [&_h2]:tracking-tight [&_h3]:mt-3 [&_h3]:mb-1.5 [&_h3]:text-base [&_h3]:font-semibold ' +
   '[&_ol]:m-0 [&_ol]:mb-2.5 [&_ol]:list-decimal [&_ol]:pl-5 [&_p]:m-0 [&_p]:mb-2.5 [&_ul]:m-0 [&_ul]:mb-2.5 [&_ul]:list-disc [&_ul]:pl-5'
 
+/* Sanitizer: one allowlist for everything that becomes editor HTML (defaultValue, drops, onChange output) ── */
+
+/** Elements kept as they are. Everything else is unwrapped (its text stays) or, for RTE_DROP, removed with its content. */
+const RTE_TAGS = new Set(['P', 'H2', 'H3', 'UL', 'OL', 'LI', 'B', 'STRONG', 'I', 'EM', 'U', 'S', 'CODE', 'PRE', 'BLOCKQUOTE', 'A', 'BR'])
+/** Equivalent elements browsers (and pasted documents) produce, mapped onto the allowlist. */
+const RTE_ALIAS: Record<string, string> = { STRIKE: 'S', DEL: 'S', INS: 'U', DIV: 'P', H1: 'H2', H4: 'H3', H5: 'H3', H6: 'H3' }
+/** Elements whose content is code, form controls or embedded documents, never text a person wrote. */
+const RTE_DROP = new Set(['SCRIPT', 'STYLE', 'TEMPLATE', 'NOSCRIPT', 'IFRAME', 'FRAME', 'FRAMESET', 'OBJECT', 'EMBED', 'SVG', 'MATH', 'TEXTAREA', 'SELECT', 'OPTION', 'TITLE', 'HEAD', 'META', 'LINK', 'XMP', 'NOEMBED', 'NOFRAMES', 'PLAINTEXT'])
+const RTE_HREF = ['https:', 'http:', 'mailto:']
+const rteEscape = (s: string) => s.replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[c]!)
+
+/**
+ * Sanitize HTML for RichTextEditor with a fixed allowlist: p, h2, h3, ul, ol, li, b/strong, i/em, u, s, code, pre,
+ * blockquote, a and br. The only attribute kept is `href` on links (https, http, mailto or relative; anything else
+ * unwraps the link). Comments, scripts, styles, frames and form controls are removed; other elements are unwrapped
+ * and keep their text. Parses with an inert DOMParser document (nothing loads or runs); without a DOM (SSR) the
+ * input is escaped to plain text.
+ */
+export function sanitizeRichText(html: string): string {
+  if (typeof DOMParser === 'undefined') return rteEscape(String(html ?? ''))
+  const doc = new DOMParser().parseFromString(String(html ?? ''), 'text/html')
+  const out = doc.createElement('div')
+  const copy = (from: Node, to: Node, depth: number) => {
+    for (let c = from.firstChild; c; c = c.nextSibling) {
+      if (c.nodeType === 3) { to.appendChild(doc.createTextNode(c.nodeValue ?? '')); continue }
+      if (c.nodeType !== 1) continue // comments, processing instructions, CDATA
+      const tag = (c as Element).tagName.toUpperCase()
+      if (RTE_DROP.has(tag)) continue
+      const name = RTE_ALIAS[tag] ?? tag
+      if (depth > 64) { to.appendChild(doc.createTextNode(c.textContent ?? '')); continue } // absurd nesting: keep the text
+      if (!RTE_TAGS.has(name)) { copy(c, to, depth + 1); continue }
+      let el: Element | null = doc.createElement(name.toLowerCase())
+      if (name === 'A') {
+        const href = safeUrl((c as Element).getAttribute('href'), { allow: RTE_HREF, fallback: '' })
+        if (href) el.setAttribute('href', href); else el = null
+      }
+      if (!el) { copy(c, to, depth + 1); continue }
+      if (name !== 'BR') copy(c, el, depth + 1)
+      to.appendChild(el)
+    }
+  }
+  copy(doc.body, out, 0)
+  return out.innerHTML
+}
+
+/** Where a drop lands: a collapsed range at the point (caretPositionFromPoint, or WebKit's caretRangeFromPoint). */
+function editorRangeAt(x: number, y: number): Range | null {
+  const d = document as Document & { caretPositionFromPoint?: (x: number, y: number) => { offsetNode: Node; offset: number } | null; caretRangeFromPoint?: (x: number, y: number) => Range | null }
+  const p = d.caretPositionFromPoint?.(x, y)
+  if (p) { const r = document.createRange(); r.setStart(p.offsetNode, p.offset); r.collapse(true); return r }
+  return d.caretRangeFromPoint?.(x, y) ?? null
+}
+/** beforeinput types that bring outside content in; handled by the component instead of the browser. */
+const EDITOR_FOREIGN_INPUT = ['insertFromDrop', 'insertFromPaste', 'insertFromPasteAsQuotation', 'insertFromYank']
+
 /**
  * Rich text editor on contentEditable. Toolbar buttons light up for the formatting under the caret; selecting text shows a
  * floating bubble (bold, italic, underline, link). ⌘B / ⌘I / ⌘U / ⌘K work, and at the start of a line "# ", "## ", "- ",
  * "1. " and "> " turn into headings, lists and quotes. The footer counts words and read time and shows "Saving… / Saved".
  * `onChange` receives the HTML (debounced; a pending save is flushed when the editor unmounts).
+ * Everything that becomes HTML (`defaultValue`, dropped content, the `onChange` output) goes through `sanitize`
+ * (default `sanitizeRichText`; pass DOMPurify with your own config if you need more). Paste inserts plain text.
  */
-export function RichTextEditor({ defaultValue = RTE_SAMPLE, onChange, className, 'aria-label': ariaLabel = 'Editor' }:
-  { defaultValue?: string; onChange?: (html: string) => void; className?: string; 'aria-label'?: string }) {
+export function RichTextEditor({ defaultValue = RTE_SAMPLE, onChange, sanitize = sanitizeRichText, className, 'aria-label': ariaLabel = 'Editor' }:
+  { defaultValue?: string; onChange?: (html: string) => void; sanitize?: (html: string) => string; className?: string; 'aria-label'?: string }) {
   const host = useRef<HTMLDivElement>(null), body = useRef<HTMLDivElement>(null), bar = useRef<HTMLDivElement>(null)
   const saved = useRef<Range | null>(null)
   const [active, setActive] = useState<string[]>([])
@@ -50,13 +107,14 @@ export function RichTextEditor({ defaultValue = RTE_SAMPLE, onChange, className,
   const [tab, setTab] = useState(0) // roving tab stop in the toolbar
   const timer = useRef<ReturnType<typeof setTimeout>>(undefined)
   const pending = useRef<string | null>(null) // HTML not yet handed to onChange
-  const notify = useRef(onChange)
-  useLayoutEffect(() => { notify.current = onChange })
+  const notify = useRef(onChange), clean = useRef(sanitize)
+  useLayoutEffect(() => { notify.current = onChange; clean.current = sanitize })
+  const ownDrag = useRef(false) // a drag that started inside the editor (moving its own text) stays native
   const linkOpen = useRef(false)
   useEffect(() => { linkOpen.current = link !== null }, [link])
 
   const count = () => (body.current?.innerText.trim().match(/\S+/g) || []).length
-  useLayoutEffect(() => { if (body.current) { body.current.innerHTML = defaultValue; setWords(count()) }; document.execCommand('defaultParagraphSeparator', false, 'p') }, []) // eslint-disable-line react-hooks/exhaustive-deps
+  useLayoutEffect(() => { if (body.current) { body.current.innerHTML = clean.current(defaultValue); setWords(count()) }; document.execCommand('defaultParagraphSeparator', false, 'p') }, []) // eslint-disable-line react-hooks/exhaustive-deps
 
   const inside = (n: Node | null) => !!n && !!body.current?.contains(n)
   const closest = (tag: string) => {
@@ -85,9 +143,33 @@ export function RichTextEditor({ defaultValue = RTE_SAMPLE, onChange, className,
   const changed = () => {
     setWords(count()); setSaving(true); clearTimeout(timer.current)
     pending.current = body.current?.innerHTML ?? ''
-    timer.current = setTimeout(() => { setSaving(false); const html = pending.current; pending.current = null; if (html !== null) notify.current?.(html) }, 700)
+    timer.current = setTimeout(() => { setSaving(false); const html = pending.current; pending.current = null; if (html !== null) notify.current?.(clean.current(html)) }, 700)
   }
-  useEffect(() => () => { clearTimeout(timer.current); if (pending.current !== null) notify.current?.(pending.current) }, []) // don't drop the last edit
+  useEffect(() => () => { clearTimeout(timer.current); if (pending.current !== null) notify.current?.(clean.current(pending.current)) }, []) // don't drop the last edit
+  /** Insert outside content at `at` (or the caret): sanitized HTML when there is any, else plain text. */
+  const insertForeign = (data: DataTransfer | null, at: Range | null) => {
+    const el = body.current, s = getSelection(); if (!el || !s || !data) return
+    if (at && el.contains(at.startContainer)) { s.removeAllRanges(); s.addRange(at) }
+    if (!s.rangeCount || !inside(s.anchorNode)) return
+    const html = data.getData('text/html'), text = data.getData('text/plain')
+    const safe = html ? clean.current(html) : ''
+    if (safe.trim()) { if (!document.execCommand('insertHTML', false, safe)) { const t = document.createElement('template'); t.innerHTML = safe; const r = s.getRangeAt(0); r.deleteContents(); r.insertNode(t.content) } }
+    else if (text) document.execCommand('insertText', false, text)
+    sync(); changed()
+  }
+  useEffect(() => { // backstop for drops/pastes that skip the React handlers (native beforeinput)
+    const el = body.current; if (!el) return
+    const before = (e: InputEvent) => {
+      if (!EDITOR_FOREIGN_INPUT.includes(e.inputType) || (e.inputType === 'insertFromDrop' && ownDrag.current)) return
+      e.preventDefault()
+      const r = e.getTargetRanges?.()[0], at = r ? document.createRange() : null
+      if (r && at) { at.setStart(r.startContainer, r.startOffset); at.setEnd(r.endContainer, r.endOffset) }
+      if (e.inputType === 'insertFromDrop') insertForeign(e.dataTransfer, at)
+      else { const t = e.dataTransfer?.getData('text/plain'); if (t) { document.execCommand('insertText', false, t); sync(); changed() } }
+    }
+    el.addEventListener('beforeinput', before)
+    return () => el.removeEventListener('beforeinput', before)
+  }, []) // eslint-disable-line react-hooks/exhaustive-deps
   const restore = () => {
     body.current?.focus({ preventScroll: true })
     const s = getSelection(); if (saved.current && s) { s.removeAllRanges(); s.addRange(saved.current) }
@@ -159,7 +241,14 @@ export function RichTextEditor({ defaultValue = RTE_SAMPLE, onChange, className,
       </div>
       <div ref={body} contentEditable suppressContentEditableWarning role="textbox" aria-multiline aria-label={ariaLabel} spellCheck={false}
         className={rteContent} onInput={() => { sync(); changed() }} onKeyDown={onKeyDown} onKeyUp={sync} onMouseUp={sync} onTouchEnd={() => setTimeout(sync, 0)}
-        onPaste={e => { e.preventDefault(); document.execCommand('insertText', false, e.clipboardData.getData('text/plain')) }} />
+        onPaste={e => { e.preventDefault(); document.execCommand('insertText', false, e.clipboardData.getData('text/plain')) }}
+        onDragStart={() => { ownDrag.current = true }} onDragEnd={() => { ownDrag.current = false }}
+        onDragOver={e => { if (!ownDrag.current) e.dataTransfer.dropEffect = 'copy' }}
+        onDrop={e => {
+          if (ownDrag.current) return // moving text within the editor: the browser moves it (dragend clears the flag)
+          e.preventDefault() // files, iframes, forms, styles, tracking images: only sanitized HTML or text gets in
+          insertForeign(e.dataTransfer, editorRangeAt(e.clientX, e.clientY))
+        }} />
       <div className="flex justify-between border-t border-[var(--line)] px-3 py-2 text-xs text-[var(--fg3)]">
         <span className="ui-num">{words} words · {Math.max(1, Math.round(words / 220))} min read</span>
         <AnimatePresence mode="wait" initial={false}>
@@ -189,8 +278,8 @@ export function RichTextEditor({ defaultValue = RTE_SAMPLE, onChange, className,
 
 export type MentionPerson = { id: string; name: string; sub?: string }
 export type MentionCommand = { cmd: string; hint: string }
-/** What MentionsInput sends: plain text interleaved with mention and command tokens. */
-export type MentionSegment = { type: 'text' | 'mention' | 'command'; value: string }
+/** What MentionsInput sends: plain text interleaved with mention and command tokens. `id` is the person's id or the command for tokens. */
+export type MentionSegment = { type: 'text' | 'mention' | 'command'; value: string; id?: string }
 const MENTION_PEOPLE: MentionPerson[] = [
   { id: 'al', name: 'Alex Lee', sub: 'Design' }, { id: 'bk', name: 'Bea Kim', sub: 'Product' }, { id: 'cm', name: 'Chris Moe', sub: 'Engineering' },
   { id: 'dn', name: 'Dana Ng', sub: 'Research' }, { id: 'ep', name: 'Eli Park', sub: 'Sales' },
@@ -204,10 +293,13 @@ const MENTION_CMD = 'inline-block rounded-[5px] bg-[var(--warn-soft)] px-1.5 lea
 /**
  * Message box with `@` mentions and `/` commands. Typing either opens a list at the caret; ↑ ↓ choose, Enter or Tab inserts
  * a non-editable token, Escape closes. With the list closed, Enter sends (Shift+Enter for a new line) and an empty send wiggles.
+ * Paste and drop insert plain text only; segments come only from tokens this component inserted (lookalike markup
+ * dropped or pasted in is sent as text), with the value rebuilt from `people` / `commands`.
  */
 export function MentionsInput({ people = MENTION_PEOPLE, commands = MENTION_COMMANDS, placeholder = 'Write a message… try @ or /', onSend, className }:
   { people?: MentionPerson[]; commands?: MentionCommand[]; placeholder?: string; className?: string; onSend?: (segments: MentionSegment[], text: string) => void }) {
   const host = useRef<HTMLDivElement>(null), ed = useRef<HTMLDivElement>(null), lid = useId()
+  const made = useRef(new WeakSet<Node>()) // tokens this component created; nothing else becomes a segment
   const [pop, setPop] = useState<{ type: '@' | '/'; q: string; x: number; y: number } | null>(null)
   const [sent, setSent] = useState<{ id: number; segs: MentionSegment[] } | null>(null)
   const items: (MentionPerson | MentionCommand)[] = !pop ? [] : pop.type === '@'
@@ -233,22 +325,47 @@ export function MentionsInput({ people = MENTION_PEOPLE, commands = MENTION_COMM
     const range = document.createRange(); range.setStart(node, start); range.setEnd(node, off); range.deleteContents()
     const tok = document.createElement('span'); const isCmd = 'cmd' in it
     tok.className = isCmd ? MENTION_CMD : MENTION_TOKEN; tok.contentEditable = 'false'; tok.dataset.kind = isCmd ? 'command' : 'mention'
+    tok.dataset.id = isCmd ? it.cmd : it.id
     tok.textContent = isCmd ? it.cmd : '@' + it.name
+    made.current.add(tok)
     range.insertNode(tok)
     const sp = document.createTextNode(' '); tok.after(sp)
     const r2 = document.createRange(); r2.setStart(sp, 1); r2.collapse(true); s.removeAllRanges(); s.addRange(r2)
     play(tok, { scale: [0.8, 1] }, spring(0.5, 0.3)); setPop(null)
   }
+  /** The segment for a token we inserted, rebuilt from the known people / commands (null if it no longer matches one). */
+  const token = (c: HTMLElement): MentionSegment | null => {
+    const id = c.dataset.id ?? ''
+    if (c.dataset.kind === 'command') { const m = commands.find(x => x.cmd === id); return m ? { type: 'command', value: m.cmd, id } : null }
+    const p = people.find(x => x.id === id); return p ? { type: 'mention', value: '@' + p.name, id } : null
+  }
   const segments = () => {
     const out: MentionSegment[] = []
     const walk = (n: Node) => n.childNodes.forEach(c => {
       if (c.nodeType === 3) { const t = (c.textContent ?? '').replace(/ /g, ' '); const last = out[out.length - 1]; if (last?.type === 'text') last.value += t; else out.push({ type: 'text', value: t }) }
-      else if (c instanceof HTMLElement && c.dataset.kind) out.push({ type: c.dataset.kind as 'mention' | 'command', value: c.textContent ?? '' })
+      else if (c instanceof HTMLElement && made.current.has(c) && token(c)) out.push(token(c)!)
       else if (c instanceof HTMLElement) { if (c.tagName === 'BR' || c.tagName === 'DIV') out.push({ type: 'text', value: '\n' }); walk(c) }
     })
     if (ed.current) walk(ed.current)
     return out
   }
+  const insertPlain = (text: string | undefined, at: Range | null) => {
+    const el = ed.current, s = getSelection(); if (!el || !s || !text) return
+    if (at && el.contains(at.startContainer)) { s.removeAllRanges(); s.addRange(at) }
+    if (s.rangeCount && el.contains(s.anchorNode)) document.execCommand('insertText', false, text)
+  }
+  useEffect(() => { // backstop for drops/pastes that skip the React handlers: plain text only
+    const el = ed.current; if (!el) return
+    const before = (e: InputEvent) => {
+      if (!EDITOR_FOREIGN_INPUT.includes(e.inputType)) return
+      e.preventDefault()
+      const r = e.getTargetRanges?.()[0], at = r ? document.createRange() : null
+      if (r && at) { at.setStart(r.startContainer, r.startOffset); at.setEnd(r.endContainer, r.endOffset) }
+      insertPlain(e.dataTransfer?.getData('text/plain'), at)
+    }
+    el.addEventListener('beforeinput', before)
+    return () => el.removeEventListener('beforeinput', before)
+  }, [])
   const send = () => {
     const el = ed.current; if (!el) return
     if (!el.textContent?.trim()) return shake(el, 4)
@@ -265,6 +382,8 @@ export function MentionsInput({ people = MENTION_PEOPLE, commands = MENTION_COMM
         onKeyUp={e => { if (['ArrowLeft', 'ArrowRight', 'Home', 'End'].includes(e.key)) detect() }}
         onBlur={() => setTimeout(() => setPop(null), 150)}
         onPaste={e => { e.preventDefault(); document.execCommand('insertText', false, e.clipboardData.getData('text/plain')) }}
+        onDragOver={e => { e.dataTransfer.dropEffect = 'copy' }}
+        onDrop={e => { e.preventDefault(); insertPlain(e.dataTransfer.getData('text/plain'), editorRangeAt(e.clientX, e.clientY)); detect() }}
         onKeyDown={e => {
           if (e.nativeEvent.isComposing) return // Enter confirming an IME candidate is not a send
           if (!open) { if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); send() } return }

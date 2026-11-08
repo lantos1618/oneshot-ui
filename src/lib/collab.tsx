@@ -1,7 +1,7 @@
 import { useEffect, useLayoutEffect, useRef, useState, type PointerEvent as RPointerEvent, type ReactNode } from 'react'
 import { AnimatePresence, motion, useReducedMotion } from 'motion/react'
 import { Input } from './forms'
-import { Avatar, Button, Icon, IconButton, TOUCH, cn, fmtDate, isCoarsePointer, spring, surface, useControllable, useWidth } from './core'
+import { Avatar, Button, Icon, IconButton, TOUCH, cn, fmtDate, isCoarsePointer, safeColor, spring, surface, useControllable, useWidth } from './core'
 import { play, useFrameLoop, useViewport } from './motion'
 import { AnimatedList } from './data'
 import { Collapse, TypingDots, useToast } from './feedback'
@@ -185,12 +185,13 @@ export function AnchoredComments({ doc, threads, defaultThreads = [], onChange, 
 
 /* ── Live presence ─────────────────────────────────────────────────────── */
 
-export type Collaborator = { name: string; /** any CSS colour; tokens such as var(--c3) keep it theme-aware */ color: string }
+export type Collaborator = { name: string; /** a plain CSS colour (hex, rgb(), named) or token such as var(--c3), which keeps it theme-aware; anything else falls back to the accent */ color: string }
 
 const PRESENCE_PEOPLE: Collaborator[] = [{ name: 'Bea Kim', color: 'var(--c3)' }, { name: 'Chris Moe', color: 'var(--c4)' }, { name: 'Dana Ng', color: 'var(--warn)' }]
 const PRESENCE_ME: Collaborator = { name: 'Alex Lee', color: 'var(--accent)' }
 
-function CollabCursor({ name, color, elRef, hidden }: { name: string; color: string; elRef: (el: HTMLDivElement | null) => void; hidden?: boolean }) {
+function CollabCursor({ name, color: raw, elRef, hidden }: { name: string; color: string; elRef: (el: HTMLDivElement | null) => void; hidden?: boolean }) {
+  const color = safeColor(raw, 'var(--accent)') // data → style/fill: no `;`, url() or other breakouts
   return (
     <div ref={elRef} aria-hidden className="pointer-events-none absolute top-0 left-0 z-[3] transition-opacity duration-150 will-change-transform" style={{ opacity: hidden ? 0 : 1 }}>
       <svg width="16" height="18" viewBox="0 0 16 18"><path d="M1 1l13 7-6 1.6L5.4 16z" fill={color} stroke="#fff" strokeWidth="1.4" strokeLinejoin="round" /></svg>
@@ -241,7 +242,7 @@ export function LivePresence({ people = PRESENCE_PEOPLE, me = PRESENCE_ME, title
       <div className="flex items-center justify-between gap-2">
         <div className="flex">
           {all.map((p, i) => (
-            <span key={p.name} className={cn('relative rounded-full', i > 0 && '-ml-1')} style={{ boxShadow: `0 0 0 2px var(--card), 0 0 0 3.5px ${p.color}`, zIndex: all.length - i }}>
+            <span key={p.name} className={cn('relative rounded-full', i > 0 && '-ml-1')} style={{ boxShadow: `0 0 0 2px var(--card), 0 0 0 3.5px ${safeColor(p.color, 'var(--accent)')}`, zIndex: all.length - i }}>
               <Avatar name={p.name} size={28} className="!border-0 [@media(pointer:coarse)]:!text-[11px]" />
             </span>
           ))}
@@ -273,6 +274,8 @@ export type InboxConversation = {
 }
 
 const INBOX_REPLIES = ['Sounds good 👍', 'On it', 'Can we chat at 4?', 'Perfect, thanks!', 'Let me check and get back to you']
+/** Most messages a ChatInbox thread keeps in memory (older ones drop off the top). */
+const INBOX_MAX_MESSAGES = 500
 const INBOX_PINGS = ['Quick one: are we still on for the review?', 'Sent you the notes from today', 'Can you take a look when you have a sec?', 'Heads up, the build is green again']
 /** local time in another zone; `at` comes from a clock read after mount, so the server never renders a time */
 const inboxTime = (tz: string, at: number) => fmtDate(new Date(at), { hour: '2-digit', minute: '2-digit', timeZone: tz })
@@ -311,7 +314,7 @@ export function ChatInbox({ conversations, replies = INBOX_REPLIES, simulateInco
   const [wrap, w] = useWidth<HTMLDivElement>()
   const wide = w === 0 || w >= 860, mid = !wide && w >= 620, narrow = !wide && !mid
   const c = list.find(x => x.id === cur) ?? list[0]
-  const later = (ms: number, f: () => void) => { timers.current.push(window.setTimeout(f, ms)) }
+  const later = (ms: number, f: () => void) => { const id = window.setTimeout(() => { timers.current = timers.current.filter(x => x !== id); f() }, ms); timers.current.push(id) }
   useEffect(() => () => timers.current.forEach(clearTimeout), [])
   const { visible: onScreen } = useViewport(wrap, { amount: 0 })
   const onScreenRef = useRef(false); onScreenRef.current = onScreen
@@ -324,7 +327,7 @@ export function ChatInbox({ conversations, replies = INBOX_REPLIES, simulateInco
 
   const deliver = (id: string, text: string) => {
     setTyping(t => ({ ...t, [id]: false }))
-    setList(l => l.map(x => x.id === id ? { ...x, messages: [...x.messages, { from: 'them', text }], last: 'now', unread: id === curRef.current ? 0 : (x.unread ?? 0) + 1 } : x))
+    setList(l => l.map(x => x.id === id ? { ...x, messages: [...x.messages, { from: 'them' as const, text }].slice(-INBOX_MAX_MESSAGES), last: 'now', unread: id === curRef.current ? 0 : (x.unread ?? 0) + 1 } : x))
   }
   // background threads ping now and then (a few times at most) while the inbox is on screen
   useEffect(() => {
@@ -353,7 +356,7 @@ export function ChatInbox({ conversations, replies = INBOX_REPLIES, simulateInco
   const send = () => {
     const v = draft.trim(); if (!v || !c) return
     const at = c.id
-    setList(l => l.map(x => x.id === at ? { ...x, messages: [...x.messages, { from: 'me', text: v }], last: 'now' } : x)); setDraft('')
+    setList(l => l.map(x => x.id === at ? { ...x, messages: [...x.messages, { from: 'me' as const, text: v }].slice(-INBOX_MAX_MESSAGES), last: 'now' } : x)); setDraft('')
     later(700, () => setTyping(t => ({ ...t, [at]: true })))
     later(2100, () => deliver(at, replies[Math.floor(Math.random() * replies.length)]))
   }

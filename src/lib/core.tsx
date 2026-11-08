@@ -107,25 +107,34 @@ export const THEMES: Theme[] = [
 /** Font choices: [family, Google Fonts query or null if already loaded]. */
 export const FONTS: [string, string | null][] = [['Geist', null], ['Inter', 'Inter:wght@400;500;600'], ['IBM Plex Sans', 'IBM+Plex+Sans:wght@400;500;600'], ['Manrope', 'Manrope:wght@400;500;600'], ['DM Sans', 'DM+Sans:wght@400;500;600'], ['JetBrains Mono', 'JetBrains+Mono:wght@400;500;600']]
 const loadedFonts = new Set(['Geist'])
-let fontsFromGoogle = true // ThemeProvider fonts={false} turns this off
-/** Add the Google Fonts stylesheet for one of FONTS (once). Does nothing on the server or when fonts are off. */
+/**
+ * Add the Google Fonts stylesheet for one of FONTS (once). Does nothing on the server. Components call it only when
+ * the provider has `fonts` on (see `useTheme().fonts`); calling it yourself always fetches from fonts.googleapis.com.
+ */
 export function loadFont(family: string) {
   const q = FONTS.find(f => f[0] === family)?.[1]
-  if (!q || loadedFonts.has(family) || !fontsFromGoogle || typeof document === 'undefined') return
+  if (!q || loadedFonts.has(family) || typeof document === 'undefined') return
   const l = document.createElement('link'); l.rel = 'stylesheet'; l.href = `https://fonts.googleapis.com/css2?family=${q}&display=swap`
   document.head.appendChild(l); loadedFonts.add(family)
 }
 
-/** '#RRGGBB' → [r, g, b] (0–255). */
-export const rgb = (h: string) => { const x = h.replace('#', ''); return [0, 2, 4].map(i => parseInt(x.slice(i, i + 2), 16)) }
+/** '#RRGGBB' → [r, g, b] (0–255). Anything else (a non-string, '#FFF', junk) reads as black instead of throwing. */
+export const rgb = (h: string) => {
+  const x = typeof h === 'string' ? h.trim().replace(/^#/, '') : ''
+  return [0, 2, 4].map(i => { const n = parseInt(x.slice(i, i + 2), 16); return Number.isFinite(n) ? n : 0 })
+}
 /** [r, g, b] (0–255, clamped) → '#RRGGBB'. */
-export const hex = (a: number[]) => '#' + a.map(v => Math.round(Math.max(0, Math.min(255, v))).toString(16).padStart(2, '0')).join('').toUpperCase()
+export const hex = (a: number[]) => '#' + a.map(v => Math.round(Math.max(0, Math.min(255, Number.isFinite(v) ? v : 0))).toString(16).padStart(2, '0')).join('').toUpperCase()
 /** Blend two hex colours: mix('#000000', '#FFFFFF', 0.5) → '#808080' */
 export const mix = (a: string, b: string, t: number) => { const A = rgb(a), B = rgb(b); return hex(A.map((v, i) => v + (B[i] - v) * t)) }
 const luminance = (h: string) => { const [r, g, b] = rgb(h).map(v => { v /= 255; return v <= 0.03928 ? v / 12.92 : ((v + 0.055) / 1.055) ** 2.4 }); return 0.2126 * r + 0.7152 * g + 0.0722 * b }
 /** WCAG contrast ratio between two hex colours (1–21). */
 export const contrast = (a: string, b: string) => { const x = luminance(a), y = luminance(b); return (Math.max(x, y) + 0.05) / (Math.min(x, y) + 0.05) }
 const readable = (c: string, bg: string, toward: string, min = 4.5) => { for (let i = 0; i < 12 && contrast(c, bg) < min; i++) c = mix(c, toward, 0.12); return c }
+
+const THEME_SHADOW_LIGHT = '0 1px 2px rgba(0,0,0,.04),0 10px 30px rgba(0,0,0,.08)'
+const THEME_SHADOW_DARK = '0 1px 2px rgba(0,0,0,.3),0 10px 30px rgba(0,0,0,.5)'
+const THEME_FONT_TAIL = ',ui-sans-serif,system-ui,-apple-system,"Segoe UI",sans-serif'
 
 /** Expand a palette into every token the components use. */
 export function derive(p: Palette, dark: boolean): Record<string, string> {
@@ -135,7 +144,7 @@ export function derive(p: Palette, dark: boolean): Record<string, string> {
     ...p, fg2: readable(p.fg2, p.card, p.fg), fg3: readable(p.fg3, p.card, p.fg),
     'accent-soft': soft(p.accent), 'ok-soft': soft(p.ok), 'warn-soft': soft(p.warn), 'bad-soft': soft(p.bad),
     c1: p.fg, c2: p.accent, c3: p.c3, c4: p.ok, band: `rgba(${r},${g},${b},${dark ? 0.18 : 0.13})`,
-    shadow: dark ? '0 1px 2px rgba(0,0,0,.3),0 10px 30px rgba(0,0,0,.5)' : '0 1px 2px rgba(0,0,0,.04),0 10px 30px rgba(0,0,0,.08)',
+    shadow: dark ? THEME_SHADOW_DARK : THEME_SHADOW_LIGHT,
   }
 }
 
@@ -150,38 +159,110 @@ export type ThemeSettings = {
   variant: Record<string, number>; custom: CustomTheme | null; useCustom: boolean
 }
 export const DEFAULT_THEME: ThemeSettings = { theme: 'default', mode: 'system', radius: 8, font: 'Geist', variant: {}, custom: null, useCustom: false }
+/** The localStorage key ThemeProvider, UIProvider and ThemeScript use by default (versioned; 'ui-theme' is migrated once). */
+export const THEME_STORAGE_KEY = 'ui-theme:v1'
+/** The original unversioned key, read once and migrated to THEME_STORAGE_KEY. */
+export const THEME_LEGACY_KEY = 'ui-theme'
 
-/** Read saved settings defensively: older saves (theme, mode, radius, font only) or junk still load. */
-function themeLoad(raw: unknown, base: ThemeSettings): ThemeSettings {
-  if (!raw || typeof raw !== 'object') return base
-  const r = raw as Partial<ThemeSettings>
-  const custom = r.custom && typeof r.custom === 'object' && r.custom.v && typeof r.custom.v.bg === 'string' ? { dark: !!r.custom.dark, v: { ...THEMES[0].light[0][1], ...r.custom.v } } : base.custom
-  return {
-    theme: typeof r.theme === 'string' && THEMES.some(t => t.id === r.theme) ? r.theme : base.theme,
-    mode: r.mode === 'light' || r.mode === 'dark' || r.mode === 'system' ? r.mode : base.mode,
-    radius: typeof r.radius === 'number' ? r.radius : base.radius,
-    font: typeof r.font === 'string' ? r.font : base.font,
-    variant: r.variant && typeof r.variant === 'object' ? { ...r.variant } : { ...base.variant },
-    custom, useCustom: !!r.useCustom && !!custom,
+/* Theme validation ───────────────────────────────────────────────────────────
+ * Saved settings are same-origin state that anything on the origin (another app, an extension, an old version) can
+ * write. Every field is checked against what the library itself produces; anything else falls back to the default. */
+
+const THEME_HEX = /^#[0-9a-f]{6}$/i
+const THEME_RADIUS_MAX = 32
+const themeIsHex = (v: unknown): v is string => typeof v === 'string' && THEME_HEX.test(v)
+const themeOwn = (o: object, k: string): unknown => (Object.hasOwn(o, k) ? (o as Record<string, unknown>)[k] : undefined)
+const themeRadius = (v: unknown, fallback: number) => (typeof v === 'number' && Number.isFinite(v) ? clamp(v, 0, THEME_RADIUS_MAX) : fallback)
+/** A font family that is safe inside `"…"` in CSS (letters, digits, spaces and hyphens). */
+const themeFontName = (v: unknown): v is string => typeof v === 'string' && /^[A-Za-z0-9 -]{1,40}$/.test(v)
+/** A palette with exactly the BASE keys, each '#RRGGBB'; bad or missing values come from `fallback`. */
+function themeCleanPalette(v: unknown, fallback: Palette): Palette {
+  const src = v && typeof v === 'object' ? v : {}
+  const out = {} as Palette
+  for (const k of BASE) { const c = themeOwn(src, k); out[k] = themeIsHex(c) ? c.toUpperCase() : fallback[k] }
+  return out
+}
+/** Per-family palette indexes: only known family ids, each an integer within that family's light/dark lists. */
+function themeCleanVariant(v: unknown): Record<string, number> {
+  const out: Record<string, number> = {}
+  if (!v || typeof v !== 'object' || Array.isArray(v)) return out
+  for (const t of THEMES) {
+    const i = themeOwn(v, t.id)
+    if (Number.isInteger(i) && (i as number) >= 0 && (i as number) < Math.max(t.light.length, t.dark.length)) out[t.id] = i as number
   }
+  return out
 }
 
-/** The palette a set of settings resolves to, with its display name ("Ayu Mirage", "Custom"). */
+/**
+ * Read saved settings strictly: each field must be something the library itself writes (a known theme id and font,
+ * a light/dark/system mode, in-range integer variants, a finite radius clamped to 0–32, a custom palette of BASE keys
+ * with '#RRGGBB' values). Invalid fields fall back to `base`; this never throws.
+ */
+export function themeLoad(raw: unknown, base: ThemeSettings = DEFAULT_THEME): ThemeSettings {
+  const fallback = { ...base, variant: { ...base.variant } }
+  try {
+    if (!raw || typeof raw !== 'object' || Array.isArray(raw)) return fallback
+    const r = raw as object
+    const theme = themeOwn(r, 'theme'), mode = themeOwn(r, 'mode'), font = themeOwn(r, 'font'), rc = themeOwn(r, 'custom')
+    const cv = rc && typeof rc === 'object' ? themeOwn(rc, 'v') : undefined
+    const custom: CustomTheme | null = cv && typeof cv === 'object' && themeIsHex(themeOwn(cv, 'bg'))
+      ? { dark: themeOwn(rc as object, 'dark') === true, v: themeCleanPalette(cv, THEMES[0].light[0][1]) } : fallback.custom
+    return {
+      theme: typeof theme === 'string' && THEMES.some(t => t.id === theme) ? theme : fallback.theme,
+      mode: mode === 'light' || mode === 'dark' || mode === 'system' ? mode : fallback.mode,
+      radius: themeRadius(themeOwn(r, 'radius'), fallback.radius),
+      font: typeof font === 'string' && FONTS.some(f => f[0] === font) ? font : fallback.font,
+      variant: Object.hasOwn(r, 'variant') ? themeCleanVariant(themeOwn(r, 'variant')) : fallback.variant,
+      custom, useCustom: themeOwn(r, 'useCustom') === true && !!custom,
+    }
+  } catch { return fallback }
+}
+
+/** The palette a set of settings resolves to, with its display name ("Ayu Mirage", "Custom"). Never throws. */
 export function themePalette(s: ThemeSettings, dark: boolean): { v: Palette; dark: boolean; label: string } {
-  if (s.useCustom && s.custom) return { v: s.custom.v, dark: s.custom.dark, label: 'Custom' }
-  const t = THEMES.find(x => x.id === s.theme) ?? THEMES[0], list = dark ? t.dark : t.light
-  const [name, v] = list[Math.min(s.variant[t.id] ?? 0, list.length - 1)]
+  if (s?.useCustom && s.custom && typeof s.custom === 'object') return { v: themeCleanPalette(s.custom.v, THEMES[0].light[0][1]), dark: s.custom.dark === true, label: 'Custom' }
+  const t = THEMES.find(x => x.id === s?.theme) ?? THEMES[0], list = dark ? t.dark : t.light
+  const i = s?.variant && typeof s.variant === 'object' ? s.variant[t.id] : 0
+  const [name, v] = list[Number.isInteger(i) ? clamp(i, 0, list.length - 1) : 0]
   return { v, dark, label: `${t.name} ${name}` }
 }
 
-/** Every CSS variable for a set of theme settings. */
+/** Every CSS variable for a set of theme settings. Never throws; a radius or font it can't use falls back to the default. */
 export function themeTokens(s: ThemeSettings, dark: boolean): Record<string, string> {
-  const p = themePalette(s, dark)
-  return { ...derive(p.v, p.dark), 'r-md': `${s.radius}px`, 'r-lg': `${Math.round(s.radius * 1.6 + 1)}px`, font: `"${s.font}",ui-sans-serif,system-ui,-apple-system,"Segoe UI",sans-serif` }
+  const p = themePalette(s, dark), radius = themeRadius(s?.radius, DEFAULT_THEME.radius), font = themeFontName(s?.font) ? s.font : DEFAULT_THEME.font
+  return { ...derive(p.v, p.dark), 'r-md': `${radius}px`, 'r-lg': `${Math.round(radius * 1.6 + 1)}px`, font: `"${font}"${THEME_FONT_TAIL}` }
 }
-/** The current theme as a CSS block you can paste into your own stylesheet, headed by its name. */
+
+/** Every token name themeTokens produces. ThemeScript and themeCSS accept no others. */
+export const THEME_TOKEN_NAMES: readonly string[] = [...BASE, 'accent-soft', 'ok-soft', 'warn-soft', 'bad-soft', 'c1', 'c2', 'c4', 'band', 'shadow', 'r-md', 'r-lg', 'font']
+/**
+ * The values themeTokens can produce: hex colours, rgba() with plain numbers, numbers and px lengths, the two
+ * shadows, and the font stack with a plain family name. As one regex source, so ThemeScript can reuse it.
+ */
+export const THEME_VALUE_SOURCE = '^(?:#[0-9a-fA-F]{3,8}|rgba?\\(\\d{1,3},\\d{1,3},\\d{1,3}(?:,(?:0|1|0?\\.\\d+))?\\)|-?\\d+(?:\\.\\d+)?(?:px)?|' +
+  [THEME_SHADOW_LIGHT, THEME_SHADOW_DARK].map(x => x.replace(/[.()]/g, '\\$&')).join('|') + '|"[A-Za-z0-9 -]{1,40}"' + THEME_FONT_TAIL.replace(/[.()]/g, '\\$&') + ')$'
+const THEME_VALUE = new RegExp(THEME_VALUE_SOURCE)
+/** True when `name: value` is a token themeTokens could have produced (so it's safe in a style sheet or inline style). */
+export const themeTokenOk = (name: string, value: unknown): value is string => THEME_TOKEN_NAMES.includes(name) && typeof value === 'string' && THEME_VALUE.test(value)
+/** Only the tokens that pass themeTokenOk. */
+export function themeSafeTokens(tokens: Record<string, string>): Record<string, string> {
+  const out: Record<string, string> = {}
+  if (tokens && typeof tokens === 'object') for (const [k, v] of Object.entries(tokens)) if (themeTokenOk(k, v)) out[k] = v
+  return out
+}
+/** Tokens safe to write into CSS: library tokens as themeTokenOk, or any other `--name` whose value passes safeCssValue. */
+function themeCleanTokens(tokens: Record<string, string>): Record<string, string> {
+  const out: Record<string, string> = {}
+  if (tokens && typeof tokens === 'object') for (const [k, v] of Object.entries(tokens)) if (/^[a-z][a-z0-9-]{0,40}$/i.test(k) && (themeTokenOk(k, v) || safeCssValue(v) !== '')) out[k] = v
+  return out
+}
+/**
+ * The current theme as a CSS block you can paste into your own stylesheet, headed by its name. Values that could
+ * break out of a declaration or load a resource are dropped, and the label can't close the comment or the
+ * `<style>`, so the result is safe inside a `<style>` element.
+ */
 export const themeCSS = (tokens: Record<string, string>, label?: string) =>
-  `${label ? `/* ${label} */\n` : ''}:root {\n${Object.entries(tokens).map(([k, v]) => `  --${k}: ${v};`).join('\n')}\n}`
+  `${label ? `/* ${String(label).replace(/\*\//g, '* /').replace(/</g, '\\3c ')} */\n` : ''}:root {\n${Object.entries(themeCleanTokens(tokens)).map(([k, v]) => `  --${k}: ${v};`).join('\n')}\n}`
 
 /**
  * Change one base colour of a palette the way the Customise grid does: editing bg, card or text
@@ -237,6 +318,8 @@ type ThemeContext = {
   ready: boolean
   /** Where the CSS variables go: on `<html>`, or on the provider's own wrapper (`target="self"`). */
   target: 'html' | 'self'
+  /** Whether the provider may fetch fonts from Google Fonts (UIProvider `fonts`). Components that load fonts check this. */
+  fonts: boolean
   /**
    * Change settings. Colour changes (theme, mode, variant, switching to or from Custom) play the reveal
    * from `from`; radius, font and live Custom edits apply in place. Picking a theme or mode leaves Custom.
@@ -250,10 +333,10 @@ const ThemeCtx = createContext<ThemeContext | null>(null)
 /** const { settings, set, toggle, dark, tokens } = useTheme(); set({ theme: 'nord', mode: 'dark' }) */
 export const useTheme = () => { const c = useContext(ThemeCtx); if (!c) throw new Error('useTheme must be inside <UIProvider>'); return c }
 
-/** Tokens as inline-style CSS variables, to theme one element and its subtree: <div style={themeStyle(tokens, dark)}>. */
+/** Tokens as inline-style CSS variables, to theme one element and its subtree: <div style={themeStyle(tokens, dark)}>. Unsafe values are dropped. */
 export function themeStyle(tokens: Record<string, string>, dark: boolean): CSSProperties {
   const s: Record<string, string> = { colorScheme: dark ? 'dark' : 'light' }
-  for (const [k, v] of Object.entries(tokens)) s[`--${k}`] = v
+  for (const [k, v] of Object.entries(themeCleanTokens(tokens))) s[`--${k}`] = v
   return s as CSSProperties
 }
 
@@ -263,17 +346,43 @@ export function themeStyle(tokens: Record<string, string>, dark: boolean): CSSPr
  */
 export const themeStored = (s: ThemeSettings) => JSON.stringify({ ...s, css: { light: themeTokens(s, false), dark: themeTokens(s, true) } })
 
+/** JSON.parse that returns a plain object or null, never throws. */
+const themeParse = (raw: string | null): object | null => {
+  if (raw === null) return null
+  try { const v: unknown = JSON.parse(raw); return v && typeof v === 'object' && !Array.isArray(v) ? v : null } catch { return null }
+}
+/**
+ * Saved settings for `key`, validated (null when nothing usable is saved). Junk (not JSON, not an object) is removed.
+ * The default key migrates a valid value from the legacy 'ui-theme' key once (the legacy value is left for older copies).
+ */
+function themeRead(key: string, base: ThemeSettings): ThemeSettings | null {
+  const raw = localStorage.getItem(key)
+  if (raw !== null) {
+    const o = themeParse(raw)
+    if (!o) { localStorage.removeItem(key); return null }
+    return themeLoad(o, base)
+  }
+  if (key !== THEME_STORAGE_KEY) return null
+  const legacy = localStorage.getItem(THEME_LEGACY_KEY)
+  if (legacy === null) return null
+  const o = themeParse(legacy)
+  if (!o) { localStorage.removeItem(THEME_LEGACY_KEY); return null }
+  const s = themeLoad(o, base)
+  localStorage.setItem(key, themeStored(s))
+  return s
+}
+
 export type ThemeProviderProps = {
   children: ReactNode
   /** Settings to start from before anything is saved, and what Reset returns to. */
   defaultSettings?: Partial<ThemeSettings>
-  /** localStorage key for the saved settings (default 'ui-theme'). Use the same key on ThemeScript. */
+  /** localStorage key for the saved settings (default 'ui-theme:v1'). Use the same key on ThemeScript. */
   storageKey?: string
   /** Save the user's choice in localStorage and restore it on the next visit (default true). */
   persist?: boolean
   /** 'html' (default) puts the CSS variables and data-theme on <html>; 'self' leaves the page alone (UIProvider puts them on its wrapper). */
   target?: 'html' | 'self'
-  /** Load the theme's font from Google Fonts when it changes (default true). */
+  /** Load the theme's font from Google Fonts when it changes (default false: nothing is fetched, the system stack is used). */
   fonts?: boolean
 }
 
@@ -281,19 +390,21 @@ export type ThemeProviderProps = {
  * Applies the theme as CSS variables on <html>, follows the OS in 'system' mode, and remembers the choice.
  * SSR-safe: renders the defaults on the server and during hydration (no matchMedia or localStorage in
  * render), then reads the saved settings and the OS scheme in a layout effect, before the first paint.
+ * Saved settings (and other tabs' changes) are validated field by field; see themeLoad.
  */
-export function ThemeProvider({ children, defaultSettings, storageKey = 'ui-theme', persist = true, target = 'html', fonts = true }: ThemeProviderProps) {
+export function ThemeProvider({ children, defaultSettings, storageKey = THEME_STORAGE_KEY, persist = true, target = 'html', fonts = false }: ThemeProviderProps) {
   const initial = { ...DEFAULT_THEME, ...defaultSettings }
   const [settings, setSettings] = useState<ThemeSettings>(initial)
   const [ready, setReady] = useState(false)
   const sysDark = useMediaQuery('(prefers-color-scheme: dark)') // false on the server and while hydrating
   useLayoutEffect(() => { // restore the saved choice after hydration, before paint
-    if (persist) try { const raw = localStorage.getItem(storageKey); if (raw) setSettings(themeLoad(JSON.parse(raw), initial)) } catch { /* storage blocked or junk */ }
+    if (persist) try { const saved = themeRead(storageKey, initial); if (saved) setSettings(saved) } catch { /* storage blocked */ }
     setReady(true)
     if (!persist) return
-    const on = (e: StorageEvent) => { // another tab changed it
+    const on = (e: StorageEvent) => { // another tab changed it: same validation as on load
       if (e.key !== storageKey || !e.newValue) return
-      try { setSettings(themeLoad(JSON.parse(e.newValue), initial)) } catch { /* junk */ }
+      const o = themeParse(e.newValue)
+      if (o) setSettings(themeLoad(o, initial))
     }
     addEventListener('storage', on); return () => removeEventListener('storage', on)
   }, [storageKey, persist]) // eslint-disable-line react-hooks/exhaustive-deps
@@ -311,7 +422,7 @@ export function ThemeProvider({ children, defaultSettings, storageKey = 'ui-them
     for (const [k, v] of Object.entries(tokens)) root.style.setProperty(`--${k}`, v)
     root.dataset.theme = dark ? 'dark' : 'light'; root.style.colorScheme = dark ? 'dark' : 'light'
   }, [ready, target, tokens, dark])
-  useEffect(() => { fontsFromGoogle = fonts; if (ready) loadFont(settings.font) }, [ready, fonts, settings.font])
+  useEffect(() => { if (ready && fonts) loadFont(settings.font) }, [ready, fonts, settings.font])
   useEffect(() => {
     if (ready && persist) try { localStorage.setItem(storageKey, themeStored(settings)) } catch { /* storage blocked */ }
   }, [ready, persist, settings, storageKey])
@@ -326,8 +437,8 @@ export function ThemeProvider({ children, defaultSettings, storageKey = 'ui-them
       if (recolours && !('custom' in patch)) revealTheme(apply, from)
       else apply() // radius, font and live colour edits change in place
     }
-    return { settings, dark, tokens, label, ready, target, set, toggle: from => set({ mode: dark ? 'light' : 'dark' }, from), reset: from => revealTheme(() => setSettings(initial), from) }
-  }, [settings, dark, tokens, label, ready, target]) // eslint-disable-line react-hooks/exhaustive-deps
+    return { settings, dark, tokens, label, ready, target, fonts, set, toggle: from => set({ mode: dark ? 'light' : 'dark' }, from), reset: from => revealTheme(() => setSettings(initial), from) }
+  }, [settings, dark, tokens, label, ready, target, fonts]) // eslint-disable-line react-hooks/exhaustive-deps
   return <ThemeCtx.Provider value={value}>{children}</ThemeCtx.Provider>
 }
 
@@ -356,6 +467,15 @@ export const sleep = (ms: number) => new Promise<void>(r => setTimeout(r, ms))
 
 /** Keep `n` inside [lo, hi]: clamp(140, 0, 100) → 100. */
 export const clamp = (n: number, lo: number, hi: number) => Math.min(hi, Math.max(lo, n))
+/**
+ * Largest value, like Math.max(...values) (NaN propagates, empty → `init`) but with a loop, so huge arrays don't
+ * overflow the call stack (spreading ~125k+ arguments throws RangeError).
+ */
+export function maxOf(values: Iterable<number>, init = -Infinity) { let m = init; for (const v of values) m = Math.max(m, v); return m }
+/** Smallest value, like Math.min(...values) with a loop (see maxOf). */
+export function minOf(values: Iterable<number>, init = Infinity) { let m = init; for (const v of values) m = Math.min(m, v); return m }
+/** [min, max] in one pass, with a loop (see maxOf). Empty → [Infinity, -Infinity]. */
+export function extent(values: Iterable<number>): [number, number] { let lo = Infinity, hi = -Infinity; for (const v of values) { lo = Math.min(lo, v); hi = Math.max(hi, v) } return [lo, hi] }
 
 /** Repeatable pseudo-random numbers (mulberry32): const r = seeded(42); r() → 0…1, the same sequence every time (safe for SSR and demos). */
 export function seeded(seed: number) {
@@ -648,21 +768,39 @@ export function useHotkey(combo: string, handler: (e: KeyboardEvent) => void, op
   }, [combo, enabled, ignoreEditable])
 }
 
-/** Keep Tab focus inside `ref` while active (only real, visible Tab stops count); focus the first control on open and restore focus on close. */
+/** Open focus traps, innermost last: only the top one handles Tab, so nested modals don't fight. */
+const coreTraps: RefObject<HTMLElement | null>[] = []
+/**
+ * Keep Tab focus inside `ref` while `active`: focuses `[data-autofocus]` or the first focusable on open, wraps Tab and
+ * Shift+Tab at document level (so focus that slipped outside comes back), and restores the previous focus on close.
+ * With nothing focusable inside it holds focus on the `[role=dialog]` (or first) element instead of letting Tab leave.
+ * Nested traps stack: only the innermost one acts.
+ */
 export function useFocusTrap(ref: RefObject<HTMLElement | null>, active: boolean) {
   useEffect(() => {
     if (!active) return
     const prev = document.activeElement as HTMLElement | null
-    requestAnimationFrame(() => (ref.current?.querySelector<HTMLElement>('[data-autofocus]') ?? focusables(ref.current)[0])?.focus())
+    coreTraps.push(ref)
+    const holder = () => { // something to park focus on when there are no tab stops
+      const el = ref.current?.querySelector<HTMLElement>('[role=dialog],[role=alertdialog]') ?? (ref.current?.firstElementChild as HTMLElement | null)
+      if (el && !el.hasAttribute('tabindex')) el.tabIndex = -1
+      return el
+    }
+    const raf = requestAnimationFrame(() => (ref.current?.querySelector<HTMLElement>('[data-autofocus]') ?? focusables(ref.current)[0] ?? holder())?.focus())
     const on = (e: KeyboardEvent) => {
-      if (e.key !== 'Tab') return
-      const f = focusables(ref.current); if (!f.length) return
-      const first = f[0], last = f[f.length - 1], a = document.activeElement
-      if (e.shiftKey && (a === first || !ref.current?.contains(a))) { e.preventDefault(); last.focus() }
-      else if (!e.shiftKey && (a === last || !ref.current?.contains(a))) { e.preventDefault(); first.focus() }
+      if (e.key !== 'Tab' || coreTraps[coreTraps.length - 1] !== ref || !ref.current) return
+      const f = focusables(ref.current), a = document.activeElement
+      if (!f.length) { e.preventDefault(); if (!ref.current.contains(a)) holder()?.focus(); return }
+      const first = f[0], last = f[f.length - 1]
+      if (e.shiftKey && (a === first || !ref.current.contains(a))) { e.preventDefault(); last.focus() }
+      else if (!e.shiftKey && (a === last || !ref.current.contains(a))) { e.preventDefault(); first.focus() }
     }
     document.addEventListener('keydown', on)
-    return () => { document.removeEventListener('keydown', on); prev?.focus?.() }
+    return () => {
+      cancelAnimationFrame(raf); document.removeEventListener('keydown', on)
+      const i = coreTraps.lastIndexOf(ref); if (i >= 0) coreTraps.splice(i, 1)
+      queueMicrotask(() => prev?.focus?.()) // after the rest of the commit (e.g. a modal lifting `inert` off the page)
+    }
   }, [active, ref])
 }
 
@@ -1038,12 +1176,12 @@ export function Skeleton({ className }: { className?: string }) {
 const AV_COLORS = ['#DBEAFE:#1E40AF', '#FCE7F3:#9D174D', '#DCFCE7:#166534', '#FEF3C7:#92400E', '#EDE9FE:#5B21B6', '#E0F2FE:#075985']
 export function Avatar({ name, src, size = 32, status, className }:
   { name: string; src?: string; size?: number; status?: 'online' | 'away' | 'offline'; className?: string }) {
-  const initials = name.split(' ').map(s => s[0]).slice(0, 2).join('').toUpperCase()
+  const initials = name.split(' ').map(s => s[0]).slice(0, 2).join('').toUpperCase(), img = safeMediaUrl(src)
   const [bg, fg] = AV_COLORS[[...name].reduce((a, c) => a + c.charCodeAt(0), 0) % AV_COLORS.length].split(':')
   return (
     <span className={cn('relative inline-grid flex-none place-items-center rounded-full border-2 border-[var(--card)] font-semibold', className)}
       style={{ width: size, height: size, fontSize: size >= 28 ? Math.max(11, size * 0.36) : size * 0.36, background: bg, color: fg }} title={name}>
-      {src ? <img src={src} alt={name} className="h-full w-full rounded-full object-cover" /> : initials}
+      {img ? <img src={img} alt={name} className="h-full w-full rounded-full object-cover" /> : initials}
       {status && <span className={cn('absolute -right-0.5 -bottom-0.5 h-2.5 w-2.5 rounded-full border-2 border-[var(--card)]',
         status === 'online' ? 'bg-[var(--ok)]' : status === 'away' ? 'bg-[var(--warn)]' : 'bg-[var(--line2)]')} />}
     </span>
@@ -1148,12 +1286,12 @@ export function SparkChart({ data, variant = 'line', width, height = 36, color =
   // fewer than two points has no shape to draw (and Math.min() of nothing is Infinity): keep the box, draw nothing
   if (data.length < 2) return <div ref={ref} className={cn('min-w-0', className)} style={{ width: width ?? '100%', height }} />
   const W = width ?? mw, H = height, pad = variant === 'line' || variant === 'area' ? 4 : 0
-  const lo = Math.min(...data, target ?? Infinity), hi = Math.max(...data, target ?? -Infinity)
+  const lo = minOf(data, target ?? Infinity), hi = maxOf(data, target ?? -Infinity)
   const n = data.length, Y = (v: number) => H - pad - ((v - lo) / (hi - lo || 1)) * (H - pad * 2)
   const pts = data.map((v, i) => [(i / Math.max(1, n - 1)) * W, Y(v)] as [number, number])
   const flat = pts.map(p => [p[0], H - pad] as [number, number])
   const P = seen ? pts : flat, line = chartPath(P, curve), t = spring(0.05, 0.45)
-  const bw = W / n, mi = data.indexOf(Math.min(...data)), ma = data.indexOf(Math.max(...data))
+  const bw = W / n, mi = data.indexOf(minOf(data)), ma = data.indexOf(maxOf(data))
   return (
     <div ref={ref} className={cn('min-w-0', className)} style={{ width: width ?? '100%', height: H }}>
       {W > 0 && (
@@ -1184,3 +1322,51 @@ export function SparkChart({ data, variant = 'line', width, height = 36, color =
     </div>
   )
 }
+
+/* Security helpers ────────────────────────────────────────────────────────────
+ * Use these wherever a URL, colour or CSS value comes from props, data, storage or model output. */
+
+const SAFE_URL_SCHEMES = ['http:', 'https:', 'mailto:', 'tel:']
+
+/**
+ * Returns `url` when it's relative (`/x`, `x`, `?q`, `#id`) or uses an allowed scheme (default http, https, mailto, tel);
+ * otherwise `fallback` ('#'). Blocks `javascript:`, `data:`, `vbscript:`, `file:` and OS protocol handlers.
+ */
+export function safeUrl(url: string | null | undefined, { allow = SAFE_URL_SCHEMES, fallback = '#' }: { allow?: string[]; fallback?: string } = {}): string {
+  if (url == null) return fallback
+  const u = String(url).trim()
+  if (!u) return fallback
+  const probe = u.replace(/[\u0000- \u007f-\u009f]/g, '') // browsers ignore these inside a scheme
+  const m = /^([a-z][a-z0-9+.-]*):/i.exec(probe)
+  if (!m) return u
+  return allow.includes(m[1].toLowerCase() + ':') ? u : fallback
+}
+
+/** Like `safeUrl` for media `src`: also allows `blob:` and `data:` of the given kind (image, audio or video); otherwise ''. */
+export function safeMediaUrl(url: string | null | undefined, kind: 'image' | 'audio' | 'video' = 'image'): string {
+  const u = safeUrl(url, { allow: ['http:', 'https:', 'blob:', 'data:'], fallback: '' })
+  if (/^data:/i.test(u) && !new RegExp(`^data:${kind}/`, 'i').test(u)) return ''
+  return u
+}
+
+/** A CSS `url("…")` with the value checked by `safeMediaUrl` and quotes/backslashes escaped; 'none' when unsafe. */
+export const cssUrl = (url: string | null | undefined) => {
+  const u = safeMediaUrl(url)
+  return u ? `url("${u.replace(/["\\\n\r]/g, c => `\\${c.charCodeAt(0).toString(16)} `)}")` : 'none'
+}
+
+/**
+ * Returns `value` if it's a plain CSS value (colours, numbers, lengths, `var(--x)`, `color-mix(…)`, `calc(…)`) with
+ * no way to break out of a declaration or load a resource; otherwise `fallback`. Rejects `;`, braces, quotes, `url(`,
+ * `expression(`, `image-set(` and `@`.
+ */
+export function safeCssValue(value: string | number | null | undefined, fallback = ''): string {
+  if (typeof value === 'number') return Number.isFinite(value) ? String(value) : fallback
+  if (typeof value !== 'string') return fallback
+  const s = value.trim()
+  if (!s || s.length > 200 || !/^[\w#%.,()\s/+*-]+$/.test(s) || /url\s*\(|expression\s*\(|image-set\s*\(/i.test(s)) return fallback
+  return s
+}
+
+/** `safeCssValue` for colours, falling back to `currentColor`. */
+export const safeColor = (color: string | null | undefined, fallback = 'currentColor') => safeCssValue(color, fallback) || fallback

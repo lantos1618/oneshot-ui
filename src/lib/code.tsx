@@ -24,13 +24,13 @@ const CODE_TOKEN_CLASS: Record<CodeTokenKind, string> = {
   var: 'text-[color-mix(in_srgb,var(--c3)_70%,var(--fg))]',
   pre: '',
 }
-const CODE_JS: [RegExp, CodeTokenKind[]] = [/(\/\/.*$)|(`(?:\\.|[^`])*`|'(?:\\.|[^'])*'|"(?:\\.|[^"])*")|\b(const|let|var|function|return|if|else|for|while|import|from|export|default|await|async|new|class|extends|true|false|null|undefined|try|catch|throw|of|in|type|interface|as|satisfies|typeof|keyof)\b|\b(\d+(?:\.\d+)?)\b|([A-Za-z_$][\w$]*)(?=\s*\()/g, ['com', 'str', 'kw', 'num', 'fn']]
+const CODE_JS: [RegExp, CodeTokenKind[]] = [/(\/\/.*$)|(`(?:[^`\\]|\\.)*`|'(?:[^'\\]|\\.)*'|"(?:[^"\\]|\\.)*")|\b(const|let|var|function|return|if|else|for|while|import|from|export|default|await|async|new|class|extends|true|false|null|undefined|try|catch|throw|of|in|type|interface|as|satisfies|typeof|keyof)\b|\b(\d+(?:\.\d+)?)\b|([A-Za-z_$][\w$]*)(?=\s*\()/g, ['com', 'str', 'kw', 'num', 'fn']]
 const CODE_LANGS: Record<CodeLanguage, [RegExp, CodeTokenKind[]]> = {
   ts: CODE_JS,
   js: CODE_JS,
-  py: [/(#.*$)|(f?"(?:\\.|[^"])*"|f?'(?:\\.|[^'])*')|\b(def|class|return|import|from|as|if|elif|else|for|in|while|with|True|False|None|await|async|lambda|try|except|raise|print)\b|\b(\d+(?:\.\d+)?)\b|([A-Za-z_]\w*)(?=\s*\()|(@\w+)/g, ['com', 'str', 'kw', 'num', 'fn', 'attr']],
-  sh: [/(#.*$)|("(?:\\.|[^"])*"|'(?:\\.|[^'])*')|(^|\s)(npm|pnpm|yarn|bun|npx|curl|git|cd|export|echo)\b|(\s-{1,2}[\w-]+)|(\$\w+|\$\{[^}]+\})/g, ['com', 'str', 'pre', 'kw', 'attr', 'var']],
-  json: [/("(?:\\.|[^"])*")(?=\s*:)|("(?:\\.|[^"])*")|\b(true|false|null)\b|(-?\d+(?:\.\d+)?)/g, ['prop', 'str', 'kw', 'num']],
+  py: [/(#.*$)|(f?"(?:[^"\\]|\\.)*"|f?'(?:[^'\\]|\\.)*')|\b(def|class|return|import|from|as|if|elif|else|for|in|while|with|True|False|None|await|async|lambda|try|except|raise|print)\b|\b(\d+(?:\.\d+)?)\b|([A-Za-z_]\w*)(?=\s*\()|(@\w+)/g, ['com', 'str', 'kw', 'num', 'fn', 'attr']],
+  sh: [/(#.*$)|("(?:[^"\\]|\\.)*"|'(?:[^'\\]|\\.)*')|(^|\s)(npm|pnpm|yarn|bun|npx|curl|git|cd|export|echo)\b|(\s-{1,2}[\w-]+)|(\$\w+|\$\{[^}]+\})/g, ['com', 'str', 'pre', 'kw', 'attr', 'var']],
+  json: [/("(?:[^"\\]|\\.)*")(?=\s*:)|("(?:[^"\\]|\\.)*")|\b(true|false|null)\b|(-?\d+(?:\.\d+)?)/g, ['prop', 'str', 'kw', 'num']],
 }
 export const CODE_LANGUAGE_NAMES: Record<CodeLanguage, string> = { ts: 'TypeScript', js: 'JavaScript', py: 'Python', sh: 'Shell', json: 'JSON' }
 
@@ -44,8 +44,15 @@ export function codeLanguageOf(filename?: string): CodeLanguage {
   return ext === 'js' || ext === 'jsx' || ext === 'mjs' ? 'js' : 'ts'
 }
 
-/** Highlight one line of code: returns spans coloured with theme tokens. */
+/** Lines longer than this render as plain text (minified bundles, data blobs): highlighting them helps nobody and costs time. */
+export const CODE_HIGHLIGHT_MAX = 2000
+
+/**
+ * Highlight one line of code: returns spans coloured with theme tokens. The patterns have no overlapping alternatives
+ * (string bodies are `[^"\\]|\\.`), so time is linear in the line; lines over CODE_HIGHLIGHT_MAX come back as plain text.
+ */
 export function highlightCode(line: string, lang: CodeLanguage = 'ts'): ReactNode[] {
+  if (line.length > CODE_HIGHLIGHT_MAX) return [line]
   const [src, names] = CODE_LANGS[lang] ?? CODE_JS
   const re = new RegExp(src.source, src.flags)
   const out: ReactNode[] = []; let last = 0, k = 0, m: RegExpExecArray | null
@@ -64,20 +71,36 @@ export function highlightCode(line: string, lang: CodeLanguage = 'ts'): ReactNod
 
 /** One step of an lcsDiff: kept (`=`, both indexes), removed (`-`, index in before) or added (`+`, index in after). Indexes are 0-based. */
 export type LcsStep = { type: '=' | '-' | '+'; a: number | null; b: number | null }
+/** lcsDiff's default size cap: the changed middle (after the common start and end are trimmed) may hold at most this many cells. */
+export const LCS_MAX_CELLS = 4_000_000
+
 /**
  * Diff two sequences by longest common subsequence: lcsDiff(beforeLines, afterLines) or over words, items, anything.
  * `equal` compares two items (default ===); `prefer` picks which side comes first when both are possible (default 'delete').
+ * The common start and end are matched first; if the changed middle is still larger than `maxCells` (m·n, default
+ * 4 million, about 16 MB), it comes back as one block removed and one block added instead of an exact diff.
  */
-export function lcsDiff<T>(before: readonly T[], after: readonly T[], { equal = (x: T, y: T) => x === y, prefer = 'delete' }: { equal?: (x: T, y: T) => boolean; prefer?: 'delete' | 'insert' } = {}): LcsStep[] {
-  const m = before.length, n = after.length
-  const L = Array.from({ length: m + 1 }, () => new Array<number>(n + 1).fill(0))
-  for (let i = m - 1; i >= 0; i--) for (let j = n - 1; j >= 0; j--) L[i][j] = equal(before[i], after[j]) ? L[i + 1][j + 1] + 1 : Math.max(L[i + 1][j], L[i][j + 1])
-  const out: LcsStep[] = []
-  for (let i = 0, j = 0; i < m || j < n;) {
-    if (i < m && j < n && equal(before[i], after[j])) out.push({ type: '=', a: i++, b: j++ })
-    else if (j >= n || (i < m && (prefer === 'delete' ? L[i + 1][j] >= L[i][j + 1] : L[i + 1][j] > L[i][j + 1]))) out.push({ type: '-', a: i++, b: null })
-    else out.push({ type: '+', a: null, b: j++ })
+export function lcsDiff<T>(before: readonly T[], after: readonly T[], { equal = (x: T, y: T) => x === y, prefer = 'delete', maxCells = LCS_MAX_CELLS }: { equal?: (x: T, y: T) => boolean; prefer?: 'delete' | 'insert'; maxCells?: number } = {}): LcsStep[] {
+  let lo = 0, hiA = before.length, hiB = after.length
+  while (lo < hiA && lo < hiB && equal(before[lo], after[lo])) lo++
+  while (hiA > lo && hiB > lo && equal(before[hiA - 1], after[hiB - 1])) { hiA--; hiB-- }
+  const m = hiA - lo, n = hiB - lo, out: LcsStep[] = []
+  for (let k = 0; k < lo; k++) out.push({ type: '=', a: k, b: k })
+  if ((m + 1) * (n + 1) > maxCells) { // too big for an exact diff: the whole middle changed
+    const del = (): void => { for (let k = 0; k < m; k++) out.push({ type: '-', a: lo + k, b: null }) }
+    const add = (): void => { for (let k = 0; k < n; k++) out.push({ type: '+', a: null, b: lo + k }) }
+    if (prefer === 'delete') { del(); add() } else { add(); del() }
+  } else {
+    const W = n + 1, L = new Int32Array((m + 1) * W) // L[i*W + j] = LCS length of before[lo+i..] and after[lo+j..]
+    for (let i = m - 1; i >= 0; i--) for (let j = n - 1; j >= 0; j--)
+      L[i * W + j] = equal(before[lo + i], after[lo + j]) ? L[(i + 1) * W + j + 1] + 1 : Math.max(L[(i + 1) * W + j], L[i * W + j + 1])
+    for (let i = 0, j = 0; i < m || j < n;) {
+      if (i < m && j < n && equal(before[lo + i], after[lo + j])) { out.push({ type: '=', a: lo + i, b: lo + j }); i++; j++ }
+      else if (j >= n || (i < m && (prefer === 'delete' ? L[(i + 1) * W + j] >= L[i * W + j + 1] : L[(i + 1) * W + j] > L[i * W + j + 1]))) out.push({ type: '-', a: lo + i++, b: null })
+      else out.push({ type: '+', a: null, b: lo + j++ })
+    }
   }
+  for (let k = 0; k < before.length - hiA; k++) out.push({ type: '=', a: hiA + k, b: hiB + k })
   return out
 }
 
@@ -155,19 +178,21 @@ function CodeHeaderTabs({ tabs, value, onChange, label }: { tabs: string[]; valu
 
 /**
  * Code block: file name with icon, language badge, line numbers, highlighted lines, wrap toggle and copy.
- * Pass `previous` to get a "Changes +N −M" toggle that shows an inline diff; long code collapses behind
+ * Pass `previous` to get a "Changes" toggle that shows an inline diff (computed the first time it's opened, then labelled
+ * +N −M; very large changes fall back to one removed and one added block); long code collapses behind
  * a fade with "Show all N lines". Without `defaultWrap`, lines wrap by default when the block is narrower than 520px (phones).
  */
 export function CodeBlock({ code, filename, language, lineNumbers = true, highlight = [], previous, defaultWrap, collapseAt = 300, className }:
   { code: string; filename?: string; language?: CodeLanguage; lineNumbers?: boolean; highlight?: number[]; previous?: string; defaultWrap?: boolean; collapseAt?: number | false; className?: string }) {
   const lang = language ?? codeLanguageOf(filename)
   const lines = useMemo(() => code.replace(/\n$/, '').split('\n'), [code])
-  const diff = useMemo(() => previous == null ? null : codeLineDiff(previous.replace(/\n$/, '').split('\n'), lines), [previous, lines])
+  const [diffOn, setDiffOn] = useState(false)
+  const [diffSeen, setDiffSeen] = useState(false) // the diff is computed the first time Changes is opened, not on render
+  const diff = useMemo(() => previous == null || !diffSeen ? null : codeLineDiff(previous.replace(/\n$/, '').split('\n'), lines), [previous, lines, diffSeen])
   const adds = diff?.filter(r => r.type === '+').length ?? 0, dels = diff?.filter(r => r.type === '-').length ?? 0
   const [box, boxW] = useWidth<HTMLDivElement>()
   const [wrapSet, setWrap] = useState<boolean | null>(null) // null until the reader toggles it
   const wrap = wrapSet ?? defaultWrap ?? (boxW > 0 && boxW < 520)
-  const [diffOn, setDiffOn] = useState(false)
   const [open, setOpen] = useState(false)
   const [inner, { height: full }] = useSize<HTMLDivElement>()
   const rows: CodeRow[] = diffOn && diff
@@ -181,10 +206,10 @@ export function CodeBlock({ code, filename, language, lineNumbers = true, highli
         <span className="flex min-w-0 items-center gap-1.5 font-medium text-[var(--fg)]"><Icon name="file" size={13} className="text-[var(--fg3)]" /><span className="truncate">{filename ?? 'snippet'}</span></span>
         <span className="flex-none rounded-[5px] bg-[var(--muted)] px-1.5 py-0.5 font-[family-name:var(--mono)] text-[11px] font-medium text-[var(--fg3)] max-[420px]:hidden">{CODE_LANGUAGE_NAMES[lang]}</span>
         <span className="flex-1" />
-        {diff && (
-          <Button size="sm" variant="ghost" className={CODE_TOOL} aria-pressed={diffOn} onClick={() => setDiffOn(v => !v)} title="Changes since the previous version">
+        {previous != null && (
+          <Button size="sm" variant="ghost" className={CODE_TOOL} aria-pressed={diffOn} onClick={() => { setDiffSeen(true); setDiffOn(v => !v) }} title="Changes since the previous version">
             <Icon name="diff" size={13} /><span className="max-sm:sr-only">Changes</span>
-            <span className="ui-num text-[11px]"><span className="text-[var(--ok)]">+{adds}</span> <span className="text-[var(--bad)]">−{dels}</span></span>
+            {diff && <span className="ui-num text-[11px]"><span className="text-[var(--ok)]">+{adds}</span> <span className="text-[var(--bad)]">−{dels}</span></span>}
           </Button>
         )}
         <Button size="sm" variant="ghost" className={CODE_TOOL} aria-pressed={wrap} onClick={() => setWrap(!wrap)} title="Wrap lines"><Icon name="wrap" size={13} className="sm:hidden" /><span className="max-sm:hidden">Wrap</span><span className="sr-only sm:hidden">Wrap lines</span></Button>

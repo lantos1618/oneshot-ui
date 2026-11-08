@@ -14,15 +14,26 @@ import { useFrameLoop, useViewport } from './motion'
 
 /* Tiny HTML/CSS highlighter for the canvas (code's highlightCode has no HTML/CSS mode yet) ─ */
 
-const AI_HL_RE = /(\/\*.*?\*\/)|(<\/?[a-zA-Z][\w-]*|\/?>)|("[^"]*")|(var\(--[\w-]+(?:,[^)]*)?\))|([a-z-]+)(?=\s*:\s)|(\b\d+(?:\.\d+)?(?:px|%|em|s)?\b|\$\d+)/g
+/**
+ * One pass, linear time: an unterminated comment runs to the end of the line, `var(` stops at the next paren, and
+ * every word is consumed whole (group 5) with an optional `: ` after it (group 6), so a failed property match can't
+ * be retried from each letter. Lines over AI_HL_MAX render plain.
+ */
+const AI_HL_RE = /(\/\*.*?(?:\*\/|$))|(<\/?[a-zA-Z][\w-]*|\/?>)|("[^"]*")|(var\(--[\w-]+(?:,[^()]*)?\))|([a-z-]+)(\s*:\s)?|(\b\d+(?:\.\d+)?(?:px|%|em|s)?\b|\$\d+)/g
+const AI_HL_MAX = 2000
 const AI_HL_CLS = ['text-[var(--fg3)] italic', 'text-[var(--accent)]', 'text-[var(--ok)]', 'text-[color-mix(in_srgb,var(--c3)_70%,var(--fg))]', 'text-[var(--bad)]', 'text-[color-mix(in_srgb,var(--c3)_70%,var(--fg))]']
 function aiHighlight(line: string): ReactNode[] {
+  if (line.length > AI_HL_MAX) return [line]
   const out: ReactNode[] = []; let last = 0, k = 0
   for (const m of line.matchAll(AI_HL_RE)) {
     if (m.index! > last) out.push(line.slice(last, m.index))
-    const g = [1, 2, 3, 4, 5, 6].findIndex(i => m[i] !== undefined)
-    out.push(<span key={k++} className={AI_HL_CLS[g]}>{m[0]}</span>)
     last = m.index! + m[0].length
+    if (m[5] !== undefined) { // a word: a property only when ": " follows
+      if (m[6] === undefined) out.push(m[5]); else out.push(<span key={k++} className={AI_HL_CLS[4]}>{m[5]}</span>, m[6])
+      continue
+    }
+    const g = [1, 2, 3, 4, 5, 7].findIndex(i => m[i] !== undefined)
+    out.push(<span key={k++} className={AI_HL_CLS[g]}>{m[0]}</span>)
   }
   out.push(line.slice(last))
   return out
@@ -76,23 +87,34 @@ const aiExplainLine = (n: number, ln: string) => /border-radius/.test(ln) ? 'Thi
 type CvMsg = { id: number; role: 'u' | 'a'; text: string; tool?: { state: 'run' | 'done'; add: number; del: number; ver: number }; dots?: boolean; stream?: boolean }
 type CvDiff = { lines: ['=' | '+' | '-', string][]; typing: number; chars: number; collapsing: boolean }
 
+/** The page's Google Fonts stylesheets, matched by exact host (https://fonts.googleapis.com only). */
+const aiFontLink = (href: string) => { try { const u = new URL(href); return u.protocol === 'https:' && u.hostname === 'fonts.googleapis.com' } catch { return false } }
+const aiAttr = (s: string) => s.replace(/[&"<>]/g, c => ({ '&': '&amp;', '"': '&quot;', '<': '&lt;', '>': '&gt;' })[c]!)
+
 /**
  * Renders the document in a sandboxed iframe (srcdoc, scripts off), so markup from a model can't run handlers in the page.
+ * A Content-Security-Policy meta comes first in the frame's head: nothing remote loads (no images, CSS imports,
+ * url() backgrounds; Google Fonts only when the provider's `fonts` is on), so model HTML can't call home.
+ * `allowRemote` lets https images in. `<base target="_blank">` without allow-popups makes links inert.
  * The theme tokens and the page's web fonts are copied in, so the preview follows the theme; it grows to its content.
  */
-function AiPreview({ html, title }: { html: string; title: string }) {
-  const { tokens, dark } = useTheme()
+function AiPreview({ html, title, allowRemote = false }: { html: string; title: string; allowRemote?: boolean }) {
+  const { tokens, dark, fonts: fontsOn } = useTheme()
   const ref = useRef<HTMLIFrameElement>(null)
   const [h, setH] = useState(320)
   const [fonts, setFonts] = useState('')
-  useEffect(() => { // the page's Google Fonts (if any), so var(--font) renders the same inside
-    const links = [...document.querySelectorAll<HTMLLinkElement>('link[rel="stylesheet"][href*="fonts.googleapis.com"]')].map(l => `<link rel="stylesheet" href="${l.href}">`)
-    const base = [...document.querySelectorAll('style')].some(s => s.textContent?.includes(FONT_CSS)) ? `<style>${FONT_CSS}</style>` : ''
-    setFonts(base + links.join(''))
-  }, [tokens.font])
-  const doc = useMemo(() => `<!doctype html><html><head><meta charset="utf-8">${fonts}<style>${themeCSS(tokens)}
+  useEffect(() => { // only when the provider allows Google Fonts: the Geist import plus the page's font links (exact host)
+    if (!fontsOn) { setFonts(''); return }
+    const links = [...document.querySelectorAll<HTMLLinkElement>('link[rel="stylesheet"]')].filter(l => aiFontLink(l.href)).map(l => `<link rel="stylesheet" href="${aiAttr(l.href)}">`)
+    setFonts(`<style>${FONT_CSS}</style>` + links.join(''))
+  }, [tokens.font, fontsOn])
+  const doc = useMemo(() => {
+    const csp = ["default-src 'none'", `style-src 'unsafe-inline'${fonts ? ' https://fonts.googleapis.com' : ''}`, ...(fonts ? ['font-src https://fonts.gstatic.com'] : []),
+      `img-src data: blob:${allowRemote ? ' https:' : ''}`, "form-action 'none'", "base-uri 'none'"].join('; ')
+    return `<!doctype html><html><head><meta http-equiv="Content-Security-Policy" content="${csp}"><meta charset="utf-8"><base target="_blank">${fonts}<style>${themeCSS(tokens)}
 :root{color-scheme:${dark ? 'dark' : 'light'}}html,body{margin:0;background:transparent}
-body{display:flex;justify-content:center;padding:16px 12px 24px;font:14px/1.5 var(--font);color:var(--fg)}</style></head><body>${html}</body></html>`, [html, tokens, dark, fonts])
+body{display:flex;justify-content:center;padding:16px 12px 24px;font:14px/1.5 var(--font);color:var(--fg)}</style></head><body>${html}</body></html>`
+  }, [html, tokens, dark, fonts, allowRemote])
   useEffect(() => {
     const f = ref.current; if (!f) return
     let ro: ResizeObserver | null = null
@@ -103,7 +125,9 @@ body{display:flex;justify-content:center;padding:16px 12px 24px;font:14px/1.5 va
   }, [doc])
   return (
     <motion.div initial={{ opacity: 0, scale: 0.97 }} animate={{ opacity: 1, scale: 1 }} transition={spring(0.25, 0.35)} className="w-full max-w-[360px]">
-      {/* allow-same-origin without allow-scripts: nothing in the document can run, and the frame can still be measured */}
+      {/* allow-same-origin without allow-scripts: nothing in the document can run, and the frame can still be measured.
+          Never add allow-scripts alongside allow-same-origin: together they let the document remove its own sandbox
+          and script the host page. No allow-popups either, so <base target="_blank"> leaves links doing nothing. */}
       <iframe ref={ref} title={title} srcDoc={doc} sandbox="allow-same-origin" className="block w-full border-0" style={{ height: h, colorScheme: dark ? 'dark' : 'light' }} />
     </motion.div>
   )
@@ -114,10 +138,11 @@ body{display:flex;justify-content:center;padding:16px 12px 24px;font:14px/1.5 va
  * type in highlighted, removed lines strike through and collapse. Toggle Code/Preview (the preview is a sandboxed
  * iframe), step through versions, copy, click or tap a line (or arrow to it and press Enter) to "Ask about line N",
  * or use the suggestion chips. Below 768px chat and document stack, rows grow to finger height on touch, and the
- * document scrolls into view while an edit streams in. A pill shows line count and version.
+ * document scrolls into view while an edit streams in. A pill shows line count and version. The preview loads nothing
+ * remote (CSP in the frame); `allowRemote` lets https images in.
  */
-export function AICanvas({ file = 'pricing-card.html', initial = aiPricingCard(null, false, false), edits = AI_CANVAS_EDITS, explain = aiExplainLine, intro = 'I made a pricing card in the canvas. Ask me to change it, or tap a line of code to ask about it.', className }:
-  { file?: string; initial?: string; edits?: CanvasEdit[]; explain?: (n: number, line: string) => string; intro?: string; className?: string }) {
+export function AICanvas({ file = 'pricing-card.html', initial = aiPricingCard(null, false, false), edits = AI_CANVAS_EDITS, explain = aiExplainLine, intro = 'I made a pricing card in the canvas. Ask me to change it, or tap a line of code to ask about it.', allowRemote = false, className }:
+  { file?: string; initial?: string; edits?: CanvasEdit[]; explain?: (n: number, line: string) => string; intro?: string; allowRemote?: boolean; className?: string }) {
   const reduce = useReducedMotion()
   const [V, setV] = useState([initial])
   const [cur, setCur] = useState(0)
@@ -267,7 +292,7 @@ export function AICanvas({ file = 'pricing-card.html', initial = aiPricingCard(n
             </div>
           ) : (
             <div className="absolute inset-0 grid place-items-center overflow-auto bg-[var(--bg)] bg-[radial-gradient(circle,var(--line2)_1px,transparent_1.2px)] bg-[length:16px_16px] p-6 max-sm:p-3">
-              <AiPreview key={`${cur}-${flash}`} html={shown} title={`Preview of ${file}, version ${cur + 1}`} />
+              <AiPreview key={`${cur}-${flash}`} html={shown} allowRemote={allowRemote} title={`Preview of ${file}, version ${cur + 1}`} />
             </div>
           )}
           <AnimatePresence>

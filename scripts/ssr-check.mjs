@@ -44,6 +44,37 @@ try {
   await check('UIProvider target=self, fonts=false', () => h(lib.UIProvider, { target: 'self', fonts: false, persist: false }, h(lib.ThemeToggle)))
   await check('ThemeScript', () => h(lib.ThemeScript, { storageKey: 'app-theme', defaultTheme: { theme: 'nord' } }))
   await check('AppearancePanel', () => h(lib.UIProvider, null, h(lib.AppearancePanel)))
+  // CSP: every <style> carries the nonce; injectStyles={false} renders none; fonts are off unless asked for
+  const expect = (name, ok, detail) => results.push(ok ? { name, ok: true, size: 0, warnings: [] } : { name, ok: false, error: detail, warnings: [] })
+  {
+    const withNonce = renderToString(h(lib.UIProvider, { nonce: 'n0nce', fonts: true }, h(lib.Button, null, 'x')))
+    const styles = withNonce.match(/<style[^>]*>/g) ?? []
+    expect('UIProvider nonce on every <style>', styles.length === 2 && styles.every(t => t.includes('nonce="n0nce"')), styles.join(' '))
+    const none = renderToString(h(lib.UIProvider, { injectStyles: false }, h(lib.Button, null, 'x')))
+    expect('UIProvider injectStyles={false}: no <style>, no font request', !/<style|googleapis/.test(none), none.slice(0, 200))
+    expect('UIProvider default: no Google Fonts', !renderToString(h(lib.UIProvider, null, 'x')).includes('googleapis'), 'FONT_CSS rendered by default')
+  }
+  // Theme storage: junk never throws, and only library tokens and values survive
+  {
+    const junk = [null, 1, 'x', [], { variant: { default: -1 } }, { theme: 'ayu', variant: { ayu: 'x' } }, { variant: { ayu: 99 } }, { radius: Infinity },
+      { radius: '8' }, { font: 'x"}</style><img src=//x>' }, { useCustom: true, custom: { dark: 1, v: { bg: 'url(http://x/) #fff' } } },
+      { useCustom: true, custom: { v: { bg: '#123456', card: 'red;position:fixed', __proto__: { x: 1 } } } }, JSON.parse('{"__proto__":{"polluted":1},"constructor":{"prototype":{"p":1}}}')]
+    let bad = ''
+    for (const j of junk) {
+      try {
+        const s = lib.themeLoad(j)
+        for (const dark of [false, true]) {
+          const t = lib.themeTokens(s, dark)
+          for (const [k, v] of Object.entries(t)) if (!lib.themeTokenOk(k, v)) bad ||= `${JSON.stringify(j)} → --${k}: ${v}`
+        }
+        lib.themePalette(j ?? {}, true); lib.themeTokens(j ?? {}, false)
+      } catch (e) { bad ||= `${JSON.stringify(j)} threw ${e.message}` }
+    }
+    expect('themeLoad/themeTokens on junk: no throw, only safe tokens', !bad && ({}).polluted === undefined, bad)
+    expect('themeCSS drops unsafe values', !/url\(|<\/style/.test(lib.themeCSS({ bg: 'url(http://x)', font: '"x"}</style>', ok: '#fff' }, '*/</style>')), 'unsafe value kept')
+    const src = lib.themeScriptSource()
+    expect('ThemeScript reads ui-theme:v1 and validates css', src.includes('"ui-theme:v1"') && src.includes('"ui-theme"') && src.includes('R.test'), src.slice(0, 120))
+  }
   const dir = join(root, 'src/showcase')
   for (const f of readdirSync(dir).filter(f => f.endsWith('Section.tsx')).sort()) {
     const mod = await vite.ssrLoadModule(`/src/showcase/${f}`).catch(e => ({ __loadError: e }))

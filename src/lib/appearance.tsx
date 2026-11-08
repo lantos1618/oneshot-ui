@@ -51,10 +51,12 @@ const appearanceSection = 'border-b border-[var(--line)] px-3 pt-2.5 pb-3'
 /**
  * Everything in the appearance panel, without the popover: mode, theme families with split previews,
  * variant chips (Ayu Mirage / Dark, Tokyo Night / Storm), a Customise grid that creates a Custom theme,
- * corner radius, font, Reset and Copy CSS. Use it inside your own panel, or use AppearanceMenu.
+ * corner radius, font, Reset and Copy CSS. Use it inside your own panel, or use AppearanceMenu. Font previews load from
+ * Google Fonts only when the provider has `fonts` on; otherwise each font shows in the system fallback.
  */
 export function AppearancePanel({ onClose, open = true, className }: { onClose?: () => void; open?: boolean; className?: string }) {
-  const { settings, set, reset, dark, tokens, label } = useTheme()
+  const { settings, set, reset, dark, tokens, label, fonts } = useTheme()
+  const preload = (f: string) => { if (fonts) loadFont(f) } // Google Fonts only when the provider allows it
   const toast = useToast()
   const grid = useRef<HTMLDivElement>(null)
   const { copied, copy: copyText } = useCopy(() => themeCSS(tokens, label))
@@ -143,7 +145,7 @@ export function AppearancePanel({ onClose, open = true, className }: { onClose?:
         <div className="mt-3 mb-1.5 text-[13px]">Font</div>
         <div className="grid grid-cols-2 gap-1.5">
           {FONTS.map(([f]) => (
-            <button key={f} aria-pressed={f === settings.font} onPointerEnter={() => loadFont(f)} onFocus={() => loadFont(f)} onClick={() => set({ font: f })} style={{ fontFamily: `"${f}",system-ui,sans-serif` }}
+            <button key={f} aria-pressed={f === settings.font} onPointerEnter={() => preload(f)} onFocus={() => preload(f)} onClick={() => set({ font: f })} style={{ fontFamily: `"${f}",system-ui,sans-serif` }}
               className={cn('cursor-pointer rounded-[var(--r-md)] border bg-[var(--card)] px-2 py-2 text-left text-[13px] hover:bg-[var(--muted)]',
                 f === settings.font ? 'border-[var(--fg)] shadow-[0_0_0_1px_var(--fg)]' : 'border-[var(--line)]')}>{f}</button>
           ))}

@@ -76,7 +76,7 @@ export function InputsSection() {
         <Field label="Password" htmlFor="in-pw"><PasswordInput id="in-pw" placeholder="At least 8 characters" strength /></Field>
       </Spec>
       <Spec title="Colour picker" desc="Swatches, hue, and hex"><ColorPicker /></Spec>
-      <Spec title="File upload" desc="Drop or browse, per-file progress"><FileUpload defaultFiles={[{ name: 'brand-guidelines.pdf', size: 2_400_000 }]} /></Spec>
+      <Spec title="File upload" desc="Drop or browse, per-file progress"><FileUpload accept="image/*,.pdf" hint="Images or PDF, up to 20 MB" defaultFiles={[{ name: 'brand-guidelines.pdf', size: 2_400_000 }]} /></Spec>
       <Spec title="Range slider" desc="Two handles, values roll">
         <RangeSlider label="Price" defaultValue={[200, 750]} min={0} max={1000} step={10} minGap={50}
           format={v => <AnimatedNumber value={v} format={eur} />} valueText={v => `€${v}`} />

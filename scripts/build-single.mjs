@@ -8,12 +8,16 @@
 //   dist-single/ui-all.tsx       everything in one file
 //   dist-single/ui-with-examples.tsx  everything plus the showcase (default export) as usage examples (not published)
 //
-// Each file starts with 'use client'.
+// Each file starts with 'use client', then a stamp: package version, git commit (when built from a checkout) and the
+// sha256 of everything after the stamp line, so a pasted copy can be checked against a release. dist-single/SHA256SUMS
+// lists the sha256 of each whole file (`cd dist-single && sha256sum -c SHA256SUMS`).
 //
 // Modules were split from one file and every top-level name is unique, so concatenation is safe;
 // we only rewrite imports. An add-on imports from another bundle only what it uses.
 import { readFileSync, writeFileSync, mkdirSync, readdirSync } from 'node:fs'
 import { join } from 'node:path'
+import { createHash } from 'node:crypto'
+import { execFileSync } from 'node:child_process'
 
 const root = new URL('..', import.meta.url).pathname
 const BUNDLES = {
@@ -80,13 +84,25 @@ const showcaseDir = join(root, 'src/showcase')
 const examples = ['kit.tsx', ...readdirSync(showcaseDir).filter(f => f.endsWith('.tsx') && f !== 'index.tsx' && f !== 'kit.tsx').sort(), 'index.tsx'].map(f => join(showcaseDir, f))
 
 mkdirSync(join(root, 'dist-single'), { recursive: true })
-const sizes = []
+const sizes = [], sums = []
+const pkg = JSON.parse(readFileSync(join(root, 'package.json'), 'utf8'))
+const git = args => { try { return execFileSync('git', args, { cwd: root, encoding: 'utf8', stdio: ['ignore', 'pipe', 'ignore'] }).trim() } catch { return '' } }
+const commit = git(['rev-parse', '--short=12', 'HEAD']), dirty = commit && git(['status', '--porcelain', '--', 'src', 'scripts', 'package.json']) ? '+dirty' : ''
+const sha256 = text => createHash('sha256').update(text, 'utf8').digest('hex')
 // every file is a client module (hooks, effects, browser APIs): the directive lets Next.js App Router import it
-const write = (name, text) => { text = `'use client'\n` + text; writeFileSync(join(root, 'dist-single', name), text); sizes.push(`${name} ${(text.length / 1024).toFixed(0)} KB`) }
+const write = (name, body, { listed = true } = {}) => {
+  const stamp = `/*! ${pkg.name} ${pkg.version} · ${name} · ${commit ? `commit ${commit}${dirty}` : 'commit unknown'} · sha256 of the text after this line: ${sha256(body)} · ` +
+    `re-copy this file on every security release: ${pkg.homepage.replace(/#readme$/, '')}/releases */\n`
+  const text = `'use client'\n` + stamp + body
+  writeFileSync(join(root, 'dist-single', name), text)
+  if (listed) sums.push(`${sha256(text)}  ${name}`) // only the published files, so `sha256sum -c` works in node_modules
+  sizes.push(`${name} ${(text.length / 1024).toFixed(0)} KB`)
+}
 for (const [b, mods] of Object.entries(BUNDLES)) {
   const banner = b === 'ui' ? '' : `/** ${b}.tsx: add-on to ui.tsx (keep both files side by side). Generated from src/lib/{${mods.join(',')}}.tsx. */\n`
   write(`${b}.tsx`, banner + render(mods.map(libFile), { self: [b], exampleDefault: false }))
 }
 write('ui-all.tsx', render(LIB.map(libFile), { exampleDefault: false }))
-write('ui-with-examples.tsx', render([...LIB.map(libFile), ...examples], { exampleDefault: true }))
-console.log('dist-single:', sizes.join(' · '))
+write('ui-with-examples.tsx', render([...LIB.map(libFile), ...examples], { exampleDefault: true }), { listed: false })
+writeFileSync(join(root, 'dist-single', 'SHA256SUMS'), sums.join('\n') + '\n')
+console.log('dist-single:', sizes.join(' · '), `· SHA256SUMS (${pkg.version}${commit ? ` ${commit}${dirty}` : ''})`)

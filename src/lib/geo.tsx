@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useRef, useState, type PointerEvent as ReactPointerEvent, type ReactNode } from 'react'
 import { motion, useInView, useReducedMotion } from 'motion/react'
-import { Button, TOUCH, clamp, cn, isTouch, onMouseLeave, useOutside, useTheme } from './core'
+import { Button, TOUCH, clamp, cn, isTouch, maxOf, minOf, onMouseLeave, safeColor, useOutside, useTheme } from './core'
 import { SegmentedControl } from './forms'
 import { PointerTooltip, usePointerTooltip } from './overlay'
 import { useFrameLoop } from './motion'
@@ -21,7 +21,7 @@ export type MapMetric = { key: string; label: string; format: (v: number) => str
 const GEO_STEPS = [12, 28, 46, 66, 88]
 const geoRamp = (s: number) => `color-mix(in srgb, var(--accent) ${s}%, var(--line))`
 /** Horizontal centre of every country path (for the left-to-right entrance). */
-const geoCentres = (() => { let cache: number[] | null = null; return () => cache ??= WORLD_MAP.countries.map(([, , d]) => { const xs = [...d.matchAll(/[ML](-?[\d.]+),/g)].map(m => +m[1]); return xs.length ? (Math.min(...xs) + Math.max(...xs)) / 2 : 0 }) })()
+const geoCentres = (() => { let cache: number[] | null = null; return () => cache ??= WORLD_MAP.countries.map(([, , d]) => { const xs = [...d.matchAll(/[ML](-?[\d.]+),/g)].map(m => +m[1]); return xs.length ? (minOf(xs) + maxOf(xs)) / 2 : 0 }) })()
 
 /**
  * World choropleth by country with a metric switch. Five-step ramp from the accent, pulsing hub markers,
@@ -45,7 +45,7 @@ export function WorldMap({ data, metrics, hubs = [], names = {}, top = 8, classN
   useOutside([listRef], () => setSpot(null), !!spot)
   const M = metrics.find(m => m.key === metric) ?? metrics[0]
   const countryTip = (n: string) => <><b className="font-semibold">{n}</b><br /><span className="text-[var(--fg2)]">{data[n] ? M.format(data[n]![metric]) : 'No data'}</span></>
-  const max = Math.max(1, ...Object.values(data).filter(Boolean).map(v => v![metric] ?? 0))
+  const max = maxOf(Object.values(data).filter(Boolean).map(v => v![metric] ?? 0), 1)
   const fill = (n: string) => { const v = data[n]?.[metric]; if (v == null) return 'var(--muted)'; const t = v / max; return geoRamp(GEO_STEPS[t < 0.1 ? 0 : t < 0.25 ? 1 : t < 0.45 ? 2 : t < 0.7 ? 3 : 4]) }
   const xs = geoCentres()
   const ranked = Object.entries(data).filter((e): e is [string, Record<string, number>] => !!e[1]).sort((a, b) => b[1][metric] - a[1][metric]).slice(0, top)
@@ -215,7 +215,7 @@ export function Globe({ hubs, routes, land = GLOBE_LAND, height = 440, className
     <div key={i} className={cn('flex cursor-default items-center gap-2 rounded-[var(--r-md)] p-2 text-xs', TOUCH.tap36, hl === i && 'bg-[var(--muted)]')}
       onPointerEnter={e => { if (!isTouch(e)) setHl(i) }} onPointerDown={e => { if (isTouch(e)) setHl(h => (h === i ? -1 : i)) }}
       onPointerLeave={onMouseLeave(() => setHl(-1))} tabIndex={0} onFocus={() => setHl(i)} onBlur={() => setHl(-1)}>
-      <i className="h-2 w-2 flex-none rounded-full" style={{ background: r.color }} /><span className="flex-1">{hubs[r.from][0]} → {hubs[r.to][0]}</span>
+      <i className="h-2 w-2 flex-none rounded-full" style={{ background: safeColor(r.color) }} /><span className="flex-1">{hubs[r.from][0]} → {hubs[r.to][0]}</span>
       <b className="font-[family-name:var(--mono)] text-[11px] font-medium text-[var(--fg2)]">{latency[i]} ms</b>
     </div>
   )

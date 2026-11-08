@@ -53,21 +53,46 @@ const gridConds = (n: GridFilterNode): GridCondition[] => gridIsGroup(n) ? n.c.f
 
 /* ---- ripgrep-style search ---- */
 type GridRg = { re: RegExp | null; err: string }
+/** Longest search the grid compiles. */
+const GRID_RG_MAX = 200
+/** Only the first this-many characters of a cell are searched. */
+const GRID_RG_CELL = 500
+/** Milliseconds one search pass may take before the grid stops and shows what it has. */
+const GRID_RG_BUDGET = 120
+/**
+ * Heuristic for patterns that backtrack catastrophically, returning why (or ''): a quantified group that itself holds a
+ * quantifier, like (a+)+, (.*.*)*, (\w+\s?)+ or (x*){2,}; or three or more open-ended wildcards (.*, \w+, [^,]*…),
+ * which are polynomial. Not a proof of safety: the search also caps cell length and its own running time.
+ */
+function gridRiskyPattern(src: string) {
+  const Q = /[*+]|\{\d+,\d*\}/
+  const flat = src.replace(/\\[wWsSdD]/g, '.').replace(/\\./g, 'x').replace(/\[[^\]]*\]/g, '.')
+  if ((flat.match(/\.(?:[*+]|\{\d+,\})/g) ?? []).length >= 3) return 'Three or more open-ended wildcards (like .*.*.*) can freeze the page: use at most two'
+  let t = flat, prev = ''
+  while (t !== prev) { // collapse innermost groups: one that holds a quantifier becomes a quantified atom
+    prev = t
+    t = t.replace(/\(([^()]*)\)/g, (_, inner: string) => (Q.test(inner) ? 'x+' : 'x'))
+  }
+  return /(?:[*+]|\{\d+,\d*\})(?:[*+]|\{\d+,\d*\})/.test(t) ? 'Nested quantifiers like (a+)+ can freeze the page: simplify the pattern, or turn off .* to search literally' : ''
+}
 function gridCompileRg(raw: string, flags: { cs: boolean; w: boolean; rx: boolean }): GridRg {
+  if (raw.length > GRID_RG_MAX) return { re: null, err: `Search is limited to ${GRID_RG_MAX} characters` }
   let q = raw.trim().replace(/^rg\s+/, ''), i: boolean | null = null, w = flags.w, F = !flags.rx, m: RegExpMatchArray | null
   while ((m = q.match(/^-(i|s|w|F)\s+/))) { if (m[1] === 'i') i = true; if (m[1] === 's') i = false; if (m[1] === 'w') w = true; if (m[1] === 'F') F = true; q = q.slice(m[0].length) }
   q = q.replace(/^"(.*)"$|^'(.*)'$/, (_, a, b) => a ?? b)
   if (!q) return { re: null, err: '' }
   const ignore = i ?? (flags.cs ? false : q === q.toLowerCase()) // smart case, like rg -S
+  const risky = F ? '' : gridRiskyPattern(q)
+  if (risky) return { re: null, err: risky }
   let src = F ? q.replace(/[.*+?^${}()|[\]\\]/g, '\\$&') : q
   if (w) src = `\\b(?:${src})\\b`
   try { return { re: new RegExp(src, 'g' + (ignore ? 'i' : '')), err: '' } } catch (e) { return { re: null, err: String((e as Error).message).replace(/^Invalid regular expression: (\/.*\/\w*: )?/, '') } }
 }
-function gridMark(text: string, re: RegExp | null): ReactNode {
-  if (!re || !text) return text
+/** The cell text with each precomputed match wrapped in <mark>. */
+function gridMark(text: string, matches: RegExpMatchArray[] | undefined): ReactNode {
+  if (!matches?.length || !text) return text
   const out: ReactNode[] = []; let last = 0, k = 0
-  re.lastIndex = 0
-  for (const m of text.matchAll(re)) {
+  for (const m of matches) {
     if (!m[0]) continue
     const at = m.index ?? 0
     if (at > last) out.push(text.slice(last, at))
@@ -80,10 +105,11 @@ function gridMark(text: string, re: RegExp | null): ReactNode {
 }
 
 /* ---- text query: serialise, parse, highlight ---- */
-type GridSchema = { label: Record<string, string>; field: Record<string, string>; kind: (k: string) => 'text' | 'number'; options: (k: string) => string[] | undefined }
+/** Column labels by key and keys by lower-cased key/label. Maps, so names like `constructor` or `__proto__` are just unknown fields. */
+type GridSchema = { label: Map<string, string>; field: Map<string, string>; kind: (k: string) => 'text' | 'number'; options: (k: string) => string[] | undefined }
 const gridQv = (v: string) => /^[\w.-]+$/.test(v) ? v : `"${v}"`
 function gridSerialise(n: GridFilterNode, s: GridSchema, top = true): string {
-  if (!gridIsGroup(n)) { const l = s.label[n.f[0]]; return `${/\s/.test(l) ? n.f[0] : l.toLowerCase()} ${n.f[1]} ${gridQv(n.f[2])}` }
+  if (!gridIsGroup(n)) { const l = s.label.get(n.f[0]) ?? n.f[0]; return `${/\s/.test(l) ? n.f[0] : l.toLowerCase()} ${n.f[1]} ${gridQv(n.f[2])}` }
   const inner = n.c.map(x => gridSerialise(x, s, false)).join(` ${n.j} `)
   return top || n.c.length < 2 ? inner : `(${inner})`
 }
@@ -91,18 +117,18 @@ function gridParse(q: string, s: GridSchema): GridGroup {
   const toks = q.match(/"[^"]*"|>=|<=|≥|≤|[<>=()]|[^\s"<>=()]+/g) || []
   let i = 0
   const cond = (): GridCondition => {
-    const f = s.field[(toks[i] || '').toLowerCase()]
+    const f = s.field.get((toks[i] || '').toLowerCase())
     if (!f) throw new Error(`Unknown field “${toks[i] || '…'}”`)
     let op = toks[i + 1]
     if (op && op.toLowerCase() === 'is' && (toks[i + 2] || '').toLowerCase() === 'not') { op = 'is not'; i++ }
     op = ({ '>=': '≥', '<=': '≤' } as Record<string, string>)[op] || (op || '').toLowerCase()
     const ops = GRID_OPS[s.kind(f)]
-    if (!ops.includes(op)) throw new Error(`“${toks[i + 1] || '…'}” isn’t an operator for ${s.label[f]} (try ${ops.join(', ')})`)
+    if (!ops.includes(op)) throw new Error(`“${toks[i + 1] || '…'}” isn’t an operator for ${s.label.get(f) ?? f} (try ${ops.join(', ')})`)
     const raw = toks[i + 2]
-    if (raw === undefined || raw === ')') throw new Error(`Missing value for ${s.label[f]}`)
+    if (raw === undefined || raw === ')') throw new Error(`Missing value for ${s.label.get(f) ?? f}`)
     let v = raw.replace(/^"|"$/g, '')
     const opts = s.options(f)
-    if (opts) { const m = opts.find(x => x.toLowerCase() === v.toLowerCase()); if (!m && op !== 'contains') throw new Error(`${s.label[f]} is one of ${opts.join(', ')}`); v = m || v }
+    if (opts) { const m = opts.find(x => x.toLowerCase() === v.toLowerCase()); if (!m && op !== 'contains') throw new Error(`${s.label.get(f) ?? f} is one of ${opts.join(', ')}`); v = m || v }
     i += 3
     return { id: gridId(), f: [f, op, v] }
   }
@@ -131,7 +157,7 @@ function gridHighlight(q: string, s: GridSchema): ReactNode {
   return q.split(/("[^"]*"|\s+|>=|<=|≥|≤|[<>=()])/).map((t, k) => {
     const l = t.toLowerCase()
     if (!t || /^\s+$/.test(t)) return t
-    if (s.field[l]) return <span key={k} className="font-semibold text-[var(--accent)]">{t}</span>
+    if (s.field.has(l)) return <span key={k} className="font-semibold text-[var(--accent)]">{t}</span>
     if (l === 'and' || l === 'or') return <span key={k} className="font-semibold text-[var(--c3)]">{t}</span>
     if (['is', 'not', 'contains', '>', '<', '=', '>=', '<=', '≥', '≤', '(', ')'].includes(l)) return <span key={k} className="text-[var(--fg2)]">{t}</span>
     return <span key={k} className="text-[color-mix(in_srgb,var(--ok)_80%,var(--fg))]">{t}</span>
@@ -335,7 +361,9 @@ export function DataGrid<T extends object>({ columns, rows, defaultRows = [], on
   const toast = useToast()
   const [filter, setFilter] = useState<GridGroup>(() => defaultFilter ?? gridFilter('AND'))
   const [sort, setSort] = useState(defaultSort ?? null)
+  const [qInput, setQInput] = useState('') // what's typed; `q` follows it after a short pause
   const [q, setQ] = useState('')
+  useEffect(() => { if (qInput === q) return; const t = setTimeout(() => setQ(qInput), 150); return () => clearTimeout(t) }, [qInput]) // eslint-disable-line react-hooks/exhaustive-deps
   const [flags, setFlags] = useState({ cs: false, w: false, rx: true })
   const [groupBy, setGroupBy] = useState('')
   const [closed, setClosed] = useState<Set<string>>(new Set())
@@ -360,8 +388,8 @@ export function DataGrid<T extends object>({ columns, rows, defaultRows = [], on
   const col = (k: string) => columns.find(c => c.key === k)
   const kind = (k: string): 'text' | 'number' => col(k)?.type === 'number' ? 'number' : 'text'
   const schema: GridSchema = useMemo(() => ({
-    label: Object.fromEntries(columns.map(c => [c.key, c.label])),
-    field: Object.fromEntries(columns.flatMap(c => [[c.key.toLowerCase(), c.key], [c.label.toLowerCase(), c.key]])),
+    label: new Map(columns.map(c => [c.key, c.label])),
+    field: new Map(columns.flatMap(c => [[c.label.toLowerCase(), c.key], [c.key.toLowerCase(), c.key]] as [string, string][])),
     kind: (k: string) => columns.find(c => c.key === k)?.type === 'number' ? 'number' : 'text',
     options: (k: string) => columns.find(c => c.key === k)?.options,
   }), [columns])
@@ -374,12 +402,28 @@ export function DataGrid<T extends object>({ columns, rows, defaultRows = [], on
   }
   const evalNode = (n: GridFilterNode, r: T): boolean => !gridIsGroup(n) ? test(r, n.f) : !n.c.length || (n.j === 'AND' ? n.c.every(x => evalNode(x, r)) : n.c.some(x => evalNode(x, r)))
   const rg = useMemo(() => gridCompileRg(q, flags), [q, flags])
-  const visible = useMemo(() => {
-    const v = data.filter(r => evalNode(filter, r) && (!rg.re || columns.some(c => { rg.re!.lastIndex = 0; return rg.re!.test(cellText(r, c)) })))
-    if (sort) v.sort((a, b) => gridCmp(a[sort.key], b[sort.key]) * sort.dir)
-    return v
+  /* one pass: each cell is matched once (the matches feed the row filter, the hit count and the highlights), and the
+     pass stops when it runs past GRID_RG_BUDGET, keeping what it found in the rows it reached */
+  const search = useMemo(() => {
+    const base = data.filter(r => evalNode(filter, r))
+    let rows = base, hits = 0, cut = 0
+    const marks = new Map<T, Map<string, RegExpMatchArray[]>>()
+    if (rg.re) {
+      const re = rg.re, t0 = performance.now(); rows = []
+      for (let i = 0; i < base.length; i++) {
+        if (i % 8 === 0 && i && performance.now() - t0 > GRID_RG_BUDGET) { cut = i; break }
+        const r = base[i]; let m: Map<string, RegExpMatchArray[]> | null = null
+        for (const c of columns) {
+          const found = [...cellText(r, c).slice(0, GRID_RG_CELL).matchAll(re)]
+          if (found.length) { (m ??= new Map()).set(c.key, found); hits += found.length }
+        }
+        if (m) { marks.set(r, m); rows.push(r) }
+      }
+    }
+    if (sort) rows.sort((a, b) => gridCmp(a[sort.key], b[sort.key]) * sort.dir)
+    return { rows, marks, hits, cut, of: base.length }
   }, [data, filter, rg, sort, columns]) // eslint-disable-line react-hooks/exhaustive-deps
-  const hits = useMemo(() => rg.re ? visible.reduce((n, r) => n + columns.reduce((m, c) => { rg.re!.lastIndex = 0; return m + (cellText(r, c).match(rg.re!)?.length ?? 0) }, 0), 0) : 0, [visible, rg]) // eslint-disable-line react-hooks/exhaustive-deps
+  const visible = search.rows, hits = search.hits
   const numCols = columns.filter(c => c.type === 'number')
   const groups = useMemo(() => {
     if (!groupBy) return null
@@ -490,7 +534,7 @@ export function DataGrid<T extends object>({ columns, rows, defaultRows = [], on
           <label className={cbWrap}><input type="checkbox" className={cb} checked={on} aria-label={`Select ${rowLabel?.(r) ?? id}`} onChange={() => {}} onClick={e => toggleRow(id, e.currentTarget.checked, e.shiftKey)} /></label>
         </td>
         {columns.map((c, i) => {
-          const editing = edit?.id === id && edit.key === c.key, text = cellText(r, c), content = gridMark(text, rg.re)
+          const editing = edit?.id === id && edit.key === c.key, text = cellText(r, c), content = gridMark(text, search.marks.get(r)?.get(c.key))
           const picked = !editing && active?.id === id && active.key === c.key
           return (
             <td key={c.key} data-gr={String(id)} data-gk={c.key} tabIndex={tab?.id === id && tab.key === c.key && !editing ? 0 : -1}
@@ -542,13 +586,14 @@ export function DataGrid<T extends object>({ columns, rows, defaultRows = [], on
       <div className="flex flex-wrap items-center gap-2 border-x border-[var(--line)] bg-[var(--card)] p-2">
         <div className={cn(inputShellClass(!!rg.err), 'flex h-7 min-w-[200px] flex-[0_1_380px] items-center pr-1 [@media(pointer:coarse)]:h-10', narrow && '!flex-[1_1_100%]')}>
           <span aria-hidden className="grid h-full place-items-center border-r border-[var(--line)] px-2 font-[family-name:var(--mono)] text-[11px] font-semibold text-[var(--fg3)]">rg</span>
-          <input value={q} onChange={e => setQ(e.target.value)} onKeyDown={e => e.key === 'Escape' && setQ('')} placeholder="search every cell, regex ok: north|quill" spellCheck={false} autoComplete="off"
+          <input value={qInput} maxLength={GRID_RG_MAX + 50} onChange={e => setQInput(e.target.value)} onKeyDown={e => { if (e.key === 'Escape') { setQInput(''); setQ('') } }} placeholder="search every cell, regex ok: north|quill" spellCheck={false} autoComplete="off"
             aria-label="Search rows (ripgrep style)" aria-invalid={!!rg.err || undefined}
             className={cn('h-full min-w-0 flex-1 border-0 bg-transparent px-2 font-[family-name:var(--mono)] text-[12.5px] text-[var(--fg)] outline-none placeholder:text-[var(--fg3)]', TOUCH.input)} />
           {rgToggle('cs', 'Aa', 'Match case (otherwise smart case, like rg -S)')}{rgToggle('w', '\\b', 'Whole word (-w)')}{rgToggle('rx', '.*', 'Regular expression (off = literal, like -F)')}
         </div>
         <span className="text-xs text-[var(--fg3)]" aria-live="polite">
-          {rg.err ? <span className="text-[var(--bad)]">{rg.err}</span> : rg.re ? `${hits} ${hits === 1 ? 'match' : 'matches'} in ${visible.length} ${visible.length === 1 ? 'row' : 'rows'}` : ''}
+          {rg.err ? <span className="text-[var(--bad)]">{rg.err}</span> : rg.re ? <>{`${hits} ${hits === 1 ? 'match' : 'matches'} in ${visible.length} ${visible.length === 1 ? 'row' : 'rows'}`}
+            {search.cut > 0 && <span className="text-[var(--warn)]">{` · search too slow, showing the first ${search.cut} of ${search.of} rows`}</span>}</> : ''}
         </span>
         {groupable && groupable.length > 0 && (
           <span className={cn('ml-auto flex items-center gap-2 text-xs text-[var(--fg3)]', narrow && 'ml-0 w-full [&>div]:flex-1 [&>div>button]:!w-full')}>Group by

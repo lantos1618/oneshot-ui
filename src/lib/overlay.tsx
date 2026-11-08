@@ -531,14 +531,58 @@ export function useScrollLock(active: boolean) {
   }, [active])
 }
 
+/** Open modal layers, innermost last. Only the top one handles Escape and keeps the rest of the page inert. */
+const overlayModals: HTMLElement[] = []
+let overlayInerted: HTMLElement[] = []
+/**
+ * Make everything outside the top modal `inert` (not focusable, clickable or read by screen readers): every sibling of
+ * the modal and of each of its ancestors up to <body>. Elements that were already inert are left alone, and so is
+ * anything marked `data-modal-keep` (the toast region). Called whenever the stack changes, so nesting unwinds.
+ */
+function overlaySyncInert() {
+  for (const el of overlayInerted) el.inert = false
+  overlayInerted = []
+  const top = overlayModals[overlayModals.length - 1]
+  for (let node: Element | null = top ?? null; node && node.parentElement && node !== document.body; node = node.parentElement) {
+    for (const sib of node.parentElement.children) {
+      if (sib === node || !(sib instanceof HTMLElement) || sib.inert || sib.matches('script,style,link,template,[data-modal-keep]')) continue
+      sib.inert = true; overlayInerted.push(sib)
+    }
+  }
+}
+
 /**
  * Everything a modal needs except the panel itself: portal, fading backdrop, focus trap, body scroll lock,
- * Escape and outside click to close, and exit animations for whatever you render inside.
+ * Escape and outside click to close, and exit animations for whatever you render inside. While open the rest of
+ * the page is `inert`, and Escape and Tab are handled at document level, so they work even when focus is outside the
+ * panel. Nested modals stack: only the top one closes on Escape, and closing it hands the page back to the one below.
  */
 export function ModalLayer({ open, onClose, children }: { open: boolean; onClose: () => void; children: ReactNode }) {
   const ref = useRef<HTMLDivElement>(null)
+  const close = useRef(onClose); close.current = onClose
   useFocusTrap(ref, open)
   useScrollLock(open)
+  useEffect(() => {
+    if (!open) return
+    let el: HTMLElement | null = null, raf = 0
+    const attach = () => { // the portal target is found in an effect, so the layer may mount a frame later
+      el = ref.current
+      if (!el) { raf = requestAnimationFrame(attach); return }
+      overlayModals.push(el); overlaySyncInert()
+    }
+    attach()
+    const key = (e: KeyboardEvent) => { // Escape with focus outside the panel (React's onKeyDown covers focus inside)
+      if (e.key !== 'Escape' || e.defaultPrevented || !el || overlayModals[overlayModals.length - 1] !== el) return
+      if (e.target instanceof Node && el.contains(e.target)) return
+      e.preventDefault(); close.current()
+    }
+    document.addEventListener('keydown', key)
+    return () => {
+      cancelAnimationFrame(raf); document.removeEventListener('keydown', key)
+      const i = el ? overlayModals.lastIndexOf(el) : -1
+      if (i >= 0) { overlayModals.splice(i, 1); overlaySyncInert() }
+    }
+  }, [open])
   return (
     <OverlayPortal>
       <AnimatePresence>

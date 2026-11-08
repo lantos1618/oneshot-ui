@@ -1,6 +1,6 @@
-import { useEffect, useId, useLayoutEffect, useRef, useState, type ReactNode, type RefObject } from 'react'
+import { useEffect, useId, useLayoutEffect, useMemo, useRef, useState, type ReactNode, type RefObject } from 'react'
 import { AnimatePresence, motion, useAnimate, useInView, useReducedMotion } from 'motion/react'
-import { AnimatedNumber, Avatar, Badge, Button, Icon, IconButton, Kbd, Spinner, StatusIcon, TOUCH, cn, floatingSurface, inputClass, sleep, spring, surface, useControllable, useOutside, useRoving, type IconName } from './core'
+import { AnimatedNumber, Avatar, Badge, Button, Icon, IconButton, Kbd, Spinner, StatusIcon, TOUCH, cn, floatingSurface, inputClass, safeColor, sleep, spring, surface, useControllable, useOutside, useRoving, type IconName } from './core'
 import { AutoHeight, Collapse, Progress, TypingDots, useToast } from './feedback'
 import { CheckMark, Checkbox, OptionList, type Option } from './forms'
 import { FloatingPanel, MenuLabel, Tooltip, useHoverIntent } from './overlay'
@@ -27,22 +27,28 @@ export function ShimmerText({ children, active = true, className }: { children: 
 
 /**
  * Reveals `text` word by word. Change `key` to restart; `playing={false}` freezes it (Stop).
- * Calls `onDone(text shown)` when it finishes or is stopped.
+ * Calls `onDone(text shown)` when it finishes or is stopped. Word ends are found once and one interval runs while
+ * it plays, so long replies stay linear (a slice per tick, no re-splitting).
  */
 export function StreamingText({ text, playing = true, wordDelay = 45, onDone, onProgress, className, caret = true }:
   { text: string; playing?: boolean; wordDelay?: number; onDone?: (shown: string) => void; onProgress?: () => void; className?: string; caret?: boolean }) {
-  const words = text.split(' ')
+  const ends = useMemo(() => { // ends[k] = where the first k words end (same words as text.split(' '))
+    const e = [0]; for (let i = text.indexOf(' '); i >= 0; i = text.indexOf(' ', i + 1)) e.push(i)
+    e.push(text.length); return e
+  }, [text])
+  const total = ends.length - 1
   const reduce = useReducedMotion()
-  const [n, setN] = useState(reduce ? words.length : 0)
+  const [n, setN] = useState(reduce ? total : 0)
   const doneRef = useRef(false), cb = useRef({ onDone, onProgress }); cb.current = { onDone, onProgress }
+  const finished = n >= total || !playing
+  useEffect(() => { if (!doneRef.current && finished) { doneRef.current = true; cb.current.onDone?.(text.slice(0, ends[Math.min(n, total)])) } }, [finished]) // eslint-disable-line react-hooks/exhaustive-deps
   useEffect(() => {
-    if (doneRef.current) return
-    if (n >= words.length || !playing) { doneRef.current = true; cb.current.onDone?.(words.slice(0, n).join(' ')); return }
-    const t = setTimeout(() => { setN(v => v + 1); cb.current.onProgress?.() }, wordDelay * (0.6 + Math.random() * 0.9))
-    return () => clearTimeout(t)
-  }, [n, playing, words.length, wordDelay]) // eslint-disable-line react-hooks/exhaustive-deps
-  const live = playing && n < words.length
-  return <span className={cn('whitespace-pre-wrap', live && caret && 'ui-caret', className)}>{words.slice(0, n).join(' ')}</span>
+    if (finished) return
+    // one interval; skipping about one tick in five keeps the uneven rhythm of the per-word random delay it replaces
+    const id = setInterval(() => { if (Math.random() < 0.2) return; setN(v => Math.min(total, v + 1)); cb.current.onProgress?.() }, Math.max(8, wordDelay * 0.85))
+    return () => clearInterval(id)
+  }, [finished, total, wordDelay])
+  return <span className={cn('whitespace-pre-wrap', !finished && caret && 'ui-caret', className)}>{text.slice(0, ends[Math.min(n, total)])}</span>
 }
 
 /** Collapsible tool-call row: shimmering label and spinner while running, a check and the past tense when done. Click to see the call. */
@@ -260,7 +266,9 @@ export function AgentPlan({ steps, onDone, className }: { steps: (string | { lab
 
 /* Permission request ─────────────────────────────────────────────────────── */
 
-type PermState = 'ask' | 'edit' | 'sending' | 'sent' | 'undone' | 'denied'
+type PermState = 'ask' | 'edit' | 'sending' | 'sent' | 'failed' | 'undoing' | 'undone' | 'undo-failed' | 'denied'
+/** What PermissionRequest's onDecide may return: a promise that settles when the host finished (false or a rejection = it failed). */
+export type PermissionOutcome = void | boolean | Promise<void | boolean>
 function PermResult({ icon, tone, title, sub }: { icon: ReactNode; tone: 'ok' | 'muted'; title: ReactNode; sub: ReactNode }) {
   return (
     <div className="flex items-start gap-3 p-3">
@@ -276,29 +284,54 @@ const permStack = 'max-sm:flex-col-reverse max-sm:items-stretch max-sm:[&>span]:
 
 /**
  * Ask before acting: say what, to whom, and why. Preview the payload (recipients and the message), edit the draft,
- * watch it send ("n of 12 delivered"), then undo within a 10 s countdown ring. Every state swap animates height.
+ * then Allow or Deny. The host does the work: `onDecide(allowed, always, draft)` gets the draft as edited, and may
+ * return a promise that settles when sending finished (false or a rejection shows "Not sent"). Pass `progress`
+ * ({ sent, total }) to show "n of 12 delivered" while it runs. With `onUndo`, a countdown ring offers Undo for
+ * `undoSeconds`; "Nothing reached the recipients" is shown only when onUndo resolves true. Every state swap animates height.
  */
 export function PermissionRequest({ title = 'Send an email to 12 people', app = 'inbox', reason, recipients = ['Alex Lee', 'Ben Kim', 'Cara Mills'], total = 12, list = 'Launch list',
   draft: initialDraft = { subject: 'Launch moved to Thursday', body: 'Hi all, quick heads up: we’re moving the launch from Tuesday to Thursday so legal can finish the terms review. Nothing else changes. Thanks for your patience.' },
-  undoSeconds = 10, onDecide, className }:
-  { title?: string; app?: IconName; reason: ReactNode; recipients?: string[]; total?: number; list?: string; draft?: { subject: string; body: string }; undoSeconds?: number; onDecide?: (allowed: boolean, always: boolean) => void; className?: string }) {
+  undoSeconds = 10, onDecide, onUndo, progress, className }:
+  { title?: string; app?: IconName; reason: ReactNode; recipients?: string[]; total?: number; list?: string; draft?: { subject: string; body: string }; undoSeconds?: number
+    onDecide?: (allowed: boolean, always: boolean, draft: { subject: string; body: string }) => PermissionOutcome
+    onUndo?: () => Promise<boolean>; progress?: { sent: number; total: number }; className?: string }) {
   const [state, setState] = useState<PermState>('ask')
   const [draft, setDraft] = useState(initialDraft)
   const [always, setAlways] = useState(false)
   const [preview, setPreview] = useState(false)
-  const [sent, setSent] = useState(0)
   const [left, setLeft] = useState(undoSeconds)
+  const [confirmed, setConfirmed] = useState(false) // the host said it finished (promise resolved, or progress complete)
+  const [settled, setSettled] = useState(false) // onDecide's promise (if any) has resolved
   const gen = useRef(0)
+  const sent = Math.min(progress?.sent ?? 0, progress?.total ?? total), of = progress?.total ?? total
+  const finish = (ok: boolean, sure: boolean) => { if (!ok) { setState('failed'); return } setConfirmed(sure); setLeft(undoSeconds); setState('sent') }
   const send = async () => {
-    const g = ++gen.current; setState('sending'); setSent(0); onDecide?.(true, always)
-    for (let i = 1; i <= total; i++) { await sleep(110 + Math.random() * 90); if (g !== gen.current) return; setSent(i) }
-    await sleep(250); if (g !== gen.current) return
-    setLeft(undoSeconds); setState('sent')
+    const g = ++gen.current; setState('sending'); setSettled(false)
+    let out: PermissionOutcome
+    try { out = onDecide?.(true, always, draft) } catch { finish(false, false); return }
+    if (out && typeof (out as Promise<unknown>).then === 'function') {
+      let r: void | boolean
+      try { r = await out } catch { if (g === gen.current) finish(false, false); return }
+      if (g !== gen.current) return
+      if (r === false) return finish(false, false)
+      if (!progress || progress.sent >= progress.total) finish(true, true); else setSettled(true)
+    } else if (out === false) finish(false, false)
+    else if (!progress) finish(true, false) // the host returned nothing to wait on: don't claim delivery
+    else setSettled(true)
   }
+  useEffect(() => { // with progress: done when every item is reported (and onDecide's promise, if any, resolved)
+    if (state === 'sending' && settled && progress && progress.sent >= progress.total) finish(true, true)
+  }, [state, settled, progress?.sent, progress?.total]) // eslint-disable-line react-hooks/exhaustive-deps
   useEffect(() => {
-    if (state !== 'sent' || left <= 0) return
+    if (state !== 'sent' || !onUndo || left <= 0) return
     const t = setTimeout(() => setLeft(l => l - 1), 1000); return () => clearTimeout(t)
-  }, [state, left])
+  }, [state, left, onUndo])
+  const undo = async () => {
+    if (!onUndo) return
+    const g = ++gen.current; setState('undoing')
+    let ok = false; try { ok = (await onUndo()) === true } catch { ok = false }
+    if (g === gen.current) setState(ok ? 'undone' : 'undo-failed')
+  }
   const reset = () => { gen.current++; setState('ask'); setPreview(false) }
   const C = 2 * Math.PI * 8
   let body: ReactNode
@@ -327,7 +360,7 @@ export function PermissionRequest({ title = 'Send an email to 12 people', app = 
         <div className="mt-3"><Checkbox checked={always} onChange={setAlways}><span className="text-xs text-[var(--fg2)]">Always allow emails to this list</span></Checkbox></div>
       </div>
       <div className={cn(permActs, permStack)}>
-        <Button size="sm" variant="ghost" onClick={() => { setState('denied'); onDecide?.(false, false) }}>Deny</Button><span className="flex-1" />
+        <Button size="sm" variant="ghost" onClick={() => { setState('denied'); onDecide?.(false, false, draft) }}>Deny</Button><span className="flex-1" />
         <Button size="sm" onClick={() => setState('edit')}>Edit draft</Button><Button size="sm" variant="primary" onClick={send}>Allow and send</Button>
       </div>
     </div>
@@ -350,35 +383,38 @@ export function PermissionRequest({ title = 'Send an email to 12 people', app = 
       </div>
     </form>
   )
-  else if (state === 'sending') body = (
+  else if (state === 'sending' || state === 'undoing') body = (
     <div className="flex items-start gap-3 p-3">
       <span className="grid h-9 w-9 flex-none place-items-center rounded-[10px] bg-[var(--muted)]"><Spinner /></span>
-      <div className="flex-1"><div className="text-sm font-semibold">Sending…</div>
-        <div className="mt-0.5 flex items-center gap-1 text-xs text-[var(--fg3)]"><AnimatedNumber value={sent} /> of {total} delivered</div>
-        <Progress value={sent} max={total} className="mt-2.5" /></div>
+      <div className="flex-1"><div className="text-sm font-semibold">{state === 'undoing' ? 'Undoing…' : 'Sending…'}</div>
+        {state === 'sending' && progress ? <>
+          <div className="mt-0.5 flex items-center gap-1 text-xs text-[var(--fg3)]"><AnimatedNumber value={sent} /> of {of} delivered</div>
+          <Progress value={sent} max={of} className="mt-2.5" /></>
+          : <div className="mt-0.5 text-xs text-[var(--fg3)]">{state === 'undoing' ? 'Asking the app to recall it' : `Waiting for ${app === 'inbox' ? 'the mail app' : 'the app'}`}</div>}</div>
     </div>
   )
   else if (state === 'sent') body = (
     <div>
-      <PermResult tone="ok" title={`Sent to ${total} people`} sub={<>“{draft.subject}”{always && ' · Future emails to this list won’t ask'}</>}
+      <PermResult tone="ok" title={confirmed ? `Sent to ${of} people` : 'Approved'} sub={<>“{draft.subject}”{!confirmed && ' · handed to the app to send'}{always && ' · Future emails to this list won’t ask'}</>}
         icon={<CheckMark size={18} strokeWidth={3} draw delay={0.1} duration={0.4} />} />
       <div className={permActs}>
-        <svg width="16" height="16" viewBox="0 0 20 20" className="flex-none" aria-hidden>
+        {onUndo && <svg width="16" height="16" viewBox="0 0 20 20" className="flex-none" aria-hidden>
           <circle cx="10" cy="10" r="8" fill="none" stroke="var(--line)" strokeWidth="2.5" />
           <motion.circle cx="10" cy="10" r="8" fill="none" stroke="var(--fg2)" strokeWidth="2.5" strokeLinecap="round" strokeDasharray={C} transform="rotate(-90 10 10)"
             initial={{ strokeDashoffset: 0 }} animate={{ strokeDashoffset: C * (1 - left / undoSeconds) }} transition={{ duration: 1, ease: 'linear' }} />
-        </svg>
-        <span className="text-xs tabular-nums text-[var(--fg3)]" aria-live="polite">{left > 0 ? `Undo available for ${left} s` : 'Delivered'}</span><span className="flex-1" />
-        {left > 0 ? <Button size="sm" onClick={() => { gen.current++; setState('undone') }}>Undo send</Button> : <Button size="sm" onClick={reset}>Start over</Button>}
+        </svg>}
+        <span className="text-xs tabular-nums text-[var(--fg3)]" aria-live="polite">{onUndo && left > 0 ? `Undo available for ${left} s` : confirmed ? 'Delivered' : 'Sent to the app'}</span><span className="flex-1" />
+        {onUndo && left > 0 ? <Button size="sm" onClick={undo}>Undo send</Button> : <Button size="sm" onClick={reset}>Start over</Button>}
       </div>
     </div>
   )
   else body = (
     <div>
-      {state === 'undone'
-        ? <PermResult tone="muted" icon={<Icon name="undo" size={18} strokeWidth={2.5} />} title="Send undone" sub={`Nothing reached the ${total} recipients. The draft is saved.`} />
-        : <PermResult tone="muted" icon={<Icon name="x" size={18} strokeWidth={2.5} />} title="Not sent" sub="The assistant was told you declined and won’t send this email." />}
-      <div className={permActs}><span className="flex-1" /><Button size="sm" onClick={reset}>{state === 'undone' ? 'Back to request' : 'Undo'}</Button></div>
+      {state === 'undone' ? <PermResult tone="muted" icon={<Icon name="undo" size={18} strokeWidth={2.5} />} title="Send undone" sub={`Nothing reached the ${of} recipients. The draft is saved.`} />
+        : state === 'undo-failed' ? <PermResult tone="muted" icon={<Icon name="info" size={18} strokeWidth={2.5} />} title="Couldn’t undo" sub="The app couldn’t recall it, so it may already have been delivered." />
+        : state === 'failed' ? <PermResult tone="muted" icon={<Icon name="x" size={18} strokeWidth={2.5} />} title="Not sent" sub="The app reported a problem. Nothing was confirmed as delivered." />
+        : <PermResult tone="muted" icon={<Icon name="x" size={18} strokeWidth={2.5} />} title="Not sent" sub="You declined, and the app was told not to send this email." />}
+      <div className={permActs}><span className="flex-1" /><Button size="sm" onClick={reset}>{state === 'denied' ? 'Undo' : 'Back to request'}</Button></div>
     </div>
   )
   return (
@@ -669,7 +705,7 @@ function AiSourceCardView({ s, n, hot, open, nudge, bind, onToggle }:
       className={cn('cursor-pointer rounded-[var(--r-md)] border bg-[var(--card)] px-3 py-2.5 transition-[border-color,box-shadow] outline-none',
         hot ? 'border-[var(--accent)] shadow-[0_0_0_3px_var(--accent-soft)]' : 'border-[var(--line)]')}>
       <div className="flex items-center gap-2">
-        <span className="grid h-5 w-5 flex-none place-items-center rounded-[5px] text-[10px] font-bold text-white [@media(pointer:coarse)]:text-[11px]" style={{ background: `color-mix(in srgb, ${s.color ?? 'var(--accent)'} 58%, #000)` }}>{s.letter ?? s.title[0]}</span>
+        <span className="grid h-5 w-5 flex-none place-items-center rounded-[5px] text-[10px] font-bold text-white [@media(pointer:coarse)]:text-[11px]" style={{ background: `color-mix(in srgb, ${safeColor(s.color, 'var(--accent)')} 58%, #000)` }}>{s.letter ?? s.title[0]}</span>
         <div className="min-w-0"><b className="block truncate text-[13px] font-medium">{s.title}</b><div className="text-[11px] text-[var(--fg3)]">{s.domain}</div></div>
         <span className="ml-auto font-[family-name:var(--mono)] text-[11px] font-semibold text-[var(--fg3)]">{n}</span>
       </div>
@@ -718,7 +754,7 @@ export function ModelComparison({ prompt, models, className }: { prompt: string;
               className={cn('flex flex-col border-[var(--line)] md:min-h-[200px] transition-[box-shadow,background] max-md:[&+&]:border-t md:[&+&]:border-l',
                 win === i && 'relative z-[1] bg-[color-mix(in_srgb,var(--ok)_6%,var(--card))] shadow-[inset_0_0_0_1.5px_var(--ok),0_0_0_3px_var(--ok-soft)]')}>
               <div className="flex items-start gap-2.5 px-3 pt-3 pb-1 text-[13px]">
-                <i className="mt-1 h-2.5 w-2.5 flex-none rounded-[3px]" style={{ background: m.color }} />
+                <i className="mt-1 h-2.5 w-2.5 flex-none rounded-[3px]" style={{ background: safeColor(m.color, 'var(--accent)') }} />
                 <div className="min-w-0"><b className="block leading-tight">{m.name}</b><span className="text-[11px] text-[var(--fg3)]">{m.tier}</span></div>
                 <span className="flex-1" />
                 <span className="text-[11px] leading-7 text-[var(--fg3)]">{s.phase === 'thinking' ? 'Thinking…' : s.phase === 'streaming' ? 'Streaming' : ''}</span>

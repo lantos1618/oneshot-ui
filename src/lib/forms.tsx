@@ -990,18 +990,38 @@ function FormsFileRow({ f, upload, onRemove }: { f: FormsFile; upload?: FormsUpl
 }
 
 /**
+ * True when `file` matches an `accept` string like the file input's: extensions ('.pdf'), MIME types ('application/pdf')
+ * and wildcards ('image/*'), comma-separated. An empty `accept` accepts everything. This checks the name and the type
+ * the browser reports, both of which the user controls: it is a convenience, not validation.
+ */
+export function fileAccepts(file: { name: string; type: string }, accept?: string) {
+  const rules = (accept ?? '').split(',').map(r => r.trim().toLowerCase()).filter(Boolean)
+  if (!rules.length) return true
+  const name = file.name.toLowerCase(), type = (file.type || '').toLowerCase()
+  return rules.some(r => r.startsWith('.') ? name.endsWith(r) : r.endsWith('/*') ? type.startsWith(r.slice(0, -1)) : type === r)
+}
+
+/**
  * Drop zone + file list. Each file shows a progress bar and "Uploading → Uploaded"; removed rows slide out and collapse.
  * Pass `upload(file, onProgress)` to upload for real (otherwise progress is simulated) and `defaultFiles` to seed the list.
+ * Dropped and picked files are filtered by `accept` (and to one file without `multiple`); skipped ones go to `onReject`
+ * and a note under the zone. `accept` only checks the name and reported type: validate type, size and content on the server.
  */
-export function FileUpload({ onFiles, accept, multiple = true, hint = 'Any type, up to 20 MB', defaultFiles = [], upload, className }:
-  { onFiles?: (f: File[]) => void; accept?: string; multiple?: boolean; hint?: string; defaultFiles?: { name: string; size: number }[]
+export function FileUpload({ onFiles, onReject, accept, multiple = true, hint = 'Any type, up to 20 MB', defaultFiles = [], upload, className }:
+  { onFiles?: (f: File[]) => void; /** files dropped or picked that don't match `accept` */ onReject?: (f: File[]) => void; accept?: string; multiple?: boolean; hint?: string; defaultFiles?: { name: string; size: number }[]
     /** upload one file for real, reporting 0–100 progress; a rejected promise marks the row failed */ upload?: FormsUploader; className?: string }) {
   const [files, setFiles] = useState<FormsFile[]>(() => defaultFiles.map(f => ({ ...f, id: ++formsFileSeq })))
   const [over, setOver] = useState(false)
+  const [skipped, setSkipped] = useState<string | null>(null)
   const input = useRef<HTMLInputElement>(null), zone = useRef<HTMLButtonElement>(null)
   const add = (list: FileList | null) => {
     if (!list?.length) return
-    const f = [...list]; setFiles(x => [...f.map(file => ({ id: ++formsFileSeq, name: file.name, size: file.size, file })).reverse(), ...x]); onFiles?.(f)
+    const all = [...list], ok = all.filter(f => fileAccepts(f, accept)), bad = all.filter(f => !ok.includes(f))
+    const f = multiple ? ok : ok.slice(0, 1)
+    setSkipped(bad.length ? `${bad.length === 1 ? `“${bad[0].name}” isn’t` : `${bad.length} files aren’t`} an accepted type${accept ? ` (${accept})` : ''}` : null)
+    if (bad.length) onReject?.(bad)
+    if (!f.length) return
+    setFiles(x => [...f.map(file => ({ id: ++formsFileSeq, name: file.name, size: file.size, file })).reverse(), ...x]); onFiles?.(f)
   }
   return (
     <div className={cn('flex flex-col', className)}>
@@ -1016,6 +1036,7 @@ export function FileUpload({ onFiles, accept, multiple = true, hint = 'Any type,
         <span className="text-xs text-[var(--fg3)]">{hint}</span>
       </motion.button>
       <input ref={input} type="file" hidden accept={accept} multiple={multiple} onChange={e => { add(e.target.files); e.target.value = '' }} />
+      {skipped && <p role="status" className="m-0 mb-1 text-xs text-[var(--bad)]">{skipped}</p>}
       <AnimatePresence initial={false}>
         {files.map(f => <FormsFileRow key={f.id} f={f} upload={upload} onRemove={() => setFiles(x => x.filter(y => y.id !== f.id))} />)}
       </AnimatePresence>

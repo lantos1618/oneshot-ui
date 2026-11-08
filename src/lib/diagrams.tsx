@@ -1,6 +1,6 @@
 import { Fragment, useCallback, useEffect, useId, useLayoutEffect, useMemo, useReducer, useRef, useState, type CSSProperties, type KeyboardEvent as ReactKeyboardEvent, type MouseEvent as ReactMouseEvent, type PointerEvent as ReactPointerEvent, type ReactNode } from 'react'
 import { AnimatePresence, animate, motion, useInView, useReducedMotion } from 'motion/react'
-import { AnimatedNumber, Avatar, Badge, Button, Chip, ICONS, Icon, LOCALE, ScrollEdges, Spinner, StatusIcon, TOUCH, addDays, clamp, cn, fmt, fmtDate, isTouch, onMouseLeave, sleep, spring, surface, useLongPress, useOutside, usePointerDrag, useScrollEdges, useWidth, type IconName } from './core'
+import { AnimatedNumber, Avatar, Badge, Button, Chip, ICONS, Icon, LOCALE, ScrollEdges, Spinner, StatusIcon, TOUCH, addDays, clamp, cn, fmt, fmtDate, isTouch, maxOf, minOf, onMouseLeave, safeColor, sleep, spring, surface, useLongPress, useOutside, usePointerDrag, useScrollEdges, useWidth, type IconName } from './core'
 import { Collapse } from './feedback'
 import { SegmentedControl, Slider } from './forms'
 import { PointerTooltip, usePointerTooltip } from './overlay'
@@ -80,17 +80,17 @@ export function Gantt({ phases, dependencies, start, days = 42, today, people = 
     while (cur) { set.add(cur); const ps = dependencies.filter(d => d[1] === cur).map(d => d[0]); if (!ps.length) break; cur = ps.reduce((a, b) => ganttEnd(sched[b]) > ganttEnd(sched[a]) ? b : a) }
     return set
   }, [sched, final, dependencies])
-  const slackOf = (id: string) => { const ss = succs(id); return ss.length ? Math.max(0, Math.min(...ss.map(s => sched[s].s)) - ganttEnd(sched[id])) : 0 }
+  const slackOf = (id: string) => { const ss = succs(id); return ss.length ? Math.max(0, minOf(ss.map(s => sched[s].s)) - ganttEnd(sched[id])) : 0 }
 
   const update = (id: string, next: { s: number; d: number }) => setSched(prev => {
     const S = Object.fromEntries(Object.entries(prev).map(([k, v]) => [k, { ...v }])); S[id] = next
-    const push = (a: string) => succs(a).forEach(b => { const need = Math.max(...preds(b).map(p => ganttEnd(S[p]))); if (S[b].s < need) { S[b].s = need; push(b) } })
+    const push = (a: string) => succs(a).forEach(b => { const need = maxOf(preds(b).map(p => ganttEnd(S[p]))); if (S[b].s < need) { S[b].s = need; push(b) } })
     push(id); return S
   })
   const moveTo = (id: string, s: number, d: number) => {
     const t = byId[id], ms = t.duration === 0
     const nd = ms ? 0 : Math.max(1, Math.min(days - s, d))
-    const minS = Math.max(0, ...preds(id).map(p => ganttEnd(sched[p])))
+    const minS = maxOf(preds(id).map(p => ganttEnd(sched[p])), 0)
     const ns = Math.max(minS, Math.min(days - Math.max(1, nd), s))
     if (ns !== sched[id].s || nd !== sched[id].d) update(id, { s: ns, d: nd })
   }
@@ -217,7 +217,7 @@ export function Gantt({ phases, dependencies, start, days = 42, today, people = 
         <div className="relative" onPointerLeave={onMouseLeave(() => { hide(); setHover(null) })}>
           {phases.map(p => {
             const ts = p.tasks.map(t => ({ ...sched[t.id], t }))
-            const s = Math.min(...ts.map(x => x.s)), e = Math.max(...ts.map(ganttEnd)), tot = ts.reduce((a, x) => a + x.d, 0) || 1
+            const s = minOf(ts.map(x => x.s)), e = maxOf(ts.map(ganttEnd)), tot = ts.reduce((a, x) => a + x.d, 0) || 1
             const pr = ts.reduce((a, x) => a + x.d * x.t.progress, 0) / tot
             return (
               <Fragment key={p.id}>
@@ -963,7 +963,7 @@ function wfLayout(m: WorkflowMachine) {
   while (q.length) { const k = q.shift()!; E.filter(e => e.a === k).forEach(e => { if (depth[e.b] === undefined) { depth[e.b] = depth[k] + 1; q.push(e.b) } }) }
   const cols: Record<number, string[]> = {}
   Object.entries(depth).forEach(([k, d]) => (cols[d] ??= []).push(k))
-  const nCols = Math.max(...Object.keys(cols).map(Number)) + 1
+  const nCols = maxOf(Object.keys(cols).map(Number)) + 1
   const W = Math.max(900, nCols * 150 + 40), H = 250, cw = (W - 40) / nCols, nw = Math.min(112, cw - 34), pos: Record<string, [number, number]> = {}
   Object.entries(cols).forEach(([d, ks]) => ks.forEach((k, i) => { pos[k] = [20 + (+d + 0.5) * cw, H / 2 + (i - (ks.length - 1) / 2) * 78] }))
   const edges: StatechartEdge[] = E.filter(e => pos[e.a] && pos[e.b]).map(e => {
@@ -1588,7 +1588,7 @@ export function ProcessFlow({ nodes: initial, edges, steps, height = 420, idle, 
                 {hasL && <span className={cn('absolute top-1/2 -left-1.5 -mt-1 h-2.5 w-2.5 rounded-full border-2 bg-[var(--card)]', st ? 'border-[var(--fg3)]' : 'border-[var(--line2)]')} />}
                 {hasR && <span className={cn('absolute top-1/2 -right-1.5 -mt-1 h-2.5 w-2.5 rounded-full border-2 bg-[var(--card)]', st ? 'border-[var(--fg3)]' : 'border-[var(--line2)]')} />}
                 <div className="flex cursor-grab touch-none items-center gap-2 border-b border-[var(--line)] px-3 py-2.5">
-                  <span className="grid h-[26px] w-[26px] flex-none place-items-center rounded-[7px]" style={{ color: n.color, background: `color-mix(in srgb, ${n.color} 14%, var(--card))` }}><Icon name={n.icon} size={14} /></span>
+                  <span className="grid h-[26px] w-[26px] flex-none place-items-center rounded-[7px]" style={{ color: safeColor(n.color), background: `color-mix(in srgb, ${safeColor(n.color)} 14%, var(--card))` }}><Icon name={n.icon} size={14} /></span>
                   <div className="min-w-0"><div className="text-[13px] leading-tight font-semibold">{n.title}</div><div className="text-[11px] text-[var(--fg3)]">{n.desc}</div></div>
                   {st === 'warn' ? (
                     // StatusIcon has no warning state: same shape, warn colour, "!" instead of the tick
@@ -1720,8 +1720,8 @@ export function DataFlow({ sources, targets, engine = 'Engine', stages = ['Inges
       initial={{ opacity: 0 }} animate={inView ? { opacity: 1 } : undefined} transition={{ duration: 0.4, delay: (k === 'd' ? 0.4 : 0) + i * 0.06 }}
       data-df-node="" onPointerEnter={e => { if (!isTouch(e)) setHl({ k, i }) }} onPointerDown={e => { if (isTouch(e)) setHl(h => h && h.k === k && h.i === i ? null : { k, i }) }} onPointerLeave={onMouseLeave(() => setHl(null))} onFocus={() => setHl({ k, i })} onBlur={() => setHl(null)}>
       <rect width={nw} height={nh} rx={10} className="fill-[var(--card)] stroke-[var(--line)]" />
-      <rect x={10} y={10} width={24} height={24} rx={7} style={{ fill: `color-mix(in srgb, ${n.color} 15%, var(--card))` }} />
-      <g transform="translate(15.5,15.5) scale(0.54)" style={{ color: n.color }}><path d={ICONS[n.icon]} fill="none" stroke="currentColor" strokeWidth={3.6} strokeLinecap="round" strokeLinejoin="round" /></g>
+      <rect x={10} y={10} width={24} height={24} rx={7} style={{ fill: `color-mix(in srgb, ${safeColor(n.color)} 15%, var(--card))` }} />
+      <g transform="translate(15.5,15.5) scale(0.54)" style={{ color: safeColor(n.color) }}><path d={ICONS[n.icon]} fill="none" stroke="currentColor" strokeWidth={3.6} strokeLinecap="round" strokeLinejoin="round" /></g>
       <text x={42} y={tall ? 19 : 20} className={cn('fill-[var(--fg)]', tall ? '[font:500_13px_var(--font)]' : '[font:500_12px_var(--font)]')}>{n.label}</text>
       <text x={42} y={34} className={cn('fill-[var(--fg3)]', tall ? '[font:12px_var(--font)]' : '[font:11px_var(--font)]')}>{sub}</text>
     </motion.g>

@@ -1,6 +1,6 @@
 {
   "name": "@lyndon/ui",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "description": "Animated React 19 components with themes, in the shadcn style: forms, overlays, data grids, charts, diagrams, maps, AI chat. Also ships as drop-in single files for AI tools.",
   "keywords": [
     "react",
@@ -143,6 +143,7 @@
     },
     "./styles.css": "./dist/styles.css",
     "./preflight.css": "./dist/preflight.css",
+    "./tokens.css": "./dist/tokens.css",
     "./package.json": "./package.json"
   },
   "files": [
@@ -154,17 +155,20 @@
     "dist-single/ui-charts.tsx",
     "dist-single/ui-ai.tsx",
     "dist-single/ui-all.tsx",
+    "dist-single/SHA256SUMS",
     "README.md",
+    "SECURITY.md",
     "LICENSE"
   ],
   "scripts": {
     "dev": "vite",
     "build": "pnpm build:lib && pnpm build:css && pnpm build:single",
     "build:lib": "vite build --config vite.lib.config.ts && vite build --config vite.lib.config.ts --mode utils && tsc -p tsconfig.lib.json && node scripts/fix-dts.mjs",
-    "build:css": "tailwindcss -i src/lib/styles.css -o dist/styles.css --minify && tailwindcss -i src/lib/preflight.css -o dist/preflight.css --minify",
+    "build:css": "tailwindcss -i src/lib/styles.css -o dist/styles.css --minify && tailwindcss -i src/lib/preflight.css -o dist/preflight.css --minify && node scripts/build-tokens.mjs",
     "build:single": "node scripts/build-single.mjs && tsc -p tsconfig.single.json --noEmit",
     "build:demo": "tsc -b && vite build",
     "test:ssr": "node scripts/ssr-check.mjs",
+    "prepublishOnly": "pnpm build && pnpm test:ssr",
     "typecheck": "tsc -b",
     "lint": "oxlint",
     "preview": "vite preview"
@@ -191,5 +195,9 @@
   },
   "publishConfig": {
     "access": "public"
-  }
+  },
+  "engines": {
+    "node": ">=20"
+  },
+  "packageManager": "pnpm@12.18.0"
 }

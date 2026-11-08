@@ -324,6 +324,9 @@ function ShowcaseBody() {
 }
 
 /** Default export: the full catalogue. Import the named components to use them in your own app. */
+/** The CSP nonce the page was served with, if any (Vite's `html.cspNonce` puts it on <meta property="csp-nonce">). */
+const showcaseNonce = () => (typeof document === 'undefined' ? undefined : document.querySelector<HTMLMetaElement>('meta[property="csp-nonce"]')?.nonce || undefined)
+
 export default function Showcase() {
-  return <UIProvider><ShowcaseBody /></UIProvider>
+  return <UIProvider fonts nonce={showcaseNonce()}><ShowcaseBody /></UIProvider>
 }

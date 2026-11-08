@@ -1,6 +1,6 @@
 import { useEffect, useLayoutEffect, useMemo, useRef, useState, type KeyboardEvent as ReactKeyboardEvent, type PointerEvent as ReactPointerEvent, type ReactNode, type RefObject } from 'react'
 import { motion } from 'motion/react'
-import { AnimatedNumber, DeltaBadge, SparkChart, TOUCH, chartPath, type Curve, addDays, clamp, cn, dayKey, fmt, fmtDate, isTouch, onMouseLeave, releaseTouchCapture, spring, startOfWeek, surface, useCoarsePointer, useOutside, useWidth } from './core'
+import { AnimatedNumber, DeltaBadge, SparkChart, TOUCH, chartPath, type Curve, addDays, clamp, cn, dayKey, extent, fmt, fmtDate, isTouch, maxOf, minOf, onMouseLeave, releaseTouchCapture, safeColor, spring, startOfWeek, surface, useCoarsePointer, useOutside, useWidth } from './core'
 import { useTween, useViewport } from './motion'
 
 /* ════════════════════════════════════════════════════════════════════════════
@@ -40,6 +40,16 @@ export function niceTicks(min: number, max: number, count = 4) {
   const lo = Math.floor(min / step) * step, hi = Math.ceil(max / step) * step
   return Array.from({ length: Math.round((hi - lo) / step) + 1 }, (_, i) => +(lo + i * step).toFixed(10))
 }
+/**
+ * At most `max` items of `data`, evenly spaced and always keeping the first and last (simple stride downsampling).
+ * Returns `data` itself when it is already small enough or `max` isn't a positive number.
+ */
+export function chartDownsample<T>(data: T[], max?: number): T[] {
+  if (!max || !Number.isFinite(max) || max < 2 || data.length <= max) return data
+  const out: T[] = [], step = (data.length - 1) / (Math.floor(max) - 1)
+  for (let i = 0; i < Math.floor(max); i++) out.push(data[Math.round(i * step)])
+  return out
+}
 const p1 = (n: number) => n.toFixed(1)
 const linePath = (pts: [number, number][]) => chartPath(pts)
 const num = (v: unknown) => (v === null || v === undefined || v === '' ? null : Number(v))
@@ -68,7 +78,7 @@ function ChartTooltip({ x, y, children, width }: { x: number; y: number; childre
 function TooltipRow({ color, label, value, dashed }: { color: string; label: ReactNode; value: ReactNode; dashed?: boolean }) {
   return (
     <div className="flex items-center gap-2">
-      <span className={cn('h-2 w-2 rounded-sm', dashed && 'border border-dashed bg-transparent')} style={dashed ? { borderColor: color } : { background: color }} />
+      <span className={cn('h-2 w-2 rounded-sm', dashed && 'border border-dashed bg-transparent')} style={dashed ? { borderColor: safeColor(color) } : { background: safeColor(color) }} />
       <span className="flex-1 text-[var(--fg2)]">{label}</span><b className="ui-num font-medium">{value}</b>
     </div>
   )
@@ -97,7 +107,7 @@ export function Legend({ items, className }: { items: { label: string; color: st
       {items.map(it => (
         <span key={it.label} className="flex items-center gap-1.5">
           <span className={cn('inline-block', it.band ? 'h-2.5 w-3.5 rounded-sm bg-[var(--band)]' : it.dashed ? 'w-3.5 border-t-2 border-dashed' : 'h-2.5 w-2.5 rounded-sm')}
-            style={it.band ? undefined : it.dashed ? { borderColor: it.color } : { background: it.color }} />{it.label}
+            style={it.band ? undefined : it.dashed ? { borderColor: safeColor(it.color) } : { background: safeColor(it.color) }} />{it.label}
         </span>
       ))}
     </div>
@@ -134,6 +144,11 @@ export type ChartProps<T extends object = ChartDatum> = {
   /** Minimum left-axis range, like a suggested min/max. */
   domain?: [number, number]
   tooltip?: (d: NoInfer<T>, i: number) => ReactNode
+  /**
+   * Draw at most this many rows (evenly sampled, first and last kept) so very long series stay fast. Off by default;
+   * with it on, tooltip indexes refer to the sampled rows.
+   */
+  maxPoints?: number
   className?: string
 }
 
@@ -151,7 +166,8 @@ export type ChartProps<T extends object = ChartDatum> = {
  * Hover, tap or drag a finger sideways for a crosshair and tooltip (`tooltip` replaces its body); tap outside to dismiss.
  * Draws in when scrolled into view.
  */
-export function Chart<T extends object = ChartDatum>({ data, x, series, height = 220, stacked, band, gap = 0.3, format = compact, rightFormat, legend = true, curve = 'linear', zero = true, domain, tooltip, className }: ChartProps<T>) {
+export function Chart<T extends object = ChartDatum>({ data: allRows, x, series, height = 220, stacked, band, gap = 0.3, format = compact, rightFormat, legend = true, curve = 'linear', zero = true, domain, tooltip, maxPoints, className }: ChartProps<T>) {
+  const data = useMemo(() => chartDownsample(allRows, maxPoints), [allRows, maxPoints])
   const [ref, w, seen] = useChartFrame<HTMLDivElement>()
   const [hoverAt, setHover] = useState<number | null>(null)
   const hover = chartIndex(hoverAt, data.length)
@@ -169,7 +185,7 @@ export function Chart<T extends object = ChartDatum>({ data, x, series, height =
     const v = data.flatMap((d, i) => S.flatMap((s, si) => s.axis !== side ? [] : [top(i, si), s.from ? num(d[s.from]) : null, s.whisker ? num(d[s.whisker.low]) : null, s.whisker ? num(d[s.whisker.high]) : null])
       .concat(side === 'left' && band ? [num(d[band.lower]), num(d[band.upper])] : [])).filter((q): q is number => q !== null && Number.isFinite(q))
     if (!v.length && !dom) return null
-    const lo = Math.min(dom?.[0] ?? Infinity, zero ? 0 : Infinity, ...v), hi = Math.max(dom?.[1] ?? -Infinity, ...v)
+    const lo = minOf(v, Math.min(dom?.[0] ?? Infinity, zero ? 0 : Infinity)), hi = maxOf(v, dom?.[1] ?? -Infinity)
     const ticks = niceTicks(lo, hi), y0 = ticks[0], y1 = ticks[ticks.length - 1]
     return { ticks, Y: (val: number) => pad.t + ih - ((val - y0) / (y1 - y0 || 1)) * ih, rest: y0 <= 0 && y1 >= 0 ? 0 : y0 }
   }
@@ -179,7 +195,7 @@ export function Chart<T extends object = ChartDatum>({ data, x, series, height =
   const X = (i: number) => pad.l + (banded ? step * (i + 0.5) : step * i)
   // skip x labels that would collide: show every Nth (N from a tidy 1, 2, 3, 4, 5, 6, 10… set) so each one gets
   // its estimated 11px width plus a gap. Dense charts (histograms with gap={0}) rely on this.
-  const labelW = Math.max(0, ...data.map(d => String(d[x] ?? '').length)) * 6.6 + 10
+  const labelW = maxOf(data.map(d => String(d[x] ?? '').length), 0) * 6.6 + 10
   const need = Math.max(1, Math.ceil(labelW / (step || 1)))
   const every = [1, 2, 3, 4, 5, 6, 10, 12, 15, 20, 25, 50, 100].find(k => k >= need) ?? need
   const runs = (si: number) => { // indices of each unbroken run of non-null values (nulls leave gaps)
@@ -295,7 +311,7 @@ export function DonutChart({ data, size = 150, thickness = 20, format = compact,
   const total = data.reduce((a, d) => a + d.value, 0) || 1
   const colorOf = (d: Slice, i: number) => d.color ?? PALETTE[i % PALETTE.length]
   const r = (size - thickness) / 2 - 2, c = 2 * Math.PI * r
-  const cx = size / 2, R = size / 2 - 6, max = Math.max(...data.map(d => d.value)) || 1
+  const cx = size / 2, R = size / 2 - 6, max = maxOf(data.map(d => d.value)) || 1
   const wedge = (i: number, rr: number) => {
     const a0 = (i / data.length) * 2 * Math.PI - Math.PI / 2, a1 = ((i + 1) / data.length) * 2 * Math.PI - Math.PI / 2
     return `M${cx},${cx}L${p1(cx + Math.cos(a0) * rr)},${p1(cx + Math.sin(a0) * rr)}A${p1(rr)},${p1(rr)} 0 0 1 ${p1(cx + Math.cos(a1) * rr)},${p1(cx + Math.sin(a1) * rr)}Z`
@@ -339,7 +355,7 @@ export function DonutChart({ data, size = 150, thickness = 20, format = compact,
         {data.map((d, i) => (
           <div key={d.label} onPointerEnter={() => setHover(i)} onPointerDown={() => setHover(i)} onPointerLeave={onMouseLeave(() => setHover(null))}
             className={cn('flex items-center gap-2 text-[13px] transition-opacity', TOUCH.tap, hover !== null && hover !== i && 'opacity-50')}>
-            <span className="h-2.5 w-2.5 rounded-sm" style={{ background: colorOf(d, i) }} />
+            <span className="h-2.5 w-2.5 rounded-sm" style={{ background: safeColor(colorOf(d, i)) }} />
             <span className="flex-1 text-[var(--fg2)]">{d.label}</span><span className="ui-num">{format(d.value)}</span>
             <span className="ui-num w-10 text-right text-xs text-[var(--fg3)]">{Math.round((d.value / total) * 100)}%</span>
           </div>
@@ -382,7 +398,7 @@ export function RadarChart({ axes, series, max, size = 240, format = compact, cl
   const hover = chartIndex(hoverAt, axes.length)
   useOutside([ref], () => setHover(null), hover !== null, { escape: true })
   // an all-zero (or empty) chart would divide by zero: fall back to a unit scale
-  const m = (max ?? Math.max(0, ...series.flatMap(s => s.values.filter(Number.isFinite)))) || 1, cx = size / 2, cy = size / 2, R = size / 2 - 34
+  const m = (max ?? maxOf(series.flatMap(s => s.values.filter(Number.isFinite)), 0)) || 1, cx = size / 2, cy = size / 2, R = size / 2 - 34
   const ang = (i: number) => (Math.PI * 2 * i) / (axes.length || 1) - Math.PI / 2
   const pt = (i: number, v: number) => [cx + Math.cos(ang(i)) * R * (v / m), cy + Math.sin(ang(i)) * R * (v / m)] as [number, number]
   const colorOf = (i: number) => series[i].color ?? PALETTE[i % PALETTE.length]
@@ -425,15 +441,17 @@ export type Point = { x: number; y: number; r?: number; label?: string; group?: 
  * Scatter plot; give points an `r` for a bubble chart and a `group` for colours. Points pop in when scrolled into view.
  * Hover or tap near a point (or slide a finger) for its tooltip; touch uses a wider catch radius.
  */
-export function ScatterChart({ points, height = 220, xLabel, yLabel, format = compact, xDomain, yDomain, className }:
-  { points: Point[]; height?: number; xLabel?: string; yLabel?: string; format?: (n: number) => string; xDomain?: [number, number]; yDomain?: [number, number]; className?: string }) {
+export function ScatterChart({ points: allPoints, height = 220, xLabel, yLabel, format = compact, xDomain, yDomain, maxPoints, className }:
+  { points: Point[]; height?: number; xLabel?: string; yLabel?: string; format?: (n: number) => string; xDomain?: [number, number]; yDomain?: [number, number]
+    /** draw at most this many points (evenly sampled) */ maxPoints?: number; className?: string }) {
+  const points = useMemo(() => chartDownsample(allPoints, maxPoints), [allPoints, maxPoints])
   const [ref, w, seen] = useChartFrame<HTMLDivElement>()
   const [hoverAt, setHover] = useState<number | null>(null)
   const hover = chartIndex(hoverAt, points.length)
   const groups = [...new Set(points.map(p => p.group ?? ''))]
   const pad = { l: 40, r: 12, t: 10, b: 28 }, iw = w - pad.l - pad.r, ih = height - pad.t - pad.b
-  const xt = niceTicks(xDomain?.[0] ?? Math.min(...points.map(p => p.x)), xDomain?.[1] ?? Math.max(...points.map(p => p.x)))
-  const yt = niceTicks(yDomain?.[0] ?? Math.min(0, ...points.map(p => p.y)), yDomain?.[1] ?? Math.max(...points.map(p => p.y)))
+  const xt = niceTicks(xDomain?.[0] ?? minOf(points.map(p => p.x)), xDomain?.[1] ?? maxOf(points.map(p => p.x)))
+  const yt = niceTicks(yDomain?.[0] ?? minOf(points.map(p => p.y), 0), yDomain?.[1] ?? maxOf(points.map(p => p.y)))
   const X = (v: number) => pad.l + ((v - xt[0]) / (xt[xt.length - 1] - xt[0] || 1)) * iw, Y = (v: number) => pad.t + ih - ((v - yt[0]) / (yt[yt.length - 1] - yt[0] || 1)) * ih
   const color = (p: Point) => PALETTE[groups.indexOf(p.group ?? '') % PALETTE.length]
   useOutside([ref], () => setHover(null), hover !== null, { escape: true })
@@ -491,8 +509,8 @@ export function Heatmap({ rows, cols, value, format = compact, cell = 18, touchC
   const coarse = useCoarsePointer()
   useOutside([ref], () => setHover(null), hover !== null, { escape: true })
   const size = coarse ? Math.max(cell, touchCell) : cell
-  const vals = rows.map((_, r) => cols.map((_, c) => value(r, c))), max = Math.max(0, ...vals.flat().filter(Number.isFinite)) || 1
-  const fill = shade ?? ((t: number) => heat(t, color))
+  const vals = rows.map((_, r) => cols.map((_, c) => value(r, c))), max = maxOf(vals.flat().filter(Number.isFinite), 0) || 1
+  const fill = (t: number) => safeColor(shade ? shade(t) : heat(t, color), 'var(--muted)')
   const gap = Math.ceil(30 / (size + 3)) // columns each label needs; skip labels that would collide
   let last = -gap
   const shown = cols.map((c, i) => (c && i - last >= gap ? ((last = i), c) : ''))
@@ -605,12 +623,12 @@ export function FunnelChart({ steps, format = compact, className }: { steps: { l
 /** Ranked horizontal bars: top pages, countries, referrers. Bars grow in when scrolled into view. */
 export function BarList({ items, format = compact, color = 'var(--accent)', className }: { items: { label: ReactNode; value: number; key?: string }[]; format?: (n: number) => string; color?: string; className?: string }) {
   const [ref, seen] = useChartSeen<HTMLDivElement>()
-  const max = Math.max(0, ...items.map(i => i.value)) || 1
+  const max = maxOf(items.map(i => i.value), 0) || 1
   return (
     <div ref={ref} className={cn('flex flex-col gap-1', className)}>
       {items.map((it, i) => (
         <div key={it.key ?? String(it.label)} className="relative flex h-8 items-center justify-between overflow-hidden rounded-md px-2.5 text-[13px]">
-          <motion.span className="absolute inset-y-0 left-0 rounded-md" style={{ background: `color-mix(in srgb, ${color} 16%, transparent)` }}
+          <motion.span className="absolute inset-y-0 left-0 rounded-md" style={{ background: `color-mix(in srgb, ${safeColor(color, 'var(--accent)')} 16%, transparent)` }}
             initial={{ width: 0 }} animate={{ width: seen ? `${(it.value / max) * 100}%` : 0 }} transition={{ ...spring(0.1, 0.6), delay: seen ? i * 0.04 : 0 }} />
           <span className="relative truncate">{it.label}</span><span className="ui-num relative text-[var(--fg2)]">{format(it.value)}</span>
         </div>
@@ -635,7 +653,7 @@ export function Treemap({ items, height = 220, format = compact, show = 'value',
     const out: Rect[] = []
     const sorted = items.map((d, i) => ({ a: (d.value / total) * w * height, i })).sort((p, q) => q.a - p.a)
     let box = { x: 0, y: 0, w, h: height }, row: typeof sorted = []
-    const worst = (r: typeof sorted, side: number) => { const s = r.reduce((a, d) => a + d.a, 0); return Math.max(...r.map(d => Math.max((side * side * d.a) / (s * s), (s * s) / (side * side * d.a)))) }
+    const worst = (r: typeof sorted, side: number) => { const s = r.reduce((a, d) => a + d.a, 0); return maxOf(r.map(d => Math.max((side * side * d.a) / (s * s), (s * s) / (side * side * d.a)))) }
     const lay = (r: typeof sorted) => {
       const s = r.reduce((a, d) => a + d.a, 0), wide = box.w >= box.h, side = wide ? box.h : box.w, thick = s / side
       let o = 0
@@ -658,7 +676,7 @@ export function Treemap({ items, height = 220, format = compact, show = 'value',
           <motion.div key={it.label} initial={{ left: r.x + r.w / 2, top: r.y + r.h / 2, width: 0, height: 0 }}
             animate={seen ? { left: r.x, top: r.y, width: r.w, height: r.h } : { left: r.x + r.w / 2, top: r.y + r.h / 2, width: 0, height: 0 }}
             transition={spring(0.2, 0.65)} className="absolute overflow-hidden p-[2px]" {...bind(() => <TooltipRow color={color} label={it.label} value={show === 'percent' ? `${Math.round(pct)}%` : `${format(it.value)} · ${Math.round(pct)}%`} />, () => setHover(r.i))}>
-            <div className="h-full rounded-md p-2 text-xs transition-opacity" style={{ background: `color-mix(in srgb, ${color} 72%, var(--fg))`, color: 'var(--card)', opacity: hover === null || hover === r.i ? 1 : 0.7 }}>
+            <div className="h-full rounded-md p-2 text-xs transition-opacity" style={{ background: `color-mix(in srgb, ${safeColor(color, 'var(--accent)')} 72%, var(--fg))`, color: 'var(--card)', opacity: hover === null || hover === r.i ? 1 : 0.7 }}>
               {r.w > it.label.length * 6.5 + 18 && r.h > 34 && <>
                 <b className="block truncate font-semibold">{it.label}</b>
                 <span className="ui-num opacity-85">{show === 'percent' ? <><AnimatedNumber value={Math.round(pct)} />%</> : format(it.value)}</span>
@@ -768,7 +786,7 @@ function regressionFit(P: [number, number][]) {
   const sxx = xs.reduce((s, x) => s + (x - mx) ** 2, 0) || 1, sxy = P.reduce((s, [x, y]) => s + (x - mx) * (y - my), 0), b = sxy / sxx, a = my - b * mx
   const res = P.map(([x, y]) => y - (a + b * x)), sse = res.reduce((s, r) => s + r * r, 0), se = Math.sqrt(sse / Math.max(1, n - 2))
   const sst = ys.reduce((s, y) => s + (y - my) ** 2, 0) || 1, t = 1.96 + 2.4 / Math.max(1, n - 2) // ≈ t(0.975, n−2)
-  const x0 = Math.floor(Math.min(...xs)), x1 = Math.ceil(Math.max(...xs))
+  const x0 = Math.floor(minOf(xs)), x1 = Math.ceil(maxOf(xs))
   const band = Array.from({ length: 41 }, (_, i) => { const x = x0 + ((x1 - x0) * i) / 40, h2 = 1 / n + (x - mx) ** 2 / sxx; return [x, a + b * x, t * se * Math.sqrt(h2), t * se * Math.sqrt(1 + h2)] })
   return { a, b, r2: 1 - sse / sst, se, n, seb: se / Math.sqrt(sxx), band, pts: P.map(p => [p[0], p[1]]) }
 }
@@ -785,7 +803,7 @@ export function RegressionChart({ points, prediction = true, height = 240, xDoma
   const fit = useMemo(() => regressionFit(points), [points])
   const collapsed = useMemo(() => ({ ...fit, band: fit.band.map(r => [r[0], r[1], 0, 0]), pts: fit.pts.map(([x]) => [x, fit.a + fit.b * x]) }), [fit])
   const S = useTween(seen ? fit : collapsed)
-  const xd = xDomain ?? [Math.min(...points.map(p => p[0])), Math.max(...points.map(p => p[0]))], yd = yDomain ?? [Math.min(0, ...points.map(p => p[1])), Math.max(...points.map(p => p[1]))]
+  const xd = xDomain ?? extent(points.map(p => p[0])), yd = yDomain ?? [minOf(points.map(p => p[1]), 0), maxOf(points.map(p => p[1]))]
   const pad = { l: 40, r: 10, t: 10, b: 26 }, iw = Math.max(0, w - pad.l - pad.r), ih = height - pad.t - pad.b
   const X = (v: number) => pad.l + ((v - xd[0]) / (xd[1] - xd[0] || 1)) * iw, Y = (v: number) => pad.t + ih - ((v - yd[0]) / (yd[1] - yd[0] || 1)) * ih
   const poly = (k: number) => S.band.map(r => `${p1(X(r[0]))},${p1(Y(r[1] + r[k]))}`).join(' ') + ' ' + S.band.slice().reverse().map(r => `${p1(X(r[0]))},${p1(Y(r[1] - r[k]))}`).join(' ')
@@ -830,7 +848,7 @@ export function RegressionChart({ points, prediction = true, height = 240, xDoma
 export type BoxGroup = { label: string; values: number[]; color?: string }
 function boxStats(a: number[]) {
   const q1 = statQuantile(a, 0.25), q3 = statQuantile(a, 0.75), iqr = q3 - q1
-  const lo = Math.max(Math.min(...a), q1 - 1.5 * iqr), hi = Math.min(Math.max(...a), q3 + 1.5 * iqr), inner = a.filter(v => v >= lo && v <= hi)
+  const lo = Math.max(minOf(a), q1 - 1.5 * iqr), hi = Math.min(maxOf(a), q3 + 1.5 * iqr), inner = a.filter(v => v >= lo && v <= hi)
   const ys = Array.from({ length: 41 }, (_, k) => lo + ((hi - lo) * k) / 40)
   // the violin is the density between the whisker ends, so outliers show as dots instead of long spikes
   return { q1, q2: statQuantile(a, 0.5), q3, lo, hi, ys, dens: statKde(inner, ys, statBandwidth(inner)), out: a.filter(v => v < lo || v > hi).slice(0, 6) }
@@ -850,7 +868,7 @@ export function BoxViolinChart({ groups, mode = 'both', domain, height = 200, fo
   const collapsed = useMemo(() => stats.map(k => ({ ...k, q1: k.q2, q3: k.q2, lo: k.q2, hi: k.q2, ys: k.ys.map(() => k.q2), dens: k.dens.map(() => 0) })), [stats])
   const collapsedOuts = useMemo(() => outs.map((o, i) => o.map(() => stats[i].q2)), [outs, stats])
   const S = useTween(seen ? stats : collapsed), O = useTween(seen ? outs : collapsedOuts)
-  const all = groups.flatMap(g => g.values), dom = domain ?? (all.length ? [Math.min(...all), Math.max(...all)] : [0, 1])
+  const all = groups.flatMap(g => g.values), dom = domain ?? (all.length ? extent(all) : [0, 1])
   const pad = { l: 30, r: 10, t: 8, b: 24 }, iw = Math.max(0, w - pad.l - pad.r), ih = height - pad.t - pad.b
   const Y = (v: number) => pad.t + ih - ((v - dom[0]) / (dom[1] - dom[0] || 1)) * ih, slot = iw / Math.max(1, groups.length), JIT = [-4, 3, -2, 5, -5, 2]
   return (
@@ -859,7 +877,7 @@ export function BoxViolinChart({ groups, mode = 'both', domain, height = 200, fo
         <svg width={w} height={height} className="block overflow-visible text-[11px]">
           <StatGridY ticks={ticksIn(dom[0], dom[1])} Y={Y} x1={pad.l} x2={w - pad.r} />
           {S.map((k, i) => {
-            const g = groups[i], color = g.color ?? PALETTE[i % PALETTE.length], cx = pad.l + slot * (i + 0.5), mx = Math.max(...k.dens) || 1, wv = slot * 0.36, bxw = mode === 'both' ? 9 : 16
+            const g = groups[i], color = g.color ?? PALETTE[i % PALETTE.length], cx = pad.l + slot * (i + 0.5), mx = maxOf(k.dens) || 1, wv = slot * 0.36, bxw = mode === 'both' ? 9 : 16
             const right = k.ys.map((v, j) => `L${p1(cx + (k.dens[j] / mx) * wv)},${p1(Y(v))}`).join(''), left = k.ys.map((v, j) => `L${p1(cx - (k.dens[j] / mx) * wv)},${p1(Y(v))}`).reverse().join('')
             return (
               <g key={g.label}>
@@ -898,14 +916,14 @@ export function DensityHistogram({ values, bins = 18, domain, height = 190, clas
   const [ref, w, seen] = useChartFrame<HTMLDivElement>()
   const [tip, bind] = useChartTip(ref)
   const [d0, d1] = domain ?? [NaN, NaN]
-  const dom = useMemo(() => (Number.isFinite(d0) ? [d0, d1] : niceTicks(Math.min(...values), Math.max(...values)).filter((_, i, a) => i === 0 || i === a.length - 1)) as [number, number], [d0, d1, values])
+  const dom = useMemo(() => (Number.isFinite(d0) ? [d0, d1] : niceTicks(minOf(values), maxOf(values)).filter((_, i, a) => i === 0 || i === a.length - 1)) as [number, number], [d0, d1, values])
   const xs = useMemo(() => Array.from({ length: 81 }, (_, i) => dom[0] + ((dom[1] - dom[0]) * i) / 80), [dom])
   const kde = useMemo(() => statKde(values, xs, statBandwidth(values)), [values, xs])
   const stats = useMemo(() => {
     const width = (dom[1] - dom[0]) / bins, counts = Array(Math.max(40, bins)).fill(0)
     values.forEach(v => { const k = Math.floor((v - dom[0]) / width); if (k >= 0 && k < bins) counts[k]++ })
     const dens = counts.map(c => c / (values.length * width))
-    return { dens, bins, kde, m: statMean(values), md: statQuantile(values, 0.5), sd: statSd(values), ymax: Math.max(...dens, ...kde) * 1.12 }
+    return { dens, bins, kde, m: statMean(values), md: statQuantile(values, 0.5), sd: statSd(values), ymax: maxOf(kde, maxOf(dens)) * 1.12 }
   }, [values, bins, kde, dom])
   const collapsed = useMemo(() => ({ ...stats, dens: stats.dens.map(() => 0), kde: stats.kde.map(() => 0), sd: 0 }), [stats])
   const S = useTween(seen ? stats : collapsed, 450)
@@ -957,7 +975,7 @@ export function ForestPlot({ rows, domain = [-0.1, 0.2], ticks = [-0.1, 0, 0.1, 
   const S = useTween(seen ? state : collapsed)
   const narrow = w > 0 && w < 400
   const L = 72, R = narrow ? 50 : 118, T = 18, B = 34, X = (v: number) => L + (Math.max(0, w - L - R) * (Math.max(domain[0], Math.min(domain[1], v)) - domain[0])) / (domain[1] - domain[0])
-  const rowH = (height - T - B) / (rows.length + 1.4), wts = S.rows.map(r => 1 / r[1] ** 2), maxW = Math.max(0, ...wts) || 1, wsum = wts.reduce((a, b) => a + b, 0) || 1
+  const rowH = (height - T - B) / (rows.length + 1.4), wts = S.rows.map(r => 1 / r[1] ** 2), maxW = maxOf(wts, 0) || 1, wsum = wts.reduce((a, b) => a + b, 0) || 1
   const py = T + rowH * (rows.length + 0.9), plo = S.pooled - 1.96 * S.pse, phi = S.pooled + 1.96 * S.pse
   return (
     <div ref={ref} className={cn('relative', className)} style={{ height }}>
