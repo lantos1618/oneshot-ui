@@ -1,0 +1,464 @@
+import { useCallback, useEffect, useId, useLayoutEffect, useRef, useState, type ReactNode } from 'react'
+import { AnimatePresence, motion, type Variants } from 'motion/react'
+import { Avatar, Button, Icon, IconButton, type IconName, StatusIcon, cn, spring, useCoarsePointer, useControllable, useHotkey, useOutside, useRoving } from './core'
+import { ActiveIndicator } from './forms'
+import { Tooltip } from './overlay'
+
+/* ════════════════════════════════════════════════════════════════════════════
+ * 7. NAVIGATION
+ * ══════════════════════════════════════════════════════════════════════════ */
+
+export type TabItem = { value: string; label: ReactNode; content?: ReactNode; badge?: ReactNode }
+
+/** Underline travels to the clicked tab; panel cross-fades. ← → move between tabs (and select them), Home/End jump to the ends. */
+export function Tabs({ items, value, defaultValue, onChange, className }:
+  { items: TabItem[]; value?: string; defaultValue?: string; onChange?: (v: string) => void; className?: string }) {
+  const [v, set] = useControllable(value, defaultValue ?? items[0]?.value ?? '', onChange)
+  const group = useId(), refs = useRef<(HTMLButtonElement | null)[]>([])
+  const i = items.findIndex(t => t.value === v)
+  const { onKeyDown } = useRoving(items.length, () => {}, { orientation: 'horizontal', index: Math.max(0, i), onMove: n => { set(items[n].value); refs.current[n]?.focus() } })
+  const current = items[i]
+  return (
+    <div className={className}>
+      <div role="tablist" className="flex gap-5 border-b border-[var(--line)]" onKeyDown={e => { if (e.key !== 'Enter') onKeyDown(e) }}>
+        {items.map((t, k) => (
+          <button key={t.value} ref={el => { refs.current[k] = el }} role="tab" aria-selected={t.value === v} tabIndex={t.value === v || (i < 0 && k === 0) ? 0 : -1} onClick={() => set(t.value)}
+            className={cn('relative flex cursor-pointer items-center gap-1.5 border-0 bg-transparent px-0 py-2 text-[13px] font-medium whitespace-nowrap transition-colors [@media(pointer:coarse)]:py-2.5',
+              t.value === v ? 'text-[var(--fg)]' : 'text-[var(--fg2)] hover:text-[var(--fg)]')}>
+            {t.label}{t.badge}
+            {t.value === v && <ActiveIndicator group={group} className="top-auto -bottom-px h-0.5 rounded-sm bg-[var(--fg)]" />}
+          </button>
+        ))}
+      </div>
+      {current?.content !== undefined && (
+        <AnimatePresence mode="wait" initial={false}>
+          <motion.div key={v} role="tabpanel" initial={{ opacity: 0, y: -4 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0, y: 4, transition: { duration: 0.1 } }}
+            transition={{ duration: 0.2 }} className="pt-3 text-[13px]">{current.content}</motion.div>
+        </AnimatePresence>
+      )}
+    </div>
+  )
+}
+
+export type NavItem = { value: string; label: string; icon?: IconName; badge?: ReactNode }
+
+/** Vertical nav (sidebars, settings sections). Highlight slides to the active item. */
+export function NavList({ items, value, defaultValue, onChange, collapsed, className }:
+  { items: NavItem[]; value?: string; defaultValue?: string; onChange?: (v: string) => void; collapsed?: boolean; className?: string }) {
+  const [v, set] = useControllable(value, defaultValue ?? items[0]?.value, onChange)
+  const group = useId()
+  return (
+    <nav className={cn('flex flex-col gap-0.5', className)}>
+      {items.map(it => (
+        <button key={it.value} onClick={() => set(it.value)} aria-current={it.value === v ? 'page' : undefined} title={collapsed ? it.label : undefined}
+          className={cn('relative flex h-8 cursor-pointer items-center gap-2.5 rounded-lg border-0 bg-transparent px-2.5 text-left text-[13px] transition-colors [@media(pointer:coarse)]:h-10',
+            it.value === v ? 'font-medium text-[var(--fg)]' : 'text-[var(--fg2)] hover:bg-[var(--muted)] hover:text-[var(--fg)]')}>
+          {it.value === v && <ActiveIndicator group={group} className="rounded-lg bg-[var(--muted)]" />}
+          {it.icon && <Icon name={it.icon} size={16} className="relative" />}
+          <AnimatePresence initial={false}>
+            {!collapsed && <motion.span initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0, transition: { duration: 0.08 } }} className="relative flex-1 truncate">{it.label}</motion.span>}
+          </AnimatePresence>
+          {!collapsed && it.badge && <span className="relative">{it.badge}</span>}
+        </button>
+      ))}
+    </nav>
+  )
+}
+
+/* Collapsible sidebar ──────────────────────────────────────────────────────── */
+
+/** A sidebar row: a nav item (badge may be a count) or a section heading. */
+export type SidebarEntry = (NavItem & { count?: number }) | { heading: string }
+const isHeading = (e: SidebarEntry): e is { heading: string } => 'heading' in e
+
+/** Default main pane: the page title over placeholder cards. */
+function SidebarPage({ item }: { item: NavItem }) {
+  return (
+    <>
+      <h4 className="m-0 flex items-center gap-2 text-base font-semibold">{item.icon && <Icon name={item.icon} size={16} className="text-[var(--fg3)]" />}{item.label}</h4>
+      <div className="grid grid-cols-3 gap-2.5">{[0, 1, 2].map(k => <div key={k} className="h-[70px] rounded-[var(--r-md)] border border-[var(--line)] bg-[var(--card)]" />)}</div>
+      <div className="min-h-[80px] flex-1 rounded-[var(--r-md)] border border-[var(--line)] bg-[var(--card)]" />
+    </>
+  )
+}
+
+const sbFade = { duration: 0.15 }
+
+/**
+ * App frame whose sidebar folds to icons. Labels become tooltips when collapsed; press `hotkey` (default `[`)
+ * while it's on screen to toggle. Has section headings, count badges, a user footer, and a main pane that
+ * changes with the selected item (`children` may be a function of the item). Without `defaultCollapsed`
+ * it starts folded when the frame is narrower than 440px; in a frame that narrow, expanding it slides it over the
+ * main pane (tap outside or pick an item to fold it again).
+ */
+export function CollapsibleSidebar({ items, title = 'Northwind', user, value, defaultValue, onChange, collapsed, defaultCollapsed, onCollapsedChange, hotkey = '[', children, className }:
+  { items: SidebarEntry[]; title?: string; user?: { name: string; detail?: string }; value?: string; defaultValue?: string; onChange?: (v: string) => void
+    collapsed?: boolean; defaultCollapsed?: boolean; onCollapsedChange?: (v: boolean) => void; hotkey?: string | false
+    children?: ReactNode | ((item: NavItem) => ReactNode); className?: string }) {
+  const navItems = items.filter((e): e is NavItem & { count?: number } => !isHeading(e))
+  const [v, setV] = useControllable(value, defaultValue ?? navItems[0]?.value, onChange)
+  const [col, setCol] = useControllable(collapsed, defaultCollapsed ?? false, onCollapsedChange)
+  const frame = useRef<HTMLDivElement>(null), group = useId()
+  // no default given: start folded when the frame is too narrow for labels and a usable main pane
+  useLayoutEffect(() => { if (collapsed === undefined && defaultCollapsed === undefined && (frame.current?.offsetWidth ?? 999) < 440) setCol(true) }, []) // eslint-disable-line react-hooks/exhaustive-deps
+  const coarse = useCoarsePointer() // touch: the toggle's tooltip would only repeat its label and the keyboard hint
+  // narrow frame (phones): the expanded sidebar slides over the main pane instead of squeezing it
+  const [over, setOver] = useState(false)
+  useLayoutEffect(() => {
+    const el = frame.current; if (!el) return
+    const ro = new ResizeObserver(() => setOver(el.offsetWidth < 440)); ro.observe(el)
+    return () => ro.disconnect()
+  }, [])
+  const toggle = useCallback(() => setCol(!col), [col, setCol])
+  useHotkey(hotkey || '', () => { // only the sidebar that is on screen answers
+    const r = frame.current?.getBoundingClientRect()
+    if (r && r.bottom > 0 && r.top < innerHeight) toggle()
+  }, { enabled: !!hotkey, ignoreEditable: true })
+  const current = navItems.find(n => n.value === v) ?? navItems[0]
+  return (
+    <div ref={frame} className={cn('relative flex h-[400px] overflow-hidden rounded-[var(--r-lg)] border border-[var(--line)] bg-[var(--bg)]', className)}>
+      {over && <div aria-hidden className="w-[60px] flex-none" />}
+      <AnimatePresence>
+        {over && !col && <motion.div key="scrim" aria-hidden onClick={toggle} className="absolute inset-0 z-[5] bg-black/25"
+          initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} transition={{ duration: 0.2 }} />}
+      </AnimatePresence>
+      <motion.aside initial={false} animate={{ width: col ? 60 : 220 }} transition={spring(0.12, 0.4)} aria-label={`${title} navigation`}
+        className={cn('flex flex-none flex-col gap-1.5 overflow-hidden border-r border-[var(--line)] bg-[var(--card)] p-2.5',
+          over && 'absolute inset-y-0 left-0 z-10', over && !col && 'shadow-[var(--shadow)]')}>
+        <div className="flex h-9 items-center gap-2 px-1 whitespace-nowrap">
+          <motion.span initial={false} animate={{ opacity: col ? 0 : 1, width: col ? 0 : 22 }} transition={sbFade} className="h-[22px] flex-none rounded-[7px] bg-[linear-gradient(135deg,var(--accent),var(--c4))]" />
+          <motion.b initial={false} animate={{ opacity: col ? 0 : 1 }} transition={sbFade} className="min-w-0 flex-1 truncate text-sm font-semibold">{title}</motion.b>
+          <Tooltip content={<>{col ? 'Expand' : 'Collapse'} <kbd className="font-[family-name:var(--mono)] opacity-70 [@media(hover:none)]:hidden">{hotkey || ''}</kbd></>} placement={col ? 'right' : 'bottom-center'} portal delay={300} disabled={coarse}>
+            <IconButton icon="panel" label={col ? 'Expand sidebar' : 'Collapse sidebar'} aria-expanded={!col} onClick={toggle} />
+          </Tooltip>
+        </div>
+        <nav className="mt-1.5 flex flex-1 flex-col gap-0.5">
+          {items.map((it, k) => isHeading(it) ? (
+            <motion.div key={`h${k}`} initial={false} animate={{ opacity: col ? 0 : 1 }} transition={sbFade} aria-hidden={col}
+              className="px-2.5 pt-2.5 pb-1 text-[11px] whitespace-nowrap text-[var(--fg3)]">{it.heading}</motion.div>
+          ) : (
+            <Tooltip key={it.value} content={it.label} placement="right" portal disabled={!col} delay={80}>
+              <button onClick={() => { setV(it.value); if (over && !col) setCol(true) }} aria-current={it.value === v ? 'page' : undefined} aria-label={col ? it.label : undefined}
+                className={cn('relative flex h-[34px] w-full cursor-pointer items-center gap-3 rounded-[var(--r-md)] border-0 bg-transparent px-2.5 text-left text-[13px] whitespace-nowrap transition-colors [@media(pointer:coarse)]:h-9',
+                  it.value === v ? 'font-medium text-[var(--fg)]' : 'text-[var(--fg2)] hover:text-[var(--fg)]')}>
+                {it.value === v && <ActiveIndicator group={group} className="rounded-[var(--r-md)] bg-[var(--muted)]" />}
+                {it.icon && <Icon name={it.icon} size={16} className="relative" />}
+                <motion.span initial={false} animate={{ opacity: col ? 0 : 1 }} transition={sbFade} className="relative flex-1 truncate">{it.label}</motion.span>
+                {(it.count ?? 0) > 0 && (
+                  <motion.span initial={false} animate={{ opacity: col ? 0 : 1 }} transition={sbFade}
+                    className="relative rounded-full bg-[var(--accent)] px-1.5 py-px font-[family-name:var(--mono)] text-[11px] font-semibold text-[var(--card)]">{it.count}</motion.span>
+                )}
+                {(it.count ?? 0) > 0 && col && <span className="absolute top-1.5 left-[26px] h-1.5 w-1.5 rounded-full bg-[var(--accent)]" />}
+                {!it.count && it.badge && !col && <span className="relative">{it.badge}</span>}
+              </button>
+            </Tooltip>
+          ))}
+        </nav>
+        {user && (
+          <div className="flex items-center gap-2 border-t border-[var(--line)] px-0.5 pt-2 whitespace-nowrap">
+            <Avatar name={user.name} size={30} className="!border-0" />
+            <motion.div initial={false} animate={{ opacity: col ? 0 : 1 }} transition={sbFade} className="min-w-0">
+              <b className="block truncate text-xs font-semibold">{user.name}</b>{user.detail && <span className="block truncate text-[11px] text-[var(--fg3)]">{user.detail}</span>}
+            </motion.div>
+          </div>
+        )}
+      </motion.aside>
+      <section aria-label={current?.label} className="relative min-w-0 flex-1 overflow-hidden">
+        <AnimatePresence mode="wait" initial={false}>
+          <motion.div key={current?.value} initial={{ opacity: 0, y: 6 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0, transition: { duration: 0.08 } }} transition={{ duration: 0.22 }}
+            className="flex h-full flex-col gap-3 p-4">
+            {current && (typeof children === 'function' ? children(current) : children ?? <SidebarPage item={current} />)}
+          </motion.div>
+        </AnimatePresence>
+      </section>
+    </div>
+  )
+}
+
+/* Mobile tab bar ───────────────────────────────────────────────────────────── */
+
+/** A tab in MobileTabBar. `count` shows a red badge (set it to 0 to clear it with an exit pop). */
+export type TabBarItem = NavItem & { count?: number }
+
+/**
+ * Bottom tab bar for phone layouts (grows by the bottom safe area on notched phones): an accent line slides to the active tab, its icon bounces,
+ * count badges pop out when cleared, and an optional raised centre button (`onAction`) sits in the middle.
+ */
+export function MobileTabBar({ items, value, defaultValue, onChange, onAction, actionLabel = 'New', actionIcon = 'plus', className }:
+  { items: TabBarItem[]; value?: string; defaultValue?: string; onChange?: (v: string) => void; onAction?: () => void; actionLabel?: string; actionIcon?: IconName; className?: string }) {
+  const [v, set] = useControllable(value, defaultValue ?? items[0].value, onChange)
+  const group = useId(), touched = useRef(false)
+  const [spin, setSpin] = useState(0)
+  const mid = Math.ceil(items.length / 2)
+  const cells: (TabBarItem | null)[] = onAction ? [...items.slice(0, mid), null, ...items.slice(mid)] : items
+  return (
+    <nav aria-label="Tabs" className={cn('grid h-[calc(64px+env(safe-area-inset-bottom,0px))] items-center border-t border-[var(--line)] bg-[color-mix(in_srgb,var(--card)_92%,transparent)] pb-[max(6px,env(safe-area-inset-bottom))] backdrop-blur-md', className)}
+      style={{ gridTemplateColumns: `repeat(${cells.length}, minmax(0, 1fr))` }}>
+      {cells.map(it => it === null ? (
+        <span key="action" className="grid place-items-center">
+          {/* the replay key sits on the icon, not the button, so pressing it keeps keyboard focus */}
+          <motion.button aria-label={actionLabel} onClick={() => { setSpin(s => s + 1); onAction?.() }} whileTap={{ scale: 0.92 }}
+            className="-mt-5 grid h-11 w-11 cursor-pointer place-items-center rounded-full border-0 bg-[var(--primary)] text-[var(--on-primary)] shadow-[0_6px_16px_rgba(0,0,0,.2)]">
+            <motion.span key={spin} className="grid" initial={false} animate={spin ? { rotate: [0, 90], scale: [1, 0.9, 1] } : undefined} transition={{ duration: 0.35, ease: 'easeOut' }}>
+              <Icon name={actionIcon} size={20} />
+            </motion.span>
+          </motion.button>
+        </span>
+      ) : (
+        <button key={it.value} onClick={() => { touched.current = true; set(it.value) }} aria-current={it.value === v ? 'page' : undefined}
+          aria-label={it.count ? `${it.label}, ${it.count} new` : it.label}
+          className={cn('relative flex h-full min-w-0 cursor-pointer flex-col items-center justify-center gap-1 border-0 bg-transparent text-[11px] font-medium transition-colors',
+            it.value === v ? 'text-[var(--accent)]' : 'text-[var(--fg3)] hover:text-[var(--fg2)]')}>
+          {it.value === v && <motion.span layoutId={group} className="absolute top-0 left-[calc(50%-14px)] h-[3px] w-7 rounded-b-[3px] bg-[var(--accent)]" transition={spring(0.25, 0.4)} />}
+          <span className="relative inline-flex">
+            <motion.span key={it.value === v ? 'on' : 'off'} className="inline-flex" initial={false}
+              animate={it.value === v && touched.current ? { y: [0, -4, 0] } : { y: 0 }} transition={{ duration: 0.35, ease: 'easeOut' }}>
+              {it.icon && <Icon name={it.icon} size={20} />}
+            </motion.span>
+            <AnimatePresence>
+              {(it.count ?? 0) > 0 && (
+                <motion.span initial={{ scale: 0 }} animate={{ scale: 1 }} exit={{ scale: 0, transition: { duration: 0.2 } }} transition={spring(0.5, 0.35)}
+                  className="absolute -top-2 left-[calc(100%-7px)] grid h-[18px] min-w-[18px] place-items-center rounded-full border-2 border-[var(--card)] bg-[var(--bad)] px-1 text-[11px] leading-none font-bold text-[var(--card)]">{it.count}</motion.span>
+              )}
+            </AnimatePresence>
+          </span>
+          {it.label}
+        </button>
+      ))}
+    </nav>
+  )
+}
+
+/**
+ * Phone-shaped frame for previewing mobile layouts (docs, marketing, onboarding). Children fill the screen as a flex column;
+ * put a tab bar at the bottom. `width`/`height` size the device (it never exceeds its container), `notch={false}` drops the
+ * camera pill, and `label` names it for screen readers (e.g. "Preview of the inbox on a phone").
+ */
+export function PhoneFrame({ children, width = 250, height = 440, notch = true, label, className }:
+  { children: ReactNode; width?: number; height?: number; notch?: boolean; label?: string; className?: string }) {
+  return (
+    <div role={label ? 'figure' : undefined} aria-label={label} style={{ width, height }}
+      className={cn('relative flex max-w-full flex-none flex-col overflow-hidden rounded-[36px] border-8 border-[var(--fg)] bg-[var(--bg)] shadow-[var(--shadow)]', className)}>
+      {notch && <span aria-hidden className="absolute top-1.5 left-1/2 z-10 h-[18px] w-[72px] -translate-x-1/2 rounded-full bg-[var(--fg)]" />}
+      {children}
+    </div>
+  )
+}
+
+/* Mega menu ────────────────────────────────────────────────────────────────── */
+
+export type MegaMenuItem = { label: string; content?: ReactNode; href?: string }
+
+const megaSlide: Variants = {
+  enter: (d: number) => ({ opacity: 0, x: 40 * d }),
+  center: { opacity: 1, x: 0, transition: spring(0.15, 0.35) },
+  exit: (d: number) => ({ opacity: 0, x: -40 * d, transition: { duration: 0.2 } }),
+}
+
+/**
+ * Site header whose menus share one panel. Hover or focus a top item to open it (it waits `closeDelay` ms
+ * before closing, so you can travel to the panel); moving to another item morphs the panel's size and
+ * position while the content slides in from that side. Escape closes, ↓ moves into the panel.
+ * Items with `href` and no `content` are plain links. `children` is the page under the header.
+ */
+export function MegaMenu({ items, brand, actions, children, closeDelay = 160, className }:
+  { items: MegaMenuItem[]; brand?: ReactNode; actions?: ReactNode; children?: ReactNode; closeDelay?: number; className?: string }) {
+  const host = useRef<HTMLDivElement>(null), measures = useRef<(HTMLDivElement | null)[]>([]), triggers = useRef<(HTMLButtonElement | null)[]>([])
+  const panel = useRef<HTMLDivElement>(null)
+  const [cur, setCur] = useState(-1)
+  const [shown, setShown] = useState(-1) // what the panel shows; outlives `cur` while the panel fades out
+  const [dir, setDir] = useState(1)
+  const openedAt = useRef(0)
+  const [sizes, setSizes] = useState<{ w: number; h: number }[]>([])
+  const [hostW, setHostW] = useState(0), [hostH, setHostH] = useState(0)
+  const [lefts, setLefts] = useState<number[]>([])
+  const wasOpen = useRef(false), closeT = useRef<ReturnType<typeof setTimeout>>(undefined)
+  const pid = useId()
+
+  const measure = useCallback(() => {
+    const h = host.current
+    if (!h) return
+    const hr = h.getBoundingClientRect()
+    setHostW(hr.width); setHostH(hr.height)
+    setSizes(measures.current.map(m => ({ w: m?.offsetWidth ?? 0, h: m?.offsetHeight ?? 0 })))
+    setLefts(triggers.current.map(t => t ? t.getBoundingClientRect().left - hr.left : 0))
+  }, [])
+  useLayoutEffect(() => {
+    measure()
+    const ro = new ResizeObserver(() => measure())
+    if (host.current) ro.observe(host.current)
+    measures.current.forEach(m => m && ro.observe(m))
+    return () => ro.disconnect()
+  }, [measure, items])
+  useEffect(() => () => clearTimeout(closeT.current), [])
+  useOutside([host], () => { wasOpen.current = false; setCur(-1) }, cur >= 0)
+  useEffect(() => {
+    if (cur < 0) return
+    const on = (e: KeyboardEvent) => {
+      if (e.key !== 'Escape') return
+      const t = triggers.current[cur], inside = host.current?.contains(document.activeElement)
+      clearTimeout(closeT.current); wasOpen.current = false; setCur(-1)
+      if (inside) t?.focus()
+    }
+    addEventListener('keydown', on)
+    return () => removeEventListener('keydown', on)
+  }, [cur])
+
+  const open = (i: number) => {
+    clearTimeout(closeT.current)
+    if (i === cur) return
+    measure()
+    wasOpen.current = cur >= 0; openedAt.current = Date.now()
+    setDir(cur >= 0 && i < cur ? -1 : 1); setCur(i); setShown(i)
+  }
+  const close = (now = false) => {
+    clearTimeout(closeT.current)
+    const go = () => { wasOpen.current = false; setCur(-1) }
+    if (now) go(); else closeT.current = setTimeout(go, closeDelay)
+  }
+  const size = sizes[shown] ?? { w: 0, h: 0 }
+  const left = shown >= 0 ? Math.max(8, Math.min(hostW - size.w - 8, (lefts[shown] ?? 0) - 20)) : 0
+  const morph = wasOpen.current ? spring(0.12, 0.4) : { duration: 0 }
+  const maxW = Math.max(200, hostW - 16)
+
+  return (
+    <div ref={host} className={cn('relative h-[420px] overflow-hidden rounded-[var(--r-lg)] border border-[var(--line)] bg-[var(--bg)]', className)}
+      onBlur={e => { if (e.relatedTarget && !e.currentTarget.contains(e.relatedTarget as Node)) close(true) }}>
+      <div className="relative z-[3] flex h-14 items-center gap-2 border-b border-[var(--line)] bg-[var(--card)] px-4">
+        {brand && <span className="mr-3 hidden flex-none items-center gap-2 text-sm font-semibold sm:flex">{brand}</span>}
+        <nav aria-label="Main" className="flex min-w-0 gap-0.5 overflow-x-auto [scrollbar-width:none]">
+          {items.map((it, i) => it.content ? (
+            <button key={it.label} ref={el => { triggers.current[i] = el }} aria-expanded={cur === i} aria-controls={pid}
+              onPointerEnter={e => { if (e.pointerType === 'mouse') open(i) }} onPointerLeave={e => { if (e.pointerType === 'mouse') close() }}
+              onFocus={() => open(i)} onClick={() => { if (cur !== i) open(i); else if (Date.now() - openedAt.current > 350) close(true) }}
+              onKeyDown={e => { if (e.key === 'ArrowDown') { e.preventDefault(); open(i); requestAnimationFrame(() => panel.current?.querySelector<HTMLElement>('a,button')?.focus()) } }}
+              className={cn('inline-flex h-[34px] flex-none cursor-pointer items-center gap-1 rounded-[var(--r-md)] border-0 px-3 text-[13px] font-medium transition-colors [@media(pointer:coarse)]:h-10',
+                cur === i ? 'bg-[var(--muted)] text-[var(--fg)]' : 'bg-transparent text-[var(--fg2)] hover:text-[var(--fg)]')}>
+              {it.label}<Icon name="chevronDown" size={12} className={cn('opacity-60 transition-transform duration-200', cur === i && 'rotate-180')} />
+            </button>
+          ) : (
+            <a key={it.label} href={it.href ?? '#'} onFocus={() => close(true)}
+              className="inline-flex h-[34px] flex-none items-center rounded-[var(--r-md)] px-3 text-[13px] font-medium text-[var(--fg2)] no-underline hover:text-[var(--fg)] [@media(pointer:coarse)]:h-10">{it.label}</a>
+          ))}
+        </nav>
+        <span className="flex-1" />
+        {actions && <span className="hidden flex-none items-center gap-2 sm:flex">{actions}</span>}
+      </div>
+      <motion.div ref={panel} id={pid} role="region" aria-label={cur >= 0 ? items[cur].label : undefined} aria-hidden={cur < 0}
+        className={cn('absolute top-16 z-[4] overflow-x-hidden overflow-y-auto overscroll-contain rounded-[var(--r-lg)] border border-[var(--line)] bg-[var(--card)] shadow-[var(--shadow)]', cur < 0 && 'pointer-events-none')}
+        initial={false}
+        animate={cur >= 0 ? { opacity: 1, y: 0, scale: 1, left, width: size.w, height: hostH ? Math.min(size.h, hostH - 72) : size.h } : { opacity: 0, y: -4, scale: 0.98 }}
+        onAnimationComplete={() => { if (cur < 0) setShown(-1) }}
+        transition={{ default: cur >= 0 ? spring(0.2, 0.3) : { duration: 0.15 }, left: morph, width: morph, height: morph }}
+        onPointerEnter={() => clearTimeout(closeT.current)} onPointerLeave={e => { if (e.pointerType === 'mouse') close() }}>
+        <AnimatePresence initial={false} custom={dir}>
+          {shown >= 0 && (
+            <motion.div key={shown} custom={dir} variants={megaSlide} initial={wasOpen.current ? 'enter' : false} animate="center" exit="exit"
+              className="absolute top-0 left-0 w-max p-4" style={{ maxWidth: maxW }}>{items[shown]?.content}</motion.div>
+          )}
+        </AnimatePresence>
+      </motion.div>
+      {/* off-screen copies, measured so the panel knows each menu's size before it morphs */}
+      <div aria-hidden className="pointer-events-none invisible absolute top-0 left-0">
+        {items.map((it, i) => it.content ? <div key={it.label} ref={el => { measures.current[i] = el }} className="absolute top-0 left-0 w-max p-4" style={{ maxWidth: maxW }}>{it.content}</div> : null)}
+      </div>
+      <div className="absolute inset-x-0 top-14 bottom-0">{children}</div>
+    </div>
+  )
+}
+
+/* Breadcrumbs, pagination, steps ───────────────────────────────────────────── */
+
+/** Trail of links to the current page (the last item, marked aria-current). Wraps on narrow screens; links grow their tap area on touch. */
+export function Breadcrumbs({ items, className }: { items: { label: string; href?: string; onClick?: () => void }[]; className?: string }) {
+  return (
+    <nav aria-label="Breadcrumb" className={cn('flex flex-wrap items-center gap-1.5 text-[13px] text-[var(--fg3)]', className)}>
+      {items.map((it, i) => {
+        const last = i === items.length - 1
+        return (
+          <span key={i} className="flex items-center gap-1.5">
+            {last ? <b aria-current="page" className="font-medium text-[var(--fg)]">{it.label}</b>
+              : <a href={it.href ?? '#'} onClick={e => { if (it.onClick) { e.preventDefault(); it.onClick() } }} className="text-[var(--fg2)] no-underline hover:text-[var(--fg)] [@media(pointer:coarse)]:-my-2 [@media(pointer:coarse)]:-mx-1 [@media(pointer:coarse)]:px-1 [@media(pointer:coarse)]:py-2">{it.label}</a>}
+            {!last && <Icon name="chevronRight" size={12} />}
+          </span>
+        )
+      })}
+    </nav>
+  )
+}
+
+/** Page numbers with ellipses: 1 … 4 5 6 … 20. `total` is the number of pages; the current page's frame slides between numbers. */
+export function Pagination({ page, total, onChange, className }: { page: number; total: number; onChange: (p: number) => void; className?: string }) {
+  const nums: (number | '…')[] = []
+  for (let p = 1; p <= total; p++) {
+    if (p === 1 || p === total || Math.abs(p - page) <= 1) nums.push(p)
+    else if (nums[nums.length - 1] !== '…') nums.push('…')
+  }
+  const group = useId()
+  const cell = 'relative grid h-8 min-w-8 cursor-pointer place-items-center rounded-lg border-0 bg-transparent px-1 text-[13px] hover:bg-[var(--muted)] disabled:opacity-40 disabled:cursor-default'
+  return (
+    <nav aria-label="Pagination" className={cn('flex items-center gap-1', className)}>
+      <button className={cell} aria-label="Previous page" disabled={page <= 1} onClick={() => onChange(page - 1)}><Icon name="chevronLeft" size={14} /></button>
+      {nums.map((n, i) => n === '…' ? <span key={`e${i}`} className="px-1 text-[var(--fg3)]">…</span> : (
+        <button key={n} className={cn(cell, n === page && 'font-semibold')} aria-current={n === page ? 'page' : undefined} onClick={() => onChange(n)}>
+          {n === page && <ActiveIndicator group={group} className="rounded-lg border border-[var(--line)] bg-[var(--card)]" />}
+          <span className="relative">{n}</span>
+        </button>
+      ))}
+      <button className={cell} aria-label="Next page" disabled={page >= total} onClick={() => onChange(page + 1)}><Icon name="chevronRight" size={14} /></button>
+    </nav>
+  )
+}
+
+/** Wizard progress: done steps fill, connecting lines draw across. On phones only the current step keeps its label. */
+export function Steps({ steps, current, className }: { steps: string[]; current: number; className?: string }) {
+  return (
+    <ol className={cn('m-0 flex list-none items-center gap-1.5 p-0 text-xs', className)}>
+      {steps.map((s, i) => (
+        <li key={s} className="contents">
+          <span className={cn('flex items-center gap-1.5', i <= current ? 'text-[var(--fg)]' : 'text-[var(--fg3)]')} aria-current={i === current ? 'step' : undefined}>
+            <motion.span key={i === current ? `c${current}` : 'n'} className="grid" initial={false} animate={{ scale: i === current ? [1, 1.15, 1] : 1 }}>
+              <StatusIcon status={i < current ? 'done' : i === current ? 'active' : 'pending'} number={i + 1} size={22} className="!text-[11px]" />
+            </motion.span>
+            <span className={cn(i === current ? 'whitespace-nowrap' : 'hidden sm:inline')}>{s}</span>
+          </span>
+          {i < steps.length - 1 && (
+            <span className="relative h-0.5 min-w-4 flex-1 overflow-hidden rounded-sm bg-[var(--line)]">
+              <motion.b className="absolute inset-0 origin-left bg-[var(--primary)]" initial={false} animate={{ scaleX: i < current ? 1 : 0 }} transition={spring(0.1, 0.4)} />
+            </span>
+          )}
+        </li>
+      ))}
+    </ol>
+  )
+}
+
+export type WizardStep = { label: string; description?: ReactNode }
+
+/**
+ * Steps plus the current step's description and Back / Continue buttons. Back is hidden on the
+ * first and last step; on the last step Continue becomes `restartLabel` and goes back to the start.
+ */
+export function Wizard({ steps, value, defaultValue = 0, onChange, onFinish, restartLabel = 'Start over', className }:
+  { steps: WizardStep[]; value?: number; defaultValue?: number; onChange?: (step: number) => void; onFinish?: () => void; restartLabel?: string; className?: string }) {
+  const [i, set] = useControllable(value, defaultValue, onChange)
+  const last = i === steps.length - 1
+  const [dir, setDir] = useState(1)
+  const go = (n: number) => { setDir(n > i ? 1 : -1); set(n) }
+  useEffect(() => { if (last) onFinish?.() }, [last]) // eslint-disable-line react-hooks/exhaustive-deps
+  return (
+    <div className={cn('flex flex-col gap-3', className)}>
+      <Steps steps={steps.map(s => s.label)} current={i} />
+      <div className="relative min-h-5 overflow-hidden text-[13px] text-[var(--fg2)]" aria-live="polite">
+        <AnimatePresence mode="popLayout" initial={false} custom={dir}>
+          <motion.p key={i} custom={dir} className="m-0" initial={{ opacity: 0, x: 12 * dir }} animate={{ opacity: 1, x: 0 }} exit={{ opacity: 0, x: -12 * dir, transition: { duration: 0.12 } }}
+            transition={spring(0.15, 0.35)}>{steps[i]?.description}</motion.p>
+        </AnimatePresence>
+      </div>
+      <div className="flex items-center justify-between">
+        <Button size="sm" onClick={() => go(Math.max(0, i - 1))} className={cn((i === 0 || last) && 'invisible')} aria-hidden={i === 0 || last} tabIndex={i === 0 || last ? -1 : 0}>Back</Button>
+        <Button size="sm" variant="primary" onClick={() => go(last ? 0 : i + 1)}>{last ? restartLabel : 'Continue'}</Button>
+      </div>
+    </div>
+  )
+}

@@ -1,0 +1,9 @@
+/*
+ * Precompiled utilities for projects without Tailwind: import "@lyndon/ui/styles.css".
+ * Tailwind's theme variables and the utilities the library's own modules use. No Preflight (it would
+ * reset the host page); add "@lyndon/ui/preflight.css" before this file if you want it.
+ */
+@layer theme, base, components, utilities;
+@import "tailwindcss/theme.css" layer(theme);
+@import "tailwindcss/utilities.css" layer(utilities) source(none);
+@source "./";

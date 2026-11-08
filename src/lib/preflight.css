@@ -1,0 +1,3 @@
+/* Optional: Tailwind's Preflight reset, for pages without Tailwind. import "@lyndon/ui/preflight.css" before styles.css. */
+@layer theme, base, components, utilities;
+@import "tailwindcss/preflight.css" layer(base);

@@ -1,0 +1,18 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover" />
+    <meta name="color-scheme" content="light dark" />
+    <title>UI library</title>
+    <!-- Same as <ThemeScript /> (themeScriptSource() in src/lib/provider.tsx), without the default tokens: applies the saved theme before paint. -->
+    <script>(function(k,d){try{var e=document.documentElement,s=null;if(k)try{s=JSON.parse(localStorage.getItem(k))}catch(x){}
+if(!s||typeof s!=="object")s=d;var c=s.css||((s.theme||"default")===d.theme&&!s.useCustom?d.css:null),m=s.mode||d.mode,
+dk=s.useCustom&&s.custom?!!s.custom.dark:m==="dark"||(m!=="light"&&matchMedia("(prefers-color-scheme: dark)").matches),t=c&&c[dk?"dark":"light"];
+if(t)for(var n in t)e.style.setProperty("--"+n,t[n]);e.setAttribute("data-theme",dk?"dark":"light");e.style.colorScheme=dk?"dark":"light"}catch(x){}})("ui-theme",{"theme":"default","mode":"system"})</script>
+  </head>
+  <body>
+    <div id="root"></div>
+    <script type="module" src="/src/main.tsx"></script>
+  </body>
+</html>
