@@ -1,7 +1,7 @@
-import { useEffect, useMemo, useRef, useState, type ReactNode } from 'react'
+import { Fragment, useEffect, useMemo, useRef, useState, type ReactNode } from 'react'
 import { AnimatePresence, motion, useReducedMotion } from 'motion/react'
-import { Button, Chip, FONT_CSS, Icon, IconButton, Spinner, TOUCH, cn, fmt, LOCALE, ScrollEdges, sleep, spring, surface, themeCSS, useMediaQuery, useRoving, useScrollEdges, useTheme } from './core'
-import { Collapse, CopyButton, TypingDots } from './feedback'
+import { Button, Chip, FONT_CSS, Icon, IconButton, Spinner, TOUCH, cn, fmt, LOCALE, ScrollEdges, sleep, spring, surface, themeCSS, useMediaQuery, useRoving, useScrollEdges, useTheme, useWidth } from './core'
+import { CopyButton, TypingDots } from './feedback'
 import { SegmentedControl, Slider, Switch } from './forms'
 import { SendButton } from './ai'
 import { lcsDiff } from './code'
@@ -360,15 +360,34 @@ const AT_HITL_TIMEOUT = 25, AT_QMAX = 8, AT_WIN = 30
 /** map units a token covers per simulated second along a line; the Indexing-loop train is slower */
 const AT_SPEED = 150, AT_LOOP_SPEED = 70
 const AT_LOOP_L = atLen('index')
+/** map units between tokens queued at a busy agent (the head keeps AT_HEAD from the station, clear of its ring); the first AT_QVIS line up, the rest stack on the last slot */
+const AT_GAP = 24, AT_QVIS = 4, AT_HEAD = 34
+/** trace table: rows are absolutely placed in a fixed-height list, so new jobs never push the page */
+const AT_ROWS = 6, AT_ROW_H = 42
+/** approval cards: fixed size, stacked by transform inside an overlay on the map (nothing below them moves) */
+const AT_CARD_W = 272, AT_CARD_H = 80, AT_CARD_GAP = 6, AT_CARDS = 2
+/** event-queue panel in the empty corner under Intake (map units) */
+const AT_EQ: Pt = [48, 396], AT_EQ_W = 214, AT_EQ_ROWS = 5, AT_EQ_ROW = 32
 const atPos = (line: string, station: string): number | undefined => AT_SP[line]?.[station]
-/** Where a token is along its line right now: interpolated while it moves, else at its state's station. */
-function atTokenS(eng: WorkflowEngine, tk: WorkflowToken) {
-  if (tk.move) { const a = atPos(tk.line, tk.move.from) ?? 0, b = atPos(tk.line, tk.move.to) ?? a; return a + (b - a) * eng.progress(tk) }
-  return atPos(tk.line, eng.machines[tk.job.type].states[tk.state].at[1]) ?? 0
+/** The polyline between two arc positions of a line, bends included (for congestion heat). */
+function atSubPath(k: string, a: number, b: number) {
+  if (a > b) [a, b] = [b, a]
+  const pts = AT_PATH[k], c = atCum[k], p0 = atPoint(k, a), p1 = atPoint(k, b), out = [`M${p0.x.toFixed(1)},${p0.y.toFixed(1)}`]
+  for (let i = 1; i < pts.length - 1; i++) if (c[i] > a + 0.5 && c[i] < b - 0.5) out.push(`L${pts[i][0]},${pts[i][1]}`)
+  out.push(`L${p1.x.toFixed(1)},${p1.y.toFixed(1)}`)
+  return out.join(' ')
 }
-const atXY = (eng: WorkflowEngine, tk: WorkflowToken) => atPoint(tk.line, atTokenS(eng, tk))
+/** Track segments between neighbouring stations, per line: the unit the congestion heat is painted on. */
+const AT_SEGS = Object.keys(AT_PATH).flatMap(k => {
+  const ss = [...new Set(Object.values(AT_SP[k] ?? {}).map(v => Math.round(v * 10) / 10))].sort((x, y) => x - y)
+  return ss.slice(0, -1).map((a, i) => ({ key: `${k}:${i}`, line: k, a, b: ss[i + 1], d: atSubPath(k, a, ss[i + 1]) }))
+})
+/** Heat by tokens on (or queued at the end of) a segment: 1 a faint wash, 2 warm, 3+ hot. */
+const AT_HEAT: [string, number, number][] = [['var(--fg3)', 0, 8], ['var(--fg3)', 0.22, 16], ['var(--warn)', 0.45, 20], ['var(--bad)', 0.45, 25]]
 const atTranslate = (p: { x: number; y: number }) => `translate(${p.x.toFixed(1)},${p.y.toFixed(1)})`
 const atTrainAt = (clock: number) => { const p = atPoint('index', AT_LOOP_L * 0.55 + AT_LOOP_SPEED * clock); return `${atTranslate(p)} rotate(${p.a.toFixed(1)})` }
+/** Pads a number to a fixed width (mono font), so a changing value never moves the text's start (no layout shift). */
+const atPad = (s: string, n: number) => s.padStart(n, ' ')
 /**
  * The engine behind the map: travel time follows the drawn distance, the Indexing loop fires the next workflow each
  * time its train completes a lap, Intake fires request.received, agents meter tokens and USD while they work, and
@@ -384,12 +403,45 @@ function atEngine(machines: Record<string, WorkflowMachine>, order: string[]) {
     source: t => { const m = machines[t], line = m.states[m.start].at[0]; return line === 'memory' ? 'index' : line },
   })
 }
+/** Which way a token runs along its line on its latest move (+1 towards higher arc length). */
+function atDirOf(tk: WorkflowToken) {
+  const m = tk.move ?? tk.last; if (!m) return 1
+  const a = atPos(tk.line, m.from), b = atPos(tk.line, m.to)
+  return a === undefined || b === undefined ? 1 : Math.sign(b - a) || 1
+}
+/**
+ * Where every token should be drawn, as [line, arc position]. Moving tokens follow the drawn line; tokens queued at a
+ * busy agent line up on the line they came in on, oldest nearest the station; a token heading for an agent with a queue
+ * stops at the back of it. With reduced motion a moving token is placed where it is going (no travel).
+ */
+function atLayout(eng: WorkflowEngine, agents: Set<string>, reduce: boolean) {
+  const slot = new Map<number, number>(), side = new Map<string, number>()
+  for (const [stn, q] of Object.entries(eng.queues)) q.forEach(tk => {
+    const k = `${stn}|${tk.line}|${atDirOf(tk)}`, n = side.get(k) ?? 0
+    slot.set(tk.uid, n); side.set(k, n + 1)
+  })
+  const out = new Map<number, [string, number]>()
+  for (const j of eng.jobs) if (!j.done) for (const tk of j.tokens) {
+    const m = tk.move ?? (tk.phase === 'queue' ? tk.last : null)
+    if (!m) { out.set(tk.uid, [tk.line, atPos(tk.line, eng.machines[j.type].states[tk.state].at[1]) ?? 0]); continue }
+    const a = atPos(tk.line, m.from) ?? 0, b = atPos(tk.line, m.to) ?? a, dir = Math.sign(b - a) || 1
+    const back = (k: number) => { const s = b - dir * (AT_HEAD + AT_GAP * Math.min(k, AT_QVIS - 1)); return dir > 0 ? Math.max(s, Math.min(a + 6, b)) : Math.min(s, Math.max(a - 6, b)) }
+    if (tk.phase === 'queue') { out.set(tk.uid, [tk.line, back(slot.get(tk.uid) ?? 0)]); continue }
+    let s = reduce ? b : a + (b - a) * eng.progress(tk)
+    const busy = agents.has(m.to) && ((eng.busy[m.to] && eng.busy[m.to] !== tk) || !!eng.queues[m.to]?.length)
+    if (busy) { const lim = back(side.get(`${m.to}|${tk.line}|${dir}`) ?? 0); s = dir > 0 ? Math.min(s, lim) : Math.max(s, lim) }
+    out.set(tk.uid, [tk.line, s])
+  }
+  return out
+}
 type AtSpark = { id: number; x: number; y: number; text: string; t: number }
 type AtFade = { id: number; x: number; y: number; line: string; jid: number; t: number; small: boolean }
+type AtDisp = { line: string; s: number; tr: string }
 
 // the track is a 6px band painted in the middle, so on touch the input itself can be a 32px target
 const AT_RANGE = 'min-w-[90px] max-w-[200px] flex-1'
 const AT_JOB_DOT = 'grid h-[18px] w-[18px] flex-none place-items-center rounded-full text-[10px] font-bold text-white [@media(pointer:coarse)]:text-[11px]'
+const AT_TRACE_COLS = 'grid-cols-[minmax(150px,26%)_1fr_64px_64px_72px] gap-3'
 /** A mouse hovering a row follows its job; a click or tap pins it (touch has no hover). Buttons inside keep their own clicks. */
 const atFollow = (id: number, setHover: (h: number | null) => void, setPin: (f: (p: number | null) => number | null) => void) => ({
   onPointerEnter: (e: React.PointerEvent) => { if (e.pointerType === 'mouse') setHover(id) },
@@ -399,51 +451,76 @@ const atFollow = (id: number, setHover: (h: number | null) => void, setPin: (f: 
 
 /**
  * Live multi-agent "transit map", driven by the same WorkflowEngine and AGENT_WORKFLOWS as StateMachine. The Indexing
- * loop and the Intake endpoint fire events into a queue; jobs start as slots free up and walk their state graph
- * station by station. Agents take one job at a time (others queue), orchestrators route with guards, Product forks
- * reviews and joins them, endpoints emit follow-up triggers. Human and Risk stations wait for approval when
- * human-in-the-loop is on. Pause, speed and max-jobs controls, fire-event chips, and a live trace table (time, tokens,
- * USD): hover a row, or press its job button, to follow that job on the map. Moving parts are drawn every frame without
- * re-rendering; the panels refresh about 8 times a second. On phones the map keeps a readable size and scrolls
- * sideways inside the card, as does the trace table. Pass your own `machines` if they use the same stations.
+ * loop and the Intake endpoint fire events into a queue (drawn on the map, under Intake); jobs start as slots free up
+ * and travel their state graph along the drawn lines, bends included. Agents take one job at a time: the others line
+ * up on the incoming line with a counter, and track segments warm up (grey, amber, red) as tokens pile onto them.
+ * Orchestrators route with guards, Product forks reviews and joins them, endpoints emit follow-up triggers. Human and
+ * Risk stations wait for approval when human-in-the-loop is on: the station gets a countdown ring and an approval card
+ * floats beside it, over the map, so nothing on the page moves. Pause, speed and max-jobs controls, fire-event chips,
+ * and a live trace table (time, tokens, USD) whose connectors link a follow-up job to the job that triggered it: hover
+ * a row, or press its job button, to follow that job on the map. Moving parts are drawn every frame without
+ * re-rendering; the panels refresh about 8 times a second. Reduced motion places tokens at their stations without
+ * travel. On phones the map keeps a readable size and scrolls sideways inside the card, as does the trace table.
+ * Pass your own `machines` if they use the same stations.
  */
 export function AgentTransitMap({ machines = AGENT_WORKFLOWS, order = AGENT_WORKFLOW_ORDER, className }:
   { machines?: Record<string, WorkflowMachine>; order?: string[]; className?: string }) {
   const eng = useMemo(() => atEngine(machines, order), [machines, order])
+  const agents = useMemo(() => new Set(Object.values(machines).flatMap(m => Object.values(m.states).filter(s => s.work).map(s => s.at[1]))), [machines])
   const [, setTick] = useState(0)
   const rerender = () => setTick(x => (x + 1) % 1e6)
   const [hovered, setHover] = useState<number | null>(null), [pin, setPin] = useState<number | null>(null)
   const hover = hovered ?? pin // the job being followed on the map
   const { ref: host, visible } = useViewport<HTMLDivElement>(null, { amount: 0 })
   const narrow = useMediaQuery('(max-width: 639px)')
+  const reduce = !!useReducedMotion()
+  const [stageRef, stageW] = useWidth<HTMLDivElement>()
   const [mapScrollRef, mapEdges] = useScrollEdges<HTMLDivElement>()
   const [traceScrollRef, traceEdges] = useScrollEdges<HTMLDivElement>()
   const fx = useRef({ sparks: [] as AtSpark[], fading: [] as AtFade[], hubFlash: [0, 0, 0], evLabel: { text: '', n: 0 }, uid: 0 })
   const tokenEls = useRef(new Map<number, SVGGElement>()), trainEl = useRef<SVGRectElement>(null), since = useRef(0)
+  const disp = useRef(new Map<number, AtDisp>())
+  const reduceRef = useRef(reduce); reduceRef.current = reduce
+  const xyOf = (tk: WorkflowToken) => { const d = disp.current.get(tk.uid); return d ? atPoint(d.line, d.s) : atPoint(tk.line, atPos(tk.line, machines[tk.job.type].states[tk.state].at[1]) ?? 0) }
   // engine events → the short-lived marks on the map (sparks, fading tokens, hub flashes, the loop's event label)
   useEffect(() => eng.subscribe(ev => {
-    const F = fx.current, now = performance.now()
+    const F = fx.current, now = performance.now(), calm = reduceRef.current
     if (ev.kind === 'queued') {
-      if (ev.cause === 'intake') { const q = atPoint('research', AT_SP.research.Intake); F.sparks.push({ id: ++F.uid, x: q.x, y: q.y, text: ev.ev, t: now }) }
+      if (ev.cause === 'intake' && !calm) { const q = atPoint('research', AT_SP.research.Intake); F.sparks.push({ id: ++F.uid, x: q.x, y: q.y, text: ev.ev, t: now }) }
       else if (ev.cause !== 'emit') F.evLabel = { text: ev.ev, n: F.evLabel.n + 1 }
     } else if (ev.kind === 'enter') {
       const st = eng.machines[ev.job.type].states[ev.state], hi = st.orch ? AT_HUBS.findIndex(h => h[0] === st.at[1]) : -1
-      if (hi >= 0) F.hubFlash[hi]++
-    } else if (ev.kind === 'trigger' && ev.ev) {
-      const p = atXY(eng, ev.token); F.sparks.push({ id: ++F.uid, x: p.x, y: p.y, text: ev.ev, t: now })
+      if (hi >= 0 && !calm) F.hubFlash[hi]++
+    } else if (ev.kind === 'trigger' && ev.ev && !calm) {
+      const p = xyOf(ev.token); F.sparks.push({ id: ++F.uid, x: p.x, y: p.y, text: ev.ev, t: now })
     } else if (ev.kind === 'done') {
-      const p = atXY(eng, ev.token); F.fading.push({ id: ev.token.uid, x: p.x, y: p.y, line: ev.token.line, jid: ev.job.id, t: now, small: !!ev.token.parent })
+      const p = xyOf(ev.token); F.fading.push({ id: ev.token.uid, x: p.x, y: p.y, line: ev.token.line, jid: ev.job.id, t: now, small: !!ev.token.parent })
+      disp.current.delete(ev.token.uid)
     }
-  }), [eng])
+  }), [eng]) // eslint-disable-line react-hooks/exhaustive-deps
   useEffect(() => { // two events to start with, so the map is busy as soon as it is seen
     const t1 = setTimeout(() => eng.fire(), 400), t2 = setTimeout(() => eng.fire(), 2000)
     return () => { clearTimeout(t1); clearTimeout(t2) }
   }, [eng])
-  // every frame: step the engine and move the train and tokens straight in the DOM; React re-renders ~8×/s
+  // every frame: step the engine, then glide each token towards its place on the line and write its transform straight
+  // into the DOM (no React state); React re-renders about 8 times a second for counters, heat and panels
   useFrameLoop(visible && !eng.paused, dt => {
     eng.tick(dt)
-    trainEl.current?.setAttribute('transform', atTrainAt(eng.clock))
-    for (const j of eng.jobs) if (!j.done) for (const tk of j.tokens) tokenEls.current.get(tk.uid)?.setAttribute('transform', atTranslate(atXY(eng, tk)))
+    const calm = reduceRef.current
+    if (!calm) trainEl.current?.setAttribute('transform', atTrainAt(eng.clock))
+    const want = atLayout(eng, agents, calm), D = disp.current, v = (AT_SPEED * eng.speed * 2 + 60) * dt
+    for (const [uid, [line, s]] of want) {
+      let d = D.get(uid)
+      if (!d || calm) d = { line, s, tr: d?.tr ?? '' }
+      else {
+        if (d.line !== line) { const p = atPoint(d.line, d.s); d.line = line; d.s = atNear(line, [p.x, p.y]) } // changing lines at a shared station
+        const diff = s - d.s; d.s = Math.abs(diff) > 320 ? s : d.s + Math.max(-v, Math.min(v, diff))
+      }
+      const tr = atTranslate(atPoint(d.line, d.s))
+      if (tr !== d.tr) { d.tr = tr; tokenEls.current.get(uid)?.setAttribute('transform', tr) }
+      D.set(uid, d)
+    }
+    for (const uid of D.keys()) if (!want.has(uid)) D.delete(uid)
     if ((since.current += dt) >= 0.125) {
       since.current = 0
       const F = fx.current, now = performance.now()
@@ -458,16 +535,61 @@ export function AgentTransitMap({ machines = AGENT_WORKFLOWS, order = AGENT_WORK
   const tokens = eng.jobs.filter(j => !j.done).flatMap(j => j.tokens)
   const intakeType = eng.intake ? eng.typeOf(eng.intake) : undefined
   const chips = [...order, ...(intakeType && !order.includes(intakeType) ? [intakeType] : [])].filter(t => machines[t])
+  const placeOf = (tk: WorkflowToken) => disp.current.get(tk.uid)?.tr || atTranslate(xyOf(tk))
+  const stationXY = (line: string, stn: string) => atPoint(line, atPos(line, stn) ?? 0)
+
+  // congestion: tokens moving along, or queued at the end of, each segment of track
+  const heat: Record<string, number> = {}
+  for (const [k, n] of Object.entries(eng.occupancy())) {
+    const [line, from, to] = k.split('|'), a = atPos(line, from), b = atPos(line, to)
+    if (a === undefined || b === undefined) continue
+    const lo = Math.min(a, b) - 0.5, hi = Math.max(a, b) + 0.5
+    AT_SEGS.forEach(sg => { if (sg.line === line && sg.a >= lo && sg.b <= hi) heat[sg.key] = (heat[sg.key] ?? 0) + n })
+  }
+  // queue counters: one per agent with a queue, beside the head of its line-up, away from the station's label
+  const queueTags = Object.entries(eng.queues).filter(([, q]) => q.length).map(([stn, q]) => {
+    const tk = q[0], dir = atDirOf(tk), b = atPos(tk.line, stn) ?? 0, p = atPoint(tk.line, b - dir * AT_HEAD), r = p.a * Math.PI / 180
+    const lab = AT_ST.find(x => x[0] === stn), nx = -Math.sin(r), ny = Math.cos(r), sd = lab && nx * lab[3] + ny * lab[4] > 0 ? -1 : 1
+    return { stn, n: q.length, x: p.x + nx * sd * 24, y: p.y + ny * sd * 24 }
+  })
+  // approvals: grouped by station (a countdown ring on the station, cards anchored beside it)
+  const waitBy = new Map<string, WorkflowToken[]>()
+  eng.waiting.forEach(tk => { const k = narrow ? '*' : `${tk.line}|${machines[tk.job.type].states[tk.state].at[1]}`; waitBy.set(k, [...(waitBy.get(k) ?? []), tk]) })
+  const rings = [...new Map(eng.waiting.map(tk => [`${tk.line}|${machines[tk.job.type].states[tk.state].at[1]}`, tk])).keys()].map(k => {
+    const [line, stn] = k.split('|'), q = eng.waiting.filter(tk => tk.line === line && machines[tk.job.type].states[tk.state].at[1] === stn)
+    return { k, ...stationXY(line, stn), n: q.length, frac: Math.max(0, q[0].t / eng.hitlWait) }
+  })
+  const maxCards = narrow ? 1 : AT_CARDS // phones: one card over the map, the rest counted
+  const stageH = stageW * (AT_H / AT_W), cardW = narrow ? Math.min(AT_CARD_W, Math.max(200, stageW - 16)) : AT_CARD_W
+  const anchorOf = (k: string) => {
+    if (k === '*') return { left: 8, top: 8 }
+    const [line, stn] = k.split('|'), p = stationXY(line, stn), lab = AT_ST.find(x => x[0] === stn)
+    const past = lab && lab[3] > 0 ? lab[3] + stn.length * 8 + 14 : 30 // clear of the station's label when it sits to the right
+    return { left: Math.max(4, Math.min(((p.x + past) / AT_W) * stageW, stageW - cardW - 4)), top: Math.max(4, (p.y / AT_H) * stageH - 26) }
+  }
+  // trace: follow-up jobs link to the job whose finish triggered them; the followed job's chain lights up
+  const rowOf = new Map(eng.jobs.map((j, i) => [j.id, i]))
+  const chain = new Set<number>()
+  if (hover !== null) {
+    for (let id: number | undefined = hover; id !== undefined && !chain.has(id); id = eng.jobs.find(j => j.id === id)?.parent) chain.add(id)
+    const down = (id: number) => eng.jobs.forEach(j => { if (j.parent === id && !chain.has(j.id)) { chain.add(j.id); down(j.id) } }); down(hover)
+  }
+  const strip = { transform: `translateX(${((AT_WIN - eng.clock) / AT_WIN) * 100}%)` } // the trace window slides by transform, not layout
+  const tx = (t: number) => `${(t / AT_WIN) * 100}%`
 
   return (
     <div ref={host} className={cn('flex flex-col', className)}>
-      <div className="relative">
+      <div ref={stageRef} className="relative">
       <div ref={mapScrollRef} className={cn(narrow && '-mx-1 overflow-x-auto overscroll-x-contain rounded-[var(--r-md)] px-1 [contain:inline-size] [scrollbar-width:thin]')} tabIndex={narrow ? 0 : undefined} aria-label={narrow ? 'Transit map, scrolls sideways' : undefined}>
-      <svg viewBox={`0 0 ${AT_W} ${AT_H}`} role="img" aria-label="Transit map of agent teams" className={cn('block h-auto w-full', narrow && 'min-w-[680px]')}>
+      <svg viewBox={`0 0 ${AT_W} ${AT_H}`} role="img" aria-label="Transit map of agent teams" className={cn('block h-auto w-full', narrow && 'min-w-[760px]')}>
         {AT_ZONES.map(([x, y, w, h, l, pos]) => <g key={l}>
           <rect x={x} y={y} width={w} height={h} fill="var(--muted)" stroke="var(--line2)" strokeDasharray="5 4" />
           <text x={pos.includes('l') ? x + 14 : x + w - 14} y={pos.includes('t') ? y + 22 : y + h - 12} textAnchor={pos.includes('l') ? 'start' : 'end'} fill="var(--fg)" style={{ font: '500 12px var(--font)' }}>{l}</text>
         </g>)}
+        <g fill="none" strokeLinecap="round" strokeLinejoin="round" aria-hidden>
+          {AT_SEGS.map(sg => { const [c, o, w] = AT_HEAT[Math.min(3, heat[sg.key] ?? 0)]; return (
+            <path key={sg.key} d={sg.d} className="transition-[opacity,stroke-width,stroke] duration-500 motion-reduce:transition-none" style={{ stroke: c, opacity: lit(sg.line) ? o : o * 0.25, strokeWidth: w }} />) })}
+        </g>
         <g fill="none" strokeWidth={8} strokeLinejoin="round">
           {Object.entries(AT_PATH).map(([k, pts]) => <path key={k} d={'M' + pts.map(p => p.join(',')).join(' L')} stroke={AT_C(k)} className={dimCls(lit(k))} />)}
           <path d={`M${AT_LC[0] - AT_LR},${AT_LC[1]} A${AT_LR},${AT_LR} 0 1,1 ${AT_LC[0] + AT_LR},${AT_LC[1]} A${AT_LR},${AT_LR} 0 1,1 ${AT_LC[0] - AT_LR},${AT_LC[1]}`} stroke={AT_C('index')} className={dimCls(lit('index'))} />
@@ -484,6 +606,26 @@ export function AgentTransitMap({ machines = AGENT_WORKFLOWS, order = AGENT_WORK
           {AT_LOOPST.map(([n, , , , ang]) => { const a = ang * Math.PI / 180; return <line key={n} x1={AT_LC[0] + Math.cos(a) * AT_LR} y1={AT_LC[1] + Math.sin(a) * AT_LR} x2={AT_LC[0] + Math.cos(a) * (AT_LR + 10)} y2={AT_LC[1] + Math.sin(a) * (AT_LR + 10)} stroke={AT_C('index')} strokeWidth={3} className={dimCls(lit('index'))} /> })}
         </g>
         <rect ref={trainEl} x={-12} y={-4} width={24} height={8} rx={4} fill="var(--card)" stroke={AT_C('index')} strokeWidth={2} transform={atTrainAt(eng.clock)} className={dimCls(lit('index'))} />
+        {/* the global event queue, waiting for a job slot */}
+        <g transform={`translate(${AT_EQ[0]},${AT_EQ[1]})`} aria-label={`Event queue, ${eng.queue.length} waiting`}>
+          <rect width={AT_EQ_W} height={44 + AT_EQ_ROWS * AT_EQ_ROW + 46} rx={12} fill="var(--card)" stroke="var(--line2)" />
+          <text x={14} y={26} fill="var(--fg)" style={{ font: '600 15px var(--font)' }}>Event queue</text>
+          <text x={AT_EQ_W - 14} y={26} textAnchor="end" fill="var(--fg3)" style={{ font: '13px var(--mono)' }}>{eng.queue.length}/{eng.queueMax}</text>
+          <AnimatePresence initial={false}>
+            {eng.queue.slice(0, AT_EQ_ROWS).map((q, i) => (
+              <motion.g key={q.id} initial={{ opacity: 0, x: -10, y: 40 + i * AT_EQ_ROW }} animate={{ opacity: 1, x: 0, y: 40 + i * AT_EQ_ROW }} exit={{ opacity: 0, x: 10 }} transition={spring(0.25, 0.35)}>
+                <rect x={10} width={AT_EQ_W - 20} height={26} rx={13} fill="var(--muted)" stroke={i === 0 ? 'var(--fg3)' : 'none'} />
+                <circle cx={25} cy={13} r={4.5} fill={AT_C(q.from)} />
+                <text x={37} y={18} fill="var(--fg)" style={{ font: '14px var(--mono)' }}>{q.ev}</text>
+              </motion.g>))}
+          </AnimatePresence>
+          {!eng.queue.length && <text x={14} y={62} fill="var(--fg3)" style={{ font: '14px var(--font)' }}>empty</text>}
+          {eng.queue.length > AT_EQ_ROWS && <text x={AT_EQ_W - 14} y={40 + AT_EQ_ROWS * AT_EQ_ROW + 4} textAnchor="end" fill="var(--fg3)" style={{ font: '13px var(--font)' }}>+{eng.queue.length - AT_EQ_ROWS} more</text>}
+          <g transform={`translate(14,${44 + AT_EQ_ROWS * AT_EQ_ROW + 22})`}>
+            {Array.from({ length: eng.maxJobs }, (_, i) => <circle key={i} cx={6 + i * 15} cy={0} r={5} fill={i < tokens.filter(t => !t.parent).length ? 'var(--fg2)' : 'none'} stroke="var(--fg3)" strokeWidth={1.5} />)}
+            <text x={14 + eng.maxJobs * 15} y={5} fill="var(--fg2)" style={{ font: '14px var(--font)' }}>{eng.jobs.filter(j => !j.done).length}/{eng.maxJobs} jobs{eng.dropped ? ` · ${eng.dropped} dropped` : ''}</text>
+          </g>
+        </g>
         <g>
           {F.sparks.map(s => <g key={s.id}>
             <motion.circle cx={s.x} cy={s.y} fill="none" stroke="var(--accent)" strokeWidth={2} initial={{ r: 6, opacity: 1 }} animate={{ r: 26, opacity: 0 }} transition={{ duration: 0.9 }} />
@@ -497,12 +639,23 @@ export function AgentTransitMap({ machines = AGENT_WORKFLOWS, order = AGENT_WORK
             {F.hubFlash[i] > 0 && <motion.circle key={F.hubFlash[i]} cx={x} cy={y} r={7} fill="var(--bad)" style={{ transformBox: 'fill-box', transformOrigin: 'center' }} initial={{ opacity: 1, scale: 0.4 }} animate={{ opacity: [1, 1, 0], scale: [0.4, 1.2, 1] }} transition={{ duration: 1 }} />}
           </g>)}
         </g>
+        {/* stations waiting for a human: a countdown ring (and how many are waiting) */}
+        <g aria-hidden>
+          {rings.map(r => { const C = 2 * Math.PI * 17; return (
+            <g key={r.k} transform={atTranslate(r)}>
+              {!reduce && <motion.circle r={18} fill="none" stroke="var(--warn)" strokeWidth={2} initial={{ opacity: 0.6, scale: 1 }} animate={{ opacity: 0, scale: 1.6 }} transition={{ duration: 1.6, repeat: Infinity, ease: 'easeOut' }} />}
+              <circle r={17} fill="var(--card)" stroke="color-mix(in srgb, var(--warn) 25%, transparent)" strokeWidth={4} />
+              <circle r={17} fill="none" stroke="var(--warn)" strokeWidth={4} strokeLinecap="round" strokeDasharray={`${(r.frac * C).toFixed(1)} ${C.toFixed(1)}`} transform="rotate(-90)" />
+              {r.n > 1 && <g transform="translate(16,-16)"><circle r={9} fill="var(--warn)" /><text y={4} textAnchor="middle" fill="var(--card)" style={{ font: '700 11px var(--font)' }}>{r.n}</text></g>}
+            </g>) })}
+        </g>
         <g>
-          {tokens.map(tk => (
-            <g key={tk.uid} ref={el => { if (el) tokenEls.current.set(tk.uid, el); else tokenEls.current.delete(tk.uid) }} transform={atTranslate(atXY(eng, tk))} className={dimCls(!hj || hj === tk.job)}>
+          {tokens.map(tk => { const q = tk.phase === 'queue'; return (
+            <g key={tk.uid} ref={el => { if (el) tokenEls.current.set(tk.uid, el); else tokenEls.current.delete(tk.uid) }} transform={placeOf(tk)} className={dimCls(!hj || hj === tk.job)}>
+              {q && <circle r={tk.parent ? 11 : 13} fill="none" stroke="var(--fg3)" strokeWidth={1.5} strokeDasharray="3 2.5" />}
               <circle r={tk.parent ? 8 : 10} fill={AT_C(tk.line)} stroke="var(--card)" strokeWidth={2.5} />
               <text y={3.6} textAnchor="middle" fill="#fff" style={{ font: '700 10px var(--font)', pointerEvents: 'none' }}>{tk.job.id}</text>
-            </g>))}
+            </g>) })}
           {F.fading.map(f => <motion.g key={'f' + f.id} transform={atTranslate(f)} initial={{ opacity: 1 }} animate={{ opacity: 0 }} transition={{ duration: 0.8 }}>
             <circle r={f.small ? 8 : 10} fill={AT_C(f.line)} stroke="var(--card)" strokeWidth={2.5} /><text y={3.6} textAnchor="middle" fill="#fff" style={{ font: '700 10px var(--font)' }}>{f.jid}</text>
           </motion.g>)}
@@ -514,9 +667,43 @@ export function AgentTransitMap({ machines = AGENT_WORKFLOWS, order = AGENT_WORK
           {AT_HUBS.map(([n, [x, y], dx, dy, anc]) => <text key={n} x={x + dx} y={y + dy} textAnchor={anc} fill="var(--fg)" style={{ font: '600 15px var(--font)' }}>{n}</text>)}
           {F.evLabel.text && <motion.text key={F.evLabel.n} x={AT_LC[0]} y={AT_LC[1] + 5} textAnchor="middle" style={{ font: '600 11px var(--mono)' }} initial={{ opacity: 0 }} animate={{ opacity: [0, 1, 1, 0.35] }} transition={{ duration: 1.6 }}>{F.evLabel.text}</motion.text>}
         </g>
+        {/* queue counters beside each agent's line-up */}
+        <g aria-hidden>
+          {queueTags.map(t => { const w = 26 + String(t.n).length * 8; return (
+            <g key={t.stn} transform={atTranslate(t)}>
+              <rect x={-w / 2} y={-11} width={w} height={22} rx={11} fill="var(--card)" stroke="var(--warn)" strokeWidth={1.5} />
+              <text y={5} textAnchor="middle" fill="var(--fg)" style={{ font: '600 13px var(--font)' }}>+{t.n}</text>
+            </g>) })}
+        </g>
       </svg>
       </div>
       {narrow && <ScrollEdges {...mapEdges} hint="Swipe the map" />}
+      {/* approvals float over the map beside the waiting station (pinned top-left on phones); fixed-size cards stacked
+          by transform, so neither the page nor the other cards ever shift */}
+      <span className="sr-only" aria-live="polite">{eng.waiting.length ? `${eng.waiting.length} waiting for your approval` : ''}</span>
+      {stageW > 0 && [...waitBy].map(([k, q]) => { const a = anchorOf(k); return (
+        <div key={k} className="pointer-events-none absolute z-[2]" style={{ left: a.left, top: a.top, width: cardW }}>
+          <AnimatePresence initial={false}>
+            {q.slice(0, maxCards).map((tk, i) => { const st = machines[tk.job.type].states[tk.state], amount = Number(tk.job.data.amount) || 0, y = i * (AT_CARD_H + AT_CARD_GAP); return (
+              <motion.div key={tk.uid} role="group" aria-label={`${tk.job.name} needs your approval`} initial={{ opacity: 0, x: -8, y }} animate={{ opacity: 1, x: 0, y }} exit={{ opacity: 0, x: -8 }} transition={spring(0.25, 0.35)}
+                {...atFollow(tk.job.id, setHover, setPin)}
+                className={cn('pointer-events-auto absolute top-0 left-0 flex w-full flex-col justify-between overflow-hidden rounded-[var(--r-md)] border bg-[color-mix(in_srgb,var(--warn)_5%,var(--card))] px-2.5 py-2 text-[13px] shadow-[0_6px_20px_-8px_rgba(0,0,0,.28)]',
+                  hover === tk.job.id ? 'border-[var(--warn)]' : 'border-[color-mix(in_srgb,var(--warn)_45%,var(--line))]')} style={{ height: AT_CARD_H }}>
+                <div className="flex items-center gap-2">
+                  <span className={AT_JOB_DOT} style={{ background: `color-mix(in srgb, ${AT_C(tk.line)} 70%, #000)` }}>{tk.job.id}</span>
+                  <b className="min-w-0 flex-1 truncate font-medium">{tk.job.name}</b>
+                  <span className={cn('w-8 flex-none font-[family-name:var(--mono)] text-xs whitespace-pre', tk.t < 6 ? 'text-[var(--warn)]' : 'text-[var(--fg3)]')} title="Approved by policy when it runs out">{atPad(`${Math.ceil(tk.t)}s`, 3)}</span>
+                </div>
+                <div className="flex items-center gap-1.5 [@media(pointer:coarse)]:[&>button]:min-h-9">
+                  <span className="min-w-0 flex-1 truncate text-xs text-[var(--fg3)]">{st.label}{amount ? ` · CHF ${amount.toLocaleString(LOCALE)}` : ''}</span>
+                  <Button size="sm" onClick={() => { eng.resolve(tk, 'reject'); setHover(null); setPin(null); rerender() }}>Reject</Button>
+                  <Button size="sm" variant="primary" onClick={() => { eng.resolve(tk, 'approve'); setHover(null); setPin(null); rerender() }}>Approve</Button>
+                </div>
+              </motion.div>) })}
+            {q.length > maxCards && <motion.div key="more" initial={{ opacity: 0, y: maxCards * (AT_CARD_H + AT_CARD_GAP) }} animate={{ opacity: 1, y: maxCards * (AT_CARD_H + AT_CARD_GAP) }} exit={{ opacity: 0 }}
+              className="absolute top-0 left-0 rounded-full border border-[var(--line)] bg-[var(--card)] px-2.5 py-0.5 text-xs text-[var(--fg2)]">+{q.length - maxCards} more waiting</motion.div>}
+          </AnimatePresence>
+        </div>) })}
       </div>
 
       <div className="mt-1.5 mb-3 flex flex-wrap justify-center gap-x-5 gap-y-2 text-[13px] text-[var(--fg2)] max-sm:justify-start max-sm:gap-x-4">
@@ -524,6 +711,9 @@ export function AgentTransitMap({ machines = AGENT_WORKFLOWS, order = AGENT_WORK
         <span className="inline-flex items-center gap-2"><i className="inline-block h-2.5 w-2.5 rounded-full bg-[var(--bad)]" />Routing decision</span>
         <span className="inline-flex items-center gap-2"><i className="inline-block h-3 w-3 rounded-full bg-[var(--card)] shadow-[inset_0_0_0_2.5px_var(--fg)]" />Orchestrator</span>
         <span className="inline-flex items-center gap-2"><i className="inline-block h-3.5 w-3.5 rounded-full bg-[var(--fg2)]" />Job (numbered, matches the trace)</span>
+        <span className="inline-flex items-center gap-2"><i className="inline-block h-3.5 w-3.5 rounded-full bg-[var(--fg2)] outline-[1.5px] outline-offset-[1.5px] outline-[var(--fg3)] outline-dashed" />Queued for a busy agent</span>
+        <span className="inline-flex items-center gap-2"><i className="inline-block h-2.5 w-7 rounded-full bg-[linear-gradient(90deg,color-mix(in_srgb,var(--fg3)_35%,transparent),color-mix(in_srgb,var(--warn)_60%,transparent),color-mix(in_srgb,var(--bad)_65%,transparent))]" />Congestion</span>
+        <span className="inline-flex items-center gap-2"><i className="inline-block h-3.5 w-3.5 rounded-full shadow-[inset_0_0_0_3px_var(--warn)]" />Waiting for approval</span>
       </div>
 
       <div className="flex flex-wrap items-center gap-x-3 gap-y-2 pb-3 text-xs text-[var(--fg2)]">
@@ -539,70 +729,64 @@ export function AgentTransitMap({ machines = AGENT_WORKFLOWS, order = AGENT_WORK
           <Chip key={t} onClick={() => { eng.fire(t); rerender() }} className="!h-7 font-[family-name:var(--mono)] !text-[11px] !font-normal [@media(pointer:coarse)]:!h-9">{machines[t].event}</Chip>))}</span>
       </div>
 
-      <div className="flex min-h-[30px] flex-wrap items-center gap-1.5 pb-3 text-xs">
-        <span className="mr-1 text-[var(--fg2)]">Queue</span>
-        <AnimatePresence initial={false}>
-          {eng.queue.map(q => <motion.span key={q.id} layout initial={{ opacity: 0, scale: 0.8 }} animate={{ opacity: 1, scale: 1 }} exit={{ opacity: 0, scale: 0.8 }} transition={spring(0.4, 0.3)} title={`from ${q.from}`}
-            className="inline-flex h-6 items-center gap-1.5 rounded-full border border-[var(--line)] bg-[var(--card)] pr-2.5 pl-2 font-[family-name:var(--mono)] text-[11px]"><i className="h-2 w-2 rounded-full" style={{ background: AT_C(q.from) }} />{q.ev}</motion.span>)}
-        </AnimatePresence>
-        {!eng.queue.length && <span className="text-[var(--fg3)]">empty</span>}
-        {eng.dropped > 0 && <span className="text-[var(--fg3)]">{eng.dropped} dropped</span>}
-      </div>
-
-      <Collapse open={eng.waiting.length > 0}>
-        <div className="mb-3 flex flex-col gap-1.5 rounded-[var(--r-lg)] border border-[color-mix(in_srgb,var(--warn)_40%,var(--line))] bg-[color-mix(in_srgb,var(--warn)_6%,var(--card))] p-2.5">
-          <div className="flex items-baseline gap-2 px-1 text-[13px]" aria-live="polite"><b className="font-semibold">Needs your approval</b><span className="text-xs text-[var(--fg3)]">{eng.waiting.length} waiting · auto-approves after {AT_HITL_TIMEOUT}s</span></div>
-          <AnimatePresence initial={false}>
-            {eng.waiting.map(tk => { const st = machines[tk.job.type].states[tk.state], amount = Number(tk.job.data.amount) || 0; return (
-              <motion.div key={tk.uid} layout initial={{ opacity: 0, y: -6 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0, height: 0 }} transition={spring(0.3, 0.35)}
-                {...atFollow(tk.job.id, setHover, setPin)}
-                className={cn('flex flex-wrap items-center gap-x-2.5 gap-y-1.5 rounded-[var(--r-md)] border bg-[var(--card)] py-1.5 pr-1.5 pl-2.5 text-[13px] [@media(pointer:coarse)]:[&>button]:min-h-9', hover === tk.job.id ? 'border-[var(--fg3)]' : 'border-[var(--line)]')}>
-                <span className={AT_JOB_DOT} style={{ background: `color-mix(in srgb, ${AT_C(tk.line)} 70%, #000)` }}>{tk.job.id}</span>
-                <div className="flex min-w-0 flex-1 basis-[140px] flex-col"><b className="truncate font-medium">{tk.job.name}</b><span className="truncate text-xs text-[var(--fg3)]">{st.label}{amount ? ` · CHF ${amount.toLocaleString(LOCALE)}` : ''}</span></div>
-                <span className={cn('ui-num text-xs', tk.t < 6 ? 'text-[var(--warn)]' : 'text-[var(--fg3)]')}>{Math.ceil(tk.t)}s</span>
-                <Button size="sm" className="max-sm:ml-auto" onClick={() => { eng.resolve(tk, 'reject'); setHover(null); setPin(null); rerender() }}>Reject</Button>
-                <Button size="sm" variant="primary" onClick={() => { eng.resolve(tk, 'approve'); setHover(null); setPin(null); rerender() }}>Approve</Button>
-              </motion.div>) })}
-          </AnimatePresence>
-        </div>
-      </Collapse>
-
       <div className="relative border-t border-[var(--line)]">
       <div ref={traceScrollRef} className="overflow-x-auto overscroll-x-contain [contain:inline-size]" tabIndex={narrow ? 0 : undefined} aria-label={narrow ? 'Trace table, scrolls sideways' : undefined}>
         <div className="min-w-[640px]">
-          <div className="grid h-9 grid-cols-[minmax(150px,26%)_1fr_64px_64px_72px] items-center gap-3 border-b border-[var(--line)] text-xs text-[var(--fg3)]">
+          <div className={cn('grid h-9 items-center border-b border-[var(--line)] text-xs text-[var(--fg3)]', AT_TRACE_COLS)}>
             <span className="sticky left-0 z-[1] bg-[var(--card)] text-sm font-semibold text-[var(--fg)]">Trace</span>
             <span className="relative h-full font-[family-name:var(--mono)] text-[11px]"><span className="absolute top-2.5 left-0">−{AT_WIN}s</span><span className="absolute top-2.5 left-1/2 -translate-x-1/2">−{AT_WIN / 2}s</span><span className="absolute top-2.5 right-0">now</span></span>
             <span className="text-right font-[family-name:var(--mono)]">time</span><span className="text-right font-[family-name:var(--mono)]">tokens</span><span className="text-right font-[family-name:var(--mono)]">USD</span>
           </div>
-          <div className="min-h-[42px]">
-            {/* rows only fade in and out (no layout animation): they re-render 8 times a second */}
-            <AnimatePresence initial={false}>
-              {eng.jobs.map(j => {
-                const t0 = eng.clock - AT_WIN
-                const cur = j.done ? (j.rejected ? 'rejected' : 'done') : j.tokens.length > 1 ? `${j.tokens.length - 1} in review` : (machines[j.type].states[j.state]?.label ?? j.state)
-                return (
-                  <motion.div key={j.id} initial={{ opacity: 0, y: -6 }} animate={{ opacity: j.done ? 0.6 : 1, y: 0 }} exit={{ opacity: 0 }} transition={spring(0.25, 0.35)}
-                    {...atFollow(j.id, setHover, setPin)}
-                    className={cn('grid h-[42px] cursor-pointer grid-cols-[minmax(150px,26%)_1fr_64px_64px_72px] items-center gap-3 border-b border-[var(--line)] text-[13px] hover:bg-[color-mix(in_srgb,var(--muted)_60%,transparent)]', hover === j.id && 'bg-[color-mix(in_srgb,var(--muted)_60%,transparent)]')}>
-                    <div className="sticky left-0 z-[1] flex min-w-0 items-center gap-2 bg-[var(--card)] whitespace-nowrap max-sm:shadow-[6px_0_6px_-6px_rgba(0,0,0,.25)]">
-                      <button type="button" aria-pressed={pin === j.id} aria-label={`Follow job ${j.id}, ${j.name}, on the map`} onClick={() => setPin(p => p === j.id ? null : j.id)}
-                        className={cn(AT_JOB_DOT, TOUCH.hit, 'cursor-pointer border-0 transition-[background] duration-300 [text-shadow:0_0_2px_rgba(0,0,0,.55)]')} style={{ background: `color-mix(in srgb, ${AT_C(j.tokens[0]?.line ?? 'memory')} 70%, #000)` }}>{j.id}</button>
-                      <span className="min-w-0 truncate">{j.name}</span>
-                      <span className={cn('min-w-0 truncate text-[11px]', j.done ? 'text-[var(--ok)]' : 'text-[var(--fg3)]')}>{cur}</span>
-                    </div>
-                    <div className="relative h-3.5">
-                      {j.segs.filter(s => (s.t1 ?? eng.clock) > t0).map((s, k) => { const a = Math.max(s.t0, t0), b = s.t1 ?? eng.clock, c = AT_C(s.line); return (
-                        <span key={k} title={s.label} className={cn('absolute rounded', s.sub ? 'top-[3px] h-2 opacity-80' : 'top-0 h-3.5', s.kind === 'move' && 'opacity-45', s.kind === 'wait' && 'opacity-90')}
-                          style={{ left: `${((a - t0) / AT_WIN) * 100}%`, width: `${Math.max(0.3, ((b - a) / AT_WIN) * 100)}%`, background: s.kind === 'wait' ? `repeating-linear-gradient(135deg, ${c} 0 3px, transparent 3px 7px)` : c }} />) })}
-                    </div>
-                    <span className="text-right font-[family-name:var(--mono)] text-xs">{((j.t1 ?? eng.clock) - j.t0).toFixed(1)}s</span>
-                    <span className="text-right font-[family-name:var(--mono)] text-xs">{(j.usage.tokens / 1000).toFixed(1)}k</span>
-                    <span className="text-right font-[family-name:var(--mono)] text-xs">{fmt.usd(j.usage.usd)}</span>
-                  </motion.div>
-                )
-              })}
-            </AnimatePresence>
+          {/* a fixed-height list: rows sit at translateY(index), the window slides by transform, numbers keep a fixed width */}
+          <div className="relative overflow-y-auto overscroll-y-contain" style={{ height: AT_ROWS * AT_ROW_H }}>
+            <div className="relative" style={{ height: Math.max(AT_ROWS, eng.jobs.length) * AT_ROW_H }}>
+              {!eng.jobs.length && <span className="absolute top-3 left-0 text-xs text-[var(--fg3)]">Jobs appear here as they start.</span>}
+              {/* follow-up connectors: from the triggering job at the moment it emitted, to the follow-up job's start */}
+              <div aria-hidden className={cn('pointer-events-none absolute inset-0 grid', AT_TRACE_COLS)}>
+                <span />
+                <div className="relative overflow-x-clip">
+                  <div className="absolute inset-0" style={strip}>
+                    {eng.jobs.map(j => {
+                      const pi = j.parent === undefined ? undefined : rowOf.get(j.parent), ci = rowOf.get(j.id)!
+                      if (pi === undefined) return null
+                      const te = j.queuedAt ?? j.t0, up = ci < pi, yp = pi * AT_ROW_H + AT_ROW_H / 2 + (up ? -7 : 7), yc = ci * AT_ROW_H + AT_ROW_H / 2
+                      const on = chain.has(j.id) && chain.has(j.parent!), col = on ? 'border-[var(--fg2)]' : 'border-[color-mix(in_srgb,var(--fg3)_55%,transparent)]'
+                      return <Fragment key={j.id}>
+                        <span className={cn('absolute w-0 border-l transition-colors duration-200', col)} style={{ left: tx(te), top: 0, height: Math.abs(yc - yp), transform: `translateY(${Math.min(yp, yc)}px)` }} />
+                        <span className={cn('absolute h-0 border-t transition-colors duration-200', col, j.t0 - te > 0.3 && 'border-dashed')} style={{ left: tx(te), top: 0, width: `calc(${tx(Math.max(0, j.t0 - te))} + 3px)`, transform: `translateY(${yc}px)` }} />
+                      </Fragment>
+                    })}
+                  </div>
+                </div>
+              </div>
+              <AnimatePresence initial={false}>
+                {eng.jobs.map((j, i) => {
+                  const cur = j.done ? (j.rejected ? 'rejected' : 'done') : j.tokens.length > 1 ? `${j.tokens.length - 1} in review` : j.tokens[0]?.phase === 'queue' ? `waiting for ${machines[j.type].states[j.tokens[0].next!]?.at[1]}` : (machines[j.type].states[j.state]?.label ?? j.state)
+                  return (
+                    <motion.div key={j.id} initial={{ opacity: 0 }} animate={{ opacity: j.done ? 0.6 : 1 }} exit={{ opacity: 0 }} transition={{ duration: 0.25 }}
+                      {...atFollow(j.id, setHover, setPin)} style={{ transform: `translateY(${i * AT_ROW_H}px)`, height: AT_ROW_H }}
+                      className={cn('absolute inset-x-0 top-0 grid cursor-pointer items-center border-b border-[var(--line)] text-[13px] hover:bg-[color-mix(in_srgb,var(--muted)_60%,transparent)]', AT_TRACE_COLS, hover === j.id && 'bg-[color-mix(in_srgb,var(--muted)_60%,transparent)]')}>
+                      <div className="sticky left-0 z-[1] flex min-w-0 items-center gap-2 bg-[var(--card)] whitespace-nowrap max-sm:shadow-[6px_0_6px_-6px_rgba(0,0,0,.25)]">
+                        <button type="button" aria-pressed={pin === j.id} aria-label={`Follow job ${j.id}, ${j.name}, on the map`} onClick={() => setPin(p => p === j.id ? null : j.id)}
+                          className={cn(AT_JOB_DOT, TOUCH.hit, 'cursor-pointer border-0 transition-[background] duration-300 [text-shadow:0_0_2px_rgba(0,0,0,.55)]')} style={{ background: `color-mix(in srgb, ${AT_C(j.tokens[0]?.line ?? 'memory')} 70%, #000)` }}>{j.id}</button>
+                        <span className="max-w-[62%] flex-none truncate">{j.name}</span>
+                        <span className={cn('min-w-0 flex-1 truncate text-[11px]', j.done ? 'text-[var(--ok)]' : 'text-[var(--fg3)]')}>{cur}</span>
+                      </div>
+                      <div className="relative h-3.5 overflow-x-clip">
+                        <div className="absolute inset-0" style={strip}>
+                          {j.segs.map((s, k) => { const b = s.t1 ?? eng.clock; if (b < eng.clock - AT_WIN) return null; const c = AT_C(s.line); return (
+                            <span key={k} title={s.label} className={cn('absolute rounded', s.sub ? 'top-[3px] h-2 opacity-80' : 'top-0 h-3.5', s.kind === 'move' && 'opacity-45', s.kind === 'wait' && 'opacity-90')}
+                              style={{ left: tx(s.t0), width: `max(1px, ${tx(b - s.t0)})`, background: s.kind === 'wait' ? `repeating-linear-gradient(135deg, ${c} 0 3px, transparent 3px 7px)` : c }} />) })}
+                        </div>
+                      </div>
+                      <span className="text-right font-[family-name:var(--mono)] text-xs whitespace-pre">{atPad(`${((j.t1 ?? eng.clock) - j.t0).toFixed(1)}s`, 6)}</span>
+                      <span className="text-right font-[family-name:var(--mono)] text-xs whitespace-pre">{atPad(`${(j.usage.tokens / 1000).toFixed(1)}k`, 6)}</span>
+                      <span className="text-right font-[family-name:var(--mono)] text-xs whitespace-pre">{atPad(fmt.usd(j.usage.usd), 8)}</span>
+                    </motion.div>
+                  )
+                })}
+              </AnimatePresence>
+            </div>
           </div>
         </div>
       </div>

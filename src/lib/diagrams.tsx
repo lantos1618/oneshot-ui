@@ -47,7 +47,8 @@ const GANTT_CELL = { 1: 'bg-[color-mix(in_srgb,var(--ok)_22%,transparent)] text-
 /**
  * Project plan. Phases collapse; drag a bar to move it, drag its right edge (or Shift + arrow keys) to change its
  * duration, snapping to days. Dependants reschedule, and Links, Critical path, Baseline and Workload overlays toggle.
- * Tasks with duration 0 are milestones; `milestone` (default: the last one) anchors the critical path.
+ * Tasks with duration 0 are milestones; `milestone` (default: the last one) anchors the critical path. Thin connectors
+ * drop from each phase bar to its tasks' starts (brighter for the task under the pointer).
  * On touch: tap a bar for its details and links, long-press it to move it, or drag the grip on its right edge to
  * resize, so swipes over the chart still scroll. Narrow screens scroll the timeline inside the card, task names pinned.
  */
@@ -96,9 +97,9 @@ export function Gantt({ phases, dependencies, start, days = 42, today, people = 
   }
 
   // row geometry for the arrows (phase rows, then their tasks while open)
-  const rowY: Record<string, number> = {}
+  const rowY: Record<string, number> = {}, phaseY: Record<string, number> = {}
   let r = 0
-  phases.forEach(p => { r++; if (open[p.id]) p.tasks.forEach(t => { rowY[t.id] = r * GANTT_ROW; r++ }) })
+  phases.forEach(p => { phaseY[p.id] = r * GANTT_ROW; r++; if (open[p.id]) p.tasks.forEach(t => { rowY[t.id] = r * GANTT_ROW; r++ }) })
   const bodyH = r * GANTT_ROW
   const X = (d: number) => (d / days) * laneW
   const barMid = (id: string) => rowY[id] + (byId[id].duration === 0 ? 20 : view.bl ? 17 : 19)
@@ -114,6 +115,11 @@ export function Gantt({ phases, dependencies, start, days = 42, today, people = 
     return { key: `${a}-${b}`, d, isCrit, shown }
   })
 
+  // phase → task connectors: down from the phase bar at the task's start, then a short tick into the task bar
+  const spawns = phases.filter(p => open[p.id]).flatMap(p => p.tasks.map(t => {
+    const ms = t.duration === 0, x = X(sched[t.id].s) - (ms ? 9 : 0) - 6, y1 = phaseY[p.id] + 24, y2 = barMid(t.id)
+    return { key: t.id, on: hover === t.id, d: `M${x},${y1} V${y2 - 4} Q${x},${y2} ${x + 4},${y2} H${x + 7}` }
+  }))
   const owners = [...new Set(tasks.map(t => t.owner))]
   const late = final ? ganttEnd(sched[final]) - (byId[final].start + byId[final].duration) : 0
   const tipFor = (id: string) => {
@@ -215,6 +221,13 @@ export function Gantt({ phases, dependencies, start, days = 42, today, people = 
           </div>
         </div>
         <div className="relative" onPointerLeave={onMouseLeave(() => { hide(); setHover(null) })}>
+          {/* under the rows, so bars and pinned names paint over them */}
+          {laneW > 0 && (
+            <svg width={laneW} height={bodyH} className="pointer-events-none absolute top-0 left-[var(--gs)] overflow-visible" aria-hidden>
+              {spawns.map(c => <motion.path key={c.key} initial={false} animate={{ d: c.d }} transition={dragId ? { duration: 0 } : spring(0.1, 0.35)} fill="none" strokeWidth={1}
+                className={cn('transition-[stroke] duration-200', c.on ? 'stroke-[color-mix(in_srgb,var(--accent)_75%,var(--fg2))]' : 'stroke-[color-mix(in_srgb,var(--fg3)_50%,transparent)]')} />)}
+            </svg>
+          )}
           {phases.map(p => {
             const ts = p.tasks.map(t => ({ ...sched[t.id], t }))
             const s = minOf(ts.map(x => x.s)), e = maxOf(ts.map(ganttEnd)), tot = ts.reduce((a, x) => a + x.d, 0) || 1
@@ -676,6 +689,8 @@ export type WorkflowJob = {
   lines: Set<string>
   /** what it did, in order (work, waits and moves) on the engine clock; the open one has t1 null */
   segs: WorkflowSegment[]
+  /** the job whose finish emitted this job's trigger event (follow-up jobs), and when that event was queued */
+  parent?: number; queuedAt?: number
 }
 /** A stretch of a job's timeline: an agent working, a wait (orchestrator, queue, human) or a move along a line. */
 export type WorkflowSegment = { kind: 'work' | 'wait' | 'move'; label: string; line: string; t0: number; t1: number | null; /** from a forked branch */ sub: boolean }
@@ -686,6 +701,8 @@ export type WorkflowToken = {
   /** seconds left in this phase */
   t: number
   move: { from: string; to: string; dur: number } | null
+  /** the latest move, kept after arrival (which way a token queued at a busy agent came in) */
+  last: { from: string; to: string } | null
   next?: string; kids: number; cb?: (() => void) | null; seg: WorkflowSegment | null
 }
 export type WorkflowState = {
@@ -712,8 +729,8 @@ export type WorkflowMachine = {
   init?: (seq: number) => Record<string, number | boolean>
   title?: (job: WorkflowJob) => string
 }
-/** A queued trigger event; `from` is the line it came from (for colour). */
-export type WorkflowQueued = { id: number; ev: string; from: string }
+/** A queued trigger event; `from` is the line it came from (for colour), `t` when it was queued, `parent` the job that emitted it. */
+export type WorkflowQueued = { id: number; ev: string; from: string; t: number; parent?: number }
 export type WorkflowEvent =
   | { kind: 'spawn' | 'enter' | 'move' | 'guard' | 'join' | 'done' | 'trigger' | 'hitl' | 'hitl-done'; job: WorkflowJob; token: WorkflowToken; state: string; to?: string; guard?: string; result?: string; ev?: string }
   /** an event joined the queue: fired by hand, by the lap timer, by the intake timer, or emitted by a finished job */
@@ -741,7 +758,8 @@ export type WorkflowEngineOptions = {
 
 /**
  * Token-based workflow engine. Events queue until a job slot frees up; each job walks its machine's states,
- * agents (stations with `work`) hold one token at a time, guards pick the next state, forks split into
+ * agents (stations with `work`) hold one token at a time and tokens that arrive while one is busy wait in that
+ * station's `queues` list (first come, first served), guards pick the next state, forks split into
  * branch tokens that join back, and human-in-the-loop states wait in `waiting` until resolve() or a timeout.
  * Every job keeps a segment timeline and usage meters. Drive it with tick(seconds) (from useFrameLoop);
  * subscribe() to every transition. StateMachine and AgentTransitMap both run on it.
@@ -751,6 +769,8 @@ export class WorkflowEngine {
   jobs: WorkflowJob[] = []; queue: WorkflowQueued[] = []; busy: Record<string, WorkflowToken> = {}
   /** tokens waiting for a human, oldest first */
   waiting: WorkflowToken[] = []
+  /** tokens that reached a busy agent and wait to enter it, by station, oldest first */
+  queues: Record<string, WorkflowToken[]> = {}
   maxJobs: number; speed: number; paused = false; hitl = true; hitlWait: number; queueMax: number
   /** simulated seconds since the engine started (stops while paused) */
   clock = 0
@@ -774,9 +794,18 @@ export class WorkflowEngine {
   typeOf(ev: string) { return Object.keys(this.machines).find(k => this.machines[k].event === ev) }
   /** How far a moving token is along its move, 0…1 (1 when it isn't moving). */
   progress(tk: WorkflowToken) { return tk.move && tk.move.dur > 0 ? clamp(1 - tk.t / tk.move.dur, 0, 1) : 1 }
-  private enqueue(ev: string, from: string, cause: 'fire' | 'lap' | 'intake' | 'emit') {
+  /** Tokens on each travelled edge right now, keyed `line|from|to`: moving along it, or queued at a busy agent at its end. */
+  occupancy() {
+    const o: Record<string, number> = {}
+    for (const j of this.jobs) if (!j.done) for (const tk of j.tokens) {
+      const m = tk.move ?? (tk.phase === 'queue' ? tk.last : null)
+      if (m) { const k = `${tk.line}|${m.from}|${m.to}`; o[k] = (o[k] ?? 0) + 1 }
+    }
+    return o
+  }
+  private enqueue(ev: string, from: string, cause: 'fire' | 'lap' | 'intake' | 'emit', parent?: number) {
     if (this.queue.length >= this.queueMax) { this.queue.shift(); this.dropped++ }
-    this.queue.push({ id: ++this.uid, ev, from }); this.emit({ kind: 'queued', ev, from, cause })
+    this.queue.push({ id: ++this.uid, ev, from, t: this.clock, parent }); this.emit({ kind: 'queued', ev, from, cause })
   }
   /** Queue the trigger event of a machine (defaults to the next one in `order`). */
   fire(type?: string, cause: 'fire' | 'lap' = 'fire') {
@@ -786,7 +815,7 @@ export class WorkflowEngine {
   private slots() { return this.maxJobs - this.jobs.filter(j => !j.done).length }
   private st(tk: WorkflowToken, s = tk.state) { return this.machines[tk.job.type].states[s] }
   private token(job: WorkflowJob, state: string, parent: WorkflowToken | null): WorkflowToken {
-    return { uid: ++this.uid, job, state, parent, line: this.machines[job.type].states[state].at[0], phase: 'route', t: 0, move: null, kids: 0, seg: null }
+    return { uid: ++this.uid, job, state, parent, line: this.machines[job.type].states[state].at[0], phase: 'route', t: 0, move: null, last: null, kids: 0, seg: null }
   }
   private seg(tk: WorkflowToken, kind: WorkflowSegment['kind'], label: string) {
     const last = tk.seg
@@ -795,9 +824,9 @@ export class WorkflowEngine {
     tk.seg = { kind, label, line: tk.line, t0: this.clock, t1: null, sub: !!tk.parent }; tk.job.segs.push(tk.seg)
   }
   private closeSeg(tk: WorkflowToken) { if (tk.seg) { tk.seg.t1 = this.clock; tk.seg = null } }
-  private spawn(type: string) {
+  private spawn(type: string, q?: WorkflowQueued) {
     const m = this.machines[type], seq = ++this.seq, line = m.states[m.start].at[0]
-    const job: WorkflowJob = { id: seq, type, name: m.name, data: { attempt: 0, ...m.init?.(seq) }, done: false, tokens: [], state: m.start, t0: this.clock, usage: { tokens: 0, usd: 0 }, lines: new Set([line]), segs: [] }
+    const job: WorkflowJob = { id: seq, type, name: m.name, data: { attempt: 0, ...m.init?.(seq) }, done: false, tokens: [], state: m.start, t0: this.clock, usage: { tokens: 0, usd: 0 }, lines: new Set([line]), segs: [], parent: q?.parent, queuedAt: q?.t }
     if (m.title) job.name = m.title(job)
     const tk = this.token(job, m.start, null)
     job.tokens.push(tk); this.jobs.unshift(job)
@@ -815,7 +844,7 @@ export class WorkflowEngine {
   private free(tk: WorkflowToken) { const st = this.st(tk); if (st.work && this.busy[st.at[1]] === tk) delete this.busy[st.at[1]] }
   private travel(tk: WorkflowToken, line: string, from: string, to: string, toState: string, cb: () => void) {
     const dur = Math.max(0, this.travelTime(line, from, to))
-    tk.phase = 'move'; tk.line = line; tk.t = dur; tk.move = { from, to, dur }; tk.cb = cb
+    tk.phase = 'move'; tk.line = line; tk.t = dur; tk.move = { from, to, dur }; tk.last = { from, to }; tk.cb = cb
     this.seg(tk, 'move', `${line.charAt(0).toUpperCase()}${line.slice(1)} line`)
     this.emit({ kind: 'move', job: tk.job, token: tk, state: tk.state, to: toState })
   }
@@ -840,12 +869,20 @@ export class WorkflowEngine {
     this.go(tk, nx)
   }
   private go(tk: WorkflowToken, state: string) {
-    const st = this.st(tk, state); tk.next = state
-    if (st.work && this.busy[st.at[1]] && this.busy[st.at[1]] !== tk) { tk.phase = 'queue'; this.seg(tk, 'wait', `Waiting for ${st.at[1]}`); return }
-    if (st.work) this.busy[st.at[1]] = tk
-    const cur = this.st(tk); this.free(tk)
+    const st = this.st(tk, state), cur = this.st(tk); tk.next = state
+    this.free(tk)
     tk.job.lines.add(st.at[0])
-    this.travel(tk, st.at[0], cur.at[1], st.at[1], state, () => this.enter(tk, state))
+    this.travel(tk, st.at[0], cur.at[1], st.at[1], state, () => this.arrive(tk, state))
+  }
+  /** At an agent: take it if it is free and nobody is ahead, else join its queue. */
+  private arrive(tk: WorkflowToken, state: string) {
+    const st = this.st(tk, state), stn = st.at[1]
+    if (st.work) {
+      const q = (this.queues[stn] ??= [])
+      if (q.length || (this.busy[stn] && this.busy[stn] !== tk)) { tk.phase = 'queue'; q.push(tk); this.seg(tk, 'wait', `Waiting for ${stn}`); return }
+      this.busy[stn] = tk
+    }
+    this.enter(tk, state)
   }
   private finish(tk: WorkflowToken) {
     const j = tk.job; this.free(tk); this.closeSeg(tk)
@@ -853,7 +890,7 @@ export class WorkflowEngine {
     j.done = true; j.t1 = this.clock; j.state = 'done'
     this.emit({ kind: 'done', job: j, token: tk, state: 'done' })
     const ev = j.rejected ? null : this.machines[j.type].emits?.(j)
-    if (ev) { this.emit({ kind: 'trigger', job: j, token: tk, state: 'done', ev }); this.enqueue(ev, tk.line, 'emit') }
+    if (ev) { this.emit({ kind: 'trigger', job: j, token: tk, state: 'done', ev }); this.enqueue(ev, tk.line, 'emit', j.id) }
   }
   /** Answer a token in `waiting`: approve, reject (the job ends and emits nothing) or 'timeout' (approved by policy). */
   resolve(tk: WorkflowToken, how: 'approve' | 'reject' | 'timeout') {
@@ -877,7 +914,7 @@ export class WorkflowEngine {
       if (this.intakeT <= 0) this.intakeT = 9 + Math.random() * 6
       if (t) this.enqueue(this.intake, this.source(t), 'intake')
     }
-    while (this.queue.length && this.slots() > 0) { const t = this.typeOf(this.queue.shift()!.ev); if (t) this.spawn(t) }
+    while (this.queue.length && this.slots() > 0) { const q = this.queue.shift()!, t = this.typeOf(q.ev); if (t) this.spawn(t, q) }
     this.jobs.forEach(j => {
       if (j.done) return
       j.tokens.slice().forEach(tk => {
@@ -887,7 +924,10 @@ export class WorkflowEngine {
           if (tk.phase === 'work') { j.usage.tokens += this.meter.tokens * dt; j.usage.usd += this.meter.usd * dt }
           if (tk.t <= 0) this.decide(tk)
         }
-        else if (tk.phase === 'queue') { const st = this.st(tk, tk.next); if (!this.busy[st.at[1]]) this.go(tk, tk.next!) }
+        else if (tk.phase === 'queue') {
+          const stn = this.st(tk, tk.next).at[1], q = this.queues[stn]
+          if (!this.busy[stn] && q?.[0] === tk) { q.shift(); this.busy[stn] = tk; this.enter(tk, tk.next!) }
+        }
         else if (tk.phase === 'hitl') { tk.t -= dt; if (tk.t <= 0) this.resolve(tk, 'timeout') }
       })
     })
@@ -1011,7 +1051,7 @@ export function StateMachine({ machines = AGENT_WORKFLOWS, order, defaultValue, 
     force()
   }), [engine, type, reduce, machines])
   const counts: Record<string, number> = {}
-  engine.jobs.filter(j => j.type === type && !j.done).forEach(j => j.tokens.forEach(t => { counts[t.state] = (counts[t.state] ?? 0) + 1 }))
+  engine.jobs.filter(j => j.type === type && !j.done).forEach(j => j.tokens.forEach(t => { const k = t.phase === 'queue' && t.next ? t.next : t.state; counts[k] = (counts[k] ?? 0) + 1 }))
   const nodes: StatechartNode[] = Object.entries(L.pos).map(([k, [x, y]]) => {
     if (k === 'done') return { id: k, kind: 'end', x, y }
     const st = m.states[k]
@@ -1058,12 +1098,17 @@ const TRACE_BAR = {
   agent: 'bg-[color-mix(in_srgb,var(--fg3)_16%,var(--card))] shadow-[inset_0_0_0_1px_color-mix(in_srgb,var(--fg3)_40%,transparent)]',
 } as const
 const TRACE_ICON = { llm: 'text-[var(--accent)]', tool: 'text-[color-mix(in_srgb,var(--c4)_80%,var(--fg))]', agent: 'text-[var(--fg2)]' } as const
+/** Spawn connector colours: thin and quiet, brighter along the hovered span's chain. */
+const TRACE_WIRE = 'border-[color-mix(in_srgb,var(--fg3)_50%,transparent)]', TRACE_WIRE_ON = 'border-[color-mix(in_srgb,var(--accent)_75%,var(--fg2))]'
+type TraceWire = { c: TraceSpan; part: 'stub' | 'through' | 'elbow' }
 
 /**
  * Nested spans on one streaming timeline (agent runs, API requests, jobs). Plays when scrolled into view:
  * bars grow with a cursor, the stat strip rolls (duration, cost, tokens, calls, errors) and a Live badge
  * settles to Complete. Groups collapse. `failure` lets Simulate failure fail a span part-way and reveal its retry.
- * Hover or tap a span for its numbers. On phones the timeline scrolls sideways with the span names pinned.
+ * Spawn connectors run from each parent bar, at the moment a child starts, down to that child's bar; hovering or
+ * tapping a span highlights its chain back to the root. Hover or tap a span for its numbers. On phones the timeline
+ * scrolls sideways with the span names pinned.
  */
 export function TraceWaterfall({ spans, total, title = 'Trace', subtitle, failure, speed = 1.2, className }:
   { spans: TraceSpan[]; total: number; title?: ReactNode; subtitle?: ReactNode
@@ -1079,7 +1124,9 @@ export function TraceWaterfall({ spans, total, title = 'Trace', subtitle, failur
   const [laneRef, laneW] = useWidth<HTMLDivElement>()
   const [scrollRef, scroll] = useScrollEdges<HTMLDivElement>()
   const { tip, show, hide } = usePointerTooltip()
+  const [hot, setHot] = useState<string | null>(null)
   const kids = (id: string | null) => spans.filter(s => (s.parent ?? null) === id && (fail || s.id !== failure?.retry))
+  const root0 = () => spans.find(s => !s.parent)
   const depth = (s: TraceSpan): number => s.parent ? 1 + depth(spans.find(x => x.id === s.parent)!) : 0
   const slowest = spans.filter(s => s.kind === 'tool' && s.id !== failure?.retry).sort((a, b) => b.duration - a.duration)[0]
   const D = (s: TraceSpan) => fail && s.id === failure?.span ? failure.at : s.duration
@@ -1106,12 +1153,29 @@ export function TraceWaterfall({ spans, total, title = 'Trace', subtitle, failur
   const pct = (t: number) => `${(t / total) * 100}%`
   const ticks = Array.from({ length: Math.floor(total / 10) + 1 }, (_, i) => i * 10)
 
+  // spawn connectors, drawn row by row so they follow Collapse, scrolling and streaming for free: the parent row
+  // holds a stub down from its bar, rows in between a pass-through, the child row an elbow into its bar. Rows are
+  // ordered over the whole tree (collapsed ones too: Collapse clips their pieces while it animates).
+  const wires = new Map<string, TraceWire[]>()
+  {
+    const flat: TraceSpan[] = [], walk = (s: TraceSpan) => { flat.push(s); kids(s.id).forEach(walk) }
+    if (root0()) walk(root0()!)
+    const at = new Map(flat.map((s, i) => [s.id, i])), add = (i: number, w: TraceWire) => { const id = flat[i].id; wires.set(id, [...(wires.get(id) ?? []), w]) }
+    flat.forEach((c, ic) => {
+      const ip = c.parent ? at.get(c.parent) : undefined
+      if (ip === undefined || clock < c.start) return
+      add(ip, { c, part: 'stub' }); for (let i = ip + 1; i < ic; i++) add(i, { c, part: 'through' }); add(ic, { c, part: 'elbow' })
+    })
+  }
+  const lit = tip ? hot : null, chain = new Set<string>()
+  for (let id = lit; id; id = spans.find(x => x.id === id)?.parent ?? null) chain.add(id)
+
   const row = (s: TraceSpan): ReactNode => {
     const d = depth(s), ch = kids(s.id), isOpen = !closed.has(s.id)
     const du = D(s), started = clock >= s.start, end = s.start + du, fin = clock >= end, w = started ? Math.min(clock, end) - s.start : 0
     const failed = fail && s.id === failure?.span && fin, frac = started ? Math.min(1, w / s.duration) : 0
     const live = started && !fin
-    const traceTip = (ev: ReactPointerEvent) => { if (!started) return hide(); show(ev, <><b className="font-semibold">{s.name}</b> <span className="text-[var(--fg3)]">{s.meta}</span><br /><span className="text-[var(--fg2)]">Start {s.start.toFixed(1)}s · {(Math.min(clock, end) - s.start).toFixed(1)}s{fin ? '' : ' so far'}{s.cost ? ` · ${fmt.usd(s.cost)}` : ''}{s.tokens ? ` · ${fmt.compact(s.tokens)} tokens` : ''}</span></>) }
+    const traceTip = (ev: ReactPointerEvent) => { setHot(s.id); if (!started) return hide(); show(ev, <><b className="font-semibold">{s.name}</b> <span className="text-[var(--fg3)]">{s.meta}</span><br /><span className="text-[var(--fg2)]">Start {s.start.toFixed(1)}s · {(Math.min(clock, end) - s.start).toFixed(1)}s{fin ? '' : ' so far'}{s.cost ? ` · ${fmt.usd(s.cost)}` : ''}{s.tokens ? ` · ${fmt.compact(s.tokens)} tokens` : ''}</span></>) }
     return (
       <Fragment key={s.id}>
         <motion.div key={failed ? 'f' : 'n'} animate={failed && !reduce ? { x: [0, -4, 4, -2, 2, 0] } : undefined} transition={{ duration: 0.35 }}
@@ -1128,6 +1192,11 @@ export function TraceWaterfall({ spans, total, title = 'Trace', subtitle, failur
           </div>
           <div className="relative h-full border-l border-[var(--line)]">
             {ticks.slice(1).map(t => <span key={t} className="pointer-events-none absolute inset-y-0 w-px bg-[var(--line)] opacity-70" style={{ left: pct(t) }} />)}
+            {wires.get(s.id)?.map(({ c, part }) => (
+              <span key={`${c.id}-${part}`} aria-hidden style={{ left: `calc(${pct(c.start)} - 6px)` }}
+                className={cn('pointer-events-none absolute transition-[opacity,border-color] duration-200', chain.has(c.id) ? TRACE_WIRE_ON : TRACE_WIRE,
+                  part === 'elbow' ? 'top-0 h-5 w-[7px] rounded-bl-[5px] border-b border-l' : 'w-0 border-l', part === 'stub' && 'top-[27px] bottom-0', part === 'through' && 'inset-y-0', part === 'stub' && !isOpen && 'opacity-0')} />
+            ))}
             <div className={cn('absolute top-[13px] h-3.5 min-w-0.5 overflow-hidden rounded-[var(--r-md)]', failed ? 'bg-[color-mix(in_srgb,var(--bad)_72%,var(--card))]' : TRACE_BAR[s.kind])}
               style={{ left: pct(s.start), width: pct(w), opacity: started ? 1 : 0 }}>
               {live && <span className="absolute inset-y-0 right-0 w-10 max-w-full bg-[linear-gradient(90deg,transparent,rgba(255,255,255,.55))]" />}
