@@ -283,7 +283,7 @@
     "prepublishOnly": "pnpm build && pnpm test:ssr",
     "typecheck": "tsc -b",
     "typecheck:tests": "tsc -p tsconfig.test.json --noEmit",
-    "typecheck:docs": "tsc -p docs/tsconfig.json --noEmit",
+    "typecheck:docs": "node scripts/build-docs-data.mjs && tsc -p docs/tsconfig.json --noEmit",
     "lint": "oxlint",
     "preview": "vite preview",
     "check": "tsc -b && pnpm typecheck:tests && pnpm build && pnpm test:registry && pnpm test:ssr && pnpm test"
