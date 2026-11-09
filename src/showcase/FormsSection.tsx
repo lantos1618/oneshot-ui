@@ -1,5 +1,5 @@
-import { useRef, useState } from 'react'
-import { AddressAutocomplete, type AddressRecord, EmojiInput, Field, Input, MENTION_COMMANDS, MENTION_PEOPLE, MentionsInput, RTE_SAMPLE, RichTextEditor, Select, SignaturePad, Switch, Textarea, UnsavedChangesBar, sleep, useFormDraft, useToast } from '../lib'
+import { useMemo, useRef, useState } from 'react'
+import { AddressAutocomplete, type AddressRecord, Button, Checkbox, Combobox, DatePicker, EmojiInput, Field, Form, FormField, Input, MultiSelect, type Option, PhoneInput, RangeSlider, Rating, SegmentedControl, TagInput, MENTION_COMMANDS, MENTION_PEOPLE, MentionsInput, RTE_SAMPLE, RichTextEditor, Select, SignaturePad, Switch, Textarea, UnsavedChangesBar, sleep, useFormDraft, useToast } from '../lib'
 import { Section, Spec } from './kit'
 
 const ROLE_OPTS = ['Admin', 'Editor', 'Viewer'].map(v => ({ value: v, label: v }))
@@ -44,6 +44,80 @@ function ProfileForm() {
   )
 }
 
+const FS_TEAMS: Option[] = [
+  { value: 'design', label: 'Design', group: 'Product' }, { value: 'research', label: 'Research', group: 'Product' }, { value: 'web', label: 'Web platform', group: 'Engineering' },
+  { value: 'mobile', label: 'Mobile', group: 'Engineering' }, { value: 'infra', label: 'Infrastructure', group: 'Engineering' }, { value: 'support', label: 'Support', group: 'Operations' },
+]
+const FS_SKILLS: Option[] = ['React', 'TypeScript', 'Figma', 'SQL', 'Motion'].map(v => ({ value: v.toLowerCase(), label: v }))
+const FS_OFFICES: Option[] = ['Zürich', 'London', 'Berlin', 'New York', 'Melbourne', 'Remote'].map(v => ({ value: v.toLowerCase().replace(/ /g, '-'), label: v }))
+
+/** A real <form>: required custom controls, focus on the first error, FormData on submit, reset to defaults. */
+function FormSubmissionDemo() {
+  const [entries, setEntries] = useState<[string, string][] | null>(null)
+  return (
+    <div className="grid gap-4 md:grid-cols-[1fr_minmax(220px,0.8fr)]">
+      <Form aria-label="Join a team" onValues={data => setEntries([...data.entries()].map(([k, v]) => [k, typeof v === 'string' ? v : v.name]))} onReset={() => setEntries(null)}
+        className="grid gap-3 sm:grid-cols-2">
+        <FormField label="Full name" name="name" required description="As on your contract"><Input autoComplete="name" placeholder="Alex Lee" /></FormField>
+        <FormField label="Team" name="team" required description="Grouped by department"><Combobox options={FS_TEAMS} placeholder="Search teams" /></FormField>
+        <FormField label="Office" name="office" required description="Where you’ll sit most days"><Combobox options={FS_OFFICES} placeholder="Choose an office" /></FormField>
+        <FormField label="Start date" name="start" required description="Sent as 2026-11-08"><DatePicker /></FormField>
+        <FormField label="Skills" name="skills" description="Each one is its own field"><MultiSelect options={FS_SKILLS} defaultValue={['react']} placeholder="Pick skills" /></FormField>
+        <FormField label="Mobile" name="phone" description="Sent in E.164"><PhoneInput /></FormField>
+        <FormField label="Hours a week" name="hours" description="Low and high, as two fields"><RangeSlider defaultValue={[24, 40]} min={8} max={48} step={4} valueText={v => `${v} hours`} /></FormField>
+        <FormField label="Contract" name="contract" description="Full time unless you say otherwise"><SegmentedControl options={['Full time', 'Part time', 'Contractor']} defaultValue="Full time" size="sm" className="self-start" /></FormField>
+        <FormField label="Tags" name="tags" description="Enter adds a tag"><TagInput placeholder="Add a tag" /></FormField>
+        <FormField label="How was onboarding?" name="rating" description="Optional; sent as 1–5"><Rating prompt="Tap to rate" /></FormField>
+        <FormField name="terms" required className="sm:col-span-2" description="Required to submit"><Checkbox value="accepted">I accept the team handbook</Checkbox></FormField>
+        <div className="flex gap-2 sm:col-span-2"><Button type="submit" variant="primary">Submit</Button><Button type="reset">Reset</Button></div>
+      </Form>
+      <div className="flex min-h-[220px] flex-col rounded-[var(--r-md)] border border-[var(--line)] bg-[var(--bg)] p-3">
+        <span className="mb-2 text-[11px] font-medium tracking-wide text-[var(--fg3)] uppercase">FormData</span>
+        <div role="status" aria-live="polite" className="max-h-[360px] min-h-0 flex-1 overflow-auto font-[family-name:var(--mono)] text-xs leading-relaxed">
+          {entries ? entries.map(([k, v], i) => <div key={i} className="flex gap-2"><span className="text-[var(--fg3)]">{k}</span><span className="break-all">{v || '""'}</span></div>)
+            : <span className="font-[family-name:var(--font)] text-[var(--fg3)]">Submit with empty fields to see focus jump to the first error, then fill them in.</span>}
+        </div>
+      </div>
+    </div>
+  )
+}
+
+const FS_CITIES = ['Amsterdam', 'Athens', 'Auckland', 'Austin', 'Bangkok', 'Barcelona', 'Basel', 'Berlin', 'Bern', 'Bogotá', 'Boston', 'Brussels', 'Budapest', 'Buenos Aires', 'Cairo', 'Cape Town', 'Chicago', 'Copenhagen', 'Dublin', 'Edinburgh', 'Geneva', 'Hamburg', 'Helsinki', 'Hong Kong', 'Istanbul', 'Lisbon', 'London', 'Los Angeles', 'Lyon', 'Madrid', 'Melbourne', 'Mexico City', 'Milan', 'Montréal', 'Mumbai', 'Munich', 'Nairobi', 'New York', 'Oslo', 'Paris', 'Prague', 'Reykjavík', 'Rome', 'San Francisco', 'São Paulo', 'Seoul', 'Singapore', 'Stockholm', 'Sydney', 'Tokyo', 'Toronto', 'Vancouver', 'Vienna', 'Warsaw', 'Zürich']
+const FS_SKUS: Option[] = Array.from({ length: 10_000 }, (_, i) => {
+  const kinds = ['Desk lamp', 'Notebook', 'Monitor arm', 'Keyboard', 'Headphones', 'Chair mat', 'Cable tray', 'Webcam']
+  return { value: `sku-${10001 + i}`, label: `${kinds[i % kinds.length]} · SKU ${10001 + i}` }
+})
+
+/** Async combobox against a fake API (latency, abort, error with retry, create) and a 10,000-option virtualised list. */
+function AsyncComboDemo() {
+  const [fail, setFail] = useState(false), [calls, setCalls] = useState({ sent: 0, aborted: 0 })
+  const failRef = useRef(fail); failRef.current = fail
+  const load = useMemo(() => (q: string, { signal }: { signal: AbortSignal }) => new Promise<Option[]>((resolve, reject) => {
+    setCalls(c => ({ ...c, sent: c.sent + 1 }))
+    const t = setTimeout(() => {
+      if (failRef.current) return reject(new Error('Network error'))
+      resolve(FS_CITIES.filter(c => c.toLowerCase().includes(q.toLowerCase())).map(c => ({ value: c.toLowerCase().replace(/\W+/g, '-'), label: c, group: c[0] })))
+    }, 450 + Math.random() * 400)
+    signal.addEventListener('abort', () => { clearTimeout(t); setCalls(c => ({ ...c, aborted: c.aborted + 1 })); reject(signal.reason) })
+  }), [])
+  return (
+    <div className="grid gap-4 md:grid-cols-2">
+      <div className="flex flex-col gap-3">
+      <FormField label="City" description="Fake API, 450–850 ms. Type fast: stale requests are aborted.">
+        <Combobox loadOptions={load} minChars={1} creatable placeholder="Search cities" />
+      </FormField>
+      <div className="flex flex-wrap items-center justify-between gap-2">
+        <Switch label={<span className="text-xs text-[var(--fg2)]">Fail requests</span>} checked={fail} onChange={setFail} />
+        <span className="ui-num text-xs text-[var(--fg3)]">{calls.sent} sent · {calls.aborted} aborted</span>
+      </div>
+      </div>
+      <FormField label="Product" description="10,000 options, only the visible rows are rendered">
+        <Combobox options={FS_SKUS} placeholder="Search 10,000 products" />
+      </FormField>
+    </div>
+  )
+}
+
 function SignatureDemo() {
   const toast = useToast()
   return <SignaturePad onConfirm={(_, n) => toast({ title: 'Signature captured', description: `${n} stroke${n === 1 ? '' : 's'}`, tone: 'ok' })} />
@@ -60,6 +134,8 @@ export function FormsSection() {
       <Spec title="Mentions and commands" desc="Type @ to mention someone, / for a command"><MentionsInput people={MENTION_PEOPLE} commands={MENTION_COMMANDS} /></Spec>
       <Spec title="Address autocomplete" desc="Type a street; picking a result fills the rest"><AddressAutocomplete addresses={FORMS_ADDRESSES} /></Spec>
       <Spec title="Emoji picker" desc="Categories, search, recently used"><EmojiInput /></Spec>
+      <Spec title="Form submission" desc="A real form: custom controls submit like native fields. Required fields stop the submit and focus the first error; Reset restores the defaults." span={3}><FormSubmissionDemo /></Spec>
+      <Spec title="Async combobox" desc="Debounced loader with abort, loading and error states, retry, create, groups; plus a virtualised 10,000-option list" span={3}><AsyncComboDemo /></Spec>
       <Spec title="Form with unsaved changes" desc="Edit anything and a save bar slides up. Reset restores, Save validates first." span={3}><ProfileForm /></Spec>
     </Section>
   )

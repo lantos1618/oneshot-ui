@@ -1,6 +1,6 @@
-import { useEffect, useState } from 'react'
+import { useEffect, useMemo, useState } from 'react'
 import { AnimatePresence, motion } from 'motion/react'
-import { Avatar, Badge, Banner, Button, CopyButton, DateRangePicker, Dialog, DropdownMenu, Field, HoldToConfirm, HoverCard, Icon, InlineEdit, Input, Kbd, MenuItem, MenuSeparator,
+import { AlertDialog, Avatar, Badge, Banner, Button, type Command, CommandPalette, CopyButton, DateRangePicker, Dialog, DropdownMenu, Field, HoldToConfirm, HoverCard, Icon, InlineEdit, Input, Kbd, MenuItem, MenuSeparator,
   type Notification, NotificationBell, Popover, PopoverContent, PopoverTrigger, Select, Sheet, Switch, Tooltip, Tour, type TourStep, cn, floatingSurface, menuItemClass, useToast } from '../lib'
 import { Row, Section, Spec, SpecPreview } from './kit'
 
@@ -81,6 +81,78 @@ const ovPreviewProfile = (
     <div className="mt-2.5 flex gap-4 text-xs text-[var(--fg3)]"><span><b className="text-[var(--fg)]">128</b> commits</span><span><b className="text-[var(--fg)]">24</b> reviews</span></div>
   </div>
 )
+
+/* Alert dialog: async confirm that can fail */
+function OvAlertDemo() {
+  const toast = useToast()
+  const [open, setOpen] = useState(false)
+  const [fail, setFail] = useState(true)
+  const [revoked, setRevoked] = useState(false)
+  const revoke = () => new Promise<void>((resolve, reject) => setTimeout(() => {
+    if (fail) { setFail(false); reject(new Error('Couldn’t reach the API, so nothing was revoked. Try again.')) }
+    else { setRevoked(true); toast({ title: 'API key revoked', description: 'sk_live_…4f2a', tone: 'bad' }); resolve() }
+  }, 1100))
+  return (
+    <>
+      <Row>
+        <Button variant="outline-danger" onClick={() => { if (revoked) { setRevoked(false); setFail(true) } setOpen(true) }}>Revoke API key</Button>
+        <span className="text-xs text-[var(--fg3)]" aria-live="polite">{revoked ? 'Revoked. Open it again to replay.' : ''}</span>
+      </Row>
+      <span className="text-xs text-[var(--fg3)]">The first attempt fails on purpose, to show the error; the second succeeds.</span>
+      <AlertDialog open={open} onOpenChange={setOpen} title="Revoke the production API key?" confirmLabel="Revoke key" onConfirm={revoke}
+        description={<>Apps using <code className="font-[family-name:var(--mono)] text-[var(--fg)]">sk_live_…4f2a</code> stop working immediately. This can’t be undone.</>} />
+      <SpecPreview className="grid place-items-center bg-[color-mix(in_srgb,var(--fg)_14%,var(--bg))]">
+        <div className={cn(floatingSurface, 'w-full max-w-[260px] p-3')}>
+          <b className="block text-[13px]">Revoke the production API key?</b>
+          <span className="mt-1 block text-xs leading-snug text-[var(--fg3)]">Apps using it stop working immediately.</span>
+          <span className="mt-2 flex items-center gap-1 text-[11px] text-[var(--bad)]"><Icon name="alert" size={11} />Couldn’t reach the API.</span>
+          <div className="mt-3 flex justify-end gap-1.5"><Button size="xs" tabIndex={-1}>Cancel</Button><Button size="xs" variant="danger" tabIndex={-1}>Revoke key</Button></div>
+        </div>
+      </SpecPreview>
+    </>
+  )
+}
+
+/* Command palette with groups, nested pages, async results and recents */
+const OV_VERBS = ['Fix', 'Add', 'Remove', 'Refactor', 'Document', 'Speed up', 'Test', 'Polish', 'Migrate', 'Localise']
+const OV_NOUNS = ['date picker', 'billing page', 'search index', 'login flow', 'CSV export', 'dark mode', 'onboarding tour', 'data grid', 'webhooks', 'chart tooltips', 'file upload', 'notifications', 'API keys', 'audit log', 'mobile nav', 'command palette']
+const OV_ISSUES = Array.from({ length: 2400 }, (_, i) => ({ n: 1000 + i, title: `${OV_VERBS[i % 10]} ${OV_NOUNS[(i * 7) % 16]}`, team: ['Web', 'Platform', 'Design', 'Mobile'][i % 4] }))
+const OV_PEOPLE = ['Alex Lee', 'Bea Kim', 'Chris Moe', 'Dana Ng', 'Eli Park', 'Fay Ito', 'Gus Roy', 'Hana Ali', 'Ivo Berg', 'Jo Marsh', 'Kai Sun', 'Lea Brun']
+/** A fake search API: 250–400 ms, honours the abort signal. */
+const ovDelay = <T,>(ms: number, signal: AbortSignal, value: () => T) => new Promise<T>((resolve, reject) => {
+  const t = setTimeout(() => resolve(value()), ms)
+  signal.addEventListener('abort', () => { clearTimeout(t); reject(new DOMException('Aborted', 'AbortError')) })
+})
+function OvPaletteDemo() {
+  const [open, setOpen] = useState(false)
+  const [last, setLast] = useState('')
+  const did = (what: string) => () => setLast(what)
+  const commands = useMemo<Command[]>(() => [
+    { id: 'new-issue', label: 'New issue', group: 'Actions', icon: 'plus', shortcut: 'C', run: did('Created a new issue') },
+    { id: 'assign', label: 'Assign to…', group: 'Actions', icon: 'user', placeholder: 'Search people…', loadChildren: (q, { signal }) => ovDelay(250, signal, () =>
+      OV_PEOPLE.filter(p => p.toLowerCase().includes(q.toLowerCase().trim())).map(p => ({ id: `p:${p}`, label: p, group: 'People', run: did(`Assigned to ${p}`) }))) },
+    { id: 'status', label: 'Change status…', group: 'Actions', icon: 'check', children: ['Backlog', 'Todo', 'In progress', 'In review', 'Done'].map(st => ({ id: `s:${st}`, label: st, group: 'Status', run: did(`Status set to ${st}`) })) },
+    { id: 'labels', label: 'Add label…', group: 'Actions', icon: 'star', children: [
+      { id: 'l-type', label: 'Type…', group: 'Labels', children: ['Bug', 'Feature', 'Chore'].map(l => ({ id: `lt:${l}`, label: l, run: did(`Labelled ${l}`) })) },
+      { id: 'l-area', label: 'Area…', group: 'Labels', children: ['Web', 'Platform', 'Design', 'Mobile'].map(l => ({ id: `la:${l}`, label: l, run: did(`Labelled ${l}`) })) },
+    ] },
+    { id: 'inbox', label: 'Go to inbox', group: 'Navigation', icon: 'inbox', shortcut: 'G I', run: did('Opened the inbox') },
+    { id: 'settings', label: 'Go to settings', group: 'Navigation', icon: 'settings', shortcut: 'G S', run: did('Opened settings') },
+    { id: 'theme', label: 'Switch theme…', group: 'Preferences', icon: 'sun', children: ['Light', 'Dark', 'System'].map(t => ({ id: `t:${t}`, label: t, run: did(`Theme: ${t}`) })) },
+  ], []) // eslint-disable-line react-hooks/exhaustive-deps
+  const loadItems = (q: string, { signal }: { signal: AbortSignal }) => ovDelay(300 + q.length * 10, signal, () => {
+    const w = q.toLowerCase().trim(); if (!w) return []
+    return OV_ISSUES.filter(x => `${x.title} ${x.team} ${x.n}`.toLowerCase().includes(w)).slice(0, 400)
+      .map((x): Command => ({ id: `i:${x.n}`, label: x.title, hint: `#${x.n} · ${x.team}`, group: 'Issues', icon: 'file', run: did(`Opened #${x.n} ${x.title}`) }))
+  })
+  return (
+    <>
+      <Row><Button onClick={() => setOpen(true)}>Open palette</Button><span className="text-xs text-[var(--fg3)]" aria-live="polite">{last}</span></Row>
+      <span className="text-xs text-[var(--fg3)]">Try “Assign to…” (people load as you type), “Add label…” (two levels), or type “fix” for hundreds of issues from the fake API.</span>
+      <CommandPalette open={open} onOpenChange={setOpen} commands={commands} loadItems={loadItems} recents={3} recentKey="showcase:palette-recents" placeholder="Search issues, people, actions…" suggestion="fix" />
+    </>
+  )
+}
 
 /** Window event the page shell sends (⌘K "Open modal" / "Open drawer") to open this section's demo dialog or sheet. */
 export const OVERLAY_DEMO_EVENT = 'showcase:overlay-demo'
@@ -180,6 +252,13 @@ export function OverlaysSection({ openPalette }: { openPalette: () => void }) {
       </Spec>
       <Spec title="Command palette" desc="Keyboard access to everything. Every word must match; tags show why." keys={[[['⌘', 'K'], 'Open'], [['↑', '↓'], 'Move'], [['↵'], 'Run']]}>
         <Row><Button onClick={openPalette}>Open palette</Button><span className="hidden text-xs text-[var(--fg3)] [@media(hover:none)]:inline">or tap the search icon in the header</span></Row>
+      </Spec>
+      <Spec title="Command palette · pages and async" desc="Groups, nested pages (Enter opens, Backspace on an empty search goes back), results from an API as you type (debounced, the stale request aborted), recent commands, and a virtualised list for long results."
+        keys={[[['↵'], 'Run or open'], [['⌫'], 'Back a page'], [['↑', '↓'], 'Move']]}>
+        <OvPaletteDemo />
+      </Spec>
+      <Spec title="Alert dialog" desc="For consequential actions: role=alertdialog, focus starts on Cancel, an outside click doesn’t dismiss it (it shakes), and the confirm waits on the request, showing its error if it fails.">
+        <OvAlertDemo />
       </Spec>
       <Spec title="Hold to confirm" desc="Press and hold for destructive actions">
         <HoldToConfirm onConfirm={() => toast({ title: 'Workspace deleted', tone: 'bad' })} status={{ done: 'Workspace deleted' }} />

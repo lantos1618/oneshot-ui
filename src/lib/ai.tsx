@@ -1,8 +1,8 @@
 import { useEffect, useId, useLayoutEffect, useMemo, useRef, useState, type ReactNode, type RefObject } from 'react'
 import { AnimatePresence, motion, useAnimate, useInView, useReducedMotion } from 'motion/react'
-import { AnimatedNumber, Avatar, Badge, Button, Icon, IconButton, Kbd, Spinner, StatusIcon, TOUCH, cn, floatingSurface, inputClass, safeColor, sleep, spring, surface, useControllable, useOutside, useRoving, type IconName } from './core'
+import { AnimatedNumber, Avatar, Badge, Button, Icon, IconButton, Kbd, Spinner, StatusIcon, TOUCH, cn, cssUrl, floatingSurface, fmt, inputClass, safeColor, sleep, spring, surface, useControllable, useOutside, useRoving, useStreamedText, type IconName } from './core'
 import { AutoHeight, Collapse, Progress, TypingDots, useToast } from './feedback'
-import { CheckMark, Checkbox, OptionList, type Option } from './forms'
+import { CheckMark, Checkbox, OptionList, Select, fileAccepts, type Option } from './forms'
 import { FloatingPanel, MenuLabel, Tooltip, useHoverIntent } from './overlay'
 import { lcsDiff } from './code'
 import { useViewport } from './motion'
@@ -27,29 +27,19 @@ export function ShimmerText({ children, active = true, className }: { children: 
 }
 
 /**
- * Reveals `text` word by word. Change `key` to restart; `playing={false}` freezes it (Stop).
- * Calls `onDone(text shown)` when it finishes or is stopped. Word ends are found once and one interval runs while
- * it plays, so long replies stay linear (a slice per tick, no re-splitting).
+ * Reveals `text` word by word (useStreamedText as a component). Change `key` to restart; `playing={false}` freezes it
+ * (Stop). Pass a growing string with `live` (a model stream) and it keeps going from where it is, catching up when a
+ * large chunk lands. Calls `onDone(text shown)` when it finishes (for `live`, once `live` is false and it caught up)
+ * or is stopped.
  */
-export function StreamingText({ text, playing = true, wordDelay = 45, onDone, onProgress, className, caret = true }:
-  { text: string; playing?: boolean; wordDelay?: number; onDone?: (shown: string) => void; onProgress?: () => void; className?: string; caret?: boolean }) {
-  const ends = useMemo(() => { // ends[k] = where the first k words end (same words as text.split(' '))
-    const e = [0]; for (let i = text.indexOf(' '); i >= 0; i = text.indexOf(' ', i + 1)) e.push(i)
-    e.push(text.length); return e
-  }, [text])
-  const total = ends.length - 1
-  const reduce = useReducedMotion()
-  const [n, setN] = useState(reduce ? total : 0)
-  const doneRef = useRef(false), cb = useRef({ onDone, onProgress }); cb.current = { onDone, onProgress }
-  const finished = n >= total || !playing
-  useEffect(() => { if (!doneRef.current && finished) { doneRef.current = true; cb.current.onDone?.(text.slice(0, ends[Math.min(n, total)])) } }, [finished]) // eslint-disable-line react-hooks/exhaustive-deps
-  useEffect(() => {
-    if (finished) return
-    // one interval; skipping about one tick in five keeps the uneven rhythm of the per-word random delay it replaces
-    const id = setInterval(() => { if (Math.random() < 0.2) return; setN(v => Math.min(total, v + 1)); cb.current.onProgress?.() }, Math.max(8, wordDelay * 0.85))
-    return () => clearInterval(id)
-  }, [finished, total, wordDelay])
-  return <span className={cn('whitespace-pre-wrap', !finished && caret && 'ui-caret', className)}>{text.slice(0, ends[Math.min(n, total)])}</span>
+export function StreamingText({ text, playing = true, live = false, wordDelay = 45, onDone, onProgress, className, caret = true }:
+  { text: string; playing?: boolean; live?: boolean; wordDelay?: number; onDone?: (shown: string) => void; onProgress?: () => void; className?: string; caret?: boolean }) {
+  const { text: shown, done } = useStreamedText(text, { unit: 'word', wordDelay, start: playing, live, onProgress })
+  const doneRef = useRef(false), cb = useRef(onDone); cb.current = onDone
+  const finished = done || !playing
+  const shownRef = useRef(shown); shownRef.current = shown
+  useEffect(() => { if (!doneRef.current && finished) { doneRef.current = true; cb.current?.(shownRef.current) } }, [finished])
+  return <span className={cn('whitespace-pre-wrap', !finished && caret && 'ui-caret', className)}>{shown}</span>
 }
 
 /** Collapsible tool-call row: shimmering label and spinner while running, a check and the past tense when done. Click to see the call. */
@@ -105,36 +95,135 @@ export function SendButton({ state = 'send', label, disabled, onClick, className
   )
 }
 
+/** A file waiting in a composer: `url` is an object URL for an image preview (revoked when it goes away), else null. */
+export type Attachment = { id: number; file: File; url: string | null }
+
 /**
- * Message box: grows with text, Enter sends (never mid IME composition), Shift+Enter adds a line. + attaches files as
- * removable chips. Send turns into Stop while `busy`. `footer` replaces the + button.
+ * Attachment state for composers: `add(files)` keeps at most `max` (and skips files over `maxSize` bytes or not
+ * matching `accept`, passing them to `onReject` with a reason), makes object URLs for image previews and revokes them
+ * on `remove`, `clear`, `take` (which hands back the Files) and unmount.
  */
-export function ChatComposer({ onSend, onStop, busy, placeholder = 'Ask anything…', footer, className }:
-  { onSend: (text: string, files: File[]) => void; onStop?: () => void; busy?: boolean; placeholder?: string; footer?: ReactNode; className?: string }) {
-  const [text, setText] = useState('')
-  const [files, setFiles] = useState<{ id: number; file: File }[]>([])
-  const ref = useRef<HTMLTextAreaElement>(null), fileRef = useRef<HTMLInputElement>(null), fid = useRef(0)
-  useAutoGrow(ref, text)
-  const send = () => { const t = text.trim(); if ((!t && !files.length) || busy) return; onSend(t, files.map(f => f.file)); setText(''); setFiles([]) }
+export function useAttachments({ max = 10, maxSize = 20 * 1024 * 1024, accept, onReject }:
+  { max?: number; maxSize?: number; accept?: string; onReject?: (files: File[], reason: 'type' | 'size' | 'count') => void } = {}) {
+  const [files, setFiles] = useState<Attachment[]>([])
+  const urls = useRef(new Set<string>()), fid = useRef(0), cur = useRef(files); cur.current = files
+  const cb = useRef(onReject); cb.current = onReject
+  useEffect(() => { const u = urls.current; return () => { u.forEach(x => URL.revokeObjectURL(x)); u.clear() } }, [])
+  const drop = (f: Attachment) => { if (f.url) { URL.revokeObjectURL(f.url); urls.current.delete(f.url) } }
+  const add = (list: FileList | File[]) => {
+    const all = Array.from(list)
+    const wrongType = all.filter(f => !fileAccepts(f, accept)), tooBig = all.filter(f => fileAccepts(f, accept) && f.size > maxSize)
+    const ok = all.filter(f => fileAccepts(f, accept) && f.size <= maxSize)
+    const room = Math.max(0, max - cur.current.length), taken = ok.slice(0, room), extra = ok.slice(room)
+    if (wrongType.length) cb.current?.(wrongType, 'type')
+    if (tooBig.length) cb.current?.(tooBig, 'size')
+    if (extra.length) cb.current?.(extra, 'count')
+    if (!taken.length) return
+    const next = taken.map(file => {
+      let url: string | null = null
+      if (/^image\//.test(file.type)) { try { url = URL.createObjectURL(file); urls.current.add(url) } catch { url = null } }
+      return { id: ++fid.current, file, url }
+    })
+    cur.current = [...cur.current, ...next]
+    setFiles(cur.current)
+  }
+  const remove = (id: number) => { const f = cur.current.find(x => x.id === id); if (f) drop(f); cur.current = cur.current.filter(x => x.id !== id); setFiles(cur.current) }
+  const clear = () => { cur.current.forEach(drop); cur.current = []; setFiles([]) }
+  const take = () => { const out = cur.current.map(f => f.file); clear(); return out }
+  return { files, add, remove, clear, take }
+}
+
+/**
+ * An attachment tile: image preview (only `blob:`, `data:image/` or http(s) URLs, through `cssUrl`) or the file
+ * extension, the name and size, and a remove button when `onRemove` is given (visible on hover, focus and touch).
+ * `uploading` plays a short progress bar along the bottom.
+ */
+export function AttachmentChip({ name, size, url, onRemove, uploading, className }:
+  { name: string; size?: number; url?: string | null; onRemove?: () => void; uploading?: number; className?: string }) {
+  const preview = url ? cssUrl(url) : 'none'
   return (
-    <div className={cn(surface.card, 'p-2 shadow-[0_1px_2px_rgba(0,0,0,.04)] focus-within:border-[var(--fg3)]', className)}>
-      {files.length > 0 && <div className="mb-1.5 flex flex-wrap gap-1.5 px-1">{files.map(f => (
-        <motion.span key={f.id} initial={{ opacity: 0, scale: 0.85 }} animate={{ opacity: 1, scale: 1 }} transition={spring(0.4, 0.3)}
-          className="inline-flex h-6 max-w-full items-center gap-1 rounded-full bg-[var(--muted)] pr-1 pl-2 text-xs"><Icon name="file" size={12} /><span className="min-w-0 truncate">{f.file.name}</span>
-          <button type="button" aria-label={`Remove ${f.file.name}`} onClick={() => { setFiles(x => x.filter(y => y.id !== f.id)); ref.current?.focus() }}
-            className={cn('grid h-4 w-4 flex-none cursor-pointer place-items-center rounded-full border-0 bg-transparent text-[var(--fg3)] hover:text-[var(--fg)]', TOUCH.hit)}><Icon name="x" size={10} strokeWidth={3} /></button>
-        </motion.span>))}</div>}
-      <textarea ref={ref} rows={1} value={text} placeholder={placeholder} aria-label="Message" onChange={e => setText(e.target.value)}
+    <motion.div initial={{ opacity: 0, scale: 0.85 }} animate={{ opacity: 1, scale: 1 }} exit={{ opacity: 0, scale: 0.85, transition: { duration: 0.15 } }} transition={spring(0.4, 0.3)}
+      className={cn('group/f relative flex h-12 max-w-[min(220px,100%)] items-center gap-2 overflow-hidden rounded-[var(--r-lg)] border border-[var(--line)] bg-[var(--bg)] py-1 pr-3 pl-1', className)}>
+      <span className="grid h-10 w-10 flex-none place-items-center rounded-[var(--r-md)] bg-[var(--muted)] bg-cover bg-center font-[family-name:var(--mono)] text-[11px] font-bold text-[var(--fg2)]" style={preview !== 'none' ? { backgroundImage: preview } : undefined}>
+        {preview !== 'none' ? '' : (name.split('.').pop() || 'file').slice(0, 4).toUpperCase()}</span>
+      <span className="flex min-w-0 flex-col text-xs leading-tight"><b className="truncate font-medium">{name}</b>{size != null && <span className="text-[var(--fg3)]">{fmt.bytes(size)}</span>}</span>
+      {uploading != null && <motion.i className="absolute bottom-0 left-0 h-0.5 bg-[var(--accent)]" initial={{ width: '0%', opacity: 1 }} animate={{ width: '100%', opacity: [1, 1, 0] }} transition={{ duration: 0.6 + (uploading % 4) * 0.2, ease: 'easeOut', opacity: { duration: 0.6 + (uploading % 4) * 0.2 + 0.3, times: [0, 0.75, 1] } }} />}
+      {onRemove && <button type="button" aria-label={`Remove ${name}`} onClick={onRemove}
+        className={cn('absolute top-1 right-1 grid h-[18px] w-[18px] cursor-pointer place-items-center rounded-full border-0 bg-[var(--fg)] text-[var(--bg)] opacity-0 transition-opacity group-hover/f:opacity-100 focus-visible:opacity-100 [@media(pointer:coarse)]:opacity-100', TOUCH.hit)}><Icon name="x" size={10} strokeWidth={3} /></button>}
+    </motion.div>
+  )
+}
+
+/** Chat status as PromptInput sees it (the same names as useAiChat's `status`). */
+export type PromptStatus = 'ready' | 'submitted' | 'streaming' | 'error'
+
+/**
+ * The prompt box for chats. Grows with its text up to `maxHeight`, then scrolls. Enter sends (never mid IME
+ * composition), Shift+Enter adds a line. Attach with +, paste or drag and drop; images preview through object URLs
+ * that are revoked when removed or sent. Optional model picker (`models`, `model`, `onModelChange`) and your own
+ * buttons (`tools`). While `status` is submitted or streaming, Send turns into Stop (`onStop`). `onSubmit(text, files)`
+ * may return false to keep the draft. Text is controlled (`value`/`onChange`, e.g. useAiChat's input) or not.
+ */
+export function PromptInput({ onSubmit, onStop, status = 'ready', value, defaultValue = '', onChange, placeholder = 'Ask anything…', attachments = true, accept, maxFiles = 10, maxFileSize = 20 * 1024 * 1024,
+  onReject, models, model, onModelChange, tools, disabled, autoFocus, maxHeight = 168, label = 'Message', className }:
+  { onSubmit: (text: string, files: File[]) => boolean | void; onStop?: () => void; status?: PromptStatus; value?: string; defaultValue?: string; onChange?: (v: string) => void
+    placeholder?: string; attachments?: boolean; accept?: string; maxFiles?: number; maxFileSize?: number; onReject?: (files: File[], reason: 'type' | 'size' | 'count') => void
+    models?: Option[]; model?: string; onModelChange?: (m: string) => void; tools?: ReactNode; disabled?: boolean; autoFocus?: boolean; maxHeight?: number; label?: string; className?: string }) {
+  const [text, setText] = useControllable(value, defaultValue, onChange)
+  const [note, setNote] = useState('')
+  const att = useAttachments({ max: maxFiles, maxSize: maxFileSize, accept, onReject: (f, why) => { setNote(why === 'type' ? `${f.length === 1 ? `“${f[0].name}” isn’t` : `${f.length} files aren’t`} an accepted type` : why === 'size' ? `${f.length === 1 ? `“${f[0].name}” is` : `${f.length} files are`} over ${fmt.bytes(maxFileSize)}` : `Up to ${maxFiles} files`); onReject?.(f, why) } })
+  const [over, setOver] = useState(false)
+  const ref = useRef<HTMLTextAreaElement>(null), fileRef = useRef<HTMLInputElement>(null), depth = useRef(0)
+  useAutoGrow(ref, text, maxHeight)
+  useEffect(() => { if (!note) return; const t = setTimeout(() => setNote(''), 4000); return () => clearTimeout(t) }, [note])
+  const busy = status === 'submitted' || status === 'streaming'
+  const canSend = !disabled && !busy && (!!text.trim() || att.files.length > 0)
+  const send = () => {
+    if (!canSend) return
+    const files = att.files.map(f => f.file)
+    if (onSubmit(text.trim(), files) === false) return
+    att.clear(); setText('')
+  }
+  const addFiles = (l: FileList | File[]) => { if (attachments) { att.add(l); ref.current?.focus() } }
+  return (
+    <div className={cn('relative rounded-[var(--r-lg)] border bg-[var(--card)] px-2.5 pt-2.5 pb-2 transition-[border-color,box-shadow]',
+      over ? 'border-[var(--accent)] shadow-[0_0_0_4px_var(--accent-soft)]' : 'border-[var(--line)] shadow-[0_1px_2px_rgba(0,0,0,.04)] focus-within:border-[var(--line2)] focus-within:shadow-[0_0_0_4px_var(--muted)]', className)}
+      onDragEnter={e => { if (!attachments || !e.dataTransfer.types.includes('Files')) return; e.preventDefault(); depth.current++; setOver(true) }}
+      onDragOver={e => { if (attachments && e.dataTransfer.types.includes('Files')) e.preventDefault() }}
+      onDragLeave={() => { depth.current = Math.max(0, depth.current - 1); if (!depth.current) setOver(false) }}
+      onDrop={e => { if (!attachments) return; e.preventDefault(); depth.current = 0; setOver(false); if (e.dataTransfer.files.length) addFiles(e.dataTransfer.files) }}>
+      {attachments && <div aria-hidden className={cn('pointer-events-none absolute inset-1 z-[4] flex items-center justify-center gap-2 rounded-[var(--r-lg)] border-2 border-dashed border-[var(--accent)] bg-[color-mix(in_srgb,var(--accent-soft)_92%,transparent)] text-[13px] font-semibold text-[var(--accent)] transition-opacity', over ? 'opacity-100' : 'opacity-0')}>
+        <Icon name="upload" size={16} />Drop files to attach</div>}
+      {att.files.length > 0 && <div className="mb-2 flex flex-wrap gap-1.5">
+        <AnimatePresence initial={false}>{att.files.map(f => <AttachmentChip key={f.id} name={f.file.name} size={f.file.size} url={f.url} onRemove={() => { att.remove(f.id); ref.current?.focus() }} />)}</AnimatePresence>
+      </div>}
+      <textarea ref={ref} rows={1} value={text} placeholder={placeholder} aria-label={label} disabled={disabled} autoFocus={autoFocus} onChange={e => setText(e.target.value)}
         onKeyDown={e => { if (e.key === 'Enter' && !e.shiftKey && !e.nativeEvent.isComposing) { e.preventDefault(); send() } }}
-        className={cn('block w-full resize-none border-0 bg-transparent px-1.5 py-1 text-[13px] leading-relaxed outline-none placeholder:text-[var(--fg3)]', TOUCH.input)} />
-      <div className="mt-1 flex items-center gap-1">
-        <input ref={fileRef} type="file" multiple hidden onChange={e => { const add = Array.from(e.target.files ?? []).map(file => ({ id: ++fid.current, file })); setFiles(f => [...f, ...add]); e.target.value = '' }} />
-        {footer ?? <IconButton icon="plus" label="Add files" onClick={() => fileRef.current?.click()} />}
-        <span className="flex-1" />
-        <SendButton state={busy ? 'stop' : 'send'} onClick={busy ? onStop : send} disabled={!busy && !text.trim() && !files.length} />
+        onPaste={e => { if (!attachments) return; const f = Array.from(e.clipboardData.files); if (f.length) { e.preventDefault(); addFiles(f) } }}
+        className={cn('block min-h-6 w-full resize-none border-0 bg-transparent px-1 py-0.5 text-sm leading-normal text-[var(--fg)] outline-none placeholder:text-[var(--fg3)] disabled:opacity-60', TOUCH.input)} />
+      <div className="mt-1.5 flex min-w-0 items-center gap-1">
+        {attachments && <>
+          <input ref={fileRef} type="file" multiple hidden accept={accept} onChange={e => { if (e.target.files) addFiles(e.target.files); e.target.value = '' }} />
+          <IconButton icon="plus" label="Add files" size="icon-sm" disabled={disabled} onClick={() => fileRef.current?.click()} className="[@media(pointer:coarse)]:!h-10 [@media(pointer:coarse)]:!w-10" />
+        </>}
+        {models && models.length > 0 && <Select aria-label="Model" options={models} value={model} onChange={onModelChange} className="!h-8 !w-auto max-w-[min(200px,45vw)] !border-transparent text-xs hover:!bg-[var(--muted)] [@media(pointer:coarse)]:!h-10" />}
+        {tools}
+        <span className="min-w-0 flex-1 truncate px-1 text-[11px] text-[var(--fg3)]" role="status">{note}</span>
+        <SendButton state={busy ? (onStop ? 'stop' : 'sending') : 'send'} onClick={busy ? onStop : send} disabled={busy ? !onStop : !canSend}
+          className="[@media(pointer:coarse)]:h-10 [@media(pointer:coarse)]:w-10" />
       </div>
     </div>
   )
+}
+
+/**
+ * Message box: grows with text, Enter sends (never mid IME composition), Shift+Enter adds a line. + attaches files
+ * (also by paste and drop). Send turns into Stop while `busy`. `footer` replaces the + button. A PromptInput with the
+ * 0.2 props.
+ */
+export function ChatComposer({ onSend, onStop, busy, placeholder = 'Ask anything…', footer, className }:
+  { onSend: (text: string, files: File[]) => void; onStop?: () => void; busy?: boolean; placeholder?: string; footer?: ReactNode; className?: string }) {
+  return <PromptInput onSubmit={(t, f) => { onSend(t, f) }} onStop={onStop} status={busy ? 'streaming' : 'ready'} placeholder={placeholder} attachments={footer === undefined} tools={footer} className={className} />
 }
 
 /* Thinking steps ─────────────────────────────────────────────────────────── */

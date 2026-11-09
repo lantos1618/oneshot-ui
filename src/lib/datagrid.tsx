@@ -1,9 +1,11 @@
-import { useEffect, useMemo, useRef, useState, type CSSProperties, type KeyboardEvent as RKeyboardEvent, type ReactNode } from 'react'
+import { memo, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type CSSProperties, type KeyboardEvent as RKeyboardEvent, type ReactElement, type ReactNode } from 'react'
 import { AnimatePresence, motion } from 'motion/react'
-import { Button, Icon, LOCALE, clamp, ScrollEdges, TOUCH, cn, fmtDate, spring, surface, useControllable, usePointerDrag, useScrollEdges, useWidth } from './core'
+import { Button, Icon, IconButton, LOCALE, clamp, ScrollEdges, Skeleton, Spinner, TOUCH, cn, spring, surface, useCoarsePointer, useControllable, usePointerDrag, useScrollEdges, useWidth } from './core'
+import { Popover, PopoverContent, PopoverTrigger } from './overlay'
 import { SegmentedControl, Select, inputShellClass } from './forms'
 import { useToast } from './feedback'
 import { useDragSort } from './layout'
+import { useVirtual } from './virtual'
 
 /* ════════════════════════════════════════════════════════════════════════════
  * DATA GRID: filter builder (Bricks / Text / Blocks), ripgrep-style search, group by,
@@ -17,6 +19,8 @@ export type GridColumn<T> = {
   /** displayed (and searched) text; defaults to the value, dates as "12 Mar 2025" */ text?: (row: T) => string
   /** custom cell, e.g. a badge. `content` is the text with search matches highlighted */ render?: (row: T, content: ReactNode) => ReactNode
   /** double-click to edit (default: text and number columns without options) */ editable?: boolean
+  /** start pinned to this side (sticky while the rest scrolls); the Columns menu changes it */ pin?: 'left' | 'right'
+  /** start hidden; the Columns menu shows it */ hidden?: boolean
 }
 export type GridCondition = { id: string; f: [field: string, op: string, value: string] }
 export type GridGroup = { id: string; j: 'AND' | 'OR'; c: GridFilterNode[] }
@@ -384,56 +388,198 @@ function GridFilterBuilder({ tree, onChange, schema, fields, defaultField, count
   )
 }
 
+/** The filter bar re-renders only when its props change (not on every scroll of a virtual grid). */
+const GridFilterBuilderMemo = memo(GridFilterBuilder)
+
 /** A visible accent ring on a text-field shell while its input has keyboard focus. */
 const GRID_FOCUS_RING = 'has-[input:focus-visible]:!border-[var(--accent)] has-[input:focus-visible]:!shadow-[0_0_0_2px_var(--accent-soft)]'
 
+const gridCollator = new Intl.Collator()
+/** fmtDate's default format with one shared formatter: building an Intl formatter per cell is the slowest part of a scroll frame. */
+let gridDateFmt: Intl.DateTimeFormat | null = null
+const gridDate = (d: Date) => (gridDateFmt ??= new Intl.DateTimeFormat(LOCALE, { day: 'numeric', month: 'short', year: 'numeric' })).format(d)
 const gridCmp = (x: unknown, y: unknown) =>
-  (typeof x === 'number' && typeof y === 'number') || (x instanceof Date && y instanceof Date) ? Number(x) - Number(y) : String(x).localeCompare(String(y))
+  (typeof x === 'number' && typeof y === 'number') || (x instanceof Date && y instanceof Date) ? Number(x) - Number(y) : gridCollator.compare(String(x), String(y))
+
+/* ---- selection model ---- */
+/** A row's key (what `rowKey` returns). */
+export type GridKey = string | number
+/**
+ * Which rows are selected. `include`: exactly `keys`. `exclude`: every row matching the current filter and search, on
+ * every page and including rows not loaded yet, except `keys`. That is "select all across pages" in server mode: send it
+ * to your API as it is. The grid only creates `exclude` from the "Select all N rows" link, and drops it back to an empty
+ * selection when the filter, search or sort changes (because "all" would then mean different rows).
+ */
+export type GridSelection = { mode: 'include' | 'exclude'; keys: ReadonlySet<GridKey> }
+/** An empty selection. */
+export const GRID_NO_SELECTION: GridSelection = { mode: 'include', keys: new Set() }
+/** Whether the row with `key` is selected. */
+export const gridIsSelected = (s: GridSelection, key: GridKey) => s.mode === 'include' ? s.keys.has(key) : !s.keys.has(key)
+/** How many rows are selected, out of `total` rows matching the filter. */
+export const gridSelectedCount = (s: GridSelection, total: number) => s.mode === 'include' ? s.keys.size : Math.max(0, total - s.keys.size)
+function gridSelWith(s: GridSelection, ids: readonly GridKey[], on: boolean): GridSelection {
+  const keys = new Set(s.keys), add = s.mode === 'include' ? on : !on
+  for (const id of ids) { if (add) keys.add(id); else keys.delete(id) }
+  return { mode: s.mode, keys }
+}
+/** Sort state: a column and a direction (1 ascending, -1 descending). */
+export type GridSort<T> = { key: keyof T & string; dir: 1 | -1 }
+/** Pinned column keys per side, in display order. */
+export type GridPinned = { left?: string[]; right?: string[] }
+type GridDisp<T> = { g: string; rs: T[]; r?: undefined } | { r: T; g?: undefined }
+/** Rows rendered when more than this many are shown (and always with `onLoadMore`) are virtualised. */
+const GRID_VIRTUAL_AT = 100
+const GRID_GROUP_H = 36
+
+/** Everything a grid row's output depends on: a memoised row re-renders only when one of these changes. */
+type GridRowProps<T> = {
+  r: T; di: number; ri: number; on: boolean; tabKey: string | null; editKey: string | null; activeKey: string | null
+  flash: { key: string; n: number } | null; marks?: Map<string, RegExpMatchArray[]>; cols: GridColumn<T>[]; stickKey: string; anim: boolean
+  measure: (el: Element | null) => void | (() => void); draw: { current: (r: T, di: number, p: GridRowProps<T>) => ReactElement }
+}
+const GridRowMemo = memo(function GridRow<T>(p: GridRowProps<T>) { return p.draw.current(p.r, p.di, p) }) as <T>(p: GridRowProps<T> & { key?: React.Key }) => ReactElement
+
+/** Props of DataGrid. Every 0.2 prop works as before; the rest add server data, column state and a selection API. */
+export type DataGridProps<T> = {
+  columns: GridColumn<T>[]; rows?: T[]; defaultRows?: T[]; onRowsChange?: (rows: T[]) => void; rowKey: (r: T) => GridKey
+  defaultFilter?: GridGroup; defaultSort?: GridSort<T>; /** columns offered in Group by (client mode) */ groupable?: (keyof T & string)[]
+  /** totals shown on each group row (default: sums of the number columns) */ groupSummary?: (rows: T[]) => ReactNode
+  /** used in checkbox labels */ rowLabel?: (r: T) => string
+  /** Export button; gets the selected rows that are loaded, and the selection (which may be `exclude` in server mode) */ onExport?: (rows: T[], selection: GridSelection) => void
+  /** px; the rows scroll inside */ maxHeight?: number; 'aria-label'?: string; className?: string
+  /** `rows` are already filtered, sorted and paged by your API: the grid only emits sort/filter/search/page changes. No grouping. */ server?: boolean
+  /** controlled sort (null: unsorted) */ sort?: GridSort<T> | null; onSortChange?: (sort: GridSort<T> | null) => void
+  /** controlled filter tree; the Bricks/Text/Blocks builder emits it */ filter?: GridGroup; onFilterChange?: (filter: GridGroup) => void
+  /** the rg search box, debounced (150 ms): apply it on your API in server mode */ onSearchChange?: (query: string) => void
+  /** server mode: rows matching on the server (pages, the count, aria-rowcount, "select all N") */ rowCount?: number
+  /** 0-based page; with `pageSize` a pager shows (client mode pages locally) */ page?: number; defaultPage?: number; onPageChange?: (page: number) => void
+  pageSize?: number; defaultPageSize?: number; /** offered in "Rows per page" */ pageSizes?: number[]; onPageSizeChange?: (size: number) => void
+  /** infinite loading: called when the last rows scroll into view (once per row count) while `hasMore` and not `loading` */ onLoadMore?: () => void; hasMore?: boolean
+  /** a request is in flight: skeleton rows when empty, dimmed rows otherwise, loading rows at the end with `onLoadMore` */ loading?: boolean
+  /** a failed request: shown above the rows, with Retry when `onRetry` is given */ error?: ReactNode; onRetry?: () => void
+  /** controlled selection (see GridSelection) */ selection?: GridSelection; defaultSelection?: GridSelection; onSelectionChange?: (s: GridSelection) => void
+  /** server mode Delete (client mode deletes locally with Undo) */ onDelete?: (selection: GridSelection, loadedRows: T[]) => void
+  /** column keys in display order (within each pinned side) */ columnOrder?: string[]; defaultColumnOrder?: string[]; onColumnOrderChange?: (order: string[]) => void
+  /** hidden column keys (default: columns with `hidden`) */ hiddenColumns?: string[]; defaultHiddenColumns?: string[]; onHiddenColumnsChange?: (keys: string[]) => void
+  /** pinned columns (default: columns with `pin`, else the first column on the left) */ pinnedColumns?: GridPinned; defaultPinnedColumns?: GridPinned; onPinnedColumnsChange?: (p: GridPinned) => void
+  onColumnResize?: (key: string, width: number) => void
+  /** px per row (default 38, 44 on touch screens); rows taller than this are measured */ rowHeight?: number
+  /** virtualise the rows: true, false, or above this many rows (default 100). Small grids keep their row animations. */ virtualize?: boolean | number
+}
 
 /**
- * Data grid for a few hundred rows, generic over the row type. Filter with Bricks (chips joined by AND/OR), a
- * Text query (`status is active and mrr > 500`, with highlighting and parse errors) or Scratch-style Blocks with
- * nested groups (drag ⠿) — all three edit one filter. Search every cell ripgrep-style (regex, smart case, whole
- * word, literal; `-i -w -F` flags work too) with highlighted hits. Group by a column with collapsible groups,
- * counts and totals. Click headers to sort, drag their edge to resize, shift-click checkboxes for ranges, then
- * Export or Delete (with Undo). Double-click a cell to edit; Enter saves, Escape cancels.
+ * Data grid, generic over the row type, from a few rows to 100k (rows are virtualised above 100: only the ones in view
+ * are in the DOM). Filter with Bricks (chips joined by AND/OR), a Text query (`status is active and mrr > 500`, with
+ * highlighting and parse errors) or Scratch-style Blocks with nested groups (drag ⠿) — all three edit one filter.
+ * Search every cell ripgrep-style (regex, smart case, whole word, literal; `-i -w -F` flags work too) with highlighted
+ * hits. Group by a column with collapsible groups, counts and totals. Click headers to sort, drag their edge to resize,
+ * drag a header (or Ctrl+Shift+← →) to reorder; the Columns menu hides, pins (left/right) and reorders. Shift-click
+ * checkboxes for ranges, then Export or Delete (with Undo). Double-click a cell to edit; Enter saves, Escape cancels.
+ * Keyboard: one Tab stop in the cells, arrows, Home/End, Ctrl+Home/End, PageUp/PageDown, Enter/F2 edits, Space selects.
+ * `server` hands sorting, filtering, search and paging to your API (`rowCount`, `page`/`pageSize` or `onLoadMore`,
+ * `loading`, `error`); `selection` is controlled with "select all across pages" semantics (see GridSelection).
  */
-export function DataGrid<T extends object>({ columns, rows, defaultRows = [], onRowsChange, rowKey, defaultFilter, defaultSort, groupable, groupSummary, rowLabel, onExport, maxHeight = 420, 'aria-label': ariaLabel = 'Rows', className }:
-  { columns: GridColumn<T>[]; rows?: T[]; defaultRows?: T[]; onRowsChange?: (rows: T[]) => void; rowKey: (r: T) => string | number
-    defaultFilter?: GridGroup; defaultSort?: { key: keyof T & string; dir: 1 | -1 }; /** columns offered in Group by */ groupable?: (keyof T & string)[]
-    /** totals shown on each group row (default: sums of the number columns) */ groupSummary?: (rows: T[]) => ReactNode
-    /** used in checkbox labels */ rowLabel?: (r: T) => string; onExport?: (rows: T[]) => void; maxHeight?: number; 'aria-label'?: string; className?: string }) {
+export function DataGrid<T extends object>(props: DataGridProps<T>) {
+  const { columns, rows, defaultRows = [], onRowsChange, rowKey, defaultFilter, defaultSort, groupable, groupSummary, rowLabel, onExport, maxHeight = 420, 'aria-label': ariaLabel = 'Rows', className,
+    server = false, sort: sortProp, onSortChange, filter: filterProp, onFilterChange, onSearchChange, rowCount, page: pageProp, defaultPage = 0, onPageChange,
+    pageSize: pageSizeProp, defaultPageSize, pageSizes, onPageSizeChange, onLoadMore, hasMore = true, loading = false, error, onRetry,
+    selection: selProp, defaultSelection, onSelectionChange, onDelete, columnOrder, defaultColumnOrder, onColumnOrderChange,
+    hiddenColumns, defaultHiddenColumns, onHiddenColumnsChange, pinnedColumns, defaultPinnedColumns, onPinnedColumnsChange, onColumnResize, rowHeight, virtualize = GRID_VIRTUAL_AT } = props
   const [data, setData] = useControllable(rows, defaultRows, onRowsChange)
   const dataRef = useRef(data); dataRef.current = data
   const commit = (next: T[]) => { dataRef.current = next; setData(next) }
   const toast = useToast()
-  const [filter, setFilter] = useState<GridGroup>(() => defaultFilter ?? gridFilter('AND'))
-  const [sort, setSort] = useState(defaultSort ?? null)
+  const [initialFilter] = useState(() => defaultFilter ?? gridFilter('AND'))
+  const [filter, setFilterRaw] = useControllable(filterProp, initialFilter, onFilterChange)
+  const [sort, setSortRaw] = useControllable<GridSort<T> | null>(sortProp, defaultSort ?? null, onSortChange)
+  const [sel, setSelRaw] = useControllable(selProp, defaultSelection ?? GRID_NO_SELECTION, onSelectionChange)
+  const selRef = useRef(sel); selRef.current = sel
+  const setSel = (s: GridSelection) => { selRef.current = s; setSelRaw(s) }
+  const [page, setPageRaw] = useControllable(pageProp, defaultPage, onPageChange)
+  const pageRef = useRef(page); pageRef.current = page
+  const setPage = (p: number) => { if (p !== pageRef.current) { pageRef.current = p; setPageRaw(p) } }
+  const [pageSize, setPageSize] = useControllable(pageSizeProp, defaultPageSize ?? 0, onPageSizeChange)
+  const paged = pageSize > 0
   const [qInput, setQInput] = useState('') // what's typed; `q` follows it after a short pause
   const [q, setQ] = useState('')
   useEffect(() => { if (qInput === q) return; const t = setTimeout(() => setQ(qInput), 150); return () => clearTimeout(t) }, [qInput]) // eslint-disable-line react-hooks/exhaustive-deps
   const [flags, setFlags] = useState({ cs: false, w: false, rx: true })
   const [groupBy, setGroupBy] = useState('')
   const [closed, setClosed] = useState<Set<string>>(new Set())
-  const [sel, setSel] = useState<Set<string | number>>(new Set())
-  const last = useRef<string | number | null>(null)
+  const last = useRef<GridKey | null>(null)
   const [widths, setWidths] = useState<Record<string, number>>(() => Object.fromEntries(columns.map(c => [c.key, c.width ?? 120])))
   const [resizing, setResizing] = useState<string | null>(null)
-  const [edit, setEditState] = useState<{ id: string | number; key: string } | null>(null)
+  const [edit, setEditState] = useState<{ id: GridKey; key: string } | null>(null)
   const editRef = useRef(edit)
   const setEdit = (e: typeof edit) => { editRef.current = e; setEditState(e) }
-  const [flash, setFlash] = useState<{ id: string | number; key: string; n: number } | null>(null)
+  const [flash, setFlash] = useState<{ id: GridKey; key: string; n: number } | null>(null)
   /* touch: tap a cell to select it, tap again (or its pencil) to edit; mouse keeps double-click */
-  const [active, setActive] = useState<{ id: string | number; key: string } | null>(null)
+  const [active, setActive] = useState<{ id: GridKey; key: string } | null>(null)
   /* keyboard: one roving Tab stop among the cells; arrows move it, Enter or F2 edits, Space selects the row */
-  const [cursor, setCursor] = useState<{ id: string | number; key: string } | null>(null)
+  const [cursor, setCursor] = useState<{ id: GridKey; key: string } | null>(null)
+  const pendingFocus = useRef<{ id: GridKey; key: string } | null>(null)
+  const [said, setSaid] = useState('') // polite announcements (column moves)
   const tableRef = useRef<HTMLTableElement>(null)
   const ptr = useRef('mouse')
-  const [scroller, edges] = useScrollEdges<HTMLDivElement>()
+  const [scrollerCb, edges] = useScrollEdges<HTMLDivElement>()
+  const scrollEl = useRef<HTMLDivElement | null>(null)
+  const scroller = useCallback((el: HTMLDivElement | null) => { scrollEl.current = el; scrollerCb(el) }, [scrollerCb])
   const [gridBox, gridW] = useWidth<HTMLDivElement>()
   const narrow = gridW > 0 && gridW < 520
+  const coarse = useCoarsePointer()
+  const rowH = rowHeight ?? (coarse ? 44 : 38)
 
+  /* ---- columns: order, visibility, pins ---- */
   const col = (k: string) => columns.find(c => c.key === k)
+  const allKeys = useMemo(() => columns.map(c => c.key as string), [columns])
+  const [orderRaw, setOrder] = useControllable(columnOrder, defaultColumnOrder ?? allKeys, onColumnOrderChange)
+  const order = useMemo(() => { const known = new Set(allKeys), o = orderRaw.filter(k => known.has(k)); for (const k of allKeys) if (!o.includes(k)) o.push(k); return o }, [orderRaw, allKeys])
+  const [hidden, setHidden] = useControllable(hiddenColumns, defaultHiddenColumns ?? columns.filter(c => c.hidden).map(c => c.key as string), onHiddenColumnsChange)
+  const [initialPins] = useState<GridPinned>(() => defaultPinnedColumns ?? (columns.some(c => c.pin)
+    ? { left: columns.filter(c => c.pin === 'left').map(c => c.key), right: columns.filter(c => c.pin === 'right').map(c => c.key) }
+    : { left: columns[0] ? [columns[0].key] : [], right: [] }))
+  const [pins, setPins] = useControllable(pinnedColumns, initialPins, onPinnedColumnsChange)
+  const pinOf = (k: string): 'left' | 'right' | null => pins.left?.includes(k) ? 'left' : pins.right?.includes(k) ? 'right' : null
+  /** every column, arranged as displayed: left pins, the rest, right pins (hidden ones included, for the menu) */
+  const arranged = useMemo(() => {
+    const z = (k: string) => pins.left?.includes(k) ? 0 : pins.right?.includes(k) ? 2 : 1
+    return [0, 1, 2].flatMap(n => order.filter(k => z(k) === n)).map(k => col(k)!).filter(Boolean)
+  }, [order, pins, columns]) // eslint-disable-line react-hooks/exhaustive-deps
+  const cols = useMemo(() => { const h = new Set(hidden); return arranged.filter(c => !h.has(c.key)) }, [arranged, hidden])
+  const colW = (c: GridColumn<T>, i: number) => { const w = widths[c.key] ?? c.width ?? 120; return i === 0 && narrow && pinOf(c.key) === 'left' ? Math.min(w, 120) : w }
+  const stick = new Map<string, { side: 'left' | 'right'; at: number; edge: boolean }>()
+  {
+    // on a phone only the first left pin stays sticky (as in 0.2): more would leave no room for the rest of the row
+    const left = cols.filter(c => pinOf(c.key) === 'left').slice(0, narrow ? 1 : undefined), right = narrow ? [] : cols.filter(c => pinOf(c.key) === 'right')
+    let x = 40; left.forEach((c, i) => { stick.set(c.key, { side: 'left', at: x, edge: i === left.length - 1 }); x += colW(c, cols.indexOf(c)) })
+    let r = 0; [...right].reverse().forEach((c, i) => { stick.set(c.key, { side: 'right', at: r, edge: i === right.length - 1 }); r += colW(c, cols.indexOf(c)) })
+  }
+  const pinStyle = (k: string): CSSProperties | undefined => { const s = stick.get(k); return s ? (s.side === 'left' ? { left: s.at } : { right: s.at }) : undefined }
+  const pinCls = (k: string, head = false) => { const s = stick.get(k); return s ? cn('sticky', head ? 'z-[3]' : 'z-[1]', s.edge && (s.side === 'left' ? 'shadow-[inset_-1px_0_0_var(--line)]' : 'shadow-[inset_1px_0_0_var(--line)]')) : '' }
+  /** move `k` one step (-1/1) among the columns of its pinned side; `shown` counts only visible columns */
+  const moveCol = (k: string, dir: -1 | 1, shown = true) => {
+    const zone = pinOf(k), list = (shown ? cols : arranged).filter(c => pinOf(c.key) === zone).map(c => c.key as string)
+    const i = list.indexOf(k), j = i + dir
+    if (i < 0 || j < 0 || j >= list.length) return false
+    moveColTo(k, list[j], dir > 0)
+    setSaid(`${col(k)?.label} moved to position ${j + 1} of ${list.length}${zone ? ` pinned ${zone}` : ''}`)
+    return true
+  }
+  const moveColTo = (k: string, target: string, after: boolean) => {
+    if (k === target) return
+    const o = order.filter(x => x !== k), at = o.indexOf(target)
+    o.splice(at + (after ? 1 : 0), 0, k)
+    setOrder(o)
+  }
+  const setPin = (k: string, side: 'left' | 'right' | null) => {
+    const left = (pins.left ?? []).filter(x => x !== k), right = (pins.right ?? []).filter(x => x !== k)
+    if (side === 'left') left.push(k); if (side === 'right') right.unshift(k)
+    setPins({ left, right })
+    setSaid(`${col(k)?.label} ${side ? `pinned ${side}` : 'unpinned'}`)
+  }
+  const toggleHidden = (k: string) => setHidden(hidden.includes(k) ? hidden.filter(x => x !== k) : [...hidden, k])
+
+  /* ---- filter, search, sort ---- */
   const kind = (k: string): 'text' | 'number' => col(k)?.type === 'number' ? 'number' : 'text'
   const schema: GridSchema = useMemo(() => ({
     label: new Map(columns.map(c => [c.key, c.label])),
@@ -441,7 +587,7 @@ export function DataGrid<T extends object>({ columns, rows, defaultRows = [], on
     kind: (k: string) => columns.find(c => c.key === k)?.type === 'number' ? 'number' : 'text',
     options: (k: string) => columns.find(c => c.key === k)?.options,
   }), [columns])
-  const cellText = (r: T, c: GridColumn<T>) => { if (c.text) return c.text(r); const v = r[c.key]; return v instanceof Date ? fmtDate(v) : String(v ?? '') }
+  const cellText = (r: T, c: GridColumn<T>) => { if (c.text) return c.text(r); const v = r[c.key]; return v instanceof Date ? gridDate(v) : String(v ?? '') }
   const test = (r: T, [k, op, v]: GridCondition['f']) => {
     const c = col(k); if (!c || v === '' || v == null) return true
     if (kind(k) === 'number') { const x = Number(r[c.key]), n = Number(v); if (Number.isNaN(n)) return true; return ({ '>': x > n, '<': x < n, '=': x === n, '≥': x >= n, '≤': x <= n } as Record<string, boolean>)[op] ?? true }
@@ -451,13 +597,13 @@ export function DataGrid<T extends object>({ columns, rows, defaultRows = [], on
   const evalNode = (n: GridFilterNode, r: T): boolean => !gridIsGroup(n) ? test(r, n.f) : !n.c.length || (n.j === 'AND' ? n.c.every(x => evalNode(x, r)) : n.c.some(x => evalNode(x, r)))
   const rg = useMemo(() => gridCompileRg(q, flags), [q, flags])
   /* one pass: each cell is matched once (the matches feed the row filter, the hit count and the highlights), and the
-     pass stops when it runs past GRID_RG_BUDGET, keeping what it found in the rows it reached */
+     pass stops when it runs past GRID_RG_BUDGET, keeping what it found in the rows it reached. Server mode only marks. */
   const search = useMemo(() => {
-    const base = data.filter(r => evalNode(filter, r))
+    const base = server ? data : filter.c.length ? data.filter(r => evalNode(filter, r)) : data.slice()
     let rows = base, hits = 0, cut = 0
     const marks = new Map<T, Map<string, RegExpMatchArray[]>>()
     if (rg.re) {
-      const re = rg.re, t0 = performance.now(); rows = []
+      const re = rg.re, t0 = performance.now(); if (!server) rows = []
       for (let i = 0; i < base.length; i++) {
         if (i % 8 === 0 && i && performance.now() - t0 > GRID_RG_BUDGET) { cut = i; break }
         const r = base[i]; let m: Map<string, RegExpMatchArray[]> | null = null
@@ -465,43 +611,67 @@ export function DataGrid<T extends object>({ columns, rows, defaultRows = [], on
           const found = [...cellText(r, c).slice(0, GRID_RG_CELL).matchAll(re)]
           if (found.length) { (m ??= new Map()).set(c.key, found); hits += found.length }
         }
-        if (m) { marks.set(r, m); rows.push(r) }
+        if (m) { marks.set(r, m); if (!server) rows.push(r) }
       }
     }
-    if (sort) rows.sort((a, b) => gridCmp(a[sort.key], b[sort.key]) * sort.dir)
-    return { rows, marks, hits, cut, of: base.length }
-  }, [data, filter, rg, sort, columns]) // eslint-disable-line react-hooks/exhaustive-deps
+    if (sort && !server) { const k = sort.key, d = sort.dir; rows.sort((a, b) => gridCmp(a[k], b[k]) * d) }
+    return { rows, marks, hits, cut: server ? 0 : cut, of: base.length }
+  }, [data, filter, rg, sort, columns, server]) // eslint-disable-line react-hooks/exhaustive-deps
   const visible = search.rows, hits = search.hits
+  const total = server ? (rowCount ?? data.length) : visible.length
+  const pageCount = paged ? Math.max(1, Math.ceil(total / pageSize)) : 1
+  const pg = paged ? clamp(page, 0, pageCount - 1) : 0
+  const pageRows = useMemo(() => paged && !server ? visible.slice(pg * pageSize, pg * pageSize + pageSize) : visible, [visible, paged, server, pg, pageSize])
   const numCols = columns.filter(c => c.type === 'number')
   const groups = useMemo(() => {
-    if (!groupBy) return null
-    const m = new Map<string, T[]>()
-    visible.forEach(r => { const c = col(groupBy)!, k = cellText(r, c); if (!m.has(k)) m.set(k, []); m.get(k)!.push(r) })
-    const total = (rs: T[]) => numCols[0] ? rs.reduce((s, r) => s + Number(r[numCols[0].key]), 0) : rs.length
-    return [...m.entries()].sort((a, b) => total(b[1]) - total(a[1]))
-  }, [visible, groupBy]) // eslint-disable-line react-hooks/exhaustive-deps
+    if (!groupBy || server) return null
+    const m = new Map<string, T[]>(), c = col(groupBy)!
+    pageRows.forEach(r => { const k = cellText(r, c); if (!m.has(k)) m.set(k, []); m.get(k)!.push(r) })
+    const sum = (rs: T[]) => numCols[0] ? rs.reduce((s, r) => s + Number(r[numCols[0].key]), 0) : rs.length
+    return [...m.entries()].sort((a, b) => sum(b[1]) - sum(a[1]))
+  }, [pageRows, groupBy, server]) // eslint-disable-line react-hooks/exhaustive-deps
+  const disp = useMemo<GridDisp<T>[] | null>(() => groups ? groups.flatMap(([g, rs]) => [{ g, rs }, ...(closed.has(g) ? [] : rs.map(r => ({ r })))]) : null, [groups, closed])
+  const dispCount = disp ? disp.length : pageRows.length
+  /** keyboard order: the rows in open groups, with their display index */
+  const nav = useMemo(() => {
+    const ids: GridKey[] = [], at: number[] = [], index = new Map<GridKey, number>()
+    if (disp) disp.forEach((d, i) => { if (d.r) { const id = rowKey(d.r); index.set(id, ids.length); ids.push(id); at.push(i) } })
+    else pageRows.forEach((r, i) => { const id = rowKey(r); index.set(id, i); ids.push(id); at.push(i) })
+    return { ids, at, index }
+  }, [disp, pageRows]) // eslint-disable-line react-hooks/exhaustive-deps
 
-  /* selection */
-  const visIds = visible.map(rowKey)
-  const allSel = visIds.length > 0 && visIds.every(id => sel.has(id)), someSel = visIds.some(id => sel.has(id))
+  /* when what the rows mean changes: back to page one, and an "all except" selection no longer applies */
+  const resetForQuery = () => { setPage(0); if (selRef.current.mode === 'exclude') setSel(GRID_NO_SELECTION) }
+  const resetRef = useRef(resetForQuery); resetRef.current = resetForQuery
+  const setFilterRef = useRef(setFilterRaw); setFilterRef.current = setFilterRaw
+  const setFilter = useCallback((f: GridGroup) => { setFilterRef.current(f); resetRef.current() }, []) // stable, so the memoised filter bar skips scroll renders
+  const setSort = (s: GridSort<T> | null) => { setSortRaw(s); resetForQuery() }
+  const firstQ = useRef(true)
+  useEffect(() => { if (firstQ.current) { firstQ.current = false; return } onSearchChange?.(q); resetRef.current() }, [q]) // eslint-disable-line react-hooks/exhaustive-deps
+
+  /* ---- selection ---- */
+  const pageIds = useMemo(() => pageRows.map(rowKey), [pageRows]) // eslint-disable-line react-hooks/exhaustive-deps
+  const { allSel, someSel } = useMemo(() => {
+    let all = pageIds.length > 0, some = false
+    for (const id of pageIds) { if (gridIsSelected(sel, id)) some = true; else all = false; if (some && !all) break }
+    return { allSel: all, someSel: some }
+  }, [pageIds, sel])
+  const selCount = gridSelectedCount(sel, total)
   const headCb = useRef<HTMLInputElement>(null)
   useEffect(() => { if (headCb.current) headCb.current.indeterminate = someSel && !allSel })
-  const toggleRow = (id: string | number, on: boolean, shift: boolean) => {
+  const isSel = (id: GridKey) => gridIsSelected(sel, id)
+  const toggleRow = (id: GridKey, on: boolean, shift: boolean) => {
     const prev = last.current
-    setSel(s => {
-      const n = new Set(s)
-      if (shift && prev != null && visIds.includes(prev)) {
-        const [a, b] = [visIds.indexOf(prev), visIds.indexOf(id)].sort((x, y) => x - y)
-        for (let i = a; i <= b; i++) { if (on) n.add(visIds[i]); else n.delete(visIds[i]) }
-      } else if (on) n.add(id); else n.delete(id)
-      return n
-    })
+    const a = prev != null ? nav.index.get(prev) : undefined, b = nav.index.get(id)
+    const ids = shift && a != null && b != null ? nav.ids.slice(Math.min(a, b), Math.max(a, b) + 1) : [id]
+    setSel(gridSelWith(selRef.current, ids, on))
     last.current = id
   }
-  const setMany = (ids: (string | number)[], on: boolean) => setSel(s => { const n = new Set(s); ids.forEach(id => on ? n.add(id) : n.delete(id)); return n })
+  const setMany = (ids: readonly GridKey[], on: boolean) => setSel(gridSelWith(selRef.current, ids, on))
+  const selectedLoaded = () => dataRef.current.filter(r => gridIsSelected(selRef.current, rowKey(r)))
   const del = () => {
-    const before = dataRef.current, removed = before.filter(r => sel.has(rowKey(r))), n = removed.length
-    commit(before.filter(r => !sel.has(rowKey(r)))); setSel(new Set())
+    const before = dataRef.current, removed = selectedLoaded(), n = removed.length, gone = new Set(removed)
+    commit(before.filter(r => !gone.has(r))); setSel(GRID_NO_SELECTION)
     const undo = () => {
       const cur = new Map(dataRef.current.map(r => [rowKey(r), r])), back = new Set(removed)
       const restored = before.flatMap(r => back.has(r) ? [r] : cur.has(rowKey(r)) ? [cur.get(rowKey(r))!] : [])
@@ -510,22 +680,67 @@ export function DataGrid<T extends object>({ columns, rows, defaultRows = [], on
     }
     toast({ title: `Deleted ${n} ${n === 1 ? 'row' : 'rows'}`, action: { label: 'Undo', onClick: undo } })
   }
-  const exp = () => { const rs = data.filter(r => sel.has(rowKey(r))); if (onExport) onExport(rs); else toast({ title: `Exported ${rs.length} ${rs.length === 1 ? 'row' : 'rows'}`, description: 'CSV ready' }) }
+  const exp = () => { const rs = selectedLoaded(); if (onExport) onExport(rs, selRef.current); else toast({ title: `Exported ${selCount} ${selCount === 1 ? 'row' : 'rows'}`, description: 'CSV ready' }) }
+  const canSelectAll = sel.mode === 'include' && allSel && total > pageIds.length
+  const selectAll = () => setSel(server ? { mode: 'exclude', keys: new Set() } : { mode: 'include', keys: new Set(visible.map(rowKey)) })
 
-  /* resize */
-  const rz = useRef<{ k: string; w0: number } | null>(null)
+  /* ---- resize ---- */
+  const rz = useRef<{ k: string; w0: number; w: number } | null>(null)
   const resize = usePointerDrag({
     cursor: 'col-resize',
-    onMove: p => { const r = rz.current; if (r) setWidths(w => ({ ...w, [r.k]: Math.max(60, r.w0 + p.dx) })) },
-    onEnd: () => { rz.current = null; setResizing(null) },
+    onMove: p => { const r = rz.current; if (r) { r.w = Math.max(60, r.w0 + p.dx); setWidths(w => ({ ...w, [r.k]: r.w })) } },
+    onEnd: () => { const r = rz.current; rz.current = null; setResizing(null); if (r && r.w !== r.w0) onColumnResize?.(r.k, r.w) },
   })
   const startResize = (e: React.PointerEvent<HTMLSpanElement>, k: string) => {
     if (e.button !== 0) return
     e.preventDefault(); e.stopPropagation()
-    rz.current = { k, w0: widths[k] }; setResizing(k); resize.start(e)
+    const w0 = widths[k] ?? col(k)?.width ?? 120
+    rz.current = { k, w0, w: w0 }; setResizing(k); resize.start(e)
   }
 
-  /* edit */
+  /* ---- drag a header to reorder (mouse and pen; touch uses the Columns menu, so horizontal scrolling still works) ---- */
+  const [colDrag, setColDrag] = useState<{ k: string; over: string; after: boolean } | null>(null)
+  const colDragRef = useRef<{ k: string; rects: { k: string; mid: number }[]; over: string; after: boolean } | null>(null)
+  const dragged = useRef(false)
+  const headDrag = usePointerDrag({
+    cursor: 'grabbing',
+    onMove: p => {
+      const d = colDragRef.current; if (!d || !d.rects.length) return
+      const hit = d.rects.find(r => p.x < r.mid), over = hit ? hit.k : d.rects[d.rects.length - 1].k, after = !hit
+      if (over !== d.over || after !== d.after) { d.over = over; d.after = after; setColDrag({ k: d.k, over, after }) }
+    },
+    onEnd: (_, cancelled) => {
+      const d = colDragRef.current; colDragRef.current = null; setColDrag(null)
+      if (d && !cancelled && (d.over !== d.k)) { moveColTo(d.k, d.over, d.after); setSaid(`${col(d.k)?.label} moved`) }
+      setTimeout(() => { dragged.current = false }) // the click that ends a drag lands on the header, not its sort button
+    },
+  })
+  const onHeadPointerDown = (e: React.PointerEvent<HTMLTableCellElement>, k: string) => {
+    if (e.button !== 0 || e.pointerType === 'touch' || resizing) return
+    const th = e.currentTarget, x0 = e.clientX, id = e.pointerId
+    const move = (ev: PointerEvent) => {
+      if (ev.pointerId !== id || Math.abs(ev.clientX - x0) < 6) return
+      off()
+      const zone = pinOf(k)
+      // one batch of reads at the start of the drag
+      const rects = cols.filter(c => pinOf(c.key) === zone).map(c => {
+        const r = tableRef.current?.querySelector<HTMLElement>(`th[data-ck="${CSS.escape(c.key)}"]`)?.getBoundingClientRect()
+        return { k: c.key as string, mid: r ? r.left + r.width / 2 : 0 }
+      })
+      colDragRef.current = { k, rects, over: k, after: false }; dragged.current = true
+      setColDrag({ k, over: k, after: false })
+      headDrag.start({ pointerId: id, clientX: ev.clientX, clientY: ev.clientY, currentTarget: th, nativeEvent: ev }, th)
+    }
+    const off = () => { removeEventListener('pointermove', move, true); removeEventListener('pointerup', off, true); removeEventListener('pointercancel', off, true) }
+    addEventListener('pointermove', move, true); addEventListener('pointerup', off, true); addEventListener('pointercancel', off, true)
+  }
+  const headerKey = (e: RKeyboardEvent, k: string) => {
+    if (!(e.ctrlKey || e.metaKey) || !e.shiftKey || (e.key !== 'ArrowLeft' && e.key !== 'ArrowRight')) return
+    e.preventDefault()
+    if (moveCol(k, e.key === 'ArrowLeft' ? -1 : 1)) requestAnimationFrame(() => tableRef.current?.querySelector<HTMLElement>(`th[data-ck="${CSS.escape(k)}"] button`)?.focus())
+  }
+
+  /* ---- edit ---- */
   const canEdit = (c: GridColumn<T>) => c.editable ?? (c.type !== 'date' && !c.options)
   const save = (r: T, c: GridColumn<T>, raw: string) => {
     if (!editRef.current) return
@@ -537,8 +752,27 @@ export function DataGrid<T extends object>({ columns, rows, defaultRows = [], on
     setFlash(f => ({ id, key: c.key, n: (f?.n ?? 0) + 1 }))
   }
 
+  /* ---- virtual rows ---- */
+  const virtualOn = virtualize === true || (virtualize !== false && (!!onLoadMore || dispCount > (typeof virtualize === 'number' ? virtualize : GRID_VIRTUAL_AT)))
+  const tab = cursor && nav.index.has(cursor.id) && cols.some(c => c.key === cursor.key) ? cursor : nav.ids.length && cols[0] ? { id: nav.ids[0], key: cols[0].key as string } : null
+  const tabAt = tab ? nav.at[nav.index.get(tab.id)!] : -1
+  const estimate = useMemo(() => disp ? (i: number) => disp[i]?.g !== undefined ? GRID_GROUP_H : rowH : rowH, [disp, rowH])
+  const keep = useMemo(() => tabAt >= 0 ? [tabAt] : undefined, [tabAt])
+  const loadingRef = useRef(loading); loadingRef.current = loading
+  const hasMoreRef = useRef(hasMore); hasMoreRef.current = hasMore
+  const v = useVirtual({
+    count: dispCount, estimateSize: estimate, scrollRef: scrollEl, enabled: virtualOn, paddingStart: rowH, scrollPaddingStart: rowH,
+    getItemKey: i => { const d = disp?.[i]; return d ? (d.g !== undefined ? `g:${d.g}` : rowKey(d.r)) : rowKey(pageRows[i]) },
+    initialRect: { width: 800, height: maxHeight }, keep,
+    onEndReached: onLoadMore ? () => { if (hasMoreRef.current && !loadingRef.current) onLoadMore() } : undefined,
+  })
+  const vRef = useRef(v); vRef.current = v
+  const firstScroll = useRef(true)
+  useEffect(() => { if (firstScroll.current) { firstScroll.current = false; return } vRef.current.scrollToOffset(0) }, [pg, filter, q])
+
+  /* ---- keyboard ---- */
   const td = 'h-[38px] overflow-hidden border-b border-[var(--line)] bg-[var(--card)] px-2.5 text-ellipsis whitespace-nowrap [@media(pointer:coarse)]:h-11'
-  const sticky0 = 'sticky left-0 z-[1] w-10 px-0 text-center', sticky1 = 'sticky left-10 z-[1] shadow-[inset_-1px_0_0_var(--line)]'
+  const sticky0 = 'sticky left-0 z-[1] w-10 px-0 text-center'
   const cb = 'm-0 h-3.5 w-3.5 cursor-pointer accent-[var(--primary)] [@media(pointer:coarse)]:h-[18px] [@media(pointer:coarse)]:w-[18px]'
   /** the whole checkbox cell is the hit area (a finger-sized label around the small native box) */
   const cbWrap = 'mx-auto flex h-full min-h-9 w-full min-w-9 cursor-pointer items-center justify-center'
@@ -547,25 +781,35 @@ export function DataGrid<T extends object>({ columns, rows, defaultRows = [], on
     const id = rowKey(r)
     if (active?.id === id && active.key === c.key) { setActive(null); setEdit({ id, key: c.key }) } else setActive({ id, key: c.key })
   }
-  const rowOrder = groups ? groups.flatMap(([k, rs]) => closed.has(k) ? [] : rs.map(rowKey)) : visIds
-  const tab = cursor && rowOrder.includes(cursor.id) && col(cursor.key) ? cursor : rowOrder.length ? { id: rowOrder[0], key: columns[0].key } : null
-  const cellEl = (id: string | number, key: string) => tableRef.current?.querySelector<HTMLElement>(`[data-gr="${CSS.escape(String(id))}"][data-gk="${CSS.escape(key)}"]`)
-  const focusCell = (id: string | number, key: string) => { setCursor({ id, key }); cellEl(id, key)?.focus({ preventScroll: false }) }
+  const cellEl = (id: GridKey, key: string) => tableRef.current?.querySelector<HTMLElement>(`[data-gr="${CSS.escape(String(id))}"][data-gk="${CSS.escape(key)}"]`)
+  /** move the Tab stop to a cell: scroll its row into view (rendering it if it was virtualised away), then focus it */
+  const focusCell = (id: GridKey, key: string) => {
+    setCursor({ id, key })
+    const ni = nav.index.get(id)
+    if (ni != null && virtualOn) v.scrollToIndex(nav.at[ni], { align: 'auto' })
+    const el = cellEl(id, key)
+    if (el) el.focus({ preventScroll: false }); else pendingFocus.current = { id, key }
+  }
+  useLayoutEffect(() => {
+    const p = pendingFocus.current; if (!p) return
+    const el = cellEl(p.id, p.key); if (el) { pendingFocus.current = null; el.focus({ preventScroll: false }) }
+  })
   const onCellKey = (e: RKeyboardEvent, r: T, c: GridColumn<T>) => {
     if (e.target !== e.currentTarget || e.nativeEvent.isComposing) return
-    const id = rowKey(r), ri = rowOrder.indexOf(id), ci = columns.findIndex(x => x.key === c.key)
-    const to = (rr: number, cc: number) => { e.preventDefault(); const nid = rowOrder[clamp(rr, 0, rowOrder.length - 1)], nk = columns[clamp(cc, 0, columns.length - 1)].key; focusCell(nid, nk) }
+    const id = rowKey(r), ri = nav.index.get(id) ?? 0, ci = cols.findIndex(x => x.key === c.key)
+    const to = (rr: number, cc: number) => { e.preventDefault(); if (!nav.ids.length) return; focusCell(nav.ids[clamp(rr, 0, nav.ids.length - 1)], cols[clamp(cc, 0, cols.length - 1)].key) }
+    const pageRowsN = Math.max(1, Math.floor((v.viewportSize - rowH) / rowH) - 1)
     switch (e.key) {
       case 'ArrowDown': return to(ri + 1, ci)
       case 'ArrowUp': return to(ri - 1, ci)
       case 'ArrowRight': return to(ri, ci + 1)
       case 'ArrowLeft': return to(ri, ci - 1)
       case 'Home': return to(e.ctrlKey || e.metaKey ? 0 : ri, 0)
-      case 'End': return to(e.ctrlKey || e.metaKey ? rowOrder.length - 1 : ri, columns.length - 1)
-      case 'PageDown': return to(ri + 10, ci)
-      case 'PageUp': return to(ri - 10, ci)
+      case 'End': return to(e.ctrlKey || e.metaKey ? nav.ids.length - 1 : ri, cols.length - 1)
+      case 'PageDown': return to(ri + pageRowsN, ci)
+      case 'PageUp': return to(ri - pageRowsN, ci)
       case 'Enter': case 'F2': if (canEdit(c)) { e.preventDefault(); setCursor({ id, key: c.key }); setEdit({ id, key: c.key }) } return
-      case ' ': e.preventDefault(); toggleRow(id, !sel.has(id), e.shiftKey); return
+      case ' ': e.preventDefault(); toggleRow(id, !isSel(id), e.shiftKey); return
     }
   }
   /** close the editor and put keyboard focus back on its cell */
@@ -574,51 +818,114 @@ export function DataGrid<T extends object>({ columns, rows, defaultRows = [], on
     if (value === null) setEdit(null); else save(r, c, value)
     cellEl(id, c.key)?.focus({ preventScroll: true })
   }
-  const rowView = (r: T) => {
-    const id = rowKey(r), on = sel.has(id)
-    return (
-      <motion.tr key={id} layout="position" transition={spring(0.12, 0.45)} className={cn('group/row', on && '[&>td]:!bg-[var(--accent-soft)]')}>
-        <td className={cn(td, sticky0, 'group-hover/row:bg-[color-mix(in_srgb,var(--muted)_55%,var(--card))]')}>
-          <label className={cbWrap}><input type="checkbox" className={cb} checked={on} aria-label={`Select ${rowLabel?.(r) ?? id}`} onChange={() => {}} onClick={e => toggleRow(id, e.currentTarget.checked, e.shiftKey)} /></label>
-        </td>
-        {columns.map((c, i) => {
-          const editing = edit?.id === id && edit.key === c.key, text = cellText(r, c), content = gridMark(text, search.marks.get(r)?.get(c.key))
-          const picked = !editing && active?.id === id && active.key === c.key
-          return (
-            <td key={c.key} data-gr={String(id)} data-gk={c.key} tabIndex={tab?.id === id && tab.key === c.key && !editing ? 0 : -1}
-              onDoubleClick={() => canEdit(c) && setEdit({ id, key: c.key })} title={canEdit(c) ? 'Double-click or press Enter to edit' : undefined}
-              onPointerDown={e => { ptr.current = e.pointerType }} onClick={() => onCell(r, c)} onFocus={e => { if (e.target === e.currentTarget) setCursor({ id, key: c.key }) }}
-              onKeyDown={e => onCellKey(e, r, c)} aria-readonly={!canEdit(c) || undefined}
-              className={cn(td, 'relative outline-none group-hover/row:bg-[color-mix(in_srgb,var(--muted)_55%,var(--card))] focus-visible:shadow-[inset_0_0_0_2px_var(--accent)]', i === 0 && sticky1, c.type === 'number' && 'text-right tabular-nums', editing && '!p-0 shadow-[inset_0_0_0_2px_var(--accent)]',
-                picked && 'shadow-[inset_0_0_0_2px_color-mix(in_srgb,var(--accent)_55%,transparent)]', picked && (c.type === 'number' ? '!pl-10' : '!pr-10'))}>
-              {editing
-                ? <input autoFocus defaultValue={String(r[c.key] ?? '')} aria-label={`Edit ${c.label}`} onFocus={e => e.currentTarget.select()}
-                  onKeyDown={e => {
-                    if (e.nativeEvent.isComposing) return
-                    if (e.key === 'Enter' || e.key === 'Escape') { e.preventDefault(); e.stopPropagation(); closeEdit(r, c, e.key === 'Enter' ? e.currentTarget.value : null) }
-                  }} onBlur={e => save(r, c, e.currentTarget.value)}
-                  className={cn('h-full w-full border-0 bg-[var(--card)] px-2.5 text-[13px] text-[var(--fg)] shadow-[inset_0_0_0_2px_var(--accent)] outline-none [@media(pointer:coarse)]:!text-base', c.type === 'number' && 'text-right tabular-nums')} />
-                : <>
-                  {flash && flash.id === id && flash.key === c.key && (
-                    <motion.span key={flash.n} aria-hidden className="pointer-events-none absolute inset-0 bg-[var(--accent-soft)]" initial={{ opacity: 1 }} animate={{ opacity: 0 }} transition={{ duration: 0.8 }} />
-                  )}
-                  <span className="relative">{c.render ? c.render(r, content) : content}</span>
-                  {picked && (
-                    <button aria-label={`Edit ${c.label}`} onClick={e => { e.stopPropagation(); setActive(null); setEdit({ id, key: c.key }) }}
-                      className={cn('absolute top-1/2 grid h-8 w-8 -translate-y-1/2 cursor-pointer place-items-center rounded-[var(--r-md)] border-0 bg-[var(--accent-soft)] text-[var(--accent)]', c.type === 'number' ? 'left-1' : 'right-1')}>
-                      <Icon name="edit" size={14} />
-                    </button>
-                  )}
-                </>}
-            </td>
-          )
-        })}
-      </motion.tr>
-    )
+
+  /* ---- rows ---- */
+  const rowBase = paged ? pg * pageSize : 0
+  const animateRows = !virtualOn
+  const hoverBg = 'group-hover/row:bg-[color-mix(in_srgb,var(--muted)_55%,var(--card))]'
+  /* Rows are memoised (GridRow): scrolling a virtual grid only renders the rows that enter the view. Their handlers go
+     through `H`, so a row that skipped a render still acts on the current filter, selection and columns. */
+  const H = useRef({ toggleRow, setEdit, onCell, setCursor, onCellKey, closeEdit, save, setActive, cellText })
+  H.current = { toggleRow, setEdit, onCell, setCursor, onCellKey, closeEdit, save, setActive, cellText }
+  const stickKey = cols.map(c => { const st = stick.get(c.key); return st ? `${c.key}:${st.side}${st.at}${st.edge ? '|' : ''}` : c.key }).join(',')
+  const drawRow = (r: T, di: number, p: GridRowProps<T>): ReactElement => {
+    const id = rowKey(r), on = p.on, h = H.current
+    const cells = <>
+      <td className={cn(td, sticky0, hoverBg)}>
+        <label className={cbWrap}><input type="checkbox" className={cb} checked={on} aria-label={`Select ${rowLabel?.(r) ?? id}`} onChange={() => {}} onClick={e => H.current.toggleRow(id, e.currentTarget.checked, e.shiftKey)} /></label>
+      </td>
+      {p.cols.map(c => {
+        const editing = p.editKey === c.key, text = h.cellText(r, c), content = gridMark(text, p.marks?.get(c.key))
+        const picked = !editing && p.activeKey === c.key
+        return (
+          <td key={c.key} data-gr={String(id)} data-gk={c.key} tabIndex={p.tabKey === c.key && !editing ? 0 : -1} style={pinStyle(c.key)}
+            onDoubleClick={() => canEdit(c) && H.current.setEdit({ id, key: c.key })} title={canEdit(c) ? 'Double-click or press Enter to edit' : undefined}
+            onPointerDown={e => { ptr.current = e.pointerType }} onClick={() => H.current.onCell(r, c)} onFocus={e => { if (e.target === e.currentTarget) H.current.setCursor({ id, key: c.key }) }}
+            onKeyDown={e => H.current.onCellKey(e, r, c)} aria-readonly={!canEdit(c) || undefined}
+            className={cn(td, 'relative outline-none focus-visible:shadow-[inset_0_0_0_2px_var(--accent)]', hoverBg, pinCls(c.key), c.type === 'number' && 'text-right tabular-nums', editing && '!p-0 shadow-[inset_0_0_0_2px_var(--accent)]',
+              picked && 'shadow-[inset_0_0_0_2px_color-mix(in_srgb,var(--accent)_55%,transparent)]', picked && (c.type === 'number' ? '!pl-10' : '!pr-10'))}>
+            {editing
+              ? <input autoFocus defaultValue={String(r[c.key] ?? '')} aria-label={`Edit ${c.label}`} onFocus={e => e.currentTarget.select()}
+                onKeyDown={e => {
+                  if (e.nativeEvent.isComposing) return
+                  if (e.key === 'Enter' || e.key === 'Escape') { e.preventDefault(); e.stopPropagation(); H.current.closeEdit(r, c, e.key === 'Enter' ? e.currentTarget.value : null) }
+                }} onBlur={e => H.current.save(r, c, e.currentTarget.value)}
+                className={cn('h-full w-full border-0 bg-[var(--card)] px-2.5 text-[13px] text-[var(--fg)] shadow-[inset_0_0_0_2px_var(--accent)] outline-none [@media(pointer:coarse)]:!text-base', c.type === 'number' && 'text-right tabular-nums')} />
+              : <>
+                {p.flash && p.flash.key === c.key && (
+                  <motion.span key={p.flash.n} aria-hidden className="pointer-events-none absolute inset-0 bg-[var(--accent-soft)]" initial={{ opacity: 1 }} animate={{ opacity: 0 }} transition={{ duration: 0.8 }} />
+                )}
+                <span className="relative">{c.render ? c.render(r, content) : content}</span>
+                {picked && (
+                  <button aria-label={`Edit ${c.label}`} onClick={e => { e.stopPropagation(); H.current.setActive(null); H.current.setEdit({ id, key: c.key }) }}
+                    className={cn('absolute top-1/2 grid h-8 w-8 -translate-y-1/2 cursor-pointer place-items-center rounded-[var(--r-md)] border-0 bg-[var(--accent-soft)] text-[var(--accent)]', c.type === 'number' ? 'left-1' : 'right-1')}>
+                    <Icon name="edit" size={14} />
+                  </button>
+                )}
+              </>}
+          </td>
+        )
+      })}
+    </>
+    const rowCls = cn('group/row', on && '[&>td]:!bg-[var(--accent-soft)]')
+    const aria = { 'aria-rowindex': p.ri, 'aria-selected': on }
+    return p.anim
+      ? <motion.tr data-index={di} {...aria} layout="position" transition={spring(0.12, 0.45)} className={rowCls}>{cells}</motion.tr>
+      : <tr data-index={di} ref={p.measure} {...aria} className={rowCls}>{cells}</tr>
+  }
+  const draw = useRef(drawRow); draw.current = drawRow
+  const rowView = (r: T, di: number) => {
+    const id = rowKey(r)
+    return <GridRowMemo<T> key={id} r={r} di={di} ri={rowBase + di + 2} on={isSel(id)} tabKey={tab?.id === id ? tab.key : null} editKey={edit?.id === id ? edit.key : null}
+      activeKey={active?.id === id ? active.key : null} flash={flash?.id === id ? flash : null} marks={search.marks.get(r)} cols={cols} stickKey={stickKey}
+      anim={animateRows} measure={v.measureElement} draw={draw} />
   }
   const defaultSummary = (rs: T[]) => numCols.map((c, i) => <span key={c.key}>{i > 0 && ' · '}{c.label} <b className="font-[family-name:var(--mono)] font-semibold text-[var(--fg2)]">{rs.reduce((s, r) => s + Number(r[c.key]), 0).toLocaleString(LOCALE)}</b></span>)
   const groupCol = groupBy ? col(groupBy) : undefined
-  const fields: [string, string][] = columns.map(c => [c.key, c.label])
+  const groupView = (k: string, rs: T[], di: number) => {
+    const open = !closed.has(k), ids = rs.map(rowKey), all = ids.every(id => isSel(id))
+    const firstPinned = cols[0] ? stick.get(cols[0].key) : undefined
+    return (
+      <tr key={`g:${k}`} data-index={di} ref={animateRows ? undefined : v.measureElement} aria-rowindex={rowBase + di + 2}>
+        <td className={cn(td, sticky0, '!h-9 !bg-[color-mix(in_srgb,var(--muted)_60%,var(--card))]')}>
+          <label className={cbWrap}><input type="checkbox" className={cb} checked={all} aria-label={`Select group ${k}`} onChange={e => setMany(ids, e.currentTarget.checked)} /></label>
+        </td>
+        <td colSpan={cols.length} style={firstPinned?.side === 'left' ? { left: 40 } : undefined}
+          className={cn(td, firstPinned?.side === 'left' && 'sticky z-[1]', '!h-9 overflow-visible !bg-[color-mix(in_srgb,var(--muted)_60%,var(--card))]')}>
+          <button aria-expanded={open} onClick={() => setClosed(s => { const n = new Set(s); if (n.has(k)) n.delete(k); else n.add(k); return n })}
+            className="inline-flex cursor-pointer items-center gap-2 border-0 bg-transparent p-0 text-[13px] font-medium text-[var(--fg)] [@media(pointer:coarse)]:min-h-9">
+            <motion.span className="grid text-[var(--fg3)]" initial={false} animate={{ rotate: open ? 90 : 0 }} transition={{ duration: 0.2 }}><Icon name="chevronRight" size={11} strokeWidth={2.5} /></motion.span>
+            {groupCol?.render ? groupCol.render(rs[0], k) : <b className="font-semibold">{k}</b>}
+            <span className="text-xs font-normal text-[var(--fg3)]">{rs.length} {rs.length === 1 ? 'row' : 'rows'}</span>
+          </button>
+          <span className="sticky left-full float-right pr-1 text-xs text-[var(--fg3)]">{(groupSummary ?? defaultSummary)(rs)}</span>
+        </td>
+      </tr>
+    )
+  }
+  const nCols = cols.length + 1
+  const spacer = (key: string, h: number) => <tr key={key} aria-hidden className="pointer-events-none"><td colSpan={nCols} style={{ height: h, padding: 0, border: 0 }} /></tr>
+  const body: ReactNode[] = []
+  {
+    let at = rowH
+    for (const it of v.items) {
+      if (virtualOn && it.start - at > 0.5) body.push(spacer(`sp:${it.index}`, it.start - at))
+      const d = disp ? disp[it.index] : null
+      body.push(d ? (d.g !== undefined ? groupView(d.g, d.rs, it.index) : rowView(d.r, it.index)) : rowView(pageRows[it.index], it.index))
+      at = it.end
+    }
+    if (virtualOn && v.totalSize - at > 0.5) body.push(spacer('sp:end', v.totalSize - at))
+  }
+  const skeletonRows = (n: number, key: string) => Array.from({ length: n }, (_, i) => (
+    <tr key={`${key}${i}`} aria-hidden>
+      <td className={cn(td, sticky0)} />
+      {cols.map((c, j) => <td key={c.key} style={pinStyle(c.key)} className={cn(td, pinCls(c.key))}><Skeleton className={cn('h-3', j % 3 === 0 ? 'w-3/4' : j % 3 === 1 ? 'w-1/2' : 'w-2/3', c.type === 'number' && 'ml-auto')} /></td>)}
+    </tr>
+  ))
+  const infinite = !!onLoadMore
+  const rowCountAria = disp ? dispCount + 1 : infinite ? (rowCount != null ? rowCount + 1 : hasMore ? -1 : dispCount + 1) : total + 1
+
+  const fields: [string, string][] = useMemo(() => columns.map(c => [c.key, c.label]), [columns])
   const defaultField = (columns.find((c, i) => i > 0 && c.type !== 'number' && !c.options) ?? columns[0]).key
   const groupKeys = groups?.map(g => g[0]) ?? []
   const allClosed = groupKeys.length > 0 && groupKeys.every(k => closed.has(k))
@@ -626,6 +933,11 @@ export function DataGrid<T extends object>({ columns, rows, defaultRows = [], on
     <button aria-pressed={flags[f]} title={title} onClick={() => setFlags(x => ({ ...x, [f]: !x[f] }))}
       className={cn('h-5 min-w-6 cursor-pointer rounded-[var(--r-sm)] border-0 px-1 font-[family-name:var(--mono)] text-[11px] font-semibold [@media(pointer:coarse)]:h-8 [@media(pointer:coarse)]:min-w-8 [@media(pointer:coarse)]:text-xs', flags[f] ? 'bg-[var(--accent-soft)] text-[color-mix(in_srgb,var(--accent)_78%,var(--fg))]' : 'bg-transparent text-[var(--fg3)] hover:bg-[var(--muted)] hover:text-[var(--fg)]')}>{label}</button>
   )
+  const fmtN = (n: number) => n.toLocaleString(LOCALE)
+  const count = server ? `${fmtN(total)} ${total === 1 ? 'row' : 'rows'}` : `${fmtN(visible.length)} of ${fmtN(data.length)} rows`
+  const leftW = cols.reduce((s, c, i) => s + (stick.get(c.key)?.side === 'left' ? colW(c, i) : 0), 40)
+  const rightW = cols.reduce((s, c, i) => s + (stick.get(c.key)?.side === 'right' ? colW(c, i) : 0), 0)
+  const visibleCols = cols.length
 
   /** "Jump to rows": focus the grid's current cell (the one Tab would reach) */
   const jumpToRows = () => { if (tab) focusCell(tab.id, tab.key) }
@@ -633,8 +945,7 @@ export function DataGrid<T extends object>({ columns, rows, defaultRows = [], on
     <div ref={gridBox} className={cn('relative flex min-w-0 flex-col', className)}>
       <button type="button" onClick={jumpToRows}
         className="sr-only z-[9] rounded-[var(--r-md)] bg-[var(--primary)] px-3 py-1.5 text-xs font-medium text-[var(--on-primary)] focus-visible:not-sr-only focus-visible:absolute focus-visible:top-2 focus-visible:right-2">Jump to rows</button>
-      <GridFilterBuilder
- tree={filter} onChange={setFilter} schema={schema} fields={fields} defaultField={defaultField} count={`${visible.length} of ${data.length} rows`} />
+      <GridFilterBuilderMemo tree={filter} onChange={setFilter} schema={schema} fields={fields} defaultField={defaultField} count={count} />
       <div className="flex flex-wrap items-center gap-2 border-x border-[var(--line)] bg-[var(--card)] p-2">
         <div className={cn(inputShellClass(!!rg.err), GRID_FOCUS_RING, 'flex h-7 min-w-[200px] flex-[0_1_380px] items-center pr-1 [@media(pointer:coarse)]:h-10', narrow && '!flex-[1_1_100%]')}>
           <span aria-hidden className="grid h-full place-items-center border-r border-[var(--line)] px-2 font-[family-name:var(--mono)] text-[11px] font-semibold text-[var(--fg3)]">rg</span>
@@ -644,80 +955,121 @@ export function DataGrid<T extends object>({ columns, rows, defaultRows = [], on
             className={cn('h-full min-w-0 flex-1 border-0 bg-transparent px-2 font-[family-name:var(--mono)] text-xs text-[var(--fg)] outline-none placeholder:text-[var(--fg3)]', TOUCH.input)} />
           {rgToggle('cs', 'Aa', 'Match case (otherwise smart case, like rg -S)')}{rgToggle('w', '\\b', 'Whole word (-w)')}{rgToggle('rx', '.*', 'Regular expression (off = literal, like -F)')}
         </div>
-        <span className="text-xs text-[var(--fg3)]" aria-live="polite">
-          {rg.err ? <span className="text-[var(--bad)]">{rg.err}</span> : rg.re ? <>{`${hits} ${hits === 1 ? 'match' : 'matches'} in ${visible.length} ${visible.length === 1 ? 'row' : 'rows'}`}
-            {search.cut > 0 && <span className="text-[var(--warn)]">{` · search too slow, showing the first ${search.cut} of ${search.of} rows`}</span>}</> : ''}
+        <span className="flex items-center gap-1.5 text-xs text-[var(--fg3)]" aria-live="polite">
+          {loading && <><Spinner size={12} label="Loading rows" /><span aria-hidden>Loading…</span></>}
+          {rg.err ? <span className="text-[var(--bad)]">{rg.err}</span> : rg.re ? <span>{server ? `${hits} ${hits === 1 ? 'match' : 'matches'} on this page` : `${hits} ${hits === 1 ? 'match' : 'matches'} in ${visible.length} ${visible.length === 1 ? 'row' : 'rows'}`}
+            {search.cut > 0 && <span className="text-[var(--warn)]">{` · search too slow, showing the first ${search.cut} of ${search.of} rows`}</span>}</span> : ''}
         </span>
-        {groupable && groupable.length > 0 && (
-          <span className={cn('ml-auto flex items-center gap-2 text-xs text-[var(--fg3)]', narrow && 'ml-0 w-full [&>div]:flex-1 [&>div>button]:!w-full')}>Group by
-            <GridPick label="Group by" variant="toolbar" value={groupBy} onChange={v => { setGroupBy(v); setClosed(new Set()) }}
-              options={[['', 'None'], ...groupable.map(k => [k, col(k)?.label ?? k] as [string, string])]} />
-          </span>
-        )}
-        {groupBy && <Button size="sm" variant="ghost" onClick={() => setClosed(allClosed ? new Set() : new Set(groupKeys))} className={cn('[@media(pointer:coarse)]:!h-9', narrow && 'ml-auto')}>{allClosed ? 'Expand all' : 'Collapse all'}</Button>}
+        <span className={cn('ml-auto flex flex-wrap items-center gap-2', narrow && 'w-full')}>
+          {!server && groupable && groupable.length > 0 && (
+            <span className={cn('flex items-center gap-2 text-xs text-[var(--fg3)]', narrow && 'flex-1 [&>div]:flex-1 [&>div>button]:!w-full')}>Group by
+              <GridPick label="Group by" variant="toolbar" value={groupBy} onChange={g => { setGroupBy(g); setClosed(new Set()) }}
+                options={[['', 'None'], ...groupable.map(k => [k, col(k)?.label ?? k] as [string, string])]} />
+            </span>
+          )}
+          {groupBy && !server && <Button size="sm" variant="ghost" onClick={() => setClosed(allClosed ? new Set() : new Set(groupKeys))} className="[@media(pointer:coarse)]:!h-9">{allClosed ? 'Expand all' : 'Collapse all'}</Button>}
+          <Popover>
+            <PopoverTrigger size="sm" variant="ghost" className="gap-1.5 [@media(pointer:coarse)]:!h-9" title="Show, hide, pin and reorder columns"><Icon name="columns" size={14} />Columns</PopoverTrigger>
+            <PopoverContent placement="bottom-end" aria-label="Columns" className="w-[min(300px,calc(100vw-16px))] p-1.5">
+              <div role="group" aria-label="Show, pin and order columns" className="flex flex-col">
+                {arranged.map((c, i) => {
+                  const shown = !hidden.includes(c.key), pin = pinOf(c.key), zone = arranged.filter(x => pinOf(x.key) === pin), zi = zone.indexOf(c)
+                  return (
+                    <div key={c.key} className={cn('flex h-8 items-center gap-0.5 rounded-[var(--r-md)] pl-1.5 [@media(pointer:coarse)]:h-10', i > 0 && pinOf(arranged[i - 1].key) !== pin && 'mt-1 border-t border-[var(--line)] pt-1')}>
+                      <label className="flex min-w-0 flex-1 cursor-pointer items-center gap-2 text-[13px]">
+                        <input type="checkbox" className={cb} checked={shown} disabled={shown && visibleCols === 1} onChange={() => toggleHidden(c.key)} aria-label={`Show ${c.label}`} />
+                        <span className={cn('truncate', !shown && 'text-[var(--fg3)]')}>{c.label}</span>
+                      </label>
+                      <IconButton size="icon-xs" icon="pinLeft" label={`Pin ${c.label} left`} aria-pressed={pin === 'left'} onClick={() => setPin(c.key, pin === 'left' ? null : 'left')} className={pin === 'left' ? '!text-[var(--accent)]' : undefined} />
+                      <IconButton size="icon-xs" icon="pinRight" label={`Pin ${c.label} right`} aria-pressed={pin === 'right'} onClick={() => setPin(c.key, pin === 'right' ? null : 'right')} className={pin === 'right' ? '!text-[var(--accent)]' : undefined} />
+                      <IconButton size="icon-xs" icon="chevronUp" label={`Move ${c.label} left`} disabled={zi <= 0} onClick={() => moveCol(c.key, -1, false)} />
+                      <IconButton size="icon-xs" icon="chevronDown" label={`Move ${c.label} right`} disabled={zi >= zone.length - 1} onClick={() => moveCol(c.key, 1, false)} />
+                    </div>
+                  )
+                })}
+              </div>
+              <div className="mt-1 flex justify-end border-t border-[var(--line)] pt-1">
+                <Button size="xs" variant="ghost" onClick={() => { setOrder(allKeys); setHidden(columns.filter(c => c.hidden).map(c => c.key)); setPins(initialPins); setSaid('Columns reset') }}>Reset columns</Button>
+              </div>
+            </PopoverContent>
+          </Popover>
+        </span>
+        <span className="sr-only" aria-live="polite">{said}</span>
       </div>
+      {error != null && error !== false && (
+        <div role="alert" className="flex flex-wrap items-center gap-2 border-x border-t border-[var(--line)] bg-[var(--bad-soft)] px-3 py-2 text-[13px] text-[var(--fg)]">
+          <Icon name="alert" size={14} className="text-[var(--bad)]" /><span className="min-w-0 flex-1">{error}</span>
+          {onRetry && <Button size="xs" onClick={onRetry}>Retry</Button>}
+        </div>
+      )}
       <div className="relative min-w-0">
-      <div ref={scroller} className="relative overflow-auto overscroll-x-contain rounded-b-[var(--r-md)] border border-[var(--line)] bg-[var(--card)]" style={{ maxHeight }}>
-        <table ref={tableRef} role="grid" aria-label={ariaLabel} className="min-w-full table-fixed border-separate border-spacing-0 text-[13px]">
-          {/* on a phone the sticky first column is capped so the rest of the row has room to scroll past it */}
-          <colgroup><col style={{ width: 40 }} />{columns.map((c, i) => <col key={c.key} style={{ width: i === 0 && narrow ? Math.min(widths[c.key], 120) : widths[c.key] }} />)}</colgroup>
+      <div ref={scroller} aria-busy={loading || undefined} className={cn('relative overflow-auto overscroll-x-contain border border-[var(--line)] bg-[var(--card)]', paged ? 'rounded-none' : 'rounded-b-[var(--r-md)]')}
+        style={{ maxHeight, scrollPaddingTop: rowH, scrollPaddingLeft: leftW, scrollPaddingRight: rightW }}>
+        <table ref={tableRef} role="grid" aria-label={ariaLabel} aria-rowcount={rowCountAria} aria-colcount={nCols} aria-multiselectable="true"
+          className={cn('min-w-full table-fixed border-separate border-spacing-0 text-[13px] transition-opacity', loading && dispCount > 0 && !infinite && 'opacity-60')}>
+          {/* on a phone the first pinned column is capped so the rest of the row has room to scroll past it */}
+          <colgroup><col style={{ width: 40 }} />{cols.map((c, i) => <col key={c.key} style={{ width: colW(c, i) }} />)}</colgroup>
           <thead>
-            <tr>
+            <tr aria-rowindex={1}>
               <th className={cn(td, sticky0, 'top-0 z-[3] bg-[color-mix(in_srgb,var(--muted)_50%,var(--card))]')}>
-                <label className={cbWrap}><input ref={headCb} type="checkbox" className={cb} checked={allSel} aria-label="Select all" onChange={e => setMany(visIds, e.currentTarget.checked)} /></label>
+                <label className={cbWrap}><input ref={headCb} type="checkbox" className={cb} checked={allSel} aria-label="Select all" onChange={e => setMany(pageIds, e.currentTarget.checked)} /></label>
               </th>
-              {columns.map((c, i) => (
-                <th key={c.key} aria-sort={sort?.key === c.key ? (sort.dir === 1 ? 'ascending' : 'descending') : undefined}
-                  className={cn(td, 'sticky top-0 z-[2] cursor-pointer bg-[color-mix(in_srgb,var(--muted)_50%,var(--card))] text-xs font-medium text-[var(--fg2)] select-none hover:text-[var(--fg)]', i === 0 && 'left-10 z-[3] shadow-[inset_-1px_0_0_var(--line)]', c.type === 'number' ? 'text-right' : 'text-left')}>
-                  <button onClick={() => setSort(s => ({ key: c.key, dir: s?.key === c.key ? (-s.dir as 1 | -1) : 1 }))}
-                    className={cn('cursor-pointer border-0 bg-transparent p-0 font-[inherit] text-inherit [@media(pointer:coarse)]:text-left', TOUCH.tap36)}>{c.label}{sort?.key === c.key && <span className="ml-1 text-[11px] text-[var(--accent)]">{sort.dir > 0 ? '▲' : '▼'}</span>}</button>
-                  <span role="separator" aria-orientation="vertical" aria-label={`Resize ${c.label}`} onPointerDown={e => startResize(e, c.key)}
-                    className="group/rz absolute top-0 right-0 bottom-0 w-[7px] cursor-col-resize touch-none [@media(pointer:coarse)]:w-4">
-                    <span className={cn('absolute top-[9px] right-[3px] bottom-[9px] w-px bg-[var(--line2)] group-hover/rz:w-0.5 group-hover/rz:bg-[var(--accent)]', resizing === c.key && '!w-0.5 !bg-[var(--accent)]')} />
-                  </span>
-                </th>
-              ))}
+              {cols.map(c => {
+                const dragOver = colDrag && colDrag.over === c.key && colDrag.k !== c.key
+                return (
+                  <th key={c.key} data-ck={c.key} aria-sort={sort?.key === c.key ? (sort.dir === 1 ? 'ascending' : 'descending') : undefined} style={pinStyle(c.key)}
+                    onPointerDown={e => onHeadPointerDown(e, c.key)}
+                    className={cn(td, 'sticky top-0 z-[2] cursor-pointer bg-[color-mix(in_srgb,var(--muted)_50%,var(--card))] text-xs font-medium text-[var(--fg2)] select-none hover:text-[var(--fg)]', pinCls(c.key, true), c.type === 'number' ? 'text-right' : 'text-left',
+                      colDrag?.k === c.key && 'opacity-50', dragOver && (colDrag.after ? '!shadow-[inset_-2px_0_0_var(--accent)]' : '!shadow-[inset_2px_0_0_var(--accent)]'))}>
+                    <button onClick={() => { if (dragged.current) { dragged.current = false; return } setSort({ key: c.key, dir: sort?.key === c.key ? (-sort.dir as 1 | -1) : 1 }) }}
+                      onKeyDown={e => headerKey(e, c.key)} aria-keyshortcuts="Control+Shift+ArrowLeft Control+Shift+ArrowRight" aria-description="Ctrl+Shift+arrows move the column"
+                      className={cn('cursor-pointer border-0 bg-transparent p-0 font-[inherit] text-inherit [@media(pointer:coarse)]:text-left', TOUCH.tap36)}>{c.label}{sort?.key === c.key && <span className="ml-1 text-[11px] text-[var(--accent)]">{sort.dir > 0 ? '▲' : '▼'}</span>}</button>
+                    <span role="separator" aria-orientation="vertical" aria-label={`Resize ${c.label}`} onPointerDown={e => startResize(e, c.key)}
+                      className="group/rz absolute top-0 right-0 bottom-0 w-[7px] cursor-col-resize touch-none [@media(pointer:coarse)]:w-4">
+                      <span className={cn('absolute top-[9px] right-[3px] bottom-[9px] w-px bg-[var(--line2)] group-hover/rz:w-0.5 group-hover/rz:bg-[var(--accent)]', resizing === c.key && '!w-0.5 !bg-[var(--accent)]')} />
+                    </span>
+                  </th>
+                )
+              })}
             </tr>
           </thead>
           <tbody>
-            {!visible.length && <tr><td colSpan={columns.length + 1} className="p-10 text-center text-[var(--fg3)]">No rows match these filters</td></tr>}
-            {groups ? groups.flatMap(([k, rs]) => {
-              const open = !closed.has(k), ids = rs.map(rowKey), all = ids.every(id => sel.has(id))
-              return [
-                <tr key={`g:${k}`}>
-                  <td className={cn(td, sticky0, '!h-9 !bg-[color-mix(in_srgb,var(--muted)_60%,var(--card))]')}>
-                    <label className={cbWrap}><input type="checkbox" className={cb} checked={all} aria-label={`Select group ${k}`} onChange={e => setMany(ids, e.currentTarget.checked)} /></label>
-                  </td>
-                  <td colSpan={columns.length} className={cn(td, sticky1, '!h-9 overflow-visible !bg-[color-mix(in_srgb,var(--muted)_60%,var(--card))]')}>
-                    <button aria-expanded={open} onClick={() => setClosed(s => { const n = new Set(s); if (n.has(k)) n.delete(k); else n.add(k); return n })}
-                      className="inline-flex cursor-pointer items-center gap-2 border-0 bg-transparent p-0 text-[13px] font-medium text-[var(--fg)] [@media(pointer:coarse)]:min-h-9">
-                      <motion.span className="grid text-[var(--fg3)]" initial={false} animate={{ rotate: open ? 90 : 0 }} transition={{ duration: 0.2 }}><Icon name="chevronRight" size={11} strokeWidth={2.5} /></motion.span>
-                      {groupCol?.render ? groupCol.render(rs[0], k) : <b className="font-semibold">{k}</b>}
-                      <span className="text-xs font-normal text-[var(--fg3)]">{rs.length} {rs.length === 1 ? 'row' : 'rows'}</span>
-                    </button>
-                    <span className="sticky left-full float-right pr-1 text-xs text-[var(--fg3)]">{(groupSummary ?? defaultSummary)(rs)}</span>
-                  </td>
-                </tr>,
-                ...(open ? rs.map(rowView) : []),
-              ]
-            }) : visible.map(rowView)}
+            {!dispCount && !loading && <tr><td colSpan={nCols} className="p-10 text-center text-[var(--fg3)]">{error != null && error !== false ? 'Couldn’t load rows' : server ? 'No rows' : 'No rows match these filters'}</td></tr>}
+            {!dispCount && loading && skeletonRows(Math.max(3, Math.min(10, Math.floor(maxHeight / rowH) - 1)), 'sk')}
+            {body}
+            {infinite && loading && hasMore && dispCount > 0 && skeletonRows(3, 'more')}
           </tbody>
         </table>
       </div>
       <ScrollEdges {...edges} hint="More columns" />
       </div>
+      {paged && (
+        <div role="navigation" aria-label="Pagination" className="flex flex-wrap items-center justify-end gap-x-3 gap-y-1 rounded-b-[var(--r-md)] border border-t-0 border-[var(--line)] bg-[var(--card)] px-2 py-1.5 text-xs text-[var(--fg3)]">
+          {pageSizes && pageSizes.length > 1 && (
+            <span className="mr-auto flex items-center gap-2">Rows per page
+              <GridPick label="Rows per page" variant="toolbar" value={String(pageSize)} options={pageSizes.map(n => [String(n), String(n)])} onChange={x => { setPageSize(Number(x)); setPage(0) }} className="[&>button]:!min-w-[72px]" />
+            </span>
+          )}
+          <span className="ui-num">{total ? `${fmtN(pg * pageSize + 1)}–${fmtN(Math.min(total, pg * pageSize + pageSize))} of ${fmtN(total)}` : '0 rows'}</span>
+          <span className="flex items-center gap-1">
+            <IconButton size="icon-sm" icon="chevronLeft" label="Previous page" disabled={pg <= 0} onClick={() => setPage(pg - 1)} />
+            <span className="ui-num min-w-[86px] text-center" aria-live="polite">Page {pg + 1} of {fmtN(pageCount)}</span>
+            <IconButton size="icon-sm" icon="chevronRight" label="Next page" disabled={pg >= pageCount - 1} onClick={() => setPage(pg + 1)} />
+          </span>
+        </div>
+      )}
       <AnimatePresence initial={false}>
-        {sel.size > 0 && (
+        {selCount > 0 && (
           <motion.div initial={{ height: 0, opacity: 0, marginTop: 0 }} animate={{ height: 'auto', opacity: 1, marginTop: 10 }} exit={{ height: 0, opacity: 0, marginTop: 0, transition: { duration: 0.18 } }} transition={spring(0.2, 0.35)}
             className="sticky bottom-2 z-[8] overflow-hidden rounded-[var(--r-md)] bg-[var(--primary)] text-[13px] text-[var(--on-primary)] shadow-[var(--shadow)]" role="region" aria-label="Selection">
             <div className="flex min-h-11 flex-wrap items-center gap-x-2 gap-y-1 py-1.5 pr-2 pl-3 [@media(pointer:coarse)]:min-h-[52px]">
-            <span className="ui-num whitespace-nowrap">{sel.size} selected</span>
-            <button onClick={() => setSel(new Set())} className="cursor-pointer border-0 bg-transparent px-1 text-xs underline-offset-2 opacity-70 hover:underline hover:opacity-100 [@media(pointer:coarse)]:min-h-9 [@media(pointer:coarse)]:px-2.5 [@media(pointer:coarse)]:text-[13px]">Clear</button>
+            <span className="ui-num whitespace-nowrap">{sel.mode === 'exclude' ? `All ${fmtN(selCount)} selected` : `${fmtN(selCount)} selected`}</span>
+            {canSelectAll && <button onClick={selectAll} className="cursor-pointer border-0 bg-transparent px-1 text-xs font-medium underline underline-offset-2 [@media(pointer:coarse)]:min-h-9 [@media(pointer:coarse)]:text-[13px]">Select all {fmtN(total)} rows</button>}
+            <button onClick={() => setSel(GRID_NO_SELECTION)} className="cursor-pointer border-0 bg-transparent px-1 text-xs underline-offset-2 opacity-70 hover:underline hover:opacity-100 [@media(pointer:coarse)]:min-h-9 [@media(pointer:coarse)]:px-2.5 [@media(pointer:coarse)]:text-[13px]">Clear</button>
             <span className="flex-1" />
             <Button size="sm" onClick={exp} className={cn('!border-[color-mix(in_srgb,var(--on-primary)_30%,transparent)] !bg-transparent !text-inherit hover:!bg-[color-mix(in_srgb,var(--on-primary)_12%,transparent)]', TOUCH.tap36)}>Export</Button>
-            <Button size="sm" variant="danger" onClick={del} className={TOUCH.tap36}>Delete</Button>
+            {(!server || onDelete) && <Button size="sm" variant="danger" onClick={server ? () => onDelete!(selRef.current, selectedLoaded()) : del} className={TOUCH.tap36}>Delete</Button>}
             </div>
-
           </motion.div>
         )}
       </AnimatePresence>

@@ -883,16 +883,55 @@ export function useRoving(count: number, onEnter: (i: number) => void, options: 
   return { active, setActive, onKeyDown }
 }
 
-/** Reveal text a few characters at a time, like a streaming model response. */
-export function useStreamedText(text: string, { cps = 60, start = true } = {}) {
-  const [n, setN] = useState(0)
-  useEffect(() => { setN(0) }, [text])
+/**
+ * Reveals text the way a model streams it: a few characters (`unit: 'char'`, about `cps` per second) or a word
+ * (`unit: 'word'`, every `wordDelay` ms) at a time. Give it a finished string to replay it, or a string that keeps
+ * growing (append-only, e.g. a live model stream) and it carries on from where it is instead of restarting; with
+ * `live` it is not `done` until `live` turns false, and it speeds up to stay close when a large chunk lands. Any
+ * other change to `text` replays from the start. `start: false` pauses it. Under reduced motion it shows everything.
+ * Returns `{ text: shown so far, done, shown: chars shown, total }`. StreamingText is this hook as a component.
+ */
+export function useStreamedText(text: string, { cps = 60, start = true, unit = 'char', wordDelay = 45, live = false, onProgress }:
+  { cps?: number; start?: boolean; unit?: 'char' | 'word'; wordDelay?: number; live?: boolean; onProgress?: () => void } = {}) {
+  const reduce = useMediaQuery('(prefers-reduced-motion: reduce)')
+  const [st, setSt] = useState(() => ({ src: text, pos: 0 }))
+  const progress = useRef(onProgress); progress.current = onProgress
+  const src = useRef(text); src.current = text
+  let { pos } = st
+  if (st.src !== text) {
+    // append-only? (compares the tail of what we had, so a long stream stays cheap to check)
+    const prev = st.src, k = Math.min(prev.length, 256)
+    const appended = text.length >= prev.length && text.startsWith(prev.slice(prev.length - k), prev.length - k)
+    pos = appended ? Math.min(st.pos, text.length) : 0
+    setSt({ src: text, pos }) // adjust state while rendering (React re-renders before committing)
+  }
+  const total = text.length
+  const shown = reduce ? total : Math.min(pos, total)
+  const behind = !reduce && start && pos < total
   useEffect(() => {
-    if (!start || n >= text.length) return
-    const t = setTimeout(() => setN(v => Math.min(text.length, v + 2 + Math.floor(Math.random() * 3))), 1000 / (cps / 3))
-    return () => clearTimeout(t)
-  }, [n, text, start, cps])
-  return { text: text.slice(0, n), done: n >= text.length }
+    if (!behind) return
+    const word = unit === 'word'
+    // one interval while it is behind (reading the latest text from a ref, so a stream of updates doesn't reset it);
+    // it stops once caught up and starts again when more text arrives
+    const id = setInterval(() => {
+      if (word && Math.random() < 0.2) return // the uneven rhythm of the per-word random delay this replaced
+      setSt(s => {
+        const text = src.current, total = text.length
+        if (s.src !== text || s.pos >= total) return s
+        const lag = total - s.pos
+        let to: number
+        if (word) {
+          const from = live && lag > 400 ? s.pos + Math.floor(lag / 10) : s.pos + 1 // live and far behind: catch up
+          const sp = text.indexOf(' ', from)
+          to = sp < 0 ? total : sp
+        } else to = s.pos + 2 + Math.floor(Math.random() * 3) + (live ? Math.floor(lag / 12) : 0)
+        return { src: s.src, pos: Math.min(total, to) }
+      })
+      progress.current?.()
+    }, word ? Math.max(8, wordDelay * 0.85) : 1000 / (Math.max(1, cps) / 3))
+    return () => clearInterval(id)
+  }, [behind, cps, unit, wordDelay, live])
+  return { text: text.slice(0, shown), done: !live && shown >= total, shown, total }
 }
 
 /**
@@ -967,6 +1006,7 @@ export const ICONS = {
   alert: 'M12 9v4M12 17h.01M10.3 3.9 1.8 18a2 2 0 0 0 1.7 3h17a2 2 0 0 0 1.7-3L13.7 3.9a2 2 0 0 0-3.4 0z',
   info: 'M12 3a9 9 0 1 0 0 18 9 9 0 0 0 0-18zM12 11v5M12 8h.01', mic: 'M12 3a3 3 0 0 0-3 3v6a3 3 0 0 0 6 0V6a3 3 0 0 0-3-3zM5 11a7 7 0 0 0 14 0M12 18v3',
   link: 'M10 14a5 5 0 0 0 7 0l3-3a5 5 0 0 0-7-7l-1 1M14 10a5 5 0 0 0-7 0l-3 3a5 5 0 0 0 7 7l1-1',
+  columns: 'M4 4h16v16H4zM9.5 4v16M14.5 4v16', pinLeft: 'M4 4v16M20 12H9M13 8l-4 4 4 4', pinRight: 'M20 4v16M4 12h11M11 8l4 4-4 4',
   more: 'M5 12h.01M12 12h.01M19 12h.01', grip: 'M9 6h.01M15 6h.01M9 12h.01M15 12h.01M9 18h.01M15 18h.01',
   sun: 'M12 8a4 4 0 1 0 0 8 4 4 0 0 0 0-8zM12 2v2M12 20v2M4.9 4.9l1.4 1.4M17.7 17.7l1.4 1.4M2 12h2M20 12h2M4.9 19.1l1.4-1.4M17.7 6.3l1.4-1.4',
   moon: 'M21 12.8A9 9 0 1 1 11.2 3a7 7 0 0 0 9.8 9.8z', terminal: 'M4 17l6-5-6-5M12 19h8',
@@ -1070,10 +1110,11 @@ export const buttonVariants = variants(
   {
     variant: {
       default: 'bg-[var(--card)] border-[var(--line)] hover:bg-[var(--muted)]',
-      primary: 'bg-[var(--primary)] text-[var(--on-primary)] border-[var(--primary)] hover:opacity-90',
-      accent: 'bg-[var(--accent)] text-[var(--card)] border-[var(--accent)] hover:opacity-90',
+      // hovers never lower text contrast: primary gets a soft ring; accent/danger move away from their card-coloured text
+      primary: 'bg-[var(--primary)] text-[var(--on-primary)] border-[var(--primary)] hover:shadow-[0_0_0_3px_color-mix(in_srgb,var(--primary)_22%,transparent)]',
+      accent: 'bg-[var(--accent)] text-[var(--card)] border-[var(--accent)] hover:bg-[color-mix(in_srgb,var(--accent)_88%,var(--fg))]',
       ghost: 'bg-transparent border-transparent hover:bg-[var(--muted)]',
-      danger: 'bg-[var(--bad)] text-[var(--card)] border-[var(--bad)] hover:opacity-90',
+      danger: 'bg-[var(--bad)] text-[var(--card)] border-[var(--bad)] hover:bg-[color-mix(in_srgb,var(--bad)_88%,var(--fg))]',
       'outline-danger': 'bg-[var(--card)] text-[var(--bad)] border-[var(--line)] hover:bg-[var(--bad-soft)]',
     },
     // heights follow the control scale (--h-xs/sm/md/lg = 24/30/36/40). Coarse pointers (touch): xs and sm sizes grow to
@@ -1466,3 +1507,126 @@ export function safeCssValue(value: string | number | null | undefined, fallback
 
 /** `safeCssValue` for colours, falling back to `currentColor`. */
 export const safeColor = (color: string | null | undefined, fallback = 'currentColor') => safeCssValue(color, fallback) || fallback
+
+/* ════════════════════════════════════════════════════════════════════════════
+ * FORM CONTROLS (0.3): the plumbing that makes a custom control behave like a native field (name + hidden inputs,
+ * required, disabled, read-only, invalid, reset, focus, FormField ids). Used by forms.tsx; keep this section together.
+ * ══════════════════════════════════════════════════════════════════════════ */
+
+/** What a FormField hands to the control inside it: ids for the label, description and error, plus field-level flags. */
+export type FormFieldState = {
+  id: string; /** only when the field has a visible label */ labelId?: string; descriptionId?: string; errorId?: string
+  name?: string; invalid?: boolean; required?: boolean; disabled?: boolean; readOnly?: boolean
+}
+/** Provided by FormField (and Field); every control reads it. Provide `null` to keep it from reaching nested controls. */
+export const FormFieldContext = createContext<FormFieldState | null>(null)
+
+/** The form props every value-holding control takes, named as on native inputs. */
+export type FormControlProps = {
+  /** submitted with the form through hidden inputs (each control documents its format) */ name?: string
+  /** id of a <form> elsewhere on the page, like the native attribute */ form?: string
+  /** the form can't be submitted while it's empty; focus moves here on a failed submit */ required?: boolean
+  disabled?: boolean
+  /** shows and submits the value but can't change it */ readOnly?: boolean
+  /** error look plus aria-invalid */ invalid?: boolean
+  /** focus left the whole control (its own list or popover counts as inside) */ onBlur?: (e: import('react').FocusEvent<HTMLElement>) => void
+  id?: string; 'aria-describedby'?: string; 'aria-labelledby'?: string
+}
+
+/** Controlled-or-uncontrolled state like useControllable, plus `reset()` back to the latest `defaultValue`. */
+export function useControllableState<T>(value: T | undefined, defaultValue: T, onChange?: (v: T) => void) {
+  const [inner, setInner] = useState(defaultValue)
+  const controlled = value !== undefined
+  const def = useRef(defaultValue)
+  useLayoutEffect(() => { def.current = defaultValue })
+  const set = useCallback((v: T) => { if (!controlled) setInner(v); onChange?.(v) }, [controlled, onChange])
+  const reset = useCallback(() => setInner(def.current), [])
+  return [controlled ? value : inner, set, reset] as const
+}
+
+/** Serialised form value: a string, one field per array item (repeated names), or null to submit nothing. */
+export type FormValue = string | string[] | null
+/** A local date as submitted by the date controls: "2026-11-08", like <input type="date">; '' for none. */
+export const formDate = (d?: Date | null) => d ? dayKey(d) : ''
+/** Disabled look for fields and field triggers: muted fill and secondary text (≥4.5:1, never faded with opacity), no hover. */
+export const formDisabledClass = 'disabled:cursor-not-allowed disabled:!opacity-100 disabled:bg-[var(--muted)] disabled:text-[var(--fg3)] disabled:hover:border-[var(--line)] ' +
+  'aria-disabled:cursor-not-allowed aria-disabled:bg-[var(--muted)] aria-disabled:text-[var(--fg3)] aria-disabled:hover:border-[var(--line)]'
+/** Read-only look for fields: muted fill, normal text; still focusable and selectable. */
+export const formReadOnlyClass = 'aria-readonly:bg-[var(--muted)] read-only:bg-[var(--muted)]'
+const formJoinIds = (...ids: (string | undefined | false)[]) => ids.filter(Boolean).join(' ') || undefined
+
+/** For native inputs (Input, Textarea…): the FormField's id, name, flags and aria-describedby merged under your own props. */
+export function useFormFieldProps(p: { id?: string; name?: string; required?: boolean; disabled?: boolean; readOnly?: boolean; invalid?: boolean; 'aria-describedby'?: string }) {
+  const f = useContext(FormFieldContext)
+  return {
+    id: p.id ?? f?.id, name: p.name ?? f?.name, required: p.required ?? f?.required, disabled: p.disabled ?? f?.disabled, readOnly: p.readOnly ?? f?.readOnly,
+    invalid: p.invalid ?? f?.invalid, 'aria-describedby': formJoinIds(p['aria-describedby'], f?.descriptionId, f?.errorId),
+  }
+}
+
+/**
+ * Everything a custom control needs to act like a native field. Returns the value and a setter (ignored while disabled or
+ * read-only), the merged flags, `control` props for the focusable element (id, aria-invalid, aria-describedby),
+ * `labelledBy` for controls whose focus target isn't a labelable element, `onBlur` for the root, and `inputs` to render
+ * inside the root (give the root `relative`):
+ *   - one hidden input per serialised value (`name`), so FormData and server actions see it; nothing while disabled
+ *   - with `required`, an invisible proxy the browser validates; when validation (or a form library) focuses it, focus
+ *     moves to the real control and the control shows its error state until the value changes
+ *   - an anchor that listens for the form's `reset` (uncontrolled values return to `defaultValue`) and fires bubbling
+ *     `input` and `change` events on user edits, like a native field
+ */
+export function useFormControl<T>(p: FormControlProps & {
+  value: T | undefined; defaultValue: T; onChange?: (v: T) => void
+  serialize: (v: T) => FormValue
+  /** whether `required` is met (default: something is submitted) */ filled?: (v: T) => boolean
+  /** focus the real control (called when the proxy gets focus) */ focus?: () => void
+  /** reset local state too (typed text, a query…) on form reset */ onReset?: () => void
+  /** 'checkbox' validates like a required native checkbox (a "tick this box" message) */ kind?: 'text' | 'checkbox'
+}) {
+  const field = useContext(FormFieldContext)
+  const [value, setValue, resetValue] = useControllableState(p.value, p.defaultValue, p.onChange)
+  const name = p.name ?? field?.name
+  const disabled = !!(p.disabled ?? field?.disabled), readOnly = !!(p.readOnly ?? field?.readOnly), required = !!(p.required ?? field?.required)
+  const [failed, setFailed] = useState(false) // the browser found it invalid; cleared by the next change
+  const invalid = !!(p.invalid ?? field?.invalid) || failed
+  const anchor = useRef<HTMLInputElement>(null), byUser = useRef(false), fns = useRef(p)
+  useLayoutEffect(() => { fns.current = p })
+  const set = useCallback((v: T) => { if (disabled || readOnly) return; byUser.current = true; setValue(v) }, [disabled, readOnly, setValue])
+  const serial = p.serialize(value)
+  const vals = serial === null ? [] : Array.isArray(serial) ? serial : [serial]
+  const filled = p.filled ? p.filled(value) : vals.some(v => v !== '')
+  const key = JSON.stringify(serial), last = useRef(key)
+  useEffect(() => {
+    const changed = last.current !== key, user = byUser.current
+    last.current = key; byUser.current = false
+    if (!changed) return
+    setFailed(false)
+    if (user) { const a = anchor.current; a?.dispatchEvent(new Event('input', { bubbles: true })); a?.dispatchEvent(new Event('change', { bubbles: true })) }
+  })
+  useEffect(() => {
+    const f = anchor.current?.form
+    if (!f) return
+    const on = () => { resetValue(); setFailed(false); fns.current.onReset?.() }
+    f.addEventListener('reset', on)
+    return () => f.removeEventListener('reset', on)
+  }, [p.form, resetValue])
+  const check = p.kind === 'checkbox'
+  const inputs = (
+    <>
+      <input type="hidden" ref={anchor} form={p.form} />
+      {name && !disabled && vals.map((v, i) => <input key={i} type="hidden" name={name} form={p.form} value={v} />)}
+      {required && !disabled && !readOnly && (
+        <input tabIndex={-1} aria-hidden required form={p.form} data-ui-field={name} type={check ? 'checkbox' : 'text'} {...(check ? { checked: filled } : { value: filled ? 'filled' : '' })}
+          onChange={() => {}} onFocus={() => fns.current.focus?.()} onInvalid={() => setFailed(true)}
+          className="pointer-events-none absolute bottom-0 left-2 m-0 h-px w-px appearance-none border-0 p-0 opacity-0" />
+      )}
+    </>
+  )
+  return {
+    value, set, name, disabled, readOnly, required, invalid, field, inputs,
+    control: { id: p.id ?? field?.id, 'aria-invalid': invalid || undefined, 'aria-describedby': formJoinIds(p['aria-describedby'], field?.descriptionId, field?.errorId) },
+    labelledBy: p['aria-labelledby'] ?? field?.labelId,
+    onBlur: (e: import('react').FocusEvent<HTMLElement>) => { if (!e.currentTarget.contains(e.relatedTarget as Node | null)) fns.current.onBlur?.(e) },
+  }
+}
+/* ═══ end FORM CONTROLS ═══ */

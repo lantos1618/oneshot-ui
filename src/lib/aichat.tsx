@@ -1,10 +1,14 @@
-import { useEffect, useId, useLayoutEffect, useRef, useState, type KeyboardEvent as RKeyboardEvent, type ReactNode } from 'react'
+import { Children, isValidElement, useCallback, useEffect, useId, useLayoutEffect, useRef, useState, type KeyboardEvent as RKeyboardEvent, type ReactNode } from 'react'
 import { AnimatePresence, motion, useReducedMotion } from 'motion/react'
-import { Badge, Button, Chip, Icon, IconButton, Spinner, TOUCH, cn, cssUrl, fmt, inputClass, menuItemClass, safeColor, safeUrl, sleep, spring, surface, useCoarsePointer, useMediaQuery, useOutside, useRoving, type IconName, type Tone } from './core'
+import { Badge, Button, Chip, Icon, IconButton, Spinner, TOUCH, cn, floatingSurface, inputClass, menuItemClass, safeColor, safeUrl, sleep, spring, surface, useCoarsePointer, useControllable, useMediaQuery, useOutside, useRoving, type IconName, type Tone } from './core'
 import { Collapse, CopyButton, TypingDots, confetti, useToast } from './feedback'
 import { Checkbox, OptionList, Select, Slider, Switch } from './forms'
 import { Dialog, FloatingPanel, MenuItem, MenuLabel } from './overlay'
-import { SendButton, StreamingText, ToolCall, useAutoGrow } from './ai'
+import { AttachmentChip, Citation, SendButton, ShimmerText, StreamingText, ToolCall, useAttachments, useAutoGrow, type Attachment } from './ai'
+import { JsonViewer } from './data'
+import { useVirtual } from './virtual'
+import { Markdown } from './markdown'
+import { aiMessageText, type AiChat, type AiDataPart, type AiFilePart, type AiMessage, type AiSourcePart, type AiToolPart, type AiToolState } from './aistream'
 
 /* ════════════════════════════════════════════════════════════════════════════
  * 11b. AI CHAT: rich assistant chat with generated UI parts, and the agent composer
@@ -27,7 +31,7 @@ export function ChatSources({ items, className }: { items: { name: string; desc:
   return (
     <div className={cn('flex flex-wrap gap-1.5', className)}>
       {items.map((s, i) => (
-        <a key={s.name} href={safeUrl(s.href ?? '#ai')} className={cn(surface.md, 'flex items-center gap-2 py-1.5 pr-2.5 pl-1.5 text-xs text-[var(--fg)] no-underline hover:border-[var(--fg3)]')}>
+        <a key={i + s.name} href={safeUrl(s.href ?? '#ai')} target={s.href && /^https?:/i.test(safeUrl(s.href)) ? '_blank' : undefined} rel="noopener noreferrer" className={cn(surface.md, 'flex items-center gap-2 py-1.5 pr-2.5 pl-1.5 text-xs text-[var(--fg)] no-underline hover:border-[var(--fg3)]')}>
           <span className="grid h-[22px] w-[22px] flex-none place-items-center rounded-[var(--r-md)] text-[11px] font-bold text-white" style={{ background: `color-mix(in srgb, ${safeColor(s.color, 'var(--accent)')} 80%, #000)` }}>{s.name[0]}</span>
           <span><b className="block font-medium">{s.name}</b><span className="text-[var(--fg3)]">{s.desc}</span></span>
           <span className="ml-1 font-[family-name:var(--mono)] text-[11px] font-semibold text-[var(--fg3)] [@media(pointer:coarse)]:text-[11px]">{i + 1}</span>
@@ -83,6 +87,320 @@ export function ChatApproval({ title, to, body: initial, className }: { title: s
   )
 }
 
+/* Conversation parts (AI Elements style): Conversation, Message, MessageParts, ToolCard, Reasoning, MessageActions, Suggestions ─ */
+
+/** Is a scroller within `threshold` px of its bottom? */
+export const aiNearBottom = (el: { scrollTop: number; scrollHeight: number; clientHeight: number }, threshold = 32) => el.scrollHeight - el.scrollTop - el.clientHeight <= threshold
+
+/**
+ * Keeps a scroller pinned to its bottom while content grows, unless the person scrolled up (wheel, touch, keys or
+ * the scrollbar; scrolls caused by layout changes never unpin it); scrolling back near the bottom, or `jump()`, pins it again. Attach `ref` to the scroller; content
+ * growth is caught on every render of the owner and by a ResizeObserver on the scroller's first child. With
+ * `follow: false` it only tracks `pinned` (for a scroller that keeps itself at the bottom, e.g. a useVirtual chat log);
+ * `jump(scrollToEnd?)` then calls your scroll function.
+ */
+export function useStickToBottom<T extends HTMLElement = HTMLDivElement>({ threshold = 32, follow = true }: { threshold?: number; follow?: boolean } = {}) {
+  const [el, ref] = useState<T | null>(null)
+  const [pinned, setPinned] = useState(true)
+  const pin = useRef(true), jumping = useRef(false), reduce = useReducedMotion()
+  const set = useCallback((v: boolean) => { if (pin.current !== v) { pin.current = v; setPinned(v) } }, [])
+  const toEnd = useCallback(() => { if (el && pin.current && follow) el.scrollTop = el.scrollHeight }, [el, follow])
+  useEffect(() => {
+    if (!el) return
+    let touchY = 0, userAt = -1e9
+    // only the reader unpins it (wheel, touch, keys, the scrollbar): scroll events from layout changes (a virtual
+    // list correcting for measured sizes, content shrinking) never do
+    const onScroll = () => {
+      const near = aiNearBottom(el, threshold)
+      if (jumping.current) { if (near) jumping.current = false; return }
+      if (near) set(true); else if (performance.now() - userAt < 1000) set(false)
+    }
+    const away = () => { jumping.current = false; userAt = performance.now(); if (el.scrollHeight > el.clientHeight + 1) set(false) }
+    const onPointer = () => { userAt = performance.now() }
+    const onWheel = (e: WheelEvent) => { if (e.deltaY < 0) away() }
+    const onTouchStart = (e: TouchEvent) => { touchY = e.touches[0]?.clientY ?? 0 }
+    const onTouchMove = (e: TouchEvent) => { if ((e.touches[0]?.clientY ?? 0) > touchY + 4) away() }
+    const onKey = (e: KeyboardEvent) => { if (['PageUp', 'ArrowUp', 'Home'].includes(e.key) && e.target === el) away() }
+    el.addEventListener('scroll', onScroll, { passive: true }); el.addEventListener('wheel', onWheel, { passive: true })
+    el.addEventListener('touchstart', onTouchStart, { passive: true }); el.addEventListener('touchmove', onTouchMove, { passive: true }); el.addEventListener('keydown', onKey); el.addEventListener('pointerdown', onPointer)
+    const ro = new ResizeObserver(() => toEnd())
+    ro.observe(el); if (el.firstElementChild) ro.observe(el.firstElementChild)
+    return () => { el.removeEventListener('scroll', onScroll); el.removeEventListener('wheel', onWheel); el.removeEventListener('touchstart', onTouchStart); el.removeEventListener('touchmove', onTouchMove); el.removeEventListener('keydown', onKey); el.removeEventListener('pointerdown', onPointer); ro.disconnect() }
+  }, [el, threshold, set, toEnd])
+  useLayoutEffect(() => { toEnd() }) // after every render: new content while pinned stays in view
+  const jump = useCallback((scrollToEnd?: () => void) => {
+    if (!el) return
+    pin.current = true; setPinned(true)
+    if (scrollToEnd) { jumping.current = false; scrollToEnd(); return } // an instant jump the owner makes (a virtual list re-renders its end first)
+    if (reduce) { el.scrollTop = el.scrollHeight; return }
+    jumping.current = true
+    el.scrollTo({ top: el.scrollHeight, behavior: 'smooth' })
+  }, [el, reduce])
+  return { ref, pinned, jump, follow: toEnd }
+}
+
+/** Conversation renders every message up to this many children, then only the ones in view (useVirtual). */
+export const CONVERSATION_VIRTUAL_AFTER = 60
+/** Height a not-yet-measured message is assumed to have in a virtualised Conversation. */
+const AI_MSG_ESTIMATE = 120
+
+/**
+ * The scrolling message log. Stays pinned to the newest message while replies stream, unless the person scrolled up;
+ * then a "Jump to latest" button floats at the bottom (it never moves the layout). Give it a height (className, e.g.
+ * `h-[420px]`) so streaming never pushes the page. `busy` sets aria-busy; the log itself is not a live region, so
+ * screen readers aren't read every token (announce a summary yourself). Past `virtualizeAfter` children (default 60;
+ * give each a stable `key`, e.g. the message id) it renders only the messages in view, measuring their real heights,
+ * still pinned to the bottom while the last one grows and keeping your place when older ones are prepended.
+ */
+export function Conversation({ children, busy, label = 'Conversation', jumpLabel = 'Jump to latest', virtualizeAfter = CONVERSATION_VIRTUAL_AFTER, className, contentClassName }:
+  { children: ReactNode; busy?: boolean; label?: string; jumpLabel?: string; /** children count above which it virtualises (Infinity: never) */ virtualizeAfter?: number
+    className?: string; contentClassName?: string }) {
+  const kids = Children.toArray(children)
+  const virtual = kids.length > virtualizeAfter
+  const box = useRef<HTMLDivElement>(null)
+  // Virtual mode windows every message but the last; the last (the one that streams) stays in normal flow below the
+  // window, so pinning works the same in both modes: after every render, and whenever the content resizes, the
+  // scroller goes to its scrollHeight in the same frame. (The virtualizer's own `anchor: 'end'` pins only after its
+  // ResizeObserver has measured a growing item, a frame late, which shows up as layout shift on every token.)
+  const stick = useStickToBottom<HTMLDivElement>()
+  const keys = useRef<(string | number)[]>([])
+  const prev = useRef<{ first: string | number | undefined; count: number }>({ first: undefined, count: 0 })
+  keys.current = kids.map((k, i) => isValidElement(k) && k.key != null ? k.key : i)
+  const keyAt = useCallback((i: number) => keys.current[i] ?? i, []) // stable, so streaming renders don't re-lay out the list
+  const v = useVirtual({ count: virtual ? kids.length - 1 : 0, estimateSize: AI_MSG_ESTIMATE, scrollRef: box, getItemKey: keyAt, enabled: virtual, overscan: 4, initialOffset: 1e9 })
+  useLayoutEffect(() => { // older messages prepended while the reader is scrolled up: keep what they are reading in place
+    const el = box.current, p = prev.current, first = keys.current[0]
+    prev.current = { first, count: kids.length }
+    if (!el || !virtual || stick.pinned || kids.length <= p.count || first === p.first || p.first === undefined) return
+    const k = keys.current.indexOf(p.first)
+    if (k > 0) el.scrollTop += k * AI_MSG_ESTIMATE // the new ones are unmeasured, so each is the estimate
+  })
+  const setRef = useCallback((el: HTMLDivElement | null) => { box.current = el; stick.ref(el) }, [stick.ref]) // eslint-disable-line react-hooks/exhaustive-deps
+  return (
+    <div className={cn('relative flex min-h-0 flex-col', className)}>
+      <div ref={setRef} role="log" aria-live="off" aria-busy={busy || undefined} aria-label={label} tabIndex={0}
+        className={cn('min-h-0 flex-1 overflow-y-auto overscroll-contain rounded-[var(--r-md)] outline-none focus-visible:shadow-[0_0_0_2px_var(--accent-soft)]', virtual && '[overflow-anchor:none]')}>
+        {virtual
+          // one parent for the window and the last message, so a message moving from one to the other keeps its DOM
+          ? <div className="relative" style={{ paddingTop: v.totalSize }} data-virtual="">
+              {v.items.map(it => (
+                <div key={it.key} data-index={it.index} ref={v.measureElement} className={cn('absolute top-0 left-0 flex w-full flex-col px-0.5 pb-3', contentClassName)}
+                  style={{ transform: `translateY(${it.start}px)` }}>{kids[it.index]}</div>))}
+              <div key={keys.current[kids.length - 1]} className={cn('flex flex-col px-0.5 pb-0.5', contentClassName)}>{kids[kids.length - 1]}</div>
+            </div>
+          : <div className={cn('flex flex-col gap-3 p-0.5', contentClassName)}>{children}</div>}
+      </div>
+      <AnimatePresence>{!stick.pinned && (
+        <div className="pointer-events-none absolute inset-x-0 bottom-2 flex justify-center">
+          <motion.button key="jump" type="button" onClick={() => stick.jump()} initial={{ opacity: 0, y: 8, scale: 0.95 }} animate={{ opacity: 1, y: 0, scale: 1 }} exit={{ opacity: 0, y: 8, scale: 0.95, transition: { duration: 0.12 } }} transition={spring(0.3, 0.3)}
+            className={cn(floatingSurface, 'pointer-events-auto inline-flex h-8 cursor-pointer items-center gap-1.5 !rounded-full px-3 text-xs font-medium text-[var(--fg)] hover:bg-[var(--muted)] [@media(pointer:coarse)]:h-10')}>
+            <Icon name="arrowDown" size={13} strokeWidth={2.5} />{jumpLabel}</motion.button>
+        </div>)}</AnimatePresence>
+    </div>
+  )
+}
+
+/** Suggestion chips (starters, follow-ups). A group named by `label`; each chip calls `onPick(text)`. */
+export function Suggestions({ items, onPick, label = 'Suggestions', disabled, className }: { items: string[]; onPick: (s: string) => void; label?: string; disabled?: boolean; className?: string }) {
+  if (!items.length) return null
+  return (
+    <div role="group" aria-label={label} className={cn('flex flex-wrap gap-1.5', className)}>
+      {items.map(q => <Chip key={q} disabled={disabled} onClick={() => onPick(q)}>{q}</Chip>)}
+    </div>
+  )
+}
+
+/**
+ * The row under an answer: "Stopped" when it was cut short, Copy (`text`, read when clicked), thumbs up / down
+ * (controlled `rating` + `onRate`, or uncontrolled), Regenerate or Retry (`onRetry`), and anything you add (`children`,
+ * e.g. a version switcher).
+ */
+export function MessageActions({ text, onRetry, retryLabel = 'Regenerate', rating, defaultRating = 0, onRate, feedback = true, stopped, disabled, children, className }:
+  { text?: string | (() => string); onRetry?: () => void; retryLabel?: string; rating?: 0 | 1 | -1; defaultRating?: 0 | 1 | -1; onRate?: (r: 0 | 1 | -1) => void
+    feedback?: boolean; stopped?: boolean; disabled?: boolean; children?: ReactNode; className?: string }) {
+  const [r, setR] = useControllable<0 | 1 | -1>(rating, defaultRating, onRate)
+  const hasText = typeof text === 'function' || !!text
+  return (
+    <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} transition={{ duration: 0.25 }} className={cn('flex flex-wrap items-center gap-0.5 text-[var(--fg3)] [@media(pointer:coarse)]:gap-1', className)}>
+      {stopped && <span className="mr-1.5 text-xs">Stopped</span>}
+      {hasText && <CopyButton text={text!} size="icon-sm" variant="ghost" className="text-[var(--fg3)] hover:text-[var(--fg)]" />}
+      {feedback && ([1, -1] as const).map(v => (
+        <Button key={v} size="icon-sm" variant="ghost" aria-label={v === 1 ? 'Good response' : 'Bad response'} aria-pressed={r === v} title={v === 1 ? 'Good response' : 'Bad response'}
+          className={r === v ? 'text-[var(--fg)] !bg-[var(--muted)]' : 'text-[var(--fg3)] hover:text-[var(--fg)]'} onClick={() => setR(r === v ? 0 : v)}>
+          <motion.span key={r === v ? 'on' : 'off'} animate={r === v ? { scale: [1, 1.3, 1], rotate: [0, v === 1 ? -15 : 15, 0] } : undefined} transition={spring(0.5, 0.45)} className={cn('grid', v === -1 && 'rotate-180')}>
+            <Icon name="thumbUp" size={14} /></motion.span>
+        </Button>
+      ))}
+      {onRetry && <IconButton icon="refresh" label={retryLabel} disabled={disabled} onClick={onRetry} />}
+      {children}
+    </motion.div>
+  )
+}
+
+/**
+ * Collapsible model reasoning in the ThinkingSteps style. Open while it streams ("Thinking…" shimmers and counts),
+ * folded to "Thought for Ns" once done (click to read it again). The text is shown as plain text, never as markup.
+ */
+export function Reasoning({ text, streaming, defaultOpen, className }: { text: string; streaming?: boolean; defaultOpen?: boolean; className?: string }) {
+  const [user, setUser] = useState<boolean | null>(defaultOpen ?? null) // null: follow `streaming`
+  const open = user ?? !!streaming
+  const [live, setLive] = useState(0), [secs, setSecs] = useState<number | null>(null)
+  useEffect(() => { // counts while it streams; the final time becomes "Thought for Ns"
+    if (!streaming) return
+    const t0 = performance.now(), now = () => (performance.now() - t0) / 1000
+    const t = setInterval(() => setLive(now()), 250)
+    return () => { clearInterval(t); setSecs(now()) }
+  }, [streaming])
+  return (
+    <div className={cn(surface.card, 'overflow-hidden text-[13px]', className)}>
+      <button type="button" aria-expanded={open} onClick={() => setUser(!open)} className="flex w-full cursor-pointer items-center gap-2 border-0 bg-transparent px-3 py-2 text-left font-medium text-[var(--fg2)] hover:text-[var(--fg)] [@media(pointer:coarse)]:min-h-10">
+        <Icon name="bulb" size={14} />
+        {streaming ? <ShimmerText>Thinking… <span className="tabular-nums">{live.toFixed(1)}s</span></ShimmerText> : <span>{secs != null ? `Thought for ${Math.max(1, Math.round(secs))}s` : 'Reasoning'}</span>}
+        <motion.span className="ml-auto grid text-[var(--fg3)]" animate={{ rotate: open ? 0 : -90 }} transition={spring(0.2, 0.3)}><Icon name="chevronDown" size={12} strokeWidth={2.5} /></motion.span>
+      </button>
+      <Collapse open={open}><div className="border-t border-[var(--line)] px-3 py-2 text-xs leading-relaxed whitespace-pre-wrap text-[var(--fg2)]">{text}</div></Collapse>
+    </div>
+  )
+}
+
+const acArgText = (v: unknown) => { let t: string; try { t = typeof v === 'string' ? v : JSON.stringify(v) ?? String(v) } catch { t = String(v) } return t.length > 160 ? t.slice(0, 157) + '…' : t }
+
+/**
+ * An approval prompt for an action the host wants to run: the tool, a summary, recipients and arguments exactly as
+ * given (shown as data, never as markup), with Deny and Approve. Approve is disabled for the first 500 ms so a click
+ * aimed at something else can't land on it as the card appears. It only reports the decision: run the action in
+ * `onDecide` (or in useAiChat's `onApprovalRequest`), never before.
+ */
+export function ApprovalCard({ tool, summary, args, recipients, demo, busy, onDecide, className }:
+  { tool: string; summary?: ReactNode; args?: unknown; recipients?: string[]; demo?: boolean; busy?: boolean; onDecide: (approved: boolean) => void; className?: string }) {
+  const [armed, setArmed] = useState(false)
+  useEffect(() => { const t = setTimeout(() => setArmed(true), 500); return () => clearTimeout(t) }, [])
+  const rows = args && typeof args === 'object' && !Array.isArray(args) ? Object.entries(args as Record<string, unknown>).slice(0, 8) : args !== undefined ? [['input', args] as [string, unknown]] : []
+  return (
+    <motion.div initial={{ opacity: 0, y: 6 }} animate={{ opacity: 1, y: 0 }} transition={spring(0.3, 0.35)} role="group" aria-label="Approval needed"
+      className={cn('flex flex-col gap-2 rounded-[var(--r-md)] border border-[color-mix(in_srgb,var(--warn)_40%,var(--line))] bg-[color-mix(in_srgb,var(--warn)_6%,var(--card))] py-2 pr-2 pl-3 text-[13px]', className)}>
+      <div className="flex flex-wrap items-center gap-1.5"><Icon name="shield" size={14} className="text-[var(--warn)]" /><b className="font-medium">Approve this action?</b>
+        <code className="rounded-[var(--r-sm)] bg-[var(--muted)] px-1.5 font-[family-name:var(--mono)] text-[11px] break-all">{tool}</code>{demo && <Badge>demo</Badge>}</div>
+      {summary && <span className="break-words">{summary}</span>}
+      {!!recipients?.length && <span className="text-xs text-[var(--fg2)]">To: {recipients.join(', ')}</span>}
+      {rows.length > 0 && <dl className="m-0 grid grid-cols-[auto_minmax(0,1fr)] gap-x-2 gap-y-0.5 text-xs">{rows.flatMap(([k, v]) => [<dt key={`k${k}`} className="font-[family-name:var(--mono)] text-[var(--fg3)]">{k}</dt>, <dd key={`v${k}`} className="m-0 break-words text-[var(--fg2)]">{acArgText(v)}</dd>])}</dl>}
+      <div className="flex justify-end gap-2">
+        <Button size="sm" disabled={busy} onClick={() => onDecide(false)}>Deny</Button>
+        <Button size="sm" variant="primary" disabled={!armed || busy} loading={busy} onClick={() => onDecide(true)}>Approve</Button>
+      </div>
+    </motion.div>
+  )
+}
+
+const AI_TOOL_BADGE: Record<AiToolState, [string, Tone | undefined]> = { pending: ['Preparing', undefined], running: ['Running', 'accent'], 'awaiting-approval': ['Needs approval', 'warn'], done: ['Done', 'ok'], error: ['Failed', 'bad'] }
+
+/**
+ * A tool call from a message: status icon, tool name and state, and (click to open) its arguments and result in a
+ * JsonViewer, as data. While it awaits approval it shows an ApprovalCard; `onDecide` gets the decision (useAiChat's
+ * `decideTool`). A denied call says so and never shows a result.
+ */
+export function ToolCard({ part, onDecide, defaultOpen = false, className }: { part: AiToolPart; onDecide?: (approved: boolean) => void; defaultOpen?: boolean; className?: string }) {
+  const [open, setOpen] = useState(defaultOpen)
+  const [busy, setBusy] = useState(false)
+  useEffect(() => { if (part.state !== 'awaiting-approval') setBusy(false) }, [part.state])
+  const denied = part.approval?.approved === false
+  const [label, tone] = denied ? ['Denied', undefined] as const : AI_TOOL_BADGE[part.state]
+  const args = part.args !== undefined ? part.args : part.argsText
+  const working = part.state === 'running' || part.state === 'pending'
+  return (
+    <div className={cn('overflow-hidden rounded-[var(--r-md)] border border-[var(--line)] text-xs', className)}>
+      <button type="button" aria-expanded={open} onClick={() => setOpen(!open)}
+        className="flex w-full cursor-pointer items-center gap-2 border-0 bg-[var(--muted)] px-2.5 py-2 text-left text-[var(--fg2)] [@media(pointer:coarse)]:min-h-10">
+        <span className="grid w-3 flex-none place-items-center">{working ? <Spinner size={12} /> : part.state === 'awaiting-approval' ? <Icon name="shield" size={12} className="text-[var(--warn)]" />
+          : <Icon name={part.state === 'done' ? 'check' : 'x'} size={12} strokeWidth={3} className={part.state === 'done' ? 'text-[var(--ok)]' : 'text-[var(--bad)]'} />}</span>
+        <ShimmerText active={working} className="min-w-0 truncate font-[family-name:var(--mono)]">{part.name}</ShimmerText>
+        <Badge size="sm" tone={tone} className="ml-auto flex-none">{label}</Badge>
+        <motion.span className="grid flex-none text-[var(--fg3)]" animate={{ rotate: open ? 90 : 0 }} transition={spring(0.2, 0.3)}><Icon name="chevronRight" size={11} strokeWidth={2.5} /></motion.span>
+      </button>
+      <Collapse open={open}>
+        <div className="flex flex-col gap-2 p-2.5">
+          {args !== undefined && <div><div className="mb-1 text-[11px] font-medium text-[var(--fg3)]">Arguments</div><JsonViewer data={args} maxHeight={160} /></div>}
+          {part.state === 'done' && !denied && <div><div className="mb-1 text-[11px] font-medium text-[var(--fg3)]">Result</div><JsonViewer data={part.result ?? null} maxHeight={160} /></div>}
+          {part.state === 'error' && <div className="text-[var(--bad)]">{part.error ?? 'The tool failed.'}</div>}
+        </div>
+      </Collapse>
+      {part.state === 'awaiting-approval' && onDecide && (
+        <ApprovalCard tool={part.name} summary={part.approval?.summary} args={part.args} busy={busy} className="m-2"
+          onDecide={ok => { setBusy(true); onDecide(ok) }} />)}
+    </div>
+  )
+}
+
+/** The numbered source chips under an answer (the same numbers as its [n] citations). */
+function AiMessageSources({ sources }: { sources: AiSourcePart[] }) {
+  return <ChatSources className="mt-1" items={sources.map(s => { const host = aiSourceHost(s.url); return { name: s.title || host, desc: host, href: s.url } })} />
+}
+const aiSourceHost = (url: string) => { try { return new URL(url).hostname || url } catch { return url } }
+
+/**
+ * Renders a message's parts in order: text as Markdown (links through safeUrl, `[n]` as a Citation of the message's
+ * n-th source), reasoning as Reasoning, tool calls as ToolCard (approvals go to `onDecideTool`), files as attachment
+ * tiles, errors with a Retry (`onRetry`), and `data` parts through `renderData` (nothing by default). Sources are
+ * collected into numbered chips at the end. Model text never reaches the DOM as HTML.
+ */
+export function MessageParts({ message, onDecideTool, onRetry, renderData, onLinkClick, className }:
+  { message: AiMessage; onDecideTool?: (toolId: string, approved: boolean) => void; onRetry?: () => void; renderData?: (part: AiDataPart) => ReactNode
+    onLinkClick?: (href: string, e: React.MouseEvent) => void; className?: string }) {
+  const streaming = message.status === 'streaming'
+  const sources = message.parts.filter((p): p is AiSourcePart => p.type === 'source')
+  const lastText = message.parts.reduce((k, p, i) => p.type === 'text' ? i : k, -1)
+  const cite = (n: number) => { const s = sources[n - 1]; return s ? <Citation n={n} source={{ title: s.title || aiSourceHost(s.url), url: s.url, snippet: s.snippet }} /> : <>[{n}]</> }
+  const visible = message.parts.some(p => p.type !== 'source' && p.type !== 'data')
+  return (
+    <div className={cn('flex min-w-0 flex-col gap-2', className)}>
+      {streaming && !visible && <TypingDots />}
+      {message.parts.map((p, i) => {
+        switch (p.type) {
+          case 'text': return p.text ? <Markdown key={i} streaming={streaming && i === lastText && p.state !== 'done'} onLinkClick={onLinkClick} renderCitation={cite} className="!text-[13px]">{p.text}</Markdown> : null
+          case 'reasoning': return <Reasoning key={i} text={p.text} streaming={p.state === 'streaming'} />
+          case 'tool': return <ToolCard key={p.id} part={p} onDecide={onDecideTool ? ok => onDecideTool(p.id, ok) : undefined} />
+          case 'file': return <AttachmentChip key={i} name={p.name} size={p.size} url={/^image\//.test(p.mediaType) ? p.url : null} />
+          case 'data': return renderData ? <div key={i}>{renderData(p)}</div> : null
+          case 'error': return (
+            <div key={i} role="alert" className="flex flex-wrap items-center gap-2 rounded-[var(--r-md)] border border-[color-mix(in_srgb,var(--bad)_35%,var(--line))] bg-[var(--bad-soft)] px-3 py-2 text-[13px] text-[var(--fg)]">
+              <Icon name="alert" size={14} className="text-[var(--bad)]" /><span className="min-w-0 flex-1 break-words">{p.message}</span>
+              {onRetry && <Button size="sm" onClick={onRetry}>Retry</Button>}
+            </div>)
+          default: return null
+        }
+      })}
+      {sources.length > 0 && <AiMessageSources sources={sources} />}
+    </div>
+  )
+}
+
+/**
+ * One message. A user message is a bubble on the right (its text as plain text, attachments as tiles above); an
+ * assistant message has a name row (`avatar`, `name`) and its MessageParts, then `actions` once it stopped streaming;
+ * a system message is a quiet centred line. Pass the same handlers as MessageParts.
+ */
+export function Message({ message, name = 'Assistant', avatar, actions, onDecideTool, onRetry, renderData, onLinkClick, className }:
+  { message: AiMessage; name?: string; avatar?: ReactNode; actions?: ReactNode; onDecideTool?: (toolId: string, approved: boolean) => void; onRetry?: () => void
+    renderData?: (part: AiDataPart) => ReactNode; onLinkClick?: (href: string, e: React.MouseEvent) => void; className?: string }) {
+  if (message.role === 'system') return <div className={cn('self-center px-3 text-center text-xs text-[var(--fg3)]', className)}>{aiMessageText(message)}</div>
+  if (message.role === 'user') {
+    const files = message.parts.filter((p): p is AiFilePart => p.type === 'file'), text = aiMessageText(message)
+    return (
+      <motion.div initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }} transition={spring(0.25, 0.4)} className={cn('flex max-w-[85%] flex-col items-end gap-1.5 self-end', className)}>
+        {files.length > 0 && <div className="flex flex-wrap justify-end gap-1.5">{files.map((f, i) => <AttachmentChip key={i} name={f.name} size={f.size} url={/^image\//.test(f.mediaType) ? f.url : null} />)}</div>}
+        {text && <div className="rounded-[14px_14px_4px_14px] bg-[var(--primary)] px-3 py-2 text-[13px] leading-normal break-words whitespace-pre-wrap text-[var(--on-primary)]">{text}</div>}
+      </motion.div>
+    )
+  }
+  return (
+    <motion.div initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }} transition={spring(0.25, 0.4)} className={cn('flex max-w-[94%] min-w-0 flex-col gap-1.5 text-[13px]', className)}>
+      <div className="flex items-center gap-1.5 text-xs font-medium text-[var(--fg3)]">{avatar ?? <i aria-hidden className="h-2 w-2 rounded-full bg-[var(--accent)]" />}{name}</div>
+      <MessageParts message={message} onDecideTool={onDecideTool} onRetry={onRetry} renderData={renderData} onLinkClick={onLinkClick} />
+      {message.status !== 'streaming' && actions}
+    </motion.div>
+  )
+}
+
 /* Assistant chat ─────────────────────────────────────────────────────────── */
 
 export type ChatScript = {
@@ -97,31 +415,104 @@ export type ChatScript = {
 export type SlashCommand = { cmd: string; prompt: string; hint: string }
 type ChatTurn = { id: number; q: string; s: ChatScript; phase: 'dots' | 'tool' | 'stream' | 'done'; v: number; run: number; stopped: boolean; shown: string; rating: 0 | 1 | -1 }
 
-/**
- * Rich assistant chat. Starter chips, `/` commands with a keyboard popup, typing dots, a collapsible tool-call row,
- * word-by-word streaming with Stop (which also works before the first word), generated UI parts under the answer,
- * follow-up chips, and an action row (copy, thumbs up/down, regenerate with version ‹ 1/2 ›). `respond(question)` returns
- * the script for a turn. Screen readers hear a short summary of each answer once it is done, not every word.
- * `defaultTurns` opens mid-conversation: each question is shown already answered (through `respond`, no streaming).
- */
-export function AssistantChat({ starters = [], commands = [], respond, defaultTurns = [], placeholder = 'Ask anything, or type / for commands', className }:
-  { starters?: string[]; commands?: SlashCommand[]; respond: (q: string) => ChatScript; /** questions already asked and answered when it mounts */ defaultTurns?: string[]; placeholder?: string; className?: string }) {
-  const [turns, setTurns] = useState<ChatTurn[]>(() => defaultTurns.map((q, i) => ({ id: -1 - i, q, s: respond(q), phase: 'done', v: 0, run: 0, stopped: false, shown: '', rating: 0 })))
+/** AssistantChat's input: a pill text field with `/` commands in a keyboard popup, and Send / Stop. */
+function AiSlashInput({ commands, placeholder, busy, onSend, onStop }: { commands: SlashCommand[]; placeholder: string; busy: boolean; onSend: (q: string) => void; onStop: () => void }) {
   const [text, setText] = useState('')
   const [slashOpen, setSlashOpen] = useState(true)
+  const listId = useId()
+  const matches = text.startsWith('/') ? commands.filter(c => c.cmd.startsWith(text.split(' ')[0].toLowerCase())) : []
+  const popup = slashOpen && matches.length > 0
+  const ask = (q: string) => { if (!q.trim() || busy) return; setText(''); onSend(q.trim()) }
+  const go = (c: SlashCommand) => { setText(''); ask(c.prompt) }
+  const roving = useRoving(matches.length, i => go(matches[i]), { homeEnd: false })
+  return (
+    <div className="relative">
+      {/* sized for the full command list, so filtering never makes the panel above the field jump */}
+      <FloatingPanel open={popup} placement="top-start" flip={false} role="presentation" style={{ minHeight: `min(${40 + commands.length * 36}px, 300px, 45dvh)` }} className="max-h-[min(300px,45dvh)] w-[min(280px,calc(100vw-32px))] overflow-y-auto overscroll-contain">
+        <MenuLabel className="font-semibold tracking-wide uppercase">Commands</MenuLabel>
+        <OptionList id={listId} label="Commands" query={text.split(' ')[0]} active={roving.active} onHover={roving.setActive} isSelected={() => false} onPick={i => go(matches[i])}
+          options={matches.map(c => ({ value: c.cmd, label: c.cmd, hint: c.hint }))} className="[&_[role=option]]:[@media(pointer:coarse)]:min-h-11" />
+      </FloatingPanel>
+      <div className="flex items-center gap-2 rounded-full border border-[var(--line)] bg-[var(--card)] py-1 pr-1 pl-4 focus-within:border-[var(--fg3)]">
+        <input value={text} placeholder={placeholder} aria-label="Message" autoComplete="off" role="combobox" aria-expanded={popup} aria-autocomplete="list"
+          aria-controls={popup ? listId : undefined} aria-activedescendant={popup ? `${listId}-${roving.active}` : undefined}
+          onChange={e => { setText(e.target.value); setSlashOpen(true) }} onBlur={() => setTimeout(() => setSlashOpen(false), 150)} onFocus={() => setSlashOpen(true)}
+          onKeyDown={e => {
+            if (e.nativeEvent.isComposing) return // Enter that confirms an IME candidate must not send
+            if (popup) {
+              if (e.key === 'Tab') { e.preventDefault(); go(matches[roving.active]); return }
+              if (e.key === 'Escape') { e.stopPropagation(); setSlashOpen(false); return }
+              roving.onKeyDown(e); return
+            }
+            if (e.key === 'Enter') { e.preventDefault(); ask(text) }
+          }}
+          className={cn('h-8 min-w-0 flex-1 border-0 bg-transparent text-[13px] outline-none placeholder:text-[var(--fg3)]', TOUCH.input)} />
+        <SendButton state={busy ? 'stop' : 'send'} onClick={() => busy ? onStop() : ask(text)} disabled={!busy && !text.trim()} />
+      </div>
+    </div>
+  )
+}
+
+/** AssistantChat over useAiChat: the same frame, with real streamed parts. */
+function AiLiveChat({ chat, starters, commands, placeholder, className }: { chat: AiChat; starters: string[]; commands: SlashCommand[]; placeholder: string; className?: string }) {
+  const { messages, busy } = chat
+  const [said, setSaid] = useState('')
+  const prev = useRef(chat.status)
+  useEffect(() => { // announce a short summary once, not every token
+    if (prev.current !== chat.status) {
+      const last = messages[messages.length - 1]
+      if (chat.status === 'submitted') setSaid('Assistant is thinking…')
+      else if (chat.status === 'error') setSaid('The reply failed')
+      else if (chat.status === 'ready' && last?.role === 'assistant') setSaid(last.stopped ? 'Stopped' : `Assistant: ${aiMessageText(last).slice(0, 300)}`)
+      prev.current = chat.status
+    }
+  }, [chat.status, messages])
+  const lastAssistant = messages.reduce((k, m, i) => m.role === 'assistant' ? i : k, -1)
+  return (
+    <div className={cn('flex flex-col gap-2.5', className)}>
+      <span className="sr-only" aria-live="polite">{said}</span>
+      <Conversation busy={busy} className="h-[min(420px,62dvh)]" contentClassName="!gap-2.5">
+        {!messages.length && <Suggestions items={starters} onPick={q => chat.submit(q)} />}
+        {messages.map((m, i) => (
+          <Message key={m.id} message={m} onDecideTool={chat.decideTool} onRetry={i === lastAssistant ? chat.regenerate : undefined}
+            actions={m.role === 'assistant' && <MessageActions text={() => aiMessageText(m)} stopped={m.stopped} onRetry={i === lastAssistant ? chat.regenerate : undefined} retryLabel={m.stopped || m.status === 'error' ? 'Retry' : 'Regenerate'} disabled={busy} />} />
+        ))}
+      </Conversation>
+      <AiSlashInput commands={commands} placeholder={placeholder} busy={busy} onSend={q => chat.submit(q)} onStop={chat.stop} />
+    </div>
+  )
+}
+
+/**
+ * Rich assistant chat. Starter chips, `/` commands with a keyboard popup, a log that stays pinned to the newest answer
+ * (with "Jump to latest" after you scroll up), Stop, and an action row (copy, thumbs up/down, regenerate).
+ *
+ * Real model: pass `chat` from useAiChat and the answers render as streamed parts (Markdown text, reasoning, tool
+ * cards with approvals, sources, files). Scripted (0.2): `respond(question)` returns a ChatScript (typing dots, a
+ * collapsible tool-call row, word-by-word streaming, generated UI parts, follow-up chips, versions ‹ 1/2 ›), and
+ * `defaultTurns` opens mid-conversation with those questions already answered. Screen readers hear a short summary of
+ * each answer once it is done, not every word.
+ */
+export function AssistantChat({ chat, starters = [], commands = [], respond, defaultTurns = [], placeholder = 'Ask anything, or type / for commands', className }:
+  { /** a real chat from useAiChat (takes precedence over `respond`) */ chat?: AiChat; starters?: string[]; commands?: SlashCommand[]; respond?: (q: string) => ChatScript
+    /** questions already asked and answered when it mounts (scripted mode) */ defaultTurns?: string[]; placeholder?: string; className?: string }) {
+  if (chat) return <AiLiveChat chat={chat} starters={starters} commands={commands} placeholder={placeholder} className={className} />
+  return <AiScriptedChat starters={starters} commands={commands} respond={respond ?? (() => ({ versions: ['No responder is connected. Pass `chat` (useAiChat) or `respond`.'] }))} defaultTurns={defaultTurns} placeholder={placeholder} className={className} />
+}
+
+/** AssistantChat driven by `respond(q) => ChatScript` (the 0.2 behaviour). */
+function AiScriptedChat({ starters, commands, respond, defaultTurns, placeholder, className }:
+  { starters: string[]; commands: SlashCommand[]; respond: (q: string) => ChatScript; defaultTurns: string[]; placeholder: string; className?: string }) {
+  const [turns, setTurns] = useState<ChatTurn[]>(() => defaultTurns.map((q, i) => ({ id: -1 - i, q, s: respond(q), phase: 'done', v: 0, run: 0, stopped: false, shown: '', rating: 0 })))
   const [said, setSaid] = useState('') // what the live region announces
-  const log = useRef<HTMLDivElement>(null), listId = useId()
   const alive = useRef(true), cancelled = useRef(new Set<number>())
   useEffect(() => { alive.current = true; return () => { alive.current = false } }, [])
   const busy = turns.some(t => t.phase !== 'done')
   const streaming = turns.some(t => t.phase === 'stream')
-  const toBottom = () => { const el = log.current; if (el) el.scrollTop = el.scrollHeight }
-  useLayoutEffect(toBottom, [turns.length, turns[turns.length - 1]?.phase])
   const patch = (id: number, p: Partial<ChatTurn> | ((t: ChatTurn) => Partial<ChatTurn>)) => setTurns(ts => ts.map(t => t.id === id ? { ...t, ...(typeof p === 'function' ? p(t) : p) } : t))
 
   const ask = async (q: string) => {
     q = q.trim(); if (!q || busy) return
-    setText('')
     const id = Date.now(), s = respond(q)
     const live = () => alive.current && !cancelled.current.has(id) // Stop during the dots or the tool call ends the turn here
     setTurns(ts => [...ts, { id, q, s, phase: 'dots', v: 0, run: 0, stopped: false, shown: '', rating: 0 }])
@@ -141,21 +532,13 @@ export function AssistantChat({ starters = [], commands = [], respond, defaultTu
   }
   const finish = (t: ChatTurn, shown: string) => { patch(t.id, { phase: 'done', shown }); setSaid(t.stopped ? 'Stopped' : `Assistant: ${shown}`) }
 
-  const matches = text.startsWith('/') ? commands.filter(c => c.cmd.startsWith(text.split(' ')[0].toLowerCase())) : []
-  const popup = slashOpen && matches.length > 0
-  const go = (c: SlashCommand) => { setText(''); ask(c.prompt) }
-  const roving = useRoving(matches.length, i => go(matches[i]), { homeEnd: false })
-  const chip = (q: string) => <Chip key={q} onClick={() => ask(q)}>{q}</Chip>
-
   return (
     <div className={cn('flex flex-col gap-2.5', className)}>
       <span className="sr-only" aria-live="polite">{said}</span>
-      <div ref={log} role="log" aria-live="off" aria-busy={streaming} aria-label="Conversation" className="flex h-[min(420px,62dvh)] flex-col gap-2.5 overflow-auto p-0.5">
+      <Conversation busy={streaming} className="h-[min(420px,62dvh)]" contentClassName="!gap-2.5">
         <AnimatePresence>
           {!turns.length && starters.length > 0 && (
-            <motion.div key="starters" exit={{ opacity: 0, y: -6, transition: { duration: 0.15 } }} className="flex flex-wrap gap-1.5" role="group" aria-label="Suggestions">
-              {starters.map(chip)}
-            </motion.div>
+            <motion.div key="starters" exit={{ opacity: 0, y: -6, transition: { duration: 0.15 } }}><Suggestions items={starters} onPick={ask} /></motion.div>
           )}
         </AnimatePresence>
         {turns.map(t => {
@@ -170,62 +553,29 @@ export function AssistantChat({ starters = [], commands = [], respond, defaultTu
                   {t.s.tool && (t.phase !== 'done' || !t.stopped || t.shown) && <ToolCall status={t.phase === 'tool' ? 'running' : 'done'} label={t.s.tool[0]} doneLabel={t.s.tool[1]} detail={t.s.tool[2]} />}
                   {t.phase !== 'tool' && <div className="mt-1.5 leading-relaxed">
                     {t.phase === 'stream'
-                      ? <StreamingText key={t.run} text={answer} playing={!t.stopped} wordDelay={45} onProgress={toBottom} onDone={shown => finish(t, shown)} />
+                      ? <StreamingText key={t.run} text={answer} playing={!t.stopped} wordDelay={45} onDone={shown => finish(t, shown)} />
                       : <span className="whitespace-pre-wrap">{t.stopped ? t.shown : answer}</span>}
                   </div>}
                   {t.phase === 'done' && !t.stopped && t.s.part && <motion.div initial={{ opacity: 0, y: 6 }} animate={{ opacity: 1, y: 0 }} transition={spring(0.25, 0.35)} className="mt-2.5">{t.s.part}</motion.div>}
                   {t.phase === 'done' && !t.stopped && t.s.followUps && t.s.followUps.length > 0 && t.id === turns[turns.length - 1].id && (
-                    <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} transition={{ duration: 0.3, delay: 0.2 }} className="mt-2.5 flex flex-wrap gap-1.5">
-                      {t.s.followUps.map(chip)}
-                    </motion.div>)}
+                    <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} transition={{ duration: 0.3, delay: 0.2 }} className="mt-2.5"><Suggestions items={t.s.followUps} onPick={ask} label="Follow-ups" /></motion.div>)}
                   {t.phase === 'done' && (
-                    <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} transition={{ duration: 0.25 }} className="mt-1.5 flex flex-wrap items-center gap-0.5 text-[var(--fg3)] [@media(pointer:coarse)]:gap-1">
-                      {t.stopped && <span className="mr-1.5 text-xs">Stopped</span>}
-                      {(!t.stopped || t.shown) && <CopyButton text={() => t.stopped ? t.shown : answer} size="icon-sm" variant="ghost" className="text-[var(--fg3)] hover:text-[var(--fg)]" />}
-                      {([1, -1] as const).map(r => (
-                        <Button key={r} size="icon-sm" variant="ghost" aria-label={r === 1 ? 'Good response' : 'Bad response'} aria-pressed={t.rating === r} title={r === 1 ? 'Good response' : 'Bad response'}
-                          className={t.rating === r ? 'text-[var(--fg)] !bg-[var(--muted)]' : 'text-[var(--fg3)] hover:text-[var(--fg)]'} onClick={() => patch(t.id, { rating: t.rating === r ? 0 : r })}>
-                          <motion.span key={t.rating === r ? 'on' : 'off'} animate={t.rating === r ? { scale: [1, 1.3, 1], rotate: [0, r === 1 ? -15 : 15, 0] } : undefined} transition={spring(0.5, 0.45)} className={cn('grid', r === -1 && 'rotate-180')}>
-                            <Icon name="thumbUp" size={14} /></motion.span>
-                        </Button>
-                      ))}
-                      <IconButton icon="refresh" label={t.stopped ? 'Retry' : 'Regenerate'} disabled={busy} onClick={() => restream(t, t.stopped && !t.shown ? t.v : (t.v + 1) % n)} />
+                    <MessageActions className="mt-1.5" stopped={t.stopped} text={!t.stopped || t.shown ? () => t.stopped ? t.shown : answer : undefined}
+                      rating={t.rating} onRate={r => patch(t.id, { rating: r })} retryLabel={t.stopped ? 'Retry' : 'Regenerate'} disabled={busy}
+                      onRetry={() => restream(t, t.stopped && !t.shown ? t.v : (t.v + 1) % n)}>
                       {n > 1 && <>
                         <IconButton icon="chevronLeft" label="Previous version" disabled={busy} onClick={() => restream(t, (t.v - 1 + n) % n)} />
                         <span className="text-xs tabular-nums">{t.v + 1} / {n}</span>
                         <IconButton icon="chevronRight" label="Next version" disabled={busy} onClick={() => restream(t, (t.v + 1) % n)} />
                       </>}
-                    </motion.div>)}
+                    </MessageActions>)}
                 </>}
               </motion.div>
             </div>
           )
         })}
-      </div>
-      <div className="relative">
-        {/* sized for the full command list, so filtering never makes the panel above the field jump */}
-        <FloatingPanel open={popup} placement="top-start" flip={false} role="presentation" style={{ minHeight: `min(${40 + commands.length * 36}px, 300px, 45dvh)` }} className="max-h-[min(300px,45dvh)] w-[min(280px,calc(100vw-32px))] overflow-y-auto overscroll-contain">
-          <MenuLabel className="font-semibold tracking-wide uppercase">Commands</MenuLabel>
-          <OptionList id={listId} label="Commands" query={text.split(' ')[0]} active={roving.active} onHover={roving.setActive} isSelected={() => false} onPick={i => go(matches[i])}
-            options={matches.map(c => ({ value: c.cmd, label: c.cmd, hint: c.hint }))} className="[&_[role=option]]:[@media(pointer:coarse)]:min-h-11" />
-        </FloatingPanel>
-        <div className="flex items-center gap-2 rounded-full border border-[var(--line)] bg-[var(--card)] py-1 pr-1 pl-4 focus-within:border-[var(--fg3)]">
-          <input value={text} placeholder={placeholder} aria-label="Message" autoComplete="off" role="combobox" aria-expanded={popup} aria-autocomplete="list"
-            aria-controls={popup ? listId : undefined} aria-activedescendant={popup ? `${listId}-${roving.active}` : undefined}
-            onChange={e => { setText(e.target.value); setSlashOpen(true) }} onBlur={() => setTimeout(() => setSlashOpen(false), 150)} onFocus={() => setSlashOpen(true)}
-            onKeyDown={e => {
-              if (e.nativeEvent.isComposing) return // Enter that confirms an IME candidate must not send
-              if (popup) {
-                if (e.key === 'Tab') { e.preventDefault(); go(matches[roving.active]); return }
-                if (e.key === 'Escape') { e.stopPropagation(); setSlashOpen(false); return }
-                roving.onKeyDown(e); return
-              }
-              if (e.key === 'Enter') { e.preventDefault(); ask(text) }
-            }}
-            className={cn('h-8 min-w-0 flex-1 border-0 bg-transparent text-[13px] outline-none placeholder:text-[var(--fg3)]', TOUCH.input)} />
-          <SendButton state={busy ? 'stop' : 'send'} onClick={() => busy ? stop() : ask(text)} disabled={!busy && !text.trim()} />
-        </div>
-      </div>
+      </Conversation>
+      <AiSlashInput commands={commands} placeholder={placeholder} busy={busy} onSend={ask} onStop={stop} />
     </div>
   )
 }
@@ -263,7 +613,7 @@ export type ComposerReply = { text?: string; needsApproval?: ComposerAction }
 /** A canned attachment offered in the + menu (e.g. a sample file in a demo). */
 export type ComposerSample = { title: string; desc: string; files: () => File[] }
 
-type AcFile = { id: number; file: File; url: string | null }
+type AcFile = Attachment
 type AcDraft = { id: number; text: string; files: AcFile[]; ctx: string[] }
 /** ok / no: the host confirmed the action ran / didn't run; ok? / no?: the host didn't confirm (or there is no host action). */
 type AcApproval = 'busy' | 'ok' | 'ok?' | 'no' | 'no?'
@@ -273,32 +623,6 @@ const AC_APPROVAL_TEXT: Record<Exclude<AcApproval, 'busy'>, string> = {
   ok: '✓ Approved. The action ran.', 'ok?': 'Approved. The app hasn’t confirmed that the action ran.',
   no: 'Not approved. The action was not run.', 'no?': 'Not approved. The app hasn’t confirmed whether anything ran.',
 }
-const acArg = (v: unknown) => { const t = typeof v === 'string' ? v : JSON.stringify(v) ?? String(v); return t.length > 160 ? t.slice(0, 157) + '…' : t }
-
-/**
- * The approval card: what the host says it will do (tool, summary, recipients, arguments), with Deny and Approve.
- * Approve is disabled for the first 500 ms so a click aimed at something else can't land on it as the card appears.
- */
-function AcApprovalCard({ action, demo, busy, onDecide }: { action: ComposerAction; demo?: boolean; busy: boolean; onDecide: (ok: boolean) => void }) {
-  const [armed, setArmed] = useState(false)
-  useEffect(() => { const t = setTimeout(() => setArmed(true), 500); return () => clearTimeout(t) }, [])
-  const args = Object.entries(action.args ?? {}).slice(0, 8)
-  return (
-    <motion.div initial={{ opacity: 0, y: 6 }} animate={{ opacity: 1, y: 0 }} transition={spring(0.3, 0.35)} role="group" aria-label="Approval needed"
-      className="flex flex-col gap-2 rounded-[var(--r-md)] border border-[color-mix(in_srgb,var(--warn)_40%,var(--line))] bg-[color-mix(in_srgb,var(--warn)_6%,var(--card))] py-2 pr-2 pl-3 text-[13px]">
-      <div className="flex flex-wrap items-center gap-1.5"><Icon name="shield" size={14} className="text-[var(--warn)]" /><b className="font-medium">Approve this action?</b>
-        <code className="rounded-[var(--r-sm)] bg-[var(--muted)] px-1.5 font-[family-name:var(--mono)] text-[11px] break-all">{action.tool}</code>{demo && <Badge>demo</Badge>}</div>
-      <span className="break-words">{action.summary}</span>
-      {!!action.recipients?.length && <span className="text-xs text-[var(--fg2)]">To: {action.recipients.join(', ')}</span>}
-      {args.length > 0 && <dl className="m-0 grid grid-cols-[auto_minmax(0,1fr)] gap-x-2 gap-y-0.5 text-xs">{args.flatMap(([k, v]) => [<dt key={`k${k}`} className="font-[family-name:var(--mono)] text-[var(--fg3)]">{k}</dt>, <dd key={`v${k}`} className="m-0 break-words text-[var(--fg2)]">{acArg(v)}</dd>])}</dl>}
-      <div className="flex justify-end gap-2">
-        <Button size="sm" disabled={busy} onClick={() => onDecide(false)}>Deny</Button>
-        <Button size="sm" variant="primary" disabled={!armed || busy} loading={busy} onClick={() => onDecide(true)}>Approve</Button>
-      </div>
-    </motion.div>
-  )
-}
-
 // keep the closest step when the new model has a different enum
 const acNearest = (list: string[], prev: string, prevList: string[]) => list.includes(prev) ? prev : list[Math.round((Math.max(0, prevList.indexOf(prev)) / Math.max(1, prevList.length - 1)) * (list.length - 1))] ?? list[0]
 
@@ -370,6 +694,27 @@ function AcStepSlider({ title, list, value, onChange, model }: { title: string; 
   return <Slider label={title} steps={list} value={Math.max(0, list.indexOf(value))} onChange={i => onChange(list[i])} />
 }
 
+/** One message of AgentComposer's log when it runs on useAiChat: the composer's user bubble (with its context chips), or the assistant's streamed parts. */
+function AcLiveMessage({ m, chat }: { m: AiMessage; chat: AiChat }) {
+  if (m.role === 'user') {
+    const ctx = Array.isArray(m.metadata?.context) ? (m.metadata!.context as unknown[]).map(String) : []
+    const files = m.parts.filter((p): p is AiFilePart => p.type === 'file'), text = aiMessageText(m)
+    return (
+      <motion.div initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }} transition={spring(0.3, 0.35)} className="flex max-w-[82%] flex-col items-end gap-1 self-end">
+        {(ctx.length > 0 || files.length > 0) && <div className="flex flex-wrap justify-end gap-1">{ctx.map(c => <Badge key={c} tone="accent">{c}</Badge>)}{files.map((f, i) => <Badge key={i}>📎 {f.name}</Badge>)}</div>}
+        {text && <div className="rounded-[16px_16px_4px_16px] bg-[var(--muted)] px-3 py-2 text-[13px] leading-normal break-words whitespace-pre-wrap">{text}</div>}
+      </motion.div>
+    )
+  }
+  const last = chat.messages[chat.messages.length - 1]?.id === m.id
+  return (
+    <motion.div initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }} transition={spring(0.3, 0.35)} className="flex max-w-[88%] min-w-0 flex-col gap-1.5 px-0.5">
+      <MessageParts message={m} onDecideTool={chat.decideTool} onRetry={last ? chat.regenerate : undefined} />
+      {m.status !== 'streaming' && <MessageActions text={() => aiMessageText(m)} stopped={m.stopped} feedback={false} onRetry={last ? chat.regenerate : undefined} retryLabel={m.stopped || m.status === 'error' ? 'Retry' : 'Regenerate'} disabled={chat.busy} />}
+    </motion.div>
+  )
+}
+
 /**
  * Agent composer that doubles as a control panel. A workspace beside it (`items`, `doc`) adds context (click an item, or
  * select text and "Add to chat"; on phones it folds into a toggle and the bar shows icons only, its panels spanning the
@@ -386,10 +731,20 @@ function AcStepSlider({ title, list, value, onChange, model }: { title: string; 
  * (approve) or to confirm nothing ran (deny). Without that confirmation the card says so instead of claiming an outcome.
  * `needsApproval` (a text test, default: a word match for send, email, create, deploy…) is a demo fallback only: it
  * applies when onSend returns a plain string in "Ask for approval" mode, after onSend already ran, so it can't stop anything.
+ *
+ * Real model: pass `chat` from useAiChat instead of onSend. Replies stream in as parts, tool calls that need approval
+ * show the same card and wait for `chat.decideTool` (run the tool in useAiChat's `onApprovalRequest`), and with an
+ * empty composer the send button stops the reply.
  */
-export function AgentComposer({ onSend, onApprovalRequest, items = [], doc, modes = AC_MODES, connectors = [], models = AC_MODELS, samples = [], needsApproval = t => AC_RISKY.test(t),
+export function AgentComposer({ chat: live, onSend, onApprovalRequest, items = [], doc, modes = AC_MODES, connectors = [], models = AC_MODELS, samples = [], needsApproval = t => AC_RISKY.test(t),
   hero = 'What should we work on?', hint, className }:
-  { onSend?: (text: string, files: File[], context: string[], meta: ComposerSendMeta) => string | ComposerReply | void | Promise<string | ComposerReply | void>
+  { /**
+     * A real chat from useAiChat. Each message goes to `chat.submit(text, files, { metadata: { context, mode, settings, connectors } })`
+     * (onSend is not called), replies render as streamed parts, tool approvals use the chat's `decideTool`, and Send
+     * becomes Stop while a reply streams (type to queue a follow-up instead).
+     */
+    chat?: AiChat
+    onSend?: (text: string, files: File[], context: string[], meta: ComposerSendMeta) => string | ComposerReply | void | Promise<string | ComposerReply | void>
     /** The person approved or denied `action` (from onSend's needsApproval). Run it now only if approved; resolve true when it ran (approve) or to confirm nothing ran (deny). */
     onApprovalRequest?: (action: ComposerAction, approved: boolean) => Promise<boolean>
     items?: WorkspaceItem[]; doc?: string; modes?: ComposerMode[]; connectors?: Connector[]; models?: ComposerModel[]; samples?: ComposerSample[]
@@ -397,9 +752,9 @@ export function AgentComposer({ onSend, onApprovalRequest, items = [], doc, mode
     needsApproval?: (text: string) => boolean; hero?: string; hint?: string; className?: string }) {
   const toast = useToast()
   const reduce = useReducedMotion()
-  const [chat, setChat] = useState(false)
+  const [chat, setChat] = useState(!!live?.messages.length)
   const [text, setText] = useState('')
-  const [files, setFiles] = useState<AcFile[]>([])
+  const att = useAttachments({ max: AC_MAX_FILES }), files = att.files
   const [ctx, setCtx] = useState<string[]>([])
   const [mode, setMode] = useState(modes[1]?.id ?? modes[0].id)
   const [cons, setCons] = useState(connectors)
@@ -416,12 +771,12 @@ export function AgentComposer({ onSend, onApprovalRequest, items = [], doc, mode
   const narrow = useMediaQuery('(max-width: 639px)'), coarse = useCoarsePointer()
   const [wsOpen, setWsOpen] = useState(false) // phones: the workspace folds into a toggle above the composer
   const boxRef = useRef<HTMLDivElement>(null), inp = useRef<HTMLTextAreaElement>(null), fileRef = useRef<HTMLInputElement>(null), docRef = useRef<HTMLParagraphElement>(null), logRef = useRef<HTMLDivElement>(null)
-  const barRef = useRef<HTMLDivElement>(null), depth = useRef(0), fid = useRef(0), mid = useRef(0), alive = useRef(true)
-  const urls = useRef(new Set<string>()) // object URLs of image previews, revoked when the chip goes away or on unmount
+  const barRef = useRef<HTMLDivElement>(null), depth = useRef(0), mid = useRef(0), alive = useRef(true)
   const pid = useId(), panelId = (k: string) => `${pid}-${k}`
-  const busy = msgs.some(m => m.role === 'a' && m.phase !== 'done')
-  const streaming = msgs.some(m => m.phase === 'stream')
-  const waiting = msgs.some(m => m.phase === 'approve')
+  const liveWaiting = !!live && live.messages.some(m => m.parts.some(p => p.type === 'tool' && p.state === 'awaiting-approval'))
+  const busy = live ? live.busy || liveWaiting : msgs.some(m => m.role === 'a' && m.phase !== 'done')
+  const streaming = live ? live.status === 'streaming' : msgs.some(m => m.phase === 'stream')
+  const waiting = live ? liveWaiting : msgs.some(m => m.phase === 'approve')
   const queueRef = useRef(queue); queueRef.current = queue
   const approve = useRef(onApprovalRequest); approve.current = onApprovalRequest
   const curMode = modes.find(m => m.id === mode) ?? modes[0]
@@ -432,8 +787,9 @@ export function AgentComposer({ onSend, onApprovalRequest, items = [], doc, mode
 
   useOutside([barRef], () => setPop(null), !!pop)
   useAutoGrow(inp, text, 168)
-  useEffect(() => { const el = logRef.current; if (el) el.scrollTo({ top: el.scrollHeight, behavior: reduce ? 'auto' : 'smooth' }) }, [msgs, reduce])
-  useEffect(() => { alive.current = true; const u = urls.current; return () => { alive.current = false; u.forEach(x => URL.revokeObjectURL(x)); u.clear() } }, [])
+  useEffect(() => { const el = logRef.current; if (el && !live) el.scrollTo({ top: el.scrollHeight, behavior: reduce ? 'auto' : 'smooth' }) }, [msgs, reduce, live])
+  useEffect(() => { alive.current = true; return () => { alive.current = false } }, [])
+  useEffect(() => { if (live && !busy) next() }, [live, busy]) // eslint-disable-line react-hooks/exhaustive-deps -- a live reply finished: send the next queued follow-up
 
   /* selection → "Add to chat". Mouse: on mouseup. Touch: selection handles fire selectionchange, so follow that
      (debounced, and a cleared selection lingers briefly so tapping the button still works after iOS drops it). */
@@ -452,15 +808,7 @@ export function AgentComposer({ onSend, onApprovalRequest, items = [], doc, mode
   }, [])
   const takeSel = () => { if (!sel) return; addCtx(`“${sel.text}”`); getSelection()?.removeAllRanges(); setSel(null) }
 
-  const addFiles = (list: FileList | File[]) => {
-    const add = Array.from(list).slice(0, Math.max(0, Math.min(8, AC_MAX_FILES - files.length))).map(f => {
-      const url = /^image\//.test(f.type) ? URL.createObjectURL(f) : null
-      if (url) urls.current.add(url)
-      return { id: ++fid.current, file: f, url }
-    })
-    setFiles(fs => [...fs, ...add]); inp.current?.focus()
-  }
-  const dropUrl = (f: AcFile) => { if (f.url) { URL.revokeObjectURL(f.url); urls.current.delete(f.url) } }
+  const addFiles = (list: FileList | File[]) => { att.add(Array.from(list).slice(0, 8)); inp.current?.focus() }
   const addCtx = (label: string) => { setCtx(c => c.includes(label) ? c : [...c, label]); inp.current?.focus() }
   const toggleCtx = (label: string) => ctx.includes(label) ? setCtx(c => c.filter(x => x !== label)) : addCtx(label)
 
@@ -473,6 +821,10 @@ export function AgentComposer({ onSend, onApprovalRequest, items = [], doc, mode
   }
   const run1 = (d: AcDraft) => {
     setChat(true)
+    if (live) {
+      live.submit(d.text, d.files.map(f => f.file), { metadata: { context: d.ctx, mode: curMode.id, settings: S, connectors: cons.filter(c => c.on).map(c => c.name) } })
+      setSaid('Assistant is working…'); return
+    }
     const id = ++mid.current
     addMsg({ id, role: 'u', d })
     const reply = onSend?.(d.text, d.files.map(f => f.file), d.ctx, { mode: curMode, settings: S, connectors: cons.filter(c => c.on).map(c => c.name) })
@@ -505,11 +857,11 @@ export function AgentComposer({ onSend, onApprovalRequest, items = [], doc, mode
   }
 
   const takeDraft = (): AcDraft => {
-    files.forEach(dropUrl) // previews only live in the composer; the sent message lists names
-    const d = { id: ++mid.current, text: text.trim(), files: files.map(f => ({ ...f, url: null })), ctx }
-    setText(''); setFiles([]); setCtx([]); return d
+    const d = { id: ++mid.current, text: text.trim(), files: files.map(f => ({ ...f, url: null })), ctx } // previews only live in the composer; the sent message lists names
+    att.clear(); setText(''); setCtx([]); return d
   }
   const canSend = !waiting && !submitting && (!!text.trim() || files.length > 0 || ctx.length > 0)
+  const canStop = !!live && live.busy && !text.trim() && !files.length && !ctx.length // live: an empty composer stops the reply
   const submit = () => {
     if (!canSend) return
     if (busy) { if (queue.length >= AC_MAX_QUEUE) { toast({ title: 'Queue is full', description: `Up to ${AC_MAX_QUEUE} follow-ups can wait; send this one when the queue clears.` }); return } setQueue(q => [...q, takeDraft()]); return }
@@ -562,7 +914,7 @@ export function AgentComposer({ onSend, onApprovalRequest, items = [], doc, mode
         {chat && (
           <motion.div ref={logRef} role="log" aria-live="off" aria-busy={streaming} aria-label="Conversation" initial={{ opacity: 0, y: 12 }} animate={{ opacity: 1, y: 0 }} transition={{ duration: 0.4, delay: 0.15 }}
             className="flex max-h-[min(360px,55dvh)] flex-1 flex-col gap-3 overflow-auto px-0.5 py-1">
-            {msgs.map(m => m.role === 'u' ? (
+            {live ? live.messages.map(m => <AcLiveMessage key={m.id} m={m} chat={live} />) : msgs.map(m => m.role === 'u' ? (
               <motion.div key={m.id} initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }} transition={spring(0.3, 0.35)} className="flex max-w-[82%] flex-col items-end gap-1 self-end">
                 {(m.d!.ctx.length > 0 || m.d!.files.length > 0) && <div className="flex flex-wrap justify-end gap-1">{m.d!.ctx.map(c => <Badge key={c} tone="accent">{c}</Badge>)}{m.d!.files.map(f => <Badge key={f.id}>📎 {f.file.name}</Badge>)}</div>}
                 {m.d!.text && <div className="rounded-[16px_16px_4px_16px] bg-[var(--muted)] px-3 py-2 text-[13px] leading-normal break-words whitespace-pre-wrap">{m.d!.text}</div>}
@@ -573,7 +925,7 @@ export function AgentComposer({ onSend, onApprovalRequest, items = [], doc, mode
                 <div className="px-0.5 text-[13px] leading-normal">
                   {m.phase === 'wait' ? <TypingDots /> : m.phase === 'stream' ? <StreamingText text={m.text!} wordDelay={wordDelay} onDone={() => setTimeout(() => alive.current && streamDone(m), reduce ? 0 : 500)} /> : m.text}
                 </div>
-                {m.phase === 'approve' && m.action && <AcApprovalCard action={m.action} demo={m.demo} busy={m.approval === 'busy'} onDecide={ok => decide(m, ok)} />}
+                {m.phase === 'approve' && m.action && <ApprovalCard tool={m.action.tool} summary={m.action.summary} args={m.action.args} recipients={m.action.recipients} demo={m.demo} busy={m.approval === 'busy'} onDecide={ok => decide(m, ok)} />}
                 {m.approval && m.approval !== 'busy' && <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} className={cn('rounded-[var(--r-md)] border px-3 py-2 text-[13px]', m.approval === 'ok' ? 'border-[color-mix(in_srgb,var(--ok)_35%,var(--line))] bg-[var(--ok-soft)] text-[var(--ok)]' : 'border-[var(--line)] bg-[var(--muted)] text-[var(--fg2)]')}>
                   {AC_APPROVAL_TEXT[m.approval]}</motion.div>}
                 {m.note && <span className="text-xs text-[var(--fg3)]">{m.note}</span>}
@@ -612,16 +964,7 @@ export function AgentComposer({ onSend, onApprovalRequest, items = [], doc, mode
               {ctx.length > 1 && <Button size="sm" variant="ghost" onClick={() => setCtx([])} className="!h-6 !px-1 text-[var(--fg3)] hover:text-[var(--fg)] [@media(pointer:coarse)]:!h-8 [@media(pointer:coarse)]:!px-2">Clear</Button>}
             </div>}
             {files.length > 0 && <div className="mb-2 flex flex-wrap gap-1.5">
-              <AnimatePresence initial={false}>{files.map(f => (
-                <motion.div key={f.id} initial={{ opacity: 0, scale: 0.85 }} animate={{ opacity: 1, scale: 1 }} exit={{ opacity: 0, scale: 0.85, transition: { duration: 0.15 } }} transition={spring(0.4, 0.3)}
-                  className="group/f relative flex h-12 max-w-[min(220px,100%)] items-center gap-2 overflow-hidden rounded-[var(--r-lg)] border border-[var(--line)] bg-[var(--bg)] py-1 pr-3 pl-1">
-                  <span className="grid h-10 w-10 flex-none place-items-center rounded-[var(--r-md)] bg-[var(--muted)] bg-cover bg-center font-[family-name:var(--mono)] text-[11px] font-bold text-[var(--fg2)]" style={f.url ? { backgroundImage: cssUrl(f.url) } : undefined}>
-                    {f.url ? '' : (f.file.name.split('.').pop() || 'file').slice(0, 4).toUpperCase()}</span>
-                  <span className="flex min-w-0 flex-col text-xs leading-tight"><b className="truncate font-medium">{f.file.name}</b><span className="text-[var(--fg3)]">{fmt.bytes(f.file.size)}</span></span>
-                  <motion.i className="absolute bottom-0 left-0 h-0.5 bg-[var(--accent)]" initial={{ width: '0%', opacity: 1 }} animate={{ width: '100%', opacity: [1, 1, 0] }} transition={{ duration: 0.6 + (f.id % 4) * 0.2, ease: 'easeOut', opacity: { duration: 0.6 + (f.id % 4) * 0.2 + 0.3, times: [0, 0.75, 1] } }} />
-                  <button type="button" aria-label={`Remove ${f.file.name}`} onClick={() => { dropUrl(f); setFiles(x => x.filter(y => y.id !== f.id)); inp.current?.focus() }}
-                    className={cn('absolute top-1 right-1 grid h-[18px] w-[18px] cursor-pointer place-items-center rounded-full border-0 bg-[var(--fg)] text-[var(--bg)] opacity-0 transition-opacity group-hover/f:opacity-100 focus-visible:opacity-100 [@media(pointer:coarse)]:opacity-100', TOUCH.hit)}><Icon name="x" size={10} strokeWidth={3} /></button>
-                </motion.div>))}</AnimatePresence>
+              <AnimatePresence initial={false}>{files.map(f => <AttachmentChip key={f.id} name={f.file.name} size={f.file.size} url={f.url} uploading={f.id} onRemove={() => { att.remove(f.id); inp.current?.focus() }} />)}</AnimatePresence>
             </div>}
             <textarea ref={inp} rows={1} value={text} placeholder={placeholder} aria-label="Message" onChange={e => setText(e.target.value)}
               onKeyDown={e => { if (e.key === 'Enter' && !e.shiftKey && !e.nativeEvent.isComposing) { e.preventDefault(); submit() } }}
@@ -684,7 +1027,7 @@ export function AgentComposer({ onSend, onApprovalRequest, items = [], doc, mode
                 <motion.i className={cn('h-[7px] w-[7px] rounded-full', status === 'working' ? 'bg-[var(--warn)]' : status === 'queued' ? 'bg-[var(--accent)]' : 'bg-[var(--bad)]')}
                   animate={status === 'working' ? { opacity: [1, 0.35, 1], scale: [1, 0.8, 1] } : { opacity: 1, scale: 1 }} transition={status === 'working' ? { duration: 1.2, repeat: Infinity } : undefined} />
                 {status === 'working' ? 'Working' : status === 'queued' ? `${queue.length} queued` : 'Needs your input'}</span>}
-              <SendButton state={submitting ? 'sending' : busy ? 'queue' : 'send'} disabled={!canSend} onClick={submit}
+              <SendButton state={submitting ? 'sending' : canStop ? 'stop' : busy ? 'queue' : 'send'} disabled={!canSend && !canStop} onClick={canStop ? live!.stop : submit}
                 className="transition-[opacity,transform] enabled:hover:scale-105 disabled:!opacity-25 [@media(pointer:coarse)]:h-10 [@media(pointer:coarse)]:w-10" />
             </div>
           </motion.div>

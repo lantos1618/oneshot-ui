@@ -7,6 +7,11 @@ import { openCodeDrawer } from './CodeDrawer'
 
 /** Use-case tags per card title, copied from the original page. The filter and ⌘K match on them. */
 export const SPEC_TAGS: Record<string, string> = {
+  'Alert dialog': 'overlay, confirmation, destructive, async, dialog', 'Async combobox': 'user input, search, autocomplete, async, loading',
+  'Command palette · pages and async': 'navigation, search, keyboard, async, command menu', 'Data grid · 50k rows': 'data, table, virtualisation, performance, spreadsheet',
+  'Data grid · server mode': 'data, table, server, pagination, async, selection', 'Form submission': 'forms, validation, user input, server actions, FormData',
+  'Live chat (real stream)': 'AI, chat, streaming, tools, approvals, assistant', 'Markdown': 'developer, AI, rich text, streaming, content',
+  'Tree view · 10k nodes': 'layout, files, hierarchy, virtualisation, performance',
   'Variants': 'buttons, actions, call to action', 'Loading to success': 'buttons, loading, feedback, async', 'Like with burst': 'buttons, reactions, social, delight', 'Motion playground': 'animation, spring, developer, design tokens',
   'Switch': 'user input, settings, toggle', 'Checkbox and radio': 'user input, forms, selection', 'Text field with validation': 'user input, forms, validation, errors', 'One-time code': 'user input, auth, login, security, OTP',
   'Segmented control': 'user input, selection, view switcher, filters', 'Number stepper': 'user input, quantity, commerce', 'Slider': 'user input, range, settings, volume', 'Rating': 'user input, feedback, reviews',

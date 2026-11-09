@@ -1,8 +1,10 @@
-import { cloneElement, createContext, isValidElement, useCallback, useContext, useEffect, useId, useLayoutEffect, useRef, useState, type HTMLAttributes, type ReactElement, type ReactNode, type RefObject, type KeyboardEvent as RKeyboardEvent, type PointerEvent as ReactPointerEvent } from 'react'
+import { cloneElement, createContext, isValidElement, useCallback, useContext, useEffect, useId, useLayoutEffect, useMemo, useRef, useState, type CSSProperties, type HTMLAttributes, type ReactElement, type ReactNode, type RefObject, type KeyboardEvent as RKeyboardEvent, type PointerEvent as ReactPointerEvent } from 'react'
 import { createPortal } from 'react-dom'
 import { AnimatePresence, motion, useDragControls, type Variants } from 'motion/react'
-import { Button, type ButtonProps, FOCUSABLE, Icon, IconButton, type IconName, Kbd, cn, floatingSurface, isTouch, menuItemClass, prefersReducedMotion, spring, useControllable, useFocusTrap, useLongPress, useMediaQuery, useOutside, useRoving, AnimatedNumber } from './core'
+import { Button, type ButtonProps, FOCUSABLE, Icon, IconButton, type IconName, Kbd, cn, floatingSurface, isTouch, menuItemClass, prefersReducedMotion, spring, useControllable, useFocusTrap, useLongPress, useMediaQuery, useOutside, useRoving, AnimatedNumber, Spinner, TOUCH } from './core'
 import { EmptyState } from './feedback'
+import { shake } from './motion'
+import { useVirtual, virtualSetAria } from './virtual'
 
 /* ════════════════════════════════════════════════════════════════════════════
  * 5. FLOATING LAYER: one Popover powers menus, selects, date pickers, hover cards.
@@ -111,8 +113,8 @@ export function FloatingPanel({ open, placement = 'bottom-start', flip = true, m
  * focusable one, else the panel itself (unless a child already took focus, e.g. a Calendar's selected day).
  * On close it hands focus back to the trigger when focus was inside the panel (or nowhere).
  */
-export function PopoverContent({ placement, className, children, role }:
-  { placement?: Placement; className?: string; children: ReactNode; role?: string }) {
+export function PopoverContent({ placement, className, children, role, 'aria-label': ariaLabel }:
+  { placement?: Placement; className?: string; children: ReactNode; role?: string; /** names the panel (a dialog needs a name) */ 'aria-label'?: string }) {
   const { open, id, triggerRef } = usePopover()
   const wasOpen = useRef(false)
   useEffect(() => {
@@ -129,7 +131,7 @@ export function PopoverContent({ placement, className, children, role }:
     const a = document.activeElement
     if (!a || a === document.body || panel?.contains(a)) triggerRef.current?.focus({ preventScroll: true })
   }, [open]) // eslint-disable-line react-hooks/exhaustive-deps
-  return <FloatingPanel open={open} id={id} placement={placement} role={role} tabIndex={-1} className={cn('outline-none', className)}>{children}</FloatingPanel>
+  return <FloatingPanel open={open} id={id} placement={placement} role={role} aria-label={ariaLabel} tabIndex={-1} className={cn('outline-none', className)}>{children}</FloatingPanel>
 }
 
 /* Menus ───────────────────────────────────────────────────────────────────── */
@@ -558,11 +560,12 @@ function overlaySyncInert() {
 
 /**
  * Everything a modal needs except the panel itself: portal, fading backdrop, focus trap, body scroll lock,
- * Escape and outside click to close, and exit animations for whatever you render inside. While open the rest of
+ * Escape and outside click to close (`onOutsideClick` overrides the click), and exit animations for whatever you render inside. While open the rest of
  * the page is `inert`, and Escape and Tab are handled at document level, so they work even when focus is outside the
  * panel. Nested modals stack: only the top one closes on Escape, and closing it hands the page back to the one below.
  */
-export function ModalLayer({ open, onClose, children }: { open: boolean; onClose: () => void; children: ReactNode }) {
+export function ModalLayer({ open, onClose, onOutsideClick, children }: { open: boolean; onClose: () => void
+  /** a click on the backdrop calls this instead of closing (AlertDialog: shake, don't dismiss) */ onOutsideClick?: () => void; children: ReactNode }) {
   const ref = useRef<HTMLDivElement>(null)
   const close = useRef(onClose); close.current = onClose
   useFocusTrap(ref, open)
@@ -594,7 +597,7 @@ export function ModalLayer({ open, onClose, children }: { open: boolean; onClose
         {open && (
           <div ref={ref} className="contents" onKeyDown={e => { if (e.key === 'Escape' && !e.defaultPrevented) { e.stopPropagation(); onClose() } }}>
             <motion.div className="fixed inset-0 z-[70] bg-black/40" initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}
-              transition={{ duration: 0.2 }} onClick={onClose} aria-hidden />
+              transition={{ duration: 0.2 }} onClick={onOutsideClick ?? onClose} aria-hidden />
             {children}
           </div>
         )}
@@ -666,16 +669,83 @@ export function Sheet({ open, onOpenChange, title, side = 'right', responsive = 
   )
 }
 
-/* Command palette ──────────────────────────────────────────────────────────── */
+/* Alert dialog ─────────────────────────────────────────────────────────────── */
 
 /**
- * A palette entry. `keywords` are extra search terms (content tags, synonyms); `hint` is a short
- * secondary label shown after the name (and searched too).
+ * Confirmation for a consequential action (role="alertdialog"). It needs a `title` and a `description`, never closes
+ * on an outside click (the panel shakes instead), and opens with focus on the least destructive action, Cancel.
+ * Escape or Cancel close it. `onConfirm` may return a promise: Confirm then shows a spinner and both buttons wait;
+ * it closes when the promise resolves, and stays open with the error's message (announced) when it rejects.
  */
-export type Command = { id: string; label: string; group?: string; icon?: IconName; shortcut?: string; keywords?: string[] | string; hint?: string; run: () => void }
+export function AlertDialog({ open, onOpenChange, title, description, confirmLabel = 'Continue', cancelLabel = 'Cancel', tone = 'danger', onConfirm, onCancel, children, className }:
+  ModalProps & { title: ReactNode; description: ReactNode; confirmLabel?: ReactNode; cancelLabel?: ReactNode
+    /** danger: red confirm button (deleting, revoking); default: primary */ tone?: 'danger' | 'default'
+    onConfirm: () => void | Promise<unknown>; onCancel?: () => void; children?: ReactNode; className?: string }) {
+  const id = useId()
+  const [pending, setPending] = useState(false)
+  const [err, setErr] = useState<string | null>(null)
+  const panel = useRef<HTMLDivElement>(null)
+  const alive = useRef(true)
+  useEffect(() => { alive.current = true; return () => { alive.current = false } }, [])
+  useEffect(() => { if (open) { setErr(null); setPending(false) } }, [open])
+  const cancel = () => { if (pending) return; onCancel?.(); onOpenChange(false) }
+  const confirm = async () => {
+    if (pending) return
+    setErr(null)
+    try {
+      const r = onConfirm()
+      if (r && typeof (r as Promise<unknown>).then === 'function') { setPending(true); panel.current?.focus({ preventScroll: true }); await r } // the buttons disable while it waits: keep focus in the dialog
+      if (!alive.current) return
+      setPending(false); onOpenChange(false)
+    } catch (e) {
+      if (!alive.current) return
+      setPending(false); setErr((e instanceof Error ? e.message : String(e ?? '')) || 'Something went wrong. Try again.')
+    }
+  }
+  return (
+    <ModalLayer open={open} onClose={cancel} onOutsideClick={() => shake(panel.current)}>
+      <div className="pointer-events-none fixed inset-0 z-[71] grid place-items-center px-[max(16px,env(safe-area-inset-left),env(safe-area-inset-right))] pt-[max(16px,env(safe-area-inset-top))] pb-[max(16px,env(safe-area-inset-bottom))]">
+        <motion.div ref={panel} tabIndex={-1} role="alertdialog" aria-modal="true" aria-labelledby={`${id}-t`} aria-describedby={`${id}-d`} aria-busy={pending || undefined}
+          initial={{ opacity: 0, scale: 0.94, y: 8 }} animate={{ opacity: 1, scale: 1, y: 0 }} exit={{ opacity: 0, scale: 0.96, transition: { duration: 0.15 } }}
+          transition={spring(0.3, 0.4)} className={cn('pointer-events-auto max-h-full w-full max-w-[420px] overflow-auto overscroll-contain rounded-[var(--r-lg)] border border-[var(--line)] bg-[var(--card)] p-5 shadow-[var(--shadow)] outline-none', className)}>
+          <h2 id={`${id}-t`} className="m-0 mb-1.5 text-base font-semibold">{title}</h2>
+          <div id={`${id}-d`} className="m-0 text-[13px] text-[var(--fg2)]">{description}</div>
+          {children && <div className="mt-4">{children}</div>}
+          <AnimatePresence initial={false}>
+            {err && (
+              <motion.p key="err" role="alert" initial={{ opacity: 0, height: 0 }} animate={{ opacity: 1, height: 'auto' }} exit={{ opacity: 0, height: 0 }} transition={{ duration: 0.18 }}
+                className="m-0 mt-3 flex items-start gap-1.5 overflow-hidden text-[13px] text-[var(--bad)]"><Icon name="alert" size={14} className="mt-0.5 flex-none" />{err}</motion.p>
+            )}
+          </AnimatePresence>
+          <div className="mt-4 flex flex-wrap justify-end gap-2">
+            <Button data-autofocus onClick={cancel} disabled={pending}>{cancelLabel}</Button>
+            <Button variant={tone === 'danger' ? 'danger' : 'primary'} loading={pending} onClick={confirm}>{confirmLabel}</Button>
+          </div>
+        </motion.div>
+      </div>
+    </ModalLayer>
+  )
+}
+
+/* Command palette ──────────────────────────────────────────────────────────── */
+
+/** Loads palette entries for a query. Abort when `signal` fires (the query changed or the palette closed). */
+export type CommandLoader = (query: string, options: { signal: AbortSignal }) => Promise<Command[]>
+/**
+ * A palette entry. `keywords` are extra search terms (content tags, synonyms); `hint` is a short secondary label shown
+ * after the name (and searched too). An entry with `children` (or `loadChildren`) opens a nested page instead of running:
+ * Enter pushes it, Backspace in the empty search box goes back.
+ */
+export type Command = {
+  id: string; label: string; group?: string; icon?: IconName; shortcut?: string; keywords?: string[] | string; hint?: string
+  run?: () => void
+  /** a nested page of entries */ children?: Command[]
+  /** a nested page whose entries come from your API, per query (debounced, aborted when superseded) */ loadChildren?: CommandLoader
+  /** search placeholder on its nested page */ placeholder?: string
+}
 
 const cmdkWords = (k: Command['keywords']) => (Array.isArray(k) ? k : k ? k.split(/\s*[|,]\s*/) : []).filter(Boolean)
-type CmdkHit = { c: Command; labelHit: boolean; tags: string[] }
+type CmdkHit = { c: Command; labelHit: boolean; tags: string[]; recent?: boolean }
 /** Every query word must appear in the label, a keyword or the hint (AND). Label matches rank first. */
 function cmdkFilter(commands: Command[], q: string): CmdkHit[] {
   const query = q.toLowerCase().trim(), words = query.split(/\s+/).filter(Boolean)
@@ -701,65 +771,188 @@ function cmdkMark(text: string, words: string[]) {
   const re = new RegExp(`(${words.map(w => w.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')).join('|')})`, 'ig')
   return text.split(re).map((part, i) => i % 2 ? <b key={i} className="font-semibold text-[var(--fg)]">{part}</b> : part)
 }
+const cmdkGroup = (h: CmdkHit | undefined) => h ? (h.recent ? 'Recent' : h.c.group ?? '') : undefined
+const cmdkFlatten = (cs: Command[]): Command[] => cs.flatMap(c => [c, ...cmdkFlatten(c.children ?? [])])
+/** Result lists longer than this are virtualised. */
+const CMDK_VIRTUAL_AT = 60
 
 /**
- * ⌘K palette: type to filter (every word must match the label, keywords or hint), arrows to move,
- * Enter to run. Shows which keyword matched, marks the active row with ↵, and suggests a query when
- * nothing matches.
+ * ⌘K palette: type to filter (every word must match the label, keywords or hint), arrows to move, Enter to run.
+ * Groups keep together under their headings. Shows which keyword matched, marks the active row with ↵, and suggests
+ * a query when nothing matches. `loadItems(query, { signal })` adds results from your API (debounced by `debounce` ms,
+ * the previous request aborted, a spinner while loading, errors shown). Entries with `children` / `loadChildren` open
+ * nested pages (Enter in, Backspace on an empty search out, or click the breadcrumb). `recents` keeps the last N
+ * entries run as a Recent group (persisted under `recentKey`). Long result lists are virtualised.
  */
-export function CommandPalette({ open, onOpenChange, commands, placeholder = 'Type a command or search…', suggestion, className }:
-  ModalProps & { commands: Command[]; placeholder?: string; suggestion?: string; className?: string }) {
+export function CommandPalette({ open, onOpenChange, commands, placeholder = 'Type a command or search…', suggestion, loadItems, debounce = 150, recents = 0, recentKey, className }:
+  ModalProps & { commands: Command[]; placeholder?: string; suggestion?: string; loadItems?: CommandLoader; /** ms */ debounce?: number
+    /** how many recently run entries to offer when the search is empty (0: none) */ recents?: number; /** localStorage key for recents */ recentKey?: string; className?: string }) {
   const [q, setQ] = useState('')
+  const [stack, setStack] = useState<{ c: Command; q: string }[]>([])
   const uid = useId()
-  useEffect(() => { if (open) setQ('') }, [open])
-  const list = cmdkFilter(commands, q)
+  useEffect(() => { if (open) { setQ(''); setStack([]) } }, [open])
+  const top = stack[stack.length - 1]?.c
+  const pageKey = stack.map(s => s.c.id).join('/')
+  const pageCommands = top ? top.children ?? [] : commands
+  const loader = top ? top.loadChildren : loadItems
+  const loaderRef = useRef(loader); loaderRef.current = loader
+
+  /* async results: debounced, the previous request aborted */
+  const [found, setFound] = useState<{ page: string; q: string; items: Command[]; loading: boolean; error: string }>({ page: '', q: '', items: [], loading: false, error: '' })
+  useEffect(() => {
+    if (!open || !loaderRef.current) return
+    const ctl = new AbortController(), page = pageKey
+    setFound(f => ({ ...f, loading: true, error: '' }))
+    const t = setTimeout(() => {
+      loaderRef.current?.(q, { signal: ctl.signal }).then(
+        items => { if (!ctl.signal.aborted) setFound({ page, q, items, loading: false, error: '' }) },
+        (e: unknown) => { if (!ctl.signal.aborted) setFound({ page, q, items: [], loading: false, error: (e instanceof Error && e.message) || 'Couldn’t load results' }) })
+    }, debounce)
+    return () => { clearTimeout(t); ctl.abort() }
+  }, [open, q, pageKey, debounce, !!loader]) // eslint-disable-line react-hooks/exhaustive-deps
+  const asyncOn = !!loader
+  const loading = asyncOn && found.loading
+  const asyncItems = asyncOn && found.page === pageKey && found.q === q ? found.items : [] // never show results for another query
+
+  /* recents */
+  const [recent, setRecent] = useState<Command[]>([])
+  useEffect(() => {
+    if (!recents || !recentKey) return
+    try {
+      const ids: unknown = JSON.parse(localStorage.getItem(recentKey) ?? '[]'), all = cmdkFlatten(commands)
+      if (Array.isArray(ids)) setRecent(ids.map(id => all.find(c => c.id === id)).filter((c): c is Command => !!c).slice(0, recents))
+    } catch { /* storage blocked or junk: no recents */ }
+  }, [recentKey, recents]) // eslint-disable-line react-hooks/exhaustive-deps
+  const remember = (c: Command) => {
+    if (!recents) return
+    const next = [c, ...recent.filter(x => x.id !== c.id)].slice(0, recents)
+    setRecent(next)
+    if (recentKey) try { localStorage.setItem(recentKey, JSON.stringify(next.map(x => x.id))) } catch { /* ignore */ }
+  }
+
+  const list = useMemo((): CmdkHit[] => {
+    const showRecent = !stack.length && !q.trim() && recents > 0
+    const r: CmdkHit[] = showRecent ? recent.map(c => ({ c, labelHit: false, tags: [], recent: true })) : []
+    return [...r, ...cmdkFilter(pageCommands, q), ...asyncItems.map((c): CmdkHit => ({ c, labelHit: false, tags: [] }))]
+  }, [pageCommands, q, asyncItems, recent, stack.length, recents])
   const words = q.toLowerCase().trim().split(/\s+/).filter(Boolean)
-  const run = (i: number) => { const c = list[i]?.c; if (!c) return; onOpenChange(false); setTimeout(() => c.run(), 160) }
-  const { active, setActive, onKeyDown } = useRoving(list.length, run, { homeEnd: false })
-  useEffect(() => setActive(0), [q, setActive])
+  const choose = (i: number) => {
+    const h = list[i]; if (!h) return
+    const c = h.c
+    if (c.children || c.loadChildren) { setStack(s => [...s, { c, q }]); setQ(''); return }
+    remember(c)
+    onOpenChange(false); setTimeout(() => c.run?.(), 160)
+  }
+  const back = (to = stack.length - 1) => { if (to < 0 || to >= stack.length) return; setQ(stack[to].q); setStack(s => s.slice(0, to)) }
+  const { active, setActive, onKeyDown } = useRoving(list.length, choose, { homeEnd: false })
+  useEffect(() => setActive(0), [q, pageKey, setActive])
+  const inputRef = useRef<HTMLInputElement>(null)
+  useEffect(() => { if (open && stack.length) inputRef.current?.focus() }, [pageKey]) // eslint-disable-line react-hooks/exhaustive-deps
+
+  /* rows: group headings interleaved with entries; virtualised when long */
+  const rows = useMemo(() => {
+    const out: ({ label: string; hit?: undefined } | { hit: number; label?: undefined })[] = [], at: number[] = []
+    list.forEach((h, i) => { const g = cmdkGroup(h); if (g && g !== cmdkGroup(list[i - 1])) out.push({ label: g }); at.push(out.length); out.push({ hit: i }) })
+    return { out, at }
+  }, [list])
+  const coarse = useMediaQuery('(pointer: coarse)')
+  const virtualOn = list.length > CMDK_VIRTUAL_AT
   const listRef = useRef<HTMLDivElement>(null)
-  useEffect(() => { listRef.current?.querySelector(`[data-i="${active}"]`)?.scrollIntoView({ block: 'nearest' }) }, [active])
+  const est = useCallback((i: number) => rows.out[i]?.label !== undefined ? 29 : coarse ? 40 : 36, [rows, coarse])
+  const keepActive = useMemo(() => rows.at[active] != null ? [rows.at[active]] : undefined, [rows, active])
+  const v = useVirtual({ count: rows.out.length, estimateSize: est, scrollRef: listRef, enabled: virtualOn, keep: keepActive, paddingStart: 6, paddingEnd: 6, initialRect: { width: 540, height: 340 } })
+  useEffect(() => {
+    if (virtualOn) { if (rows.at[active] != null) v.scrollToIndex(rows.at[active], { align: 'auto' }) }
+    else listRef.current?.querySelector(`[data-i="${active}"]`)?.scrollIntoView({ block: 'nearest' })
+  }, [active, virtualOn]) // eslint-disable-line react-hooks/exhaustive-deps
   const suggest = suggestion ?? (cmdkWords(commands.find(c => cmdkWords(c.keywords).length)?.keywords)[0] ?? commands[0]?.label.split(' ')[0] ?? '').toLowerCase()
+  const optionId = (i: number) => `${uid}-o${i}`
+
+  const option = (i: number, style?: CSSProperties) => {
+    const { c, tags } = list[i], nested = !!(c.children || c.loadChildren)
+    return (
+      <button id={optionId(i)} data-i={i} role="option" aria-selected={i === active} aria-haspopup={nested ? 'listbox' : undefined} tabIndex={-1}
+        {...(virtualOn ? virtualSetAria(i, list.length) : null)} style={style}
+        onPointerMove={() => i !== active && setActive(i)} onClick={() => choose(i)}
+        className={cn(menuItemClass, 'relative', words.length ? 'text-[var(--fg2)]' : '', virtualOn && i === active && 'bg-[var(--muted)]')}>
+        {!virtualOn && i === active && <motion.span layoutId={`${uid}-active`} className="absolute inset-0 rounded-[var(--r-md)] bg-[var(--muted)]" transition={spring(0.15, 0.25)} />}
+        <span className="relative flex min-w-0 items-center gap-2">
+          {c.icon && <Icon name={c.icon} size={15} className="text-[var(--fg3)]" />}
+          <span className="truncate">{cmdkMark(c.label, words)}</span>
+          {/* zero basis: the hint only takes what the label leaves, so the label is never the one cut short */}
+          {tags.length > 0 && <span className="min-w-0 flex-1 basis-0 truncate text-xs text-[var(--fg3)]">· {tags.join(' · ')}</span>}
+          {c.hint && !tags.length && <span className="min-w-0 flex-1 basis-0 truncate text-xs text-[var(--fg3)]">{c.hint}</span>}
+        </span>
+        <span className="relative flex flex-none items-center gap-1">
+          {c.shortcut && <Kbd className="[@media(hover:none)]:hidden">{c.shortcut}</Kbd>}
+          {nested ? <Icon name="chevronRight" size={14} className="text-[var(--fg3)]" />
+            : i === active && <Kbd aria-hidden className="[@media(hover:none)]:hidden">↵</Kbd>}
+        </span>
+      </button>
+    )
+  }
+  const empty = list.length === 0 && (
+    <div className="p-6 text-center text-[13px] text-[var(--fg3)]">
+      {loading ? 'Searching…' : found.error && found.page === pageKey ? null : <>Nothing matches “{q}”.{!stack.length && suggest && <> Try <button className="cursor-pointer border-0 bg-transparent p-0 font-medium text-[var(--accent)] underline-offset-2 hover:underline" onClick={() => setQ(suggest)}>“{suggest}”</button>.</>}</>}
+    </div>
+  )
   return (
     <ModalLayer open={open} onClose={() => onOpenChange(false)}>
       <motion.div role="dialog" aria-modal="true" aria-label="Command palette"
         initial={{ opacity: 0, scale: 0.96, y: -8 }} animate={{ opacity: 1, scale: 1, y: 0 }} exit={{ opacity: 0, scale: 0.98, transition: { duration: 0.12 } }}
         transition={spring(0.25, 0.35)} className={cn(floatingSurface, 'fixed top-[14vh] left-1/2 z-[72] w-[min(540px,calc(100%-32px))] -translate-x-1/2 overflow-hidden max-[640px]:top-[max(12px,env(safe-area-inset-top))] [@media(max-height:500px)]:top-[max(8px,env(safe-area-inset-top))]', className)}>
         <div className="flex items-center gap-2 border-b border-[var(--line)] px-4">
-          <Icon name="search" className="text-[var(--fg3)]" />
-          <input data-autofocus value={q} onChange={e => setQ(e.target.value)} onKeyDown={onKeyDown} placeholder={placeholder}
-            role="combobox" aria-expanded="true" aria-controls={`${uid}-list`} aria-activedescendant={list[active] ? `${uid}-${list[active].c.id}` : undefined}
-            className="w-full border-0 bg-transparent py-3 text-base outline-none" />
-        </div>
-        <div ref={listRef} id={`${uid}-list`} role="listbox" className="max-h-[min(340px,50vh)] overflow-auto overscroll-contain p-1.5 max-[640px]:max-h-[min(420px,60dvh)]">
-          {list.length === 0 && (
-            <div className="p-6 text-center text-[13px] text-[var(--fg3)]">
-              Nothing matches “{q}”.{suggest && <> Try <button className="cursor-pointer border-0 bg-transparent p-0 font-medium text-[var(--accent)] underline-offset-2 hover:underline" onClick={() => setQ(suggest)}>“{suggest}”</button>.</>}
-            </div>
+          <Icon name="search" className="flex-none text-[var(--fg3)]" />
+          {stack.length > 0 && (
+            <nav aria-label="Palette pages" className="flex min-w-0 flex-none items-center gap-1 text-xs text-[var(--fg3)]">
+              {stack.map((s, i) => (
+                <span key={s.c.id} className="flex items-center gap-1">
+                  <button onClick={() => back(i)} title={`Back to ${i ? stack[i - 1].c.label : 'all commands'}`}
+                    className={cn('max-w-[120px] cursor-pointer truncate rounded-[var(--r-sm)] border-0 bg-[var(--muted)] px-1.5 py-0.5 text-xs text-[var(--fg2)] hover:text-[var(--fg)]', TOUCH.target)}>{s.c.label}</button>
+                  <span aria-hidden>/</span>
+                </span>
+              ))}
+            </nav>
           )}
-          {list.map(({ c, tags }, i) => (
-            <div key={c.id}>
-              {c.group && c.group !== list[i - 1]?.c.group && <MenuLabel>{c.group}</MenuLabel>}
-              <button id={`${uid}-${c.id}`} data-i={i} role="option" aria-selected={i === active} tabIndex={-1} onPointerMove={() => setActive(i)} onClick={() => run(i)}
-                className={cn(menuItemClass, 'relative', words.length ? 'text-[var(--fg2)]' : '')}>
-                {i === active && <motion.span layoutId={`${uid}-active`} className="absolute inset-0 rounded-[var(--r-md)] bg-[var(--muted)]" transition={spring(0.15, 0.25)} />}
-                <span className="relative flex min-w-0 items-center gap-2">
-                  {c.icon && <Icon name={c.icon} size={15} className="text-[var(--fg3)]" />}
-                  <span className="truncate">{cmdkMark(c.label, words)}</span>
-                  {/* zero basis: the hint only takes what the label leaves, so the label is never the one cut short */}
-                  {tags.length > 0 && <span className="min-w-0 flex-1 basis-0 truncate text-xs text-[var(--fg3)]">· {tags.join(' · ')}</span>}
-                  {c.hint && !tags.length && <span className="min-w-0 flex-1 basis-0 truncate text-xs text-[var(--fg3)]">{c.hint}</span>}
-                </span>
-                <span className="relative flex flex-none items-center gap-1 [@media(hover:none)]:hidden">
-                  {c.shortcut && <Kbd>{c.shortcut}</Kbd>}
-                  {i === active && <Kbd aria-hidden>↵</Kbd>}
-                </span>
-              </button>
-            </div>
-          ))}
+          <input ref={inputRef} data-autofocus value={q} onChange={e => setQ(e.target.value)} placeholder={top?.placeholder ?? (top ? `Search ${top.label.replace(/(…|\.{3})$/, '').toLowerCase()}…` : placeholder)}
+            onKeyDown={e => { if (e.key === 'Backspace' && !q && stack.length) { e.preventDefault(); back(); return } onKeyDown(e) }}
+            role="combobox" aria-expanded="true" aria-controls={`${uid}-list`} aria-autocomplete="list" aria-busy={loading || undefined}
+            aria-activedescendant={list[active] ? optionId(active) : undefined} aria-label={top ? `Search ${top.label.replace(/(…|\.{3})$/, '')}` : 'Search commands'}
+            className="w-full min-w-0 border-0 bg-transparent py-3 text-base outline-none" />
+          {loading && <Spinner size={14} label="Loading results" className="text-[var(--fg3)]" />}
         </div>
+        {asyncOn && found.error && found.page === pageKey && (
+          <div role="alert" className="flex items-center gap-1.5 border-b border-[var(--line)] px-4 py-2 text-xs text-[var(--bad)]"><Icon name="alert" size={13} />{found.error}</div>
+        )}
+        {virtualOn ? (
+          <div ref={listRef} id={`${uid}-list`} role="listbox" aria-label="Results" className="relative h-[min(340px,50vh)] overflow-auto overscroll-contain px-1.5 max-[640px]:h-[min(420px,60dvh)]">
+            <div style={{ height: v.totalSize, position: 'relative' }}>
+              {v.items.map(it => {
+                const row = rows.out[it.index]
+                return (
+                  <div key={row.label !== undefined ? `l:${row.label}:${it.index}` : `o:${row.hit}`} data-index={it.index} ref={v.measureElement}
+                    style={{ position: 'absolute', top: 0, left: 0, width: '100%', transform: `translateY(${it.start}px)` }}>
+                    {row.label !== undefined ? <MenuLabel>{row.label}</MenuLabel> : option(row.hit)}
+                  </div>
+                )
+              })}
+            </div>
+          </div>
+        ) : (
+          <div ref={listRef} id={`${uid}-list`} role="listbox" aria-label="Results" className="max-h-[min(340px,50vh)] overflow-auto overscroll-contain p-1.5 max-[640px]:max-h-[min(420px,60dvh)]">
+            {empty}
+            {list.map((h, i) => (
+              <div key={`${h.recent ? 'r' : 'c'}:${h.c.id}:${i}`}>
+                {cmdkGroup(h) && cmdkGroup(h) !== cmdkGroup(list[i - 1]) && <MenuLabel>{cmdkGroup(h)}</MenuLabel>}
+                {option(i)}
+              </div>
+            ))}
+          </div>
+        )}
         <div className="flex gap-3 border-t border-[var(--line)] px-3 py-2 text-[11px] text-[var(--fg3)] [@media(hover:none)]:hidden">
-          <span><Kbd>↑</Kbd> <Kbd>↓</Kbd> move</span><span><Kbd>↵</Kbd> run</span><span><Kbd>esc</Kbd> close</span>
+          <span><Kbd>↑</Kbd> <Kbd>↓</Kbd> move</span><span><Kbd>↵</Kbd> {list[active]?.c.children || list[active]?.c.loadChildren ? 'open' : 'run'}</span>
+          {stack.length > 0 && <span><Kbd>⌫</Kbd> back</span>}<span><Kbd>esc</Kbd> close</span>
+          <span className="ml-auto ui-num" aria-live="polite">{loading ? '' : `${list.length} ${list.length === 1 ? 'result' : 'results'}`}</span>
         </div>
       </motion.div>
     </ModalLayer>

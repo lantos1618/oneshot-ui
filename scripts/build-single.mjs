@@ -21,10 +21,10 @@ import { execFileSync } from 'node:child_process'
 
 const root = new URL('..', import.meta.url).pathname
 const BUNDLES = {
-  ui: ['core', 'motion', 'overlay', 'forms', 'navigation', 'feedback', 'data', 'layout', 'appearance', 'provider'],
+  ui: ['core', 'motion', 'virtual', 'overlay', 'forms', 'navigation', 'feedback', 'data', 'layout', 'appearance', 'provider'],
   'ui-charts': ['charts', 'diagrams', 'geo'],
-  'ui-content': ['playground', 'editor', 'datagrid', 'scheduler', 'code', 'media', 'collab', 'pages'],
-  'ui-ai': ['ai', 'aichat', 'aiagent'],
+  'ui-content': ['playground', 'editor', 'datagrid', 'scheduler', 'code', 'markdown', 'media', 'collab', 'pages'],
+  'ui-ai': ['aistream', 'ai', 'aichat', 'aiagent'],
 }
 const LIB = Object.values(BUNDLES).flat()
 const bundleOf = Object.fromEntries(Object.entries(BUNDLES).flatMap(([b, ms]) => ms.map(m => [m, b])))

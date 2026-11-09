@@ -240,6 +240,115 @@ Notes:
 - A few demo-style components use random layouts or the current time; render those only on the client (for
   example `dynamic(() => …, { ssr: false })`) if you see hydration warnings.
 
+## AI chat with real model streams
+
+`useAiChat` (from `@lyndon/ui` or `@lyndon/ui/aistream`) turns a model stream into messages made of parts: text,
+reasoning, tool calls, sources, files, custom data and errors. Its `send(messages, { signal })` returns the reply as
+any of:
+
+- an async iterable of chunks (or of plain strings, each a text delta),
+- a `ReadableStream` of chunks, or of bytes in SSE (`data: {…}`) or NDJSON (one JSON chunk per line),
+- a `Response` from the AI SDK's `result.toUIMessageStreamResponse()` (read without the `ai` package; see
+  `fromAiSdkUIMessageStream`).
+
+Stop aborts `signal` and keeps what arrived. A thrown error or an `error` chunk becomes an error part with Retry
+(`regenerate`). State updates are batched to one render per animation frame.
+
+| Chunk | Fields | AI SDK UI message stream event |
+| --- | --- | --- |
+| `start` | `messageId?` | `start` |
+| `text-delta` / `text-end` | `delta`, `id?` | `text-delta` / `text-end` |
+| `reasoning-delta` / `reasoning-end` | `delta`, `id?` | `reasoning-delta` / `reasoning-end` |
+| `tool-start` | `id`, `name`, `args?`, `needsApproval?` | `tool-input-start` |
+| `tool-args-delta` | `id`, `delta` (raw JSON text) | `tool-input-delta` |
+| `tool-args` | `id`, `args`, `name?` | `tool-input-available` |
+| `tool-approval` | `id`, `summary?` | `tool-approval-request` |
+| `tool-result` / `tool-error` | `id`, `result` / `error` | `tool-output-available` / `tool-output-error` |
+| `source` | `url`, `title?`, `snippet?` | `source-url` |
+| `file` | `url`, `mediaType`, `name?` | `file` |
+| `data` | `name`, `data`, `id?` | `data-<name>` |
+| `finish` | | `finish`, `abort` |
+| `error` | `message` | `error` (`errorText`) |
+
+`applyAiChunk(messages, chunk)` is the pure reducer behind the hook, and `parseAiStream(stream)` the SSE/NDJSON
+parser; both are exported for servers, tests and other state libraries.
+
+The parts render with components you can use on their own (AI Elements style): `Conversation` (a log that stays
+pinned to the newest message unless the reader scrolled up, then shows "Jump to latest"; past 60 messages it
+renders only those in view, with `useVirtual`), `Message`,
+`MessageParts`, `Reasoning`, `ToolCard`, `ApprovalCard`, `MessageActions`, `Suggestions` and `PromptInput`
+(autogrowing textarea, attachments by paste, drop or pick, model picker, Send/Stop). `AssistantChat` and
+`AgentComposer` also take `chat={useAiChat(…)}`. Their 0.2 scripted props (`respond`, `onSend`) still work.
+
+A Next.js route handler that streams from the Anthropic API as NDJSON chunks (the key stays in the server
+environment, `ANTHROPIC_API_KEY`; validate the request body in real code):
+
+```ts
+// app/api/chat/route.ts
+import Anthropic from '@anthropic-ai/sdk'
+
+const client = new Anthropic()
+
+export async function POST(req: Request) {
+  const { messages } = await req.json() // [{ role: 'user' | 'assistant', content: string }]
+  const stream = client.messages.stream({
+    model: process.env.ANTHROPIC_MODEL!, // a current Claude model ID
+    max_tokens: 64000,
+    thinking: { type: 'adaptive', display: 'summarized' }, // streams readable reasoning
+    messages,
+  }, { signal: req.signal })
+  const enc = new TextEncoder()
+  const body = new ReadableStream<Uint8Array>({
+    async start(ctl) {
+      const send = (chunk: object) => ctl.enqueue(enc.encode(JSON.stringify(chunk) + '\n'))
+      try {
+        for await (const e of stream) {
+          if (e.type !== 'content_block_delta') continue
+          if (e.delta.type === 'text_delta') send({ type: 'text-delta', delta: e.delta.text })
+          else if (e.delta.type === 'thinking_delta') send({ type: 'reasoning-delta', delta: e.delta.thinking })
+        }
+        const final = await stream.finalMessage()
+        send(final.stop_reason === 'refusal' ? { type: 'error', message: 'The model declined this request.' } : { type: 'finish' })
+      } catch {
+        send({ type: 'error', message: 'The model request failed.' }) // don't forward provider error details
+      }
+      ctl.close()
+    },
+    cancel() { stream.abort() }, // Stop in the browser closes the request
+  })
+  return new Response(body, { headers: { 'content-type': 'application/x-ndjson', 'cache-control': 'no-store' } })
+}
+```
+
+```tsx
+// app/chat.tsx
+'use client'
+import { AssistantChat, aiMessageText, useAiChat } from '@lyndon/ui'
+
+export function Chat() {
+  const chat = useAiChat({
+    send: async (messages, { signal }) => {
+      const res = await fetch('/api/chat', {
+        method: 'POST', signal, headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ messages: messages.filter(m => m.role !== 'system').map(m => ({ role: m.role, content: aiMessageText(m) })).filter(m => m.content) }),
+      })
+      if (!res.ok || !res.body) throw new Error(`Chat failed (${res.status})`)
+      return res.body // NDJSON bytes: useAiChat parses them
+    },
+  })
+  return <AssistantChat chat={chat} starters={['Summarise this week']} />
+}
+```
+
+With the AI SDK on the server instead, return `result.toUIMessageStreamResponse()` from the route and
+`return fetch(…).then(fromAiSdkUIMessageStream)` from `send`.
+
+Tool calls that need approval arrive as `tool-start` with `needsApproval` (or a `tool-approval` chunk). The tool card
+shows an approval prompt and nothing runs until the person decides: `useAiChat({ onApprovalRequest: async (tool,
+approved) => approved ? runTool(tool.name, tool.args) : undefined })` runs it in the browser and its return value
+becomes the result; without that handler the decision is recorded on the part (`approval.approved`) for your
+server. Either way `send` is then called again (`continueAfterApproval`) so the model can carry on.
+
 ## Subpath imports
 
 `@lyndon/ui` is the all-in-one entry. Each area is also its own entry point (one ES module per area, with
@@ -253,7 +362,7 @@ import { cn, mix } from '@lyndon/ui/utils'
 ```
 
 Entries: `core`, `motion`, `overlay`, `forms`, `navigation`, `feedback`, `data`, `datagrid`, `layout`,
-`editor`, `scheduler`, `code`, `media`, `collab`, `pages`, `charts`, `diagrams`, `geo`, `ai`, `aichat`,
+`editor`, `scheduler`, `code`, `media`, `collab`, `pages`, `charts`, `diagrams`, `geo`, `aistream`, `ai`, `aichat`,
 `aiagent`, `playground`, `appearance`, `provider`, `utils`, plus `styles.css`, `preflight.css` and `tokens.css`
 (the token CSS UIProvider injects, for `injectStyles={false}`).
 Tree-shaking works with either style: a bundler only keeps the components you import.
@@ -268,7 +377,7 @@ importable through `exports`; copy them). They need only `react`, `react-dom`, `
 | `ui.tsx` | Theme and provider, primitives, inputs and forms, overlays, navigation, feedback, data display, layout | |
 | `ui-content.tsx` | Editor, data grid, scheduler, code, media, collaboration, pages | `ui.tsx` |
 | `ui-charts.tsx` | Chart kit, diagrams, maps | `ui.tsx` |
-| `ui-ai.tsx` | AI chat, composer, agents | `ui.tsx` |
+| `ui-ai.tsx` | AI message model and streams (`useAiChat`), chat parts, composer, agents | `ui.tsx`, `ui-content.tsx` |
 | `ui-all.tsx` | Everything in one file | |
 
 Copy `ui.tsx` (plus any add-ons, side by side in the same folder) into your project, or attach it to a chat
@@ -284,6 +393,127 @@ Wrap the app in <UIProvider>. Use only the components and hooks it exports (Butt
 Dialog, Tabs, DataTable, useToast, …) and its colour tokens (bg-[var(--card)], text-[var(--fg2)],
 border-[var(--line)], var(--accent)) instead of raw colours, so light/dark and every theme keep working.
 Override a component's own classes with Tailwind's ! prefix (className="!h-8").
+```
+
+## Forms
+
+Every value-holding control (Select, Combobox, MultiSelect, DatePicker, DateRangePicker, TimePicker, TagInput, Slider,
+RangeSlider, OTPInput, PhoneInput, CurrencyInput, Rating, ColorPicker, NumberStepper, SegmentedControl, RadioGroup,
+Switch, Checkbox, FileUpload) behaves like a native field: `name`, `required`, `disabled`, `readOnly`, `invalid`
+(aria-invalid plus the error look), `onBlur`, `form`, and a `ref` that reaches the focusable element (so
+`ref.current.focus()` works for focus-on-error). With `name`, hidden inputs carry the value, so `new FormData(form)`,
+plain `<form action>` posts and server actions see it. A form `reset` returns uncontrolled controls to `defaultValue`.
+User edits fire bubbling `input` and `change` events on the form, like native fields.
+
+| Control | Submitted as |
+|---|---|
+| Select, Combobox, SegmentedControl, RadioGroup | the option `value`; `''` when nothing is chosen (Combobox sends the value, not the typed text) |
+| TimePicker | `"09:30"` (24-hour, like `<input type="time">`) |
+| MultiSelect, TagInput | one field per item: `labels=bug&labels=docs` (never comma-joined; read with `formData.getAll`); nothing when empty |
+| DatePicker | local date `"2026-11-08"` (like `<input type="date">`); `''` when empty |
+| DateRangePicker | two fields, start then end: `period=2026-11-01&period=2026-11-07`; `''` for a missing side |
+| Slider, NumberStepper, Rating | the number as a plain string: `"40"`; Rating sends `''` while unrated |
+| RangeSlider | two fields, low then high: `price=200&price=750` |
+| CurrencyInput | plain number `"1234.5"` (no separators or symbol); `currencyName` adds the code (`"CHF"`) |
+| PhoneInput | E.164 `"+41791234567"`; `''` while empty |
+| OTPInput | the digits typed so far: `"123456"` |
+| ColorPicker | `"#2563EB"` (upper case) |
+| Switch, Checkbox | `value` (default `"on"`) while on; nothing while off, like a native checkbox |
+| FileUpload | a native file field with the picked or dropped files (use `multipart/form-data`) |
+
+`required` means something is chosen (MultiSelect and TagInput: at least one item; DateRangePicker: both ends; OTPInput:
+every box; Checkbox and Switch: ticked). The browser validates it like a native field and, when it focuses the field,
+focus lands on the real control. Disabled controls submit nothing; read-only ones submit but can't be changed.
+
+**Form and FormField** need no form library. `FormField` wires a label (`htmlFor`, or `aria-labelledby` for controls
+that aren't labelable elements), a description and an error (both through `aria-describedby`; they share one line, so a
+message appearing doesn't push the layout) to whatever control is inside, and passes `name`, `required`, `disabled`
+and `readOnly` down. `Form` validates on submit, shows each failing field's message in its FormField, focuses the first
+one, and re-checks as fields change; `errors` adds your own messages by field name. `Field` still works (it is FormField).
+
+```tsx
+import { Button, Checkbox, Combobox, DatePicker, Form, FormField, Input, MultiSelect } from '@lyndon/ui'
+
+<Form onValues={data => save(Object.fromEntries(data))} errors={serverErrors}>
+  <FormField label="Full name" name="name" required><Input /></FormField>
+  <FormField label="Team" name="team" required description="Grouped by department"><Combobox options={teams} /></FormField>
+  <FormField label="Start date" name="start" required><DatePicker /></FormField>
+  <FormField label="Skills" name="skills"><MultiSelect options={skills} /></FormField>
+  <FormField name="terms" required><Checkbox value="accepted">I accept the handbook</Checkbox></FormField>
+  <Button type="submit">Submit</Button> <Button type="reset">Reset</Button>
+</Form>
+```
+
+**Server actions** (Next.js App Router) get the same fields. The components are client components, so the form can sit
+in a Server Component:
+
+```tsx
+// app/join/actions.ts
+'use server'
+export async function join(data: FormData) {
+  const team = data.get('team')         // "web"
+  const start = data.get('start')       // "2026-11-08"
+  const skills = data.getAll('skills')  // ["react", "sql"]
+}
+
+// app/join/page.tsx
+<form action={join}>
+  <FormField label="Team" name="team" required><Select options={teams} /></FormField>
+  <FormField label="Start date" name="start" required><DatePicker /></FormField>
+  <FormField label="Skills" name="skills"><MultiSelect options={skills} /></FormField>
+  <button>Join</button>
+</form>
+```
+
+**react-hook-form + zod.** The library depends on neither. Native-backed inputs (`Input`, `Textarea`, `PasswordInput`)
+take `register()` directly. The custom controls call `onChange` with a value rather than an event, so bind them with
+`Controller`: `field` spreads straight on (`name`, `value`, `onChange`, `onBlur`, `ref`, `disabled`), and `ref` reaches
+the focusable element, so `shouldFocusError` works.
+
+```tsx
+import { useForm, Controller } from 'react-hook-form'
+import { zodResolver } from '@hookform/resolvers/zod'
+import { z } from 'zod'
+
+const schema = z.object({
+  email: z.string().email('Use a work email'),
+  team: z.string().min(1, 'Choose a team'),
+  start: z.date({ message: 'Pick a start date' }),
+  skills: z.array(z.string()).min(1, 'Pick at least one skill'),
+})
+
+function JoinForm() {
+  const { register, control, handleSubmit, formState: { errors } } = useForm<z.infer<typeof schema>>({
+    resolver: zodResolver(schema), defaultValues: { email: '', team: '', skills: [] },
+  })
+  return (
+    <form onSubmit={handleSubmit(save)} noValidate>
+      <FormField label="Email" error={errors.email?.message}><Input {...register('email')} /></FormField>
+      <Controller name="team" control={control} render={({ field, fieldState }) => (
+        <FormField label="Team" error={fieldState.error?.message}><Combobox {...field} options={teams} /></FormField>
+      )} />
+      <Controller name="start" control={control} render={({ field, fieldState }) => (
+        <FormField label="Start date" error={fieldState.error?.message}><DatePicker {...field} value={field.value ?? null} /></FormField>
+      )} />
+      <Controller name="skills" control={control} render={({ field, fieldState }) => (
+        <FormField label="Skills" error={fieldState.error?.message}><MultiSelect {...field} options={skills} /></FormField>
+      )} />
+      <Button type="submit">Join</Button>
+    </form>
+  )
+}
+```
+
+**Async Combobox.** `loadOptions(query, { signal })` replaces (or adds to) `options`. It runs `debounce` ms (200) after
+typing stops, once the query has `minChars`; a newer query aborts the older request (pass `signal` to `fetch`) and late
+results are dropped. The list shows loading, empty and error states (Retry, or Enter in the field). `creatable` adds
+“Create “x”” (`onCreate(text)` may return the Option to use), options can carry a `group`, `defaultOptions` show before
+the first load, and `onInputChange` reports typing. Option lists past 100 items (Select, Combobox, MultiSelect) render
+only the visible rows.
+
+```tsx
+<Combobox name="city" creatable loadOptions={(q, { signal }) =>
+  fetch(`/api/cities?q=${encodeURIComponent(q)}`, { signal }).then(r => r.json())} />
 ```
 
 ## Overriding classes
@@ -320,6 +550,13 @@ What the components do with untrusted input, and what stays your job. Report vul
 - **AI output**: the AI components take model output as data. Links pass through `safeUrl` (http, https, mailto,
   tel and relative only), colours through `safeColor`, and model HTML is previewed in a sandboxed frame without
   scripts. Never treat model text as instructions to your app.
+- **Streamed AI messages** (`useAiChat`, `MessageParts`): model text renders only through `Markdown` (no raw HTML,
+  links through `safeUrl`), user text as plain text, tool arguments and results as data (`JsonViewer`, text), and
+  source links through `safeUrl`. Attachment previews use object URLs that are revoked when the file is removed,
+  sent or unmounted, shown only through `safeMediaUrl`. Streams are capped (`AI_LIMITS`: 200,000 characters per
+  part, 100,000 of tool-argument JSON, 400 parts per message, 2,000 messages, 1 MB per SSE event or NDJSON line;
+  longer input is dropped, not thrown). Validate and authorise what the browser sends to your route; never let a
+  client-sent message decide what a tool may do.
 - **Approvals**: `AgentComposer`'s approval card and `PermissionRequest` only gate an action when you wire them, and
   they only report outcomes your app confirms:
   - `AgentComposer`: return `{ needsApproval: { tool, summary, args?, recipients? } }` from `onSend` instead of running
@@ -327,6 +564,10 @@ What the components do with untrusted input, and what stays your job. Report vul
     it ran (or, on deny, to confirm nothing ran). Approve is disabled for 500 ms after the card appears.
   - `PermissionRequest`: `onDecide(allowed, always, draft)` receives the edited draft and may return a promise;
     pass `progress` for real delivery counts and `onUndo(): Promise<boolean>` to offer Undo.
+  - `useAiChat`: a tool call that asks for approval stays `awaiting-approval` until `decideTool(id, approved)` (the
+    tool card's Approve/Deny, armed after 500 ms). Run the tool in `onApprovalRequest(tool, approved)` only when
+    `approved` is true, or on your server once the next request shows `approval.approved === true`. A denied call
+    never shows a result, even if one arrives.
   On their own they are UI. The text-matching `needsApproval` fallback is a demo aid and gates nothing.
 - **Files**: `FileUpload` filters picked and dropped files by `accept` (skipped ones go to `onReject`), but the name
   and type it checks are under the user's control. Validate type, size and content on the server.

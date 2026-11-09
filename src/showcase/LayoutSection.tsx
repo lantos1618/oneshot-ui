@@ -1,4 +1,4 @@
-import { Fragment, useState, type ReactNode } from 'react'
+import { Fragment, useMemo, useState, type ReactNode } from 'react'
 import { Kanban, type KanbanColumn, OrgChart, type OrgNode, highlightCode, Scheduler, type SchedulerEvent, SortableList, SplitPane, Timeline, type TimelineItem, type TreeNode, TreeView, useToast } from '../lib'
 import { Section, Spec, SpecAction } from './kit'
 
@@ -100,6 +100,43 @@ function LayoutPane({ title, children, plain }: { title: string; children: React
   )
 }
 
+/* Tree view · 10k nodes: a generated monorepo (25 packages × 8 folders × 50 files) */
+const LAYOUT_PKGS = ['auth', 'billing', 'search', 'analytics', 'editor', 'checkout', 'catalog', 'inbox', 'calendar', 'files', 'teams', 'settings', 'reports',
+  'notifications', 'onboarding', 'payments', 'pricing', 'profile', 'admin', 'audit', 'chat', 'docs', 'exports', 'imports', 'webhooks']
+const LAYOUT_DIRS = ['components', 'hooks', 'utils', 'api', 'types', 'styles', 'tests', 'fixtures']
+const LAYOUT_WORDS = ['Button', 'Panel', 'Table', 'List', 'Header', 'Footer', 'Modal', 'Form', 'Field', 'Card', 'Badge', 'Menu', 'Tabs', 'Toolbar', 'Chart', 'Filter', 'Row', 'Cell', 'Item', 'View']
+const LAYOUT_EXT: Record<string, string> = { components: 'tsx', hooks: 'ts', utils: 'ts', api: 'ts', types: 'ts', styles: 'css', tests: 'tsx', fixtures: 'json' }
+function layoutBigTree(): TreeNode[] {
+  let s0 = 42; const R = () => (s0 = (s0 * 9301 + 49297) % 233280) / 233280
+  return [{ id: 'mono', label: 'monorepo', children: [{ id: 'packages', label: 'packages', children: LAYOUT_PKGS.map(pk => ({
+    id: pk, label: pk, children: LAYOUT_DIRS.map(d => ({
+      id: `${pk}/${d}`, label: d, children: Array.from({ length: 50 }, (_, i) => {
+        const w = LAYOUT_WORDS[(i + pk.length) % 20], base = d === 'hooks' ? `use${w}${i}` : d === 'tests' ? `${w}${i}.test` : `${w}${i}`
+        return { id: `${pk}/${d}/${i}`, label: `${base}.${LAYOUT_EXT[d]}`, size: `${(R() * 12 + 0.3).toFixed(1)} KB` }
+      }),
+    })),
+  })) }, { id: 'readme', label: 'README.md', size: '4.2 KB' }, { id: 'pkgjson', label: 'package.json', size: '1.1 KB' }] }]
+}
+const layoutTreeCount = (ns: TreeNode[]): number => ns.reduce((s, n) => s + 1 + (n.children ? layoutTreeCount(n.children) : 0), 0)
+const layoutFolders = (ns: TreeNode[]): string[] => ns.flatMap(n => n.children ? [n.id, ...layoutFolders(n.children)] : [])
+function LayoutBigTree() {
+  const toast = useToast()
+  const nodes = useMemo(layoutBigTree, [])
+  const [all, setAll] = useState(false)
+  const total = useMemo(() => layoutTreeCount(nodes), [nodes])
+  const folders = useMemo(() => layoutFolders(nodes), [nodes])
+  return (
+    <>
+      <div className="flex flex-wrap items-center gap-2 text-xs text-[var(--fg3)]">
+        <span className="ui-num">{total.toLocaleString('en-GB')} nodes · {folders.length} folders</span>
+        <SpecAction onClick={() => setAll(a => !a)}>{all ? 'Collapse all' : 'Expand all'}</SpecAction>
+      </div>
+      <TreeView key={all ? 'all' : 'some'} nodes={nodes} height={340} defaultExpanded={all ? folders : ['mono', 'packages', 'auth', 'auth/components']} aria-label="Monorepo files"
+        className="rounded-[var(--r-md)] border border-[var(--line)] p-1" onOpen={n => toast({ title: 'Opened', description: n.label })} />
+    </>
+  )
+}
+
 export function LayoutSection() {
   const toast = useToast()
   const [list, setList] = useState([
@@ -129,6 +166,10 @@ export function LayoutSection() {
       <Spec title="Tree view" desc="Double-click a file to rename it" keys={[[['↑', '↓'], 'Move'], [['←', '→'], 'Fold'], [['↵'], 'Open'], [['F2'], 'Rename']]}>
         <TreeView nodes={LAYOUT_TREE} defaultExpanded={['my-app', 'src', 'components', 'hooks']} aria-label="Project files"
           onOpen={n => toast({ title: 'Opened', description: n.label })} onRename={(_, v, prev) => toast({ title: 'Renamed', description: `${prev} → ${v}` })} />
+      </Spec>
+      <Spec title="Tree view · 10k nodes" desc="Ten thousand files in a generated monorepo. Only the rows in view are rendered (flattened open folders), so Expand all stays instant; arrows, Page Up/Down and Home/End scroll the focused row into view."
+        keys={[[['↑', '↓'], 'Move'], [['PgUp', 'PgDn'], 'Page'], [['Home', 'End'], 'First / last'], [['←', '→'], 'Fold']]}>
+        <LayoutBigTree />
       </Spec>
       <Spec title="Activity timeline" desc="Grouped by day, new events slide in" actions={<SpecAction onClick={simulate}>Simulate event</SpecAction>}>
         <Timeline items={feed} />

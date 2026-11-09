@@ -1,5 +1,7 @@
-import { CodeBlock, CodeTabs, Diff, InlineCode, InstallCommand, Kbd, Terminal } from '../lib'
-import { Section, Spec } from './kit'
+import { useEffect, useState } from 'react'
+import { useReducedMotion } from 'motion/react'
+import { Citation, CodeBlock, CodeTabs, Diff, InlineCode, InstallCommand, Kbd, Markdown, type Source, Terminal, useViewport } from '../lib'
+import { Section, Spec, SpecAction } from './kit'
 
 const IMPORT_CODE = `import { createFlow } from './flow';
 import { notify } from './notify';
@@ -80,11 +82,77 @@ const DIFF_AFTER = `export const flow = createFlow({
 
 flow.on('error', (e) => report(e, { flow: 'csv-import' }));`
 
+/** A model answer for the Markdown card: table, fence, task list, quote, citations, links and an image (shown as a link). */
+const MD_ANSWER = `## Why the CSV import is slow
+
+Most of the time goes to **validation**, not parsing: every row is checked *one at a time*, and each failure makes its own \`queueForReview()\` call [1].
+
+| Step | Rows/s | Share of time |
+|:--|--:|--:|
+| Parse | 48,000 | 6% |
+| Validate | 2,100 | 81% |
+| Queue for review | 900 | 13% |
+
+> Batching the review queue alone cut a 50k-row import from 41 s to 9 s in staging [2].
+
+### Suggested fix
+
+\`\`\`ts
+const failed = rows.filter((row) => !isValid(row));
+await flow.step('queue', () => queueForReview(failed)); // one call, not N
+\`\`\`
+
+- [x] Batch the \`queueForReview\` calls
+- [x] Compile the schema once, outside the loop
+- [ ] Stream rows instead of loading the whole file
+  - Use a \`ReadableStream\` for files over 20 MB
+
+See the [flow docs](https://example.com/docs/flows) or https://example.com/changelog for details. ~~Raising \`retries\`~~ won't help here.
+![Import timeline](https://example.com/import-timeline.png)`
+
+const MD_SOURCES: Source[] = [
+  { title: 'Flow runtime: steps and retries', url: 'https://example.com/docs/flows/steps', snippet: 'Each step call is awaited and retried on its own; batch work inside a step to avoid per-item overhead.' },
+  { title: 'Staging report, import batching', url: 'https://example.com/reports/import-batching', snippet: '50,000 rows: 41.2 s before, 9.0 s after batching the review queue.' },
+]
+const mdCite = (n: number) => MD_SOURCES[n - 1] ? <Citation n={n} source={MD_SOURCES[n - 1]} /> : <sup>[{n}]</sup>
+
+/** Streams the sample answer in a few characters at a time once the card is on screen (remount to replay); `still` shows it whole. */
+function MarkdownStreamDemo({ still }: { still: boolean }) {
+  const reduce = useReducedMotion()
+  const { ref, seen } = useViewport<HTMLDivElement>(null, { amount: 0 }) // any part on screen (the card is taller than a phone screen)
+  const [n, setN] = useState(0)
+  const whole = still || !!reduce
+  useEffect(() => {
+    if (whole || !seen) return
+    let i = 0, timer = 0
+    const tick = () => {
+      i = Math.min(MD_ANSWER.length, i + 2 + Math.floor(Math.random() * 7))
+      setN(i)
+      if (i < MD_ANSWER.length) timer = window.setTimeout(tick, 24)
+    }
+    timer = window.setTimeout(tick, 250)
+    return () => window.clearTimeout(timer)
+  }, [whole, seen])
+  const shown = whole ? MD_ANSWER.length : n
+  return (
+    // the finished answer sits invisibly underneath, so the card has its final height from the start (no layout shift);
+    // rendered as a stream too, so its tables get the same fixed column widths as the live copy
+    <div ref={ref} className="grid max-w-[72ch]">
+      <div aria-hidden inert className="invisible col-start-1 row-start-1"><Markdown streaming caret={false} renderCitation={mdCite}>{MD_ANSWER}</Markdown></div>
+      <div className="col-start-1 row-start-1 min-w-0" aria-live="off">
+        <Markdown streaming={shown < MD_ANSWER.length} renderCitation={mdCite}>{MD_ANSWER.slice(0, shown)}</Markdown>
+      </div>
+    </div>
+  )
+}
+
 const dim = 'text-[var(--fg3)]', ok = 'text-[var(--ok)]', acc = 'text-[var(--accent)]'
 
 export function CodeSection() {
+  const [mdRun, setMdRun] = useState(0)
+  const [mdStill, setMdStill] = useState(false)
   return (
-    <Section id="code" title="Code" desc="Highlighted blocks, tabs, diffs and a terminal. Tokenised in the page, no highlighter library.">
+    <Section id="code" title="Code" desc="Highlighted blocks, tabs, diffs, a terminal and streamed Markdown. Tokenised in the page, no highlighter library.">
       <Spec title="Code block" desc="File name, language, line numbers, highlighted lines, wrap, copy, expand" span={2}>
         <CodeBlock code={IMPORT_CODE} previous={IMPORT_PREV} filename="run-import.ts" highlight={[7, 8]} />
       </Spec>
@@ -112,6 +180,14 @@ export function CodeSection() {
       </Spec>
       <Spec title="Diff" desc="Unified or split view, added and removed lines, hunk header" span={3}>
         <Diff before={DIFF_BEFORE} after={DIFF_AFTER} filename="flow.config.ts" hunk="createFlow" />
+      </Spec>
+      <Spec title="Markdown" span={3}
+        desc="Model output as it streams: half-typed syntax never flashes, code fences become code blocks, links are checked and images aren't fetched"
+        actions={<>
+          <SpecAction aria-pressed={mdStill} onClick={() => { if (mdStill) setMdRun(r => r + 1); setMdStill(v => !v) }}>Static</SpecAction>
+          <SpecAction onClick={() => { setMdStill(false); setMdRun(r => r + 1) }}>Replay</SpecAction>
+        </>}>
+        <MarkdownStreamDemo key={mdRun} still={mdStill} />
       </Spec>
     </Section>
   )

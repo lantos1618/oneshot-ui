@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react'
-import { AICanvas, AI_CANVAS_SAMPLE, AgentComposer, AgentPlan, AgentTransitMap, AssistantChat, Badge, Chart, ChatApproval, ChatCard, ChatChecklist, type ChatScript, ChatSources, Citation, CodeBlock, type ComposerModel,
+import { AICanvas, AI_CANVAS_SAMPLE, type AiChunk, type AiMessage, type AiToolPart, AgentComposer, Conversation, Message, MessageActions, PromptInput, Suggestions, aiMessageText, useAiChat, AgentPlan, AgentTransitMap, AssistantChat, Badge, Chart, ChatApproval, ChatCard, ChatChecklist, type ChatScript, ChatSources, Citation, CodeBlock, type ComposerModel,
   type ComposerAction, type ComposerReply, type ComposerSample, type ComposerSendMeta, ConfidenceField, type Connector, GhostTextInput, LOCALE, ModelComparison, PermissionRequest, type SlashCommand, type Source, SourcesPanel, SuggestedEdit, ThinkingSteps, VoiceInput,
   type StepStatus, type WorkspaceItem, sleep, useViewport } from '../lib'
 import { Section, Spec, SpecAction } from './kit'
@@ -145,11 +145,132 @@ function AiPlanDemo({ run }: { run: number }) {
   )
 }
 
+/* Live chat: a local fake model behind the same `send` interface a real one uses (no network, no keys) ─────────── */
+
+/** Waits `ms`, or rejects as soon as the request is aborted (Stop, Regenerate, unmount). */
+const liveWait = (ms: number, signal: AbortSignal) => new Promise<void>((res, rej) => {
+  if (signal.aborted) { rej(new DOMException('Aborted', 'AbortError')); return }
+  const t = setTimeout(res, ms)
+  signal.addEventListener('abort', () => { clearTimeout(t); rej(new DOMException('Aborted', 'AbortError')) }, { once: true })
+})
+/** Streams `text` in uneven 2–9 character pieces, like tokens arriving. */
+async function* liveType(text: string, signal: AbortSignal, kind: 'text-delta' | 'reasoning-delta' = 'text-delta'): AsyncGenerator<AiChunk> {
+  for (let i = 0; i < text.length;) { const n = 2 + Math.floor(Math.random() * 8); await liveWait(kind === 'text-delta' ? 28 : 18, signal); yield { type: kind, delta: text.slice(i, i + n) }; i += n }
+}
+const LIVE_SUGGESTIONS = ['Plan our launch week', 'Book a design review with Sam', 'Explain the retry policy', 'Simulate an error']
+const LIVE_MODELS = [{ value: 'fast', label: 'Fast model' }, { value: 'deep', label: 'Deep model' }]
+const LIVE_PLAN = `## Launch week plan
+
+Here’s a plan that keeps the **Thursday** date and leaves a buffer for legal [1]:
+
+1. **Mon:** freeze scope, cut the release branch \`release/0.3\`
+2. **Tue:** final QA on Safari payments (the open bug) [2]
+3. **Wed:** legal sign-off, then schedule the announcement
+4. **Thu:** ship at 10:00, watch error rates for two hours
+
+| Owner | Deliverable | Status |
+| --- | --- | --- |
+| Priya | Notes | Draft |
+| Sam | Images | Wed |
+
+See the [launch checklist](https://notes.example.com/launch) for the full list.`
+const LIVE_RETRY = `Retries use **exponential backoff with jitter**: wait \`base × 2^attempt\`, randomised by ±50%, and give up after three tries.
+
+\`\`\`js
+const wait = base * 2 ** attempt * (0.5 + Math.random())
+\`\`\`
+
+Errors below 500 are never retried, because a 4xx won’t succeed on a second attempt [1].`
+
+/**
+ * The demo's model: reasoning, then Markdown text with citations and sources, or a tool call that needs approval, or
+ * an error part, depending on the question. It honours `signal`, so Stop and Regenerate cancel it mid-stream.
+ */
+async function* liveModel(messages: AiMessage[], { signal }: { signal: AbortSignal }): AsyncGenerator<AiChunk> {
+  const last = messages[messages.length - 1]
+  await liveWait(350, signal)
+  if (last?.role === 'assistant') { // continuing after an approval decision
+    const tool = last.parts.find((p): p is AiToolPart => p.type === 'tool')
+    yield* liveType(tool?.approval?.approved
+      ? `Done: **Design review** is booked for Thursday 14:00–14:30 and the invite went to Sam. Event id \`${String((tool.result as { id?: string } | undefined)?.id ?? 'evt')}\`.`
+      : 'Okay, I didn’t book anything. Want me to suggest a different time instead?', signal)
+    yield { type: 'finish' }; return
+  }
+  const q = aiMessageText(last ?? { id: '', role: 'user', parts: [] }).toLowerCase()
+  yield { type: 'start' }
+  if (/error|fail/.test(q)) { yield* liveType('Looking that up', signal); await liveWait(500, signal); throw new Error('The model provider returned 429 (rate limited). Nothing was lost; try again.') }
+  const book = /book|review|meet|calendar/.test(q), retry = /retry|backoff/.test(q)
+  yield* liveType(book ? 'The person wants a 30-minute review with Sam this week. Thursday afternoon is free on both calendars. Creating an event changes their calendar, so ask first.'
+    : retry ? 'They want the retry rules in plain words. Summarise the backoff, show the formula, and say which errors are not retried.'
+    : 'Launch is Thursday. Legal review is the critical path and the Safari bug is still open, so put QA before sign-off and keep a day of buffer.', signal, 'reasoning-delta')
+  yield { type: 'reasoning-end' }
+  if (book) {
+    yield* liveType('Thursday 14:00 works for both of you. I’ll create the event once you approve:', signal)
+    yield { type: 'tool-start', id: 'call_cal_1', name: 'calendar.createEvent' }
+    const args = JSON.stringify({ title: 'Design review', with: ['sam@quill.example'], start: '2026-11-12T14:00', minutes: 30 })
+    for (let i = 0; i < args.length; i += 12) { await liveWait(30, signal); yield { type: 'tool-args-delta', id: 'call_cal_1', delta: args.slice(i, i + 12) } }
+    yield { type: 'tool-approval', id: 'call_cal_1', summary: 'Create “Design review” on Thu 12 Nov, 14:00–14:30, and invite sam@quill.example' }
+    yield { type: 'finish' }; return
+  }
+  if (retry) yield { type: 'source', url: 'https://docs.example.com/retries', title: 'Retry policy', snippet: 'Backoff with jitter; 4xx responses are final.' }
+  else {
+    yield { type: 'source', url: 'https://notes.example.com/legal', title: 'Legal review status', snippet: 'Terms review due Wednesday EOD.' }
+    yield { type: 'source', url: 'https://issues.example.com/ENG-812', title: 'ENG-812 · Safari payment bug', snippet: 'Checkout times out on retry in Safari 17.' }
+  }
+  yield* liveType(retry ? LIVE_RETRY : LIVE_PLAN, signal)
+  yield { type: 'finish' }
+}
+/** The demo host runs the approved tool (pretend), then returns its result. Denied: nothing runs. */
+const liveRunTool = async (tool: AiToolPart, approved: boolean) => { if (!approved) return undefined; await sleep(600); return { id: 'evt_7f3a', calendar: 'Work', created: true, tool: tool.name } }
+/** 200 older messages (100 exchanges) for the virtualisation demo; batch `n` gets its own ids. */
+const liveHistory = (n: number): AiMessage[] => Array.from({ length: 200 }, (_, i) => {
+  const k = 200 - i
+  return i % 2 === 0
+    ? { id: `old-${n}-${i}`, role: 'user', status: 'done', parts: [{ type: 'text', text: `Earlier question #${n}.${k / 2 | 0}: how did week ${(k % 12) + 1} go?` }] }
+    : { id: `old-${n}-${i}`, role: 'assistant', status: 'done', parts: [{ type: 'text', text: i % 6 === 1 ? `Week ${(k % 12) + 1}: **${(k * 7) % 40 + 10} tickets** closed, two incidents, and the migration moved to staging.\n\n- Payments: stable\n- Search: p95 down 18%` : `All on track. Nothing needs your attention this week.` }] }
+})
+const LIVE_INITIAL: AiMessage[] = [
+  { id: 'live-u1', role: 'user', status: 'done', parts: [{ type: 'text', text: 'What changed in 0.3?' }] },
+  { id: 'live-a1', role: 'assistant', status: 'done', parts: [
+    { type: 'source', url: 'https://github.com/lantos1618/oneshot-ui', title: 'Release notes' },
+    { type: 'text', text: 'Real streams: every AI component now takes **live model output** as message parts (text, reasoning, tools, sources, files) [1]. Pick a suggestion below to watch one stream.' }] },
+]
+
+/** Live chat wired to the fake model through useAiChat: Conversation + Message + MessageActions + Suggestions + PromptInput. */
+function LiveChatDemo({ older }: { older: number }) {
+  const [model, setModel] = useState('fast')
+  const chat = useAiChat({ send: liveModel, initialMessages: LIVE_INITIAL, onApprovalRequest: liveRunTool })
+  const { setMessages } = chat
+  useEffect(() => { // "Load 200 older": prepends history, so the log virtualises (and keeps your place if you scrolled up)
+    if (!older) return
+    setMessages(ms => [...liveHistory(older), ...ms])
+  }, [older, setMessages])
+  const lastA = chat.messages.reduce((k, m, i) => m.role === 'assistant' ? i : k, -1)
+  return (
+    <div className="flex min-w-0 flex-col gap-2.5">
+      <Conversation busy={chat.busy} className="h-[min(400px,58dvh)]">
+        {chat.messages.map((m, i) => (
+          <Message key={m.id} message={m} onDecideTool={chat.decideTool} onRetry={chat.regenerate}
+            actions={m.role === 'assistant' && <MessageActions text={() => aiMessageText(m)} stopped={m.stopped} disabled={chat.busy}
+              onRetry={i === lastA ? chat.regenerate : undefined} retryLabel={m.stopped || m.status === 'error' ? 'Retry' : 'Regenerate'} />} />
+        ))}
+      </Conversation>
+      <div className="-mx-1 overflow-x-auto px-1 pb-0.5 [scrollbar-width:none]"><Suggestions items={LIVE_SUGGESTIONS} onPick={q => chat.submit(q)} disabled={chat.busy} className="!flex-nowrap [&>button]:flex-none" /></div>
+      <PromptInput value={chat.input} onChange={chat.setInput} status={chat.status} onStop={chat.stop} onSubmit={(t, f) => chat.submit(t, f)} placeholder="Message the demo model (it runs in your browser)"
+        models={LIVE_MODELS} model={model} onModelChange={setModel} accept="image/*,.pdf,.txt,.md" maxFiles={4} />
+    </div>
+  )
+}
+
 export function AISection() {
   const [replay, setReplay] = useState(0)
   const [planRun, setPlanRun] = useState(0)
+  const [older, setOlder] = useState(0)
   return (
     <Section id="ai" title="AI" desc="Streaming, showing work, asking permission, and being honest about uncertainty.">
+      <Spec title="Live chat (real stream)" actions={<SpecAction onClick={() => setOlder(n => n + 1)}>Load 200 older</SpecAction>} desc="useAiChat over a local fake model that streams the same chunks a real one sends: reasoning, Markdown with citations and sources, a tool call that waits for your approval, and errors with Retry. Stop cancels the request through its AbortSignal; scroll up while it streams and it stops following. “Load 200 older” prepends history: past 60 messages the log renders only what is in view." span={3}>
+        <LiveChatDemo older={older} />
+      </Spec>
       <Spec title="Chat" desc="Answers compose the library’s own components: charts, tables, code blocks, sources, checklists and approval cards. Type / for commands." span={3}>
         <AssistantChat defaultTurns={['Chart MRR this year']} starters={STARTERS} commands={COMMANDS} respond={respond} />
       </Spec>

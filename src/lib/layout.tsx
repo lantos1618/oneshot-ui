@@ -1,7 +1,8 @@
-import { useEffect, useId, useLayoutEffect, useRef, useState, type CSSProperties, type ReactNode, type RefObject, type KeyboardEvent as RKeyboardEvent, type PointerEvent as RPointerEvent } from 'react'
+import { Fragment, useEffect, useId, useLayoutEffect, useMemo, useRef, useState, type CSSProperties, type ReactNode, type RefObject, type KeyboardEvent as RKeyboardEvent, type PointerEvent as RPointerEvent } from 'react'
 import { AnimatePresence, LayoutGroup, motion } from 'motion/react'
 import { AvatarStack, Badge, DeltaBadge, Icon, type IconName, ScrollEdges, StatusIcon, type StatusIconStatus, TOUCH, type Tone, clamp, cn, prefersReducedMotion, safeColor, spring, surface, useCoarsePointer, useControllable, useLongPress, usePointerDrag, useScrollEdges, useWidth, SparkChart } from './core'
 import { Collapse, useToast } from './feedback'
+import { useVirtual } from './virtual'
 
 /* ════════════════════════════════════════════════════════════════════════════
  * 10. LAYOUT: drag-sort engine, kanban, sortable list, tree, timeline, split panes
@@ -496,15 +497,24 @@ function TreeIcon({ name, dir, open }: { name: string; dir: boolean; open: boole
   return <Icon name="file" size={15} strokeWidth={1.8} style={{ color: TREE_EXT[name.split('.').pop() ?? ''] ?? 'var(--fg3)' }} />
 }
 
+const treeCount = (ns: TreeNode[]): number => ns.reduce((s, n) => s + 1 + (n.children ? treeCount(n.children) : 0), 0)
+/** Trees with more nodes than this render only the rows in view. */
+const TREE_VIRTUAL_AT = 300
+type TreeFlat = { n: TreeNode; parent: TreeNode | null; depth: number; pos: number; size: number }
+
 /**
  * File tree with roving focus: ↑ / ↓ move, → opens or steps into a folder, ← closes or jumps to the parent,
- * Enter opens (folders toggle, files call `onOpen`). F2 renames any row (file or folder) in place; double-click renames a file.
- * Folders show their item count, files their size; icons are coloured by extension. `compact` gives denser rows
- * without the counts (for side panels such as an IDE explorer).
+ * Home / End jump, Enter opens (folders toggle, files call `onOpen`). F2 renames any row (file or folder) in place;
+ * double-click renames a file. Folders show their item count, files their size; icons are coloured by extension.
+ * `compact` gives denser rows without the counts (for side panels such as an IDE explorer). Trees of more than 300
+ * nodes (or `virtualize`) render only the visible rows of the flattened open nodes inside a `height` px scroller,
+ * with aria-level / aria-setsize / aria-posinset on each row, so 10k-node trees stay instant.
  */
-export function TreeView({ nodes, defaultExpanded = [], onSelect, onOpen, onRename, compact, className, 'aria-label': ariaLabel = 'Files' }:
+export function TreeView({ nodes, defaultExpanded = [], onSelect, onOpen, onRename, compact, virtualize, height = 360, className, 'aria-label': ariaLabel = 'Files' }:
   { nodes: TreeNode[]; defaultExpanded?: string[]; onSelect?: (n: TreeNode) => void; onOpen?: (n: TreeNode) => void
-    onRename?: (n: TreeNode, name: string, previous: string) => void; compact?: boolean; className?: string; 'aria-label'?: string }) {
+    onRename?: (n: TreeNode, name: string, previous: string) => void; compact?: boolean
+    /** render only the rows in view: true, false, or above this many nodes (default 300) */ virtualize?: boolean | number
+    /** px, virtual mode: the tree scrolls inside this height */ height?: number; className?: string; 'aria-label'?: string }) {
   const [open, setOpen] = useState(() => new Set(defaultExpanded))
   const [names, setNames] = useState<Record<string, string>>({})
   const [sel, setSel] = useState<string>(nodes[0]?.id ?? '')
@@ -512,55 +522,96 @@ export function TreeView({ nodes, defaultExpanded = [], onSelect, onOpen, onRena
   const cancelRename = useRef(false)
   const rows = useRef(new Map<string, HTMLDivElement>())
   const name = (n: TreeNode) => names[n.id] ?? n.label
-  const flat: { n: TreeNode; parent: TreeNode | null }[] = []
-  const walk = (list: TreeNode[], parent: TreeNode | null) => list.forEach(n => { flat.push({ n, parent }); if (n.children && open.has(n.id)) walk(n.children, n) })
-  walk(nodes, null)
+  const flat = useMemo(() => {
+    const out: TreeFlat[] = []
+    const walk = (list: TreeNode[], parent: TreeNode | null, depth: number) => list.forEach((n, i) => {
+      out.push({ n, parent, depth, pos: i + 1, size: list.length })
+      if (n.children && open.has(n.id)) walk(n.children, n, depth + 1)
+    })
+    walk(nodes, null, 0)
+    return out
+  }, [nodes, open])
+  const indexOf = useMemo(() => new Map(flat.map((f, i) => [f.n.id, i])), [flat])
+  const total = useMemo(() => treeCount(nodes), [nodes])
+  const virtualOn = virtualize === true || (virtualize !== false && total > (typeof virtualize === 'number' ? virtualize : TREE_VIRTUAL_AT))
+  const coarse = useCoarsePointer()
+  const box = useRef<HTMLDivElement>(null)
+  const selAt = indexOf.get(sel) ?? 0
+  const keep = useMemo(() => [selAt], [selAt])
+  const v = useVirtual({ count: flat.length, estimateSize: coarse ? 36 : compact ? 24 : 28, scrollRef: box, enabled: virtualOn, keep, initialRect: { width: 320, height } })
+  const pendingFocus = useRef<string | null>(null)
+  useLayoutEffect(() => { const id = pendingFocus.current; if (id && rows.current.get(id)) { pendingFocus.current = null; rows.current.get(id)!.focus({ preventScroll: true }) } })
   const toggle = (id: string, force?: boolean) => setOpen(s => { const n = new Set(s), on = force ?? !n.has(id); if (on) n.add(id); else n.delete(id); return n })
-  const select = (n: TreeNode) => { setSel(n.id); rows.current.get(n.id)?.focus(); onSelect?.(n) }
+  const select = (n: TreeNode) => {
+    setSel(n.id)
+    if (virtualOn) { const i = indexOf.get(n.id); if (i != null) v.scrollToIndex(i, { align: 'auto' }) }
+    const el = rows.current.get(n.id)
+    if (el?.isConnected) el.focus({ preventScroll: virtualOn }); else pendingFocus.current = n.id
+    onSelect?.(n)
+  }
   const onKey = (e: RKeyboardEvent, n: TreeNode, i: number, parent: TreeNode | null) => {
     if (editing) return
     const dir = !!n.children, isOpen = open.has(n.id)
+    const page = Math.max(1, Math.floor(v.viewportSize / (coarse ? 36 : compact ? 24 : 28)) - 1)
     const act: Record<string, () => void> = {
       ArrowDown: () => flat[i + 1] && select(flat[i + 1].n), ArrowUp: () => flat[i - 1] && select(flat[i - 1].n),
       Home: () => select(flat[0].n), End: () => select(flat[flat.length - 1].n),
+      PageDown: () => select(flat[Math.min(flat.length - 1, i + page)].n), PageUp: () => select(flat[Math.max(0, i - page)].n),
       ArrowRight: () => { if (dir) { if (isOpen) { if (flat[i + 1]) select(flat[i + 1].n) } else toggle(n.id, true) } },
       ArrowLeft: () => { if (dir && isOpen) toggle(n.id, false); else if (parent) select(parent) },
       Enter: () => { if (dir) toggle(n.id); else onOpen?.(n) }, F2: () => setEditing(n.id),
     }
     if (act[e.key]) { e.preventDefault(); act[e.key]() }
   }
-  const render = (list: TreeNode[], depth: number, parent: TreeNode | null): ReactNode => list.map(n => {
-    const dir = !!n.children, isOpen = open.has(n.id), i = flat.findIndex(f => f.n.id === n.id)
+  const row = (f: TreeFlat, i: number, extra?: { style?: CSSProperties; aria?: Record<string, number> }) => {
+    const { n, depth, parent } = f, dir = !!n.children, isOpen = open.has(n.id)
+    return (
+      <div ref={el => { if (!el) return; rows.current.set(n.id, el); return () => { if (rows.current.get(n.id) === el) rows.current.delete(n.id) } }} role="treeitem" aria-level={depth + 1} aria-selected={sel === n.id}
+        aria-expanded={dir ? isOpen : undefined} tabIndex={sel === n.id ? 0 : -1} data-index={virtualOn ? i : undefined} {...extra?.aria}
+        style={{ paddingLeft: (compact ? 4 : 8) + depth * (compact ? 12 : 16), ...extra?.style }}
+        onClick={() => { select(n); if (dir) toggle(n.id) }} onDoubleClick={() => !dir && setEditing(n.id)} onKeyDown={e => onKey(e, n, i, parent)}
+        className={cn('flex cursor-pointer items-center gap-1.5 rounded-[var(--r-md)] pr-2 whitespace-nowrap outline-none focus-visible:shadow-[inset_0_0_0_2px_var(--accent)] [@media(pointer:coarse)]:h-9 [@media(pointer:coarse)]:text-sm', compact ? 'h-6 text-xs' : 'h-7 text-[13px]',
+          sel === n.id ? 'bg-[var(--accent-soft)] text-[color-mix(in_srgb,var(--accent)_78%,var(--fg))]' : 'hover:bg-[var(--muted)]')}>
+        <span className="grid w-3.5 flex-none place-items-center text-[var(--fg3)]">
+          {dir && <motion.span initial={false} animate={{ rotate: isOpen ? 90 : 0 }} transition={spring(0.2, 0.25)} className="grid"><Icon name="chevronRight" size={11} strokeWidth={3} /></motion.span>}
+        </span>
+        {n.icon ? <Icon name={n.icon} size={15} className="text-[var(--fg3)]" /> : <TreeIcon name={name(n)} dir={dir} open={isOpen} />}
+        {editing === n.id
+          ? <input autoFocus defaultValue={name(n)} aria-label={`Rename ${name(n)}`} onClick={e => e.stopPropagation()}
+            onFocus={e => { const val = e.currentTarget.value, dot = val.lastIndexOf('.'); e.currentTarget.setSelectionRange(0, dot > 0 ? dot : val.length) }}
+            onKeyDown={e => {
+              e.stopPropagation()
+              if (e.key === 'Escape') { cancelRename.current = true; setEditing(null); rows.current.get(n.id)?.focus() }
+              if (e.key === 'Enter') e.currentTarget.blur()
+            }}
+            onBlur={e => {
+              if (cancelRename.current) { cancelRename.current = false; return }
+              const val = e.currentTarget.value.trim(), prev = name(n)
+              setEditing(null); rows.current.get(n.id)?.focus()
+              if (val && val !== prev) { setNames(m => ({ ...m, [n.id]: val })); onRename?.(n, val, prev) }
+            }}
+            className={cn('w-[140px] min-w-0 rounded-[var(--r-sm)] border border-[var(--accent)] bg-[var(--card)] px-1 py-px text-[13px] text-[var(--fg)] outline-none [@media(pointer:coarse)]:flex-1', TOUCH.input)} />
+          : <motion.span key={name(n)} initial={{ opacity: names[n.id] ? 0.3 : 1 }} animate={{ opacity: 1 }} className="truncate">{name(n)}</motion.span>}
+        {!compact && <span className="ml-auto pl-2 text-[11px] tabular-nums text-[var(--fg2)]">{dir ? n.children!.length : n.size}</span>}
+      </div>
+    )
+  }
+  if (virtualOn) return (
+    <div ref={box} role="tree" aria-label={ariaLabel} className={cn('relative overflow-auto overscroll-contain select-none', className)} style={{ height }}>
+      <div style={{ height: v.totalSize, position: 'relative' }}>
+        {v.items.map(it => {
+          const f = flat[it.index]
+          return <Fragment key={f.n.id}>{row(f, it.index, { style: { position: 'absolute', top: 0, left: 0, right: 0, transform: `translateY(${it.start}px)` }, aria: { 'aria-setsize': f.size, 'aria-posinset': f.pos } })}</Fragment>
+        })}
+      </div>
+    </div>
+  )
+  const render = (list: TreeNode[], depth: number, parent: TreeNode | null): ReactNode => list.map((n, k) => {
+    const i = indexOf.get(n.id) ?? -1, f = flat[i] ?? { n, parent, depth, pos: k + 1, size: list.length } // inside a closed (closing) folder
     return (
       <li key={n.id} role="none">
-        <div ref={el => { if (el) rows.current.set(n.id, el); else rows.current.delete(n.id) }} role="treeitem" aria-level={depth + 1} aria-selected={sel === n.id}
-          aria-expanded={dir ? isOpen : undefined} tabIndex={sel === n.id ? 0 : -1} style={{ paddingLeft: (compact ? 4 : 8) + depth * (compact ? 12 : 16) }}
-          onClick={() => { select(n); if (dir) toggle(n.id) }} onDoubleClick={() => !dir && setEditing(n.id)} onKeyDown={e => onKey(e, n, i, parent)}
-          className={cn('flex cursor-pointer items-center gap-1.5 rounded-[var(--r-md)] pr-2 whitespace-nowrap outline-none focus-visible:shadow-[inset_0_0_0_2px_var(--accent)] [@media(pointer:coarse)]:h-9 [@media(pointer:coarse)]:text-sm', compact ? 'h-6 text-xs' : 'h-7 text-[13px]',
-            sel === n.id ? 'bg-[var(--accent-soft)] text-[color-mix(in_srgb,var(--accent)_78%,var(--fg))]' : 'hover:bg-[var(--muted)]')}>
-          <span className="grid w-3.5 flex-none place-items-center text-[var(--fg3)]">
-            {dir && <motion.span initial={false} animate={{ rotate: isOpen ? 90 : 0 }} transition={spring(0.2, 0.25)} className="grid"><Icon name="chevronRight" size={11} strokeWidth={3} /></motion.span>}
-          </span>
-          {n.icon ? <Icon name={n.icon} size={15} className="text-[var(--fg3)]" /> : <TreeIcon name={name(n)} dir={dir} open={isOpen} />}
-          {editing === n.id
-            ? <input autoFocus defaultValue={name(n)} aria-label={`Rename ${name(n)}`} onClick={e => e.stopPropagation()}
-              onFocus={e => { const v = e.currentTarget.value, dot = v.lastIndexOf('.'); e.currentTarget.setSelectionRange(0, dot > 0 ? dot : v.length) }}
-              onKeyDown={e => {
-                e.stopPropagation()
-                if (e.key === 'Escape') { cancelRename.current = true; setEditing(null); rows.current.get(n.id)?.focus() }
-                if (e.key === 'Enter') e.currentTarget.blur()
-              }}
-              onBlur={e => {
-                if (cancelRename.current) { cancelRename.current = false; return }
-                const v = e.currentTarget.value.trim(), prev = name(n)
-                setEditing(null); rows.current.get(n.id)?.focus()
-                if (v && v !== prev) { setNames(m => ({ ...m, [n.id]: v })); onRename?.(n, v, prev) }
-              }}
-              className={cn('w-[140px] min-w-0 rounded-[var(--r-sm)] border border-[var(--accent)] bg-[var(--card)] px-1 py-px text-[13px] text-[var(--fg)] outline-none [@media(pointer:coarse)]:flex-1', TOUCH.input)} />
-            : <motion.span key={name(n)} initial={{ opacity: names[n.id] ? 0.3 : 1 }} animate={{ opacity: 1 }} className="truncate">{name(n)}</motion.span>}
-          {!compact && <span className="ml-auto pl-2 text-[11px] tabular-nums text-[var(--fg2)]">{dir ? n.children!.length : n.size}</span>}
-        </div>
-        {dir && <Collapse open={isOpen}><ul role="group" className="m-0 list-none p-0">{render(n.children!, depth + 1, n)}</ul></Collapse>}
+        {row(f, i)}
+        {n.children && <Collapse open={open.has(n.id)}><ul role="group" className="m-0 list-none p-0">{render(n.children, depth + 1, n)}</ul></Collapse>}
       </li>
     )
   })

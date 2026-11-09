@@ -3,6 +3,47 @@
 All notable changes to `@lyndon/ui`. The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/);
 versions follow [semver](https://semver.org/) (while on 0.x, a minor version may break APIs).
 
+## [0.3.0]
+
+Real data: model streams, form submission, async data and long lists.
+
+### Added
+- **Markdown** (`@lyndon/ui/markdown`): streaming-safe GFM renderer for model output (headings, lists, task lists,
+  tables, quotes, code fences via CodeBlock, links, autolinks, `[n]` citations). React nodes only, links through
+  `safeUrl`, images shown as links unless `images="allow"`, 200k-character cap, linear-time parser. Half-received
+  syntax never flashes, an open fence renders as code, streamed tables keep fixed column widths, and the caret
+  causes no layout shift.
+- **AI streams** (`@lyndon/ui/aistream`): message model with parts (text, reasoning, tool, source, file, data,
+  error), `applyAiChunk` reducer, `parseAiStream` (SSE / NDJSON byte streams), `fromAiSdkUIMessageStream`, and
+  `useAiChat` (submit, stop via AbortSignal, regenerate, tool approvals that run only after `decideTool`, errors
+  with retry, frame-throttled updates). Chat parts exported separately: `Conversation` (stays pinned to the
+  newest message, "Jump to latest"), `Message`, `MessageParts`, `Reasoning`, `ToolCard`, `ApprovalCard`,
+  `MessageActions`, `Suggestions`, `PromptInput` (attachments by paste/drop/pick, model picker, Send/Stop),
+  `useAttachments`, `AttachmentChip`. Long conversations virtualise past 60 messages (cap 2,000). README:
+  Next.js route handler streaming from the Anthropic API.
+- **Forms:** every custom control (Select, Combobox, MultiSelect, date and time pickers, TagInput, sliders, OTP,
+  Phone, Currency, Rating, ColorPicker, NumberStepper, SegmentedControl, RadioGroup, Switch, Checkbox,
+  FileUpload) takes `name`, `required`, `disabled`, `readOnly`, `invalid`, `onBlur`, `form` and `ref`, submits
+  through hidden inputs (`new FormData(form)`, server actions), resets with the form and receives focus on
+  error. New `Form` and `FormField`; README recipes for server actions and react-hook-form + zod.
+- **Async Combobox:** `loadOptions(query, { signal })` with debounce, abort, loading/empty/error states with
+  retry, `minChars`, `creatable`, option groups.
+- **Virtualization** (`@lyndon/ui/virtual`): `useVirtual` (dynamic heights, window or element scrolling,
+  bottom anchoring for chats, `scrollToIndex`, SSR-safe, keeps the focused row rendered) and `VirtualList`.
+  Used by OptionList (over 100 options), DataGrid (over 100 rows), TreeView (over 300 nodes), CommandPalette
+  (over 60 results) and long conversations.
+- **DataGrid:** server mode (controlled sort, filter, search, pages or infinite loading, loading and error
+  states), column pin/hide/reorder (popover, drag, Ctrl+Shift+arrows), controlled selection with select-all
+  across pages (`GridSelection`), full ARIA grid row/column counts on virtual rows. 50k rows scroll with no long
+  tasks and about 20 rows in the DOM.
+- **CommandPalette:** groups, async `loadItems`, nested pages, recents. **AlertDialog** with async confirm.
+
+### Changed
+- `Field` is now `FormField` with the same props. `ChatComposer` wraps `PromptInput`; `StreamingText` wraps
+  `useStreamedText`, which now follows an append-only growing string (`live`). AssistantChat and AgentComposer
+  take `chat` from `useAiChat`; their scripted props still work.
+- Primary/accent/danger button hovers no longer lower text contrast.
+
 ## [0.2.1]
 
 ### Added

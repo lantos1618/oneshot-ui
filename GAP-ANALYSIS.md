@@ -110,6 +110,12 @@ Open: on phones the approval card covers the top-left of the map; station labels
 
 ## 2. Next: capability gaps vs the field (P0/P1)
 
+**Status: 0.3.0 landed items 1, 2, 4, 5, 6, 7, 8 and AlertDialog** (streaming message parts, Markdown, form-native
+controls, Form/FormField, async Combobox, virtualization, DataGrid server mode/columns/selection; plus
+CommandPalette async and nested pages, AI Elements-style parts from item 15). Item 3 (tests and CI) landed in 0.2.1.
+Next (0.4): i18n and RTL (9, 10), composable parts + asChild (11), registry and per-component drop-ins (12), docs
+site (13), date/time (14), async MultiSelect.
+
 | # | Gap | Pri | Effort | Evidence / approach |
 |---|---|---|---|---|
 | 1 | **Real AI streaming.** A message model with parts (text, reasoning, tool, source, file, data), an adapter for AI SDK `useChat`, ReadableStream or AsyncIterable, and stop via AbortSignal | P0 | L | Every AI component is scripted today: `respond(q)=>ChatScript`, the canned `CanvasEdit[]` |
