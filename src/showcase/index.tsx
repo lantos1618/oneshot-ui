@@ -17,9 +17,9 @@ import { MotionSection } from './MotionSection'
 import { NavigationSection } from './NavigationSection'
 import { OverlaysSection } from './OverlaysSection'
 import { PagesSection } from './PagesSection'
-import { SECTIONS, SECTION_TAGS, SHOWCASE_MSG, ShellContext, type SpecEntry, flashSpec, specMatches, useSpecs } from './kit'
+import { SECTIONS, SECTION_TAGS, SHOWCASE_MSG, ShellContext, type SpecEntry, flashSpec, mountAllSpecs, specMatches, useSpecs } from './kit'
 import { CodeDrawer } from './CodeDrawer'
-import { DesignQA, DesignQAButton, designQA } from './DesignQA'
+import { DesignQA, DesignQAButton, designQA, useDesignQA } from './DesignQA'
 import { OVERLAY_DEMO_EVENT, type OverlayDemo } from './OverlaysSection'
 
 /** True when typing somewhere, so single-key shortcuts stay out of the way. */
@@ -254,6 +254,13 @@ function ShellLocaleMenu() {
   )
 }
 
+/** Card demos mount as they near the viewport (kit.tsx); a Design QA audit scans every card, so it mounts them all first. */
+function ShellQaMountAll() {
+  const { runs } = useDesignQA()
+  useEffect(() => { if (runs) mountAllSpecs() }, [runs])
+  return null
+}
+
 function ShowcaseBody() {
   const { set, toggle, settings } = useTheme()
   const tm = useMessages(SHOWCASE_MSG)
@@ -374,6 +381,7 @@ function ShowcaseBody() {
       <ShellShortcuts open={keys} onOpenChange={setKeys} />
       <CodeDrawer />
       <DesignQA />
+      <ShellQaMountAll />
     </ShellContext.Provider>
   )
 }

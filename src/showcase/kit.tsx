@@ -1,5 +1,7 @@
-import { createContext, useContext, useId, useLayoutEffect, useRef, useState, useSyncExternalStore, type ReactNode } from 'react'
-import { Badge, Button, type ButtonProps, Card, Icon, Kbd, Reveal, cn, defineMessages, logicalArrow, useDir, useMessages } from '../lib'
+import { flushSync } from 'react-dom'
+import { createContext, startTransition, useContext, useEffect, useId, useLayoutEffect, useRef, useState, useSyncExternalStore, type ReactNode } from 'react'
+import { motion, useReducedMotion } from 'motion/react'
+import { Badge, Button, type ButtonProps, Card, EASE_OUT, Icon, Kbd, cn, defineMessages, logicalArrow, useDir, useMessages } from '../lib'
 import { openCodeDrawer } from './CodeDrawer'
 
 /* Showcase kit: Section, Spec (card), Row, the section list, use-case tags, and the card registry the
@@ -7,15 +9,7 @@ import { openCodeDrawer } from './CodeDrawer'
 
 /** Use-case tags per card title, copied from the original page. The filter and ⌘K match on them. */
 export const SPEC_TAGS: Record<string, string> = {
-  'A · Pins on the line': 'charts, annotations, events, timeline, health',
-  'B · Icon rug under the axis': 'charts, annotations, events, timeline, monitoring',
-  'C · Vertical rules with flags': 'charts, annotations, events, monitoring, deploys',
-  'D · Shaded bands for durations': 'charts, annotations, durations, timeline, health',
-  'G · Rolled-up counts': 'charts, annotations, aggregation, timeline, monitoring',
-  'Auto · Picks by width and density': 'charts, annotations, events, timeline, health',
-  'E · Swimlanes per tag': 'diagrams, timeline, events, lanes, habits',
-  'F · State ribbon with tags': 'diagrams, timeline, states, widgets, health',
-  'H · Chart plus linked journal': 'diagrams, timeline, journal, linked views, editing',
+  'Tags over time': 'charts, annotations, events, timeline, health, monitoring', 'Timeline views': 'diagrams, timeline, events, journal, health',
   'Slider with magnets': 'user input, range, snapping, haptics, settings',
   'Accordion · composable': 'data, disclosure, composable, FAQ', 'Composable overlays': 'overlay, dialog, popover, tooltip, composable, asChild',
   'Context menu · composable': 'navigation, menu, right click, composable, keyboard', 'Links as buttons (asChild)': 'navigation, links, routing, asChild, buttons',
@@ -173,6 +167,88 @@ export function flashSpec(id: string) {
   setTimeout(go, 'onscrollend' in window ? 5000 : 900)
 }
 
+/* Lazy card bodies ──────────────────────────────────────────────────────────────
+ * Mounting all ~180 demos at once cost a phone (4× CPU) an 8 s long task, and every animation frame then paid for
+ * painting, layerizing and intersection-checking ~17k elements. So a card's header renders at once (the filter, the
+ * sidebar and ⌘K need it) but its demo mounts only as the card comes within about a screen of the viewport, and
+ * stays mounted after. Cards in view mount right away; the ones ahead mount one at a time in transitions (React
+ * yields between them), so scrolling stays responsive. A card stays transparent until its demo is in, so a demo that
+ * mounts on screen (after a jump) fades in instead of shifting the layout; demos above the viewport mount only as they
+ * scroll back in. Cards far from the viewport (more than
+ * ~2.5 screens) also skip rendering with `content-visibility: auto`; near ones don't, so popovers inside a card are
+ * never clipped by the containment. */
+
+/** What a card still waits for: its demo to mount, and/or being seen (15% on screen) to fade in. */
+type KitCard = { mount?: (urgent: boolean) => void; seen?: () => void }
+const kitCards = new Map<Element, KitCard>()
+/** Unmounted cards within the mount margin, with their distance from the viewport when they entered it. */
+const kitNear = new Map<Element, number>()
+let kitNearIO: IntersectionObserver | null = null, kitViewIO: IntersectionObserver | null = null, kitFarIO: IntersectionObserver | null = null
+let kitPumpT = 0, kitDeepLinked = false
+/** On screen (and not hidden by the filter)? Reads layout: only for the first look and deep links. */
+const kitOnScreen = (el: Element) => { const r = el.getBoundingClientRect(); return r.height > 0 && r.bottom > 0 && r.top < innerHeight }
+const kitDone = (el: Element, c: KitCard) => { if (!c.mount && !c.seen) { kitCards.delete(el); kitViewIO?.unobserve(el) } }
+function kitMountNow(el: Element, urgent: boolean) {
+  const c = kitCards.get(el), mount = c?.mount
+  if (!c || !mount) return
+  c.mount = undefined; kitNear.delete(el); kitNearIO?.unobserve(el); kitDone(el, c)
+  mount(urgent)
+}
+/** Mount the waiting card nearest the viewport (ties: the one that came near first), then the next 50 ms later.
+ * Reads no layout: distances come from the observer. Cards that scroll on screen mount at once (kitViewIO). */
+function kitPump() {
+  kitPumpT = 0
+  let next: Element | null = null, best = Infinity
+  for (const [el, d] of kitNear) if (d < best) { best = d; next = el }
+  if (next) kitMountNow(next, false)
+  if (kitNear.size) kitPumpT = window.setTimeout(kitPump, 50)
+}
+/** Cards registered in this commit, looked at once it's done: one layout for all of them (reading each card's box
+ * in its own layout effect re-laid out the page ~180 times, as motion writes styles in between), and the ones on
+ * screen or deep-linked mount synchronously, before the first paint. */
+const kitFresh = new Set<Element>()
+const kitIsHashTarget = (el: Element) => !!location.hash && decodeURIComponent(location.hash.slice(1)) === el.id
+function kitFirstLook() {
+  const now = [...kitFresh].filter(el => kitCards.get(el)?.mount && (kitOnScreen(el) || kitIsHashTarget(el)))
+  kitFresh.clear()
+  if (now.length) flushSync(() => now.forEach(el => kitMountNow(el, true)))
+}
+function kitObservers() {
+  if (kitNearIO || typeof IntersectionObserver === 'undefined') return
+  // a screen and a half below: at a reading pace a demo has mounted well before it scrolls in. Nothing above: after a
+  // jump, demos above the viewport stay unmounted until they scroll in at the top edge (still transparent, and the
+  // content below is held by scroll anchoring); mounting them while out of sight changed the page above the reader,
+  // which Chrome can still count as layout shift
+  kitNearIO = new IntersectionObserver(es => {
+    for (const e of es) {
+      if (!e.isIntersecting || !kitCards.get(e.target)?.mount) { kitNear.delete(e.target); continue }
+      const top = e.boundingClientRect.top, vh = e.rootBounds ? e.rootBounds.height / 2.5 : innerHeight // root = viewport + 1.5 screens below
+      kitNear.set(e.target, Math.max(0, top - vh))
+    }
+    if (kitNear.size && !kitPumpT) kitPumpT = window.setTimeout(kitPump, 0)
+  }, { rootMargin: '0px 0px 150% 0px' })
+  // on screen: mount now; 15% on screen: fade in (one observer for every card instead of one each)
+  kitViewIO = new IntersectionObserver(es => {
+    for (const e of es) {
+      const c = kitCards.get(e.target)
+      if (!c || !e.isIntersecting) continue
+      if (c.mount) kitMountNow(e.target, true)
+      if (c.seen && e.intersectionRatio >= 0.149) { const seen = c.seen; c.seen = undefined; seen() }
+      kitDone(e.target, c)
+    }
+  }, { threshold: [0, 0.15] })
+  // far away: skip style, layout and paint (an attribute, not React state, so nothing re-renders)
+  kitFarIO = new IntersectionObserver(es => {
+    for (const e of es) e.target.toggleAttribute('data-far', !e.isIntersecting)
+  }, { rootMargin: '250% 0px' })
+}
+/** Mount every card's demo now (the Design QA audit scans them all). */
+export function mountAllSpecs() {
+  for (const el of [...kitCards.keys()]) kitMountNow(el, true)
+}
+/** Render card demos right away instead of as they near the viewport (server renders that should include them, tests). */
+export const SpecEagerContext = createContext(false)
+
 /* Layout pieces ─────────────────────────────────────────────────────────────── */
 
 /** Everything Tab reaches inside an element: visible, enabled, not inert. */
@@ -215,8 +291,9 @@ export function SpecPreview({ children, className, label }: { children: ReactNod
 }
 
 /**
- * A component card: title, one-line description, key hints, use-case tag chips, then the demo. Fades up when scrolled
- * into view. `actions` go in the header's top-right slot (one-shot demo actions, or a Switch for a live mode).
+ * A component card: title, one-line description, key hints, use-case tag chips, then the demo. The demo mounts as the
+ * card nears the viewport (see "Lazy card bodies" above; `SpecEagerContext` renders it at once) and the card fades up
+ * when scrolled into view. `actions` go in the header's top-right slot (one-shot demo actions, or a Switch for a live mode).
  * Keyboard: the code button is one Tab stop and the tag chips another (arrows move between chips). Demos with many
  * controls get a "Skip to next card" link right after the header, so Tab doesn't have to walk the whole demo.
  */
@@ -239,6 +316,48 @@ export function Spec({ title, desc, children, span = 1, actions, keys, notes }:
     setId(kitRegister({ key, id: base, title, desc: desc ?? '', section, tags }))
   }, [key, base, title, desc, section, tagKey]) // eslint-disable-line react-hooks/exhaustive-deps
   useLayoutEffect(() => () => { kitSpecs.delete(key); kitNotify() }, [key])
+  // lazy demo: placeholders on the server and in the first client render; on screen (or the deep-link target) it
+  // mounts before the first paint, otherwise when it nears the viewport
+  const eager = useContext(SpecEagerContext)
+  const [live, setLive] = useState(eager)
+  // the card stays transparent until its demo is in, then fades up once it's 15% on screen
+  const reduce = useReducedMotion()
+  const [seen, setSeen] = useState(false)
+  useLayoutEffect(() => {
+    const el = cardRef.current
+    kitObservers()
+    if (!el || !kitViewIO) { setLive(true); setSeen(true); return } // no IntersectionObserver: everything at once
+    const c: KitCard = { seen: () => setSeen(true) }
+    if (!live) c.mount = urgent => urgent ? setLive(true) : startTransition(() => setLive(true))
+    kitCards.set(el, c)
+    kitViewIO.observe(el)
+    if (c.mount) { kitNearIO?.observe(el); if (!kitFresh.size) queueMicrotask(kitFirstLook); kitFresh.add(el) }
+    kitFarIO?.observe(el) // far-away cards skip rendering
+    return () => {
+      kitCards.delete(el); kitNear.delete(el); kitFresh.delete(el)
+      kitViewIO?.unobserve(el); kitNearIO?.unobserve(el); kitFarIO?.unobserve(el); el.removeAttribute('data-far')
+    }
+  }, []) // eslint-disable-line react-hooks/exhaustive-deps
+  // fade in only once the new demo has settled (no resize for 120 ms, at most 0.8 s): a demo that lays itself out over a
+  // few frames after mounting (effects, measured widths) does so while the card is still fully transparent, which
+  // doesn't count as layout shift. Cards mounted ahead of the viewport have settled long before they're seen.
+  const [settled, setSettled] = useState(eager)
+  useEffect(() => {
+    const body = bodyRef.current
+    if (!live || settled || !body) return
+    let quiet = 0
+    const done = () => setSettled(true), arm = () => { clearTimeout(quiet); quiet = window.setTimeout(done, 120) }
+    const ro = typeof ResizeObserver === 'undefined' ? null : new ResizeObserver(arm)
+    ro?.observe(body); arm()
+    const cap = window.setTimeout(done, 800)
+    return () => { clearTimeout(quiet); clearTimeout(cap); ro?.disconnect() }
+  }, [live, settled])
+  useEffect(() => { // a deep link to this card: make sure it's on screen once its demo is in
+    const el = cardRef.current
+    if (!live || !el || kitDeepLinked || !kitIsHashTarget(el)) return
+    kitDeepLinked = true
+    requestAnimationFrame(() => { if (!kitOnScreen(el)) el.scrollIntoView({ block: 'start' }) })
+  }, [live, id])
   const shown = specMatches({ title, desc: desc ?? '', tags }, query)
   const chips = tags.slice(0, 4)
   const pickTag = (t: string) => {
@@ -260,9 +379,15 @@ export function Spec({ title, desc, children, span = 1, actions, keys, notes }:
     setSkip(kitTabbables(bodyRef.current).length >= KIT_SKIP_AT && !!kitNextCard(cardRef.current))
   }
   return (
-    <Reveal id={id} data-spec={title} ref={cardRef} onFocus={onFocus}
-      className={cn('group/spec min-w-0 scroll-mt-28 rounded-[var(--r-lg)] transition-shadow duration-500 data-[flash]:shadow-[0_0_0_2px_var(--accent),0_0_0_6px_var(--accent-soft)]',
-        span === 2 && 'md:col-span-2', span === 3 && 'col-span-full', !shown && 'hidden')}>
+    <motion.div id={id} data-spec={title} ref={cardRef} onFocus={onFocus}
+      // no transform while waiting: a translated card holding the scroll anchor stops the browser from keeping the view
+      // in place as demos above it mount, so the slide-up is a keyframe that exists only during the fade
+      initial={{ opacity: 0 }} animate={settled && seen ? (reduce ? { opacity: 1 } : { opacity: 1, y: [14, 0] }) : undefined}
+      transition={{ duration: reduce ? 0.2 : 0.45, ease: EASE_OUT }}
+      className={cn('group/spec min-w-0 scroll-mt-28 rounded-[var(--r-lg)] transition-shadow duration-500 [contain-intrinsic-size:auto_400px] data-[far]:[content-visibility:auto] data-[flash]:shadow-[0_0_0_2px_var(--accent),0_0_0_6px_var(--accent-soft)]',
+        // an unmounted card is never the scroll anchor: its placeholder is replaced on mount, which would leave the
+        // browser nothing to keep in place while demos above the viewport mount and change height
+        !live && '[overflow-anchor:none]', span === 2 && 'md:col-span-2', span === 3 && 'col-span-full', !shown && 'hidden')}>
       <Card className="relative flex h-full flex-col">
         <div className="flex min-w-0 items-start gap-1.5">
           <h3 className="m-0 min-w-0 flex-1 text-sm leading-snug font-semibold">{title}</h3>
@@ -296,7 +421,10 @@ export function Spec({ title, desc, children, span = 1, actions, keys, notes }:
           className="pointer-events-none absolute end-3 bottom-3 z-10 rounded-[var(--r-md)] border border-[var(--line)] bg-[var(--card)] px-2.5 py-1.5 text-xs font-medium text-[var(--fg)] no-underline opacity-0 shadow-[var(--shadow)] focus-visible:pointer-events-auto focus-visible:opacity-100 focus-visible:outline-2 focus-visible:outline-[var(--accent)]">
           {t('skipNext')} ↓
         </a>
-        <div ref={bodyRef} data-spec-body className="flex flex-1 flex-col gap-3">{children}</div>
+        <div ref={bodyRef} data-spec-body className="flex flex-1 flex-col gap-3">
+          {/* reserves about the demo's height until it mounts (typical body heights per width, measured in the showcase) */}
+          {live ? children : <div aria-hidden className={span === 3 ? 'h-[520px] md:h-[400px]' : span === 2 ? 'h-[320px] md:h-[300px]' : 'h-[220px] md:h-[260px]'} />}
+        </div>
         {notes && (
           <dl className="m-0 mt-4 grid gap-x-6 gap-y-3 border-t border-[var(--line)] pt-3 text-xs leading-relaxed sm:grid-cols-2">
             <div><dt className="mb-0.5 text-[11px] font-semibold tracking-[.06em] text-[var(--fg3)] uppercase">{t('goodAt')}</dt><dd className="m-0 text-[var(--fg2)]">{notes.good}</dd></div>
@@ -304,7 +432,7 @@ export function Spec({ title, desc, children, span = 1, actions, keys, notes }:
           </dl>
         )}
       </Card>
-    </Reveal>
+    </motion.div>
   )
 }
 

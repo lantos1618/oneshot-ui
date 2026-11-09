@@ -4,7 +4,7 @@
 > CSS variables (seven palette families, light and dark). Forms, overlays, navigation, data grid, charts, diagrams, maps,
 > media, AI chat and agent UIs. Every component is also a self-contained .tsx drop-in file.
 
-Version 0.5.0. Source: https://github.com/lantos1618/oneshot-ui. Docs: https://lantos1618.github.io/oneshot-ui/. Licence: MIT with a revenue threshold (free up to USD 200k ARR).
+Version 0.6.0. Source: https://github.com/lantos1618/oneshot-ui. Docs: https://lantos1618.github.io/oneshot-ui/. Licence: MIT with a revenue threshold (free up to USD 200k ARR).
 
 ## Use it
 
@@ -22,8 +22,8 @@ and motion. Attach the ones you need plus ui-provider.tsx; they share one UIProv
 - CLI (offline, from the installed package): `npx @lyndon/ui add data-grid dialog --dir src/components/ui`, `npx @lyndon/ui list`, `npx @lyndon/ui info data-grid`
 - shadcn CLI: `npx shadcn add https://lantos1618.github.io/oneshot-ui/r/data-grid.json` (pulls in ui-provider)
 - Index with sizes, exports and embedded components: https://lantos1618.github.io/oneshot-ui/index.json
-- The same files from npm: https://unpkg.com/@lyndon/ui@0.5.0/dist-registry/files/<name>.tsx
-- Whole library in one file (dist-single/ui-all.tsx, ~588.9k tokens): only for tools with a very large context; prefer the drop-ins
+- The same files from npm: https://unpkg.com/@lyndon/ui@0.6.0/dist-registry/files/<name>.tsx
+- Whole library in one file (dist-single/ui-all.tsx, ~589.9k tokens): only for tools with a very large context; prefer the drop-ins
 
 ## Foundation
 
@@ -100,7 +100,7 @@ Rolling number (replaces the NumberFlow web component): each digit rolls to its 
 - Exports: AnimatedNumber
 - npm: motion, react
 
-### Avatar (`avatar`, ~3.2k tokens)
+### Avatar (`avatar`, ~3.3k tokens)
 
 Avatar from @lyndon/ui.
 
@@ -291,7 +291,7 @@ Typed date and time in one field: the locale's date segments, then hour, minute 
 - Embeds: FormFieldContext
 - npm: react
 
-### Date time picker (`date-time-picker`, ~39.0k tokens)
+### Date time picker (`date-time-picker`, ~39.1k tokens)
 
 Date and time picker: a DateTimeField with a calendar button (or Alt+↓) opening the Calendar with a TimeField under it, and with `timeZonePicker` a searchable time-zone picker beside it. Same value as DateTimeField: an ISO 8601 string with the zone's offset, "2026-11-08T09:30:00+01:00". Picking another zone keeps the wall time (09:30 stays 09:30, the offset changes) and calls `onTimeZoneChange`; `timeZone` controls the zone, `defaultTimeZone` seeds it. Picking a day with no time yet sets midnight. Takes the Calendar's `weekStartsOn` and `numberOfMonths`. Form-native like DateTimeField.
 
@@ -563,7 +563,7 @@ Click (or Enter) to edit; Enter or blur saves, Escape cancels. With `helper`, a 
 - Embeds: Icon
 - npm: motion, react
 
-### Notification bell (`notification-bell`, ~16.1k tokens)
+### Notification bell (`notification-bell`, ~16.2k tokens)
 
 Bell with an unread count; shakes when new unread items arrive. The panel shows the newest `max` items, staggering them in on open; clicking one marks it read, "Mark all read" clears them in sequence.
 
@@ -620,7 +620,7 @@ Trail of links to the current page (the last item, marked aria-current). Wraps o
 - Embeds: Icon
 - npm: react
 
-### Collapsible sidebar (`collapsible-sidebar`, ~17.8k tokens)
+### Collapsible sidebar (`collapsible-sidebar`, ~17.9k tokens)
 
 Collapsible sidebar from @lyndon/ui.
 
@@ -766,7 +766,7 @@ Copies `text`. On success the icon swaps to a check and the label (or, icon-only
 - Embeds: Button, Icon, Slot, Spinner
 - npm: motion, react
 
-### Empty state (`empty-state`, ~1.9k tokens)
+### Empty state (`empty-state`, ~2.0k tokens)
 
 Centred icon, title, hint and action. The icon bobs gently (off for reduced motion or `bob={false}`).
 
@@ -875,12 +875,12 @@ JSON tree with typed colours (strings, numbers, booleans, null). Filter highligh
 - Embeds: Button, Collapse, Icon, IconButton, Slot, Spinner
 - npm: motion, react
 
-### Shortcut sheet (`shortcut-sheet`, ~15.6k tokens)
+### Shortcut sheet (`shortcut-sheet`, ~15.5k tokens)
 
 Keyboard shortcuts in titled groups (General / Navigation / Editing…). Inline by default (`columns={2}` lays groups side by side); `variant="dialog"` shows them in a dialog instead, controlled by `open` + `onOpenChange` (two columns, a Close button), and `hotkey` also toggles that dialog with ? (ignored while typing in a field).
 
 - File: https://lantos1618.github.io/oneshot-ui/files/shortcut-sheet.tsx
-- Exports: ShortcutSheet, ShortcutOverlay
+- Exports: ShortcutSheet
 - Embeds: Button, Dialog, DialogClose, DialogContent, DialogDescription, DialogFooter, DialogRoot, DialogTitle, DialogTrigger, Icon, IconButton, Kbd, ModalLayer, OverlayPortal, Slot, Spinner
 - npm: motion, react, react-dom
 
@@ -913,7 +913,7 @@ A scrolling list that renders only the items in view. Items measure themselves (
 
 ## Layout
 
-### Kanban (`kanban`, ~30.4k tokens)
+### Kanban (`kanban`, ~30.5k tokens)
 
 Board with rich cards. Drag cards between columns (drops at the pointer's position) and drag a column header to reorder columns. Keys: each card has a drag-handle button (⠿); arrows move focus between cards, Alt + arrows move the card, Alt + Shift + ← / → move its column. Columns with a `limit` turn red past it. "+ Add card" opens an inline textarea (Enter adds). On touch, press and hold a card to pick it up.
 
@@ -996,7 +996,7 @@ Markdown for model output (GFM subset: headings, emphasis, strikethrough, code, 
 - Embeds: Button, CopyButton, Icon, InlineCode, ScrollEdges, Slot, Spinner
 - npm: motion, react
 
-### Mentions input (`mentions-input`, ~27.5k tokens)
+### Mentions input (`mentions-input`, ~27.6k tokens)
 
 Message box with `@` mentions and `/` commands. Typing either opens a list at the caret; ↑ ↓ choose, Enter or Tab inserts a non-editable token, Escape closes. With the list closed, Enter sends (Shift+Enter for a new line) and an empty send wiggles. Paste and drop insert plain text only; segments come only from tokens this component inserted (lookalike markup dropped or pasted in is sent as text), with the value rebuilt from `people` / `commands` (both empty by default; the placeholder mentions @ and / only when there is something to pick).
 
@@ -1035,7 +1035,7 @@ Save bar for a form with unsaved changes: slides up inside its (relative, overfl
 
 ## Scheduling
 
-### Org chart (`org-chart`, ~15.2k tokens)
+### Org chart (`org-chart`, ~15.3k tokens)
 
 Hierarchy laid out as a tidy tree in a fixed-height canvas that scrolls inside (the page never moves). Connectors draw themselves in after every change. Click a node's count to fold its team (the badge then shows "+N" people hidden); Expand all opens everything. Wide charts open scaled to fit the width (down to 55%, then they scroll, centred); "Actual size" switches to 100%. Nodes move by transform.
 
@@ -1044,7 +1044,7 @@ Hierarchy laid out as a tidy tree in a fixed-height canvas that scrolls inside (
 - Embeds: Avatar, Button, Icon, ScrollEdges, Slot, Spinner
 - npm: motion, react
 
-### Scheduler (`scheduler`, ~32.5k tokens)
+### Scheduler (`scheduler`, ~32.6k tokens)
 
 Calendar with Day, Week, Month and Year views (plus 3-day on phones). In Day/Week, drag on empty time to create an event (then type its title), drag an event to move it (across days too) or its bottom edge to resize, all on a 15-minute snap. In Month, drag chips between days. Click any date to zoom in; ← / → and the arrows page through time. Under ~640px it opens on a 3-day view, the week swipes sideways with snap, month cells show dots, and tapping an event shows its details. On touch, press and hold to create or move (a swipe keeps scrolling); a tapped (selected) event drags straight away and shows a resize grip.
 
@@ -1140,7 +1140,7 @@ Before / after comparison: drag anywhere (or arrow keys / Home / End on the hand
 - Embeds: Badge, Icon
 - npm: motion, react
 
-### Lightbox (`lightbox`, ~15.7k tokens)
+### Lightbox (`lightbox`, ~15.8k tokens)
 
 Full-screen image viewer. Opens from (and closes back into) the thumbnail `originFor(id)` returns. Thumbnails strip, swipe to change, click / double-click / wheel / + − to zoom, drag to pan, ← / → to move, Esc to close. Touch: swipe sideways to change, pinch or double-tap to zoom, swipe down to close. Renders in the themed overlay layer with the shared scroll lock; focus is trapped while open; the chrome respects the safe areas.
 
@@ -1149,7 +1149,7 @@ Full-screen image viewer. Opens from (and closes back into) the thumbnail `origi
 - Embeds: Button, Icon, IconButton, OverlayPortal, Slot, Spinner
 - npm: motion, react, react-dom
 
-### Masonry gallery (`masonry-gallery`, ~21.1k tokens)
+### Masonry gallery (`masonry-gallery`, ~21.4k tokens)
 
 Pinterest-style masonry: each tile drops into the shortest column; columns follow the width (two on phones). On touch screens the Save button and the title overlay are always visible (no hover there). Category chips filter with a reflow, "Load more" staggers new tiles in (and says "That’s everything" when `hasMore` is false), Save toggles per tile, and clicking opens the Lightbox from the tile. The layout comes from each item's `ratio` (height / width), so the full height is reserved before any image loads and nothing below moves; tiles fade in when the gallery scrolls into view.
 
@@ -1158,7 +1158,7 @@ Pinterest-style masonry: each tile drops into the shortest column; columns follo
 - Embeds: Avatar, Button, Chip, Icon, IconButton, Lightbox, OverlayPortal, Slot, Spinner
 - npm: motion, react, react-dom
 
-### Media card (`media-card`, ~12.0k tokens)
+### Media card (`media-card`, ~12.1k tokens)
 
 Article / video card: image with a tag and duration badge, date line, title, description, author and a bookmark toggle. `loading` shows a matching skeleton; content fades up (staggered by `index`) and the card lifts on hover. The card itself is not a control (only the bookmark is); wrap the title in a link to make it open something.
 
@@ -1176,7 +1176,7 @@ Slim pill player: play, title, a thin draggable progress bar (← / → when foc
 - Embeds: Icon
 - npm: motion, react
 
-### Progressive image (`progressive-image`, ~9.4k tokens)
+### Progressive image (`progressive-image`, ~9.5k tokens)
 
 Image that blurs up: a tiny placeholder shows blurred, then the full image crossfades in. If loading fails, a fallback with Retry appears (`onRetry` lets you swap the src first).
 
@@ -1214,7 +1214,7 @@ Waveform bars from `peaks` (0..1 each). `played` (0..1) colours the bars before 
 
 ## Collaboration
 
-### Anchored comments (`anchored-comments`, ~17.8k tokens)
+### Anchored comments (`anchored-comments`, ~17.9k tokens)
 
 Comments anchored to highlighted text: the document sits on the left, threads on the right. Hovering a highlight or a thread lights up both; clicking a highlight focuses its thread's reply box. Threads take emoji reactions, replies, and Resolve (dims the anchor, toast with Undo) / Reopen.
 
@@ -1223,7 +1223,7 @@ Comments anchored to highlighted text: the document sits on the left, threads on
 - Embeds: AnimatedList, Avatar, Button, FormFieldContext, Icon, IconButton, Input, Slot, Spinner
 - npm: motion, react
 
-### Chat inbox (`chat-inbox`, ~17.2k tokens)
+### Chat inbox (`chat-inbox`, ~17.3k tokens)
 
 Three-pane chat inbox: searchable conversation list (unread counts, online dots, last-message time), the thread (day divider, bubbles, typing indicator, simulated replies) and a details pane (role, location, live local time, shared files). The thread slides on switching; a reply that lands while you are elsewhere bumps that conversation's unread count, and background threads occasionally ping. Under ~860px the details pane becomes a slide-over; under ~620px the list and thread swap.
 
@@ -1232,7 +1232,7 @@ Three-pane chat inbox: searchable conversation list (unread counts, online dots,
 - Embeds: Avatar, Badge, Button, FormFieldContext, Icon, IconButton, Input, Slot, Spinner, TypingDots
 - npm: motion, react
 
-### Comment thread (`comment-thread`, ~11.5k tokens)
+### Comment thread (`comment-thread`, ~11.6k tokens)
 
 Threaded comments with inline reply boxes.
 
@@ -1241,7 +1241,7 @@ Threaded comments with inline reply boxes.
 - Embeds: AnimatedList, Avatar, Button, Collapse, FormFieldContext, Input, Slot, Spinner
 - npm: motion, react
 
-### Live presence (`live-presence`, ~8.4k tokens)
+### Live presence (`live-presence`, ~8.5k tokens)
 
 Live presence on a mock document: collaborators' cursors drift about with name labels, your own "You" cursor follows the pointer inside the canvas, and an avatar stack ringed in each person's colour counts who's here. Cursors pause while off screen and stay put under reduced motion.
 
@@ -1298,7 +1298,7 @@ GitHub-style contribution grid in 4 levels with a Less → More legend. `values`
 - Embeds: Heatmap
 - npm: motion, react
 
-### Chart (`chart`, ~25.6k tokens)
+### Chart (`chart`, ~25.8k tokens)
 
 The cartesian chart. Mix series types freely: line <Chart data x="month" series={[{ key: 'revenue' }]} curve="monotone" /> stacked area series={[{ key: 'a', type: 'area' }, { key: 'b', type: 'area' }]} stacked grouped / stacked bars series={[{ key: 'a', type: 'bar' }, { key: 'b', type: 'bar' }]} (stacked) combo, two axes series={[{ key: 'orders', type: 'bar' }, { key: 'rate', axis: 'right', points: true }]} forecast / confidence band={{ lower: 'lo', upper: 'hi' }} plus a dashed series; nulls leave gaps histogram bars with gap={0} (1px separators) waterfall { type: 'float', from: 'start', key: 'end', connectors: true, labelOf, colorOf } candlestick { type: 'float', from: 'open', key: 'close', whisker: { low: 'low', high: 'high' }, axis: 'right' } error bars { type: 'float', from: 'floor', key: 'mean', whisker: { low: 'lo', high: 'hi', caps: true } } Hover, tap or drag a finger sideways for a crosshair and tooltip (`tooltip` replaces its body); tap outside to dismiss. Keyboard: the chart is one Tab stop; arrows, Home and End move the same crosshair and tooltip (useChartFocus). Draws in when scrolled into view.
 
@@ -1315,7 +1315,7 @@ Histogram with a kernel-density curve, mean (dashed), median and a ±1σ shaded 
 - Exports: DensityHistogram
 - npm: motion, react
 
-### Donut chart (`donut-chart`, ~12.0k tokens)
+### Donut chart (`donut-chart`, ~11.9k tokens)
 
 Share of a total. variant 'donut' (default; pie with thickness = size/2) or 'polar' (polar area: equal angles, radius by value). Hover or tap a slice or legend row to focus it (tap outside to clear). Sweeps in when scrolled into view.
 
@@ -1324,7 +1324,7 @@ Share of a total. variant 'donut' (default; pie with thickness = size/2) or 'pol
 - Embeds: AnimatedNumber
 - npm: motion, react
 
-### Forest plot (`forest-plot`, ~12.6k tokens)
+### Forest plot (`forest-plot`, ~12.5k tokens)
 
 Forest plot: effect sizes with 95% CI whiskers, squares sized by inverse-variance weight, a pooled diamond and a zero line. Rows whose interval clears 0 are coloured as significant. New rows morph in place; hover or tap a row for its numbers. Below 400px wide the right column shows the effect only (the interval stays drawn and is in the tooltip).
 
@@ -1332,7 +1332,7 @@ Forest plot: effect sizes with 95% CI whiskers, squares sized by inverse-varianc
 - Exports: ForestPlot
 - npm: motion, react
 
-### Funnel chart (`funnel-chart`, ~10.7k tokens)
+### Funnel chart (`funnel-chart`, ~10.6k tokens)
 
 Funnel with step-to-step conversion. Bars grow in when scrolled into view (a clip-path wipe from the centre, so nothing reflows); hover, tap or arrow-key a step for its share of the first step.
 
@@ -1340,7 +1340,7 @@ Funnel with step-to-step conversion. Bars grow in when scrolled into view (a cli
 - Exports: FunnelChart
 - npm: motion, react
 
-### Gauge (`gauge`, ~8.1k tokens)
+### Gauge (`gauge`, ~8.0k tokens)
 
 Half-circle gauge. The arc sweeps and the number rolls up when scrolled into view, and again whenever `value` changes. Colour comes from `color`, or from `thresholds` (fraction of the range → colour). `label` is the caption under the number.
 
@@ -1392,7 +1392,7 @@ Stat tile: label, value that rolls up when scrolled into view, and a curved area
 - Embeds: AnimatedNumber, SparkChart
 - npm: motion, react
 
-### Ticker table (`ticker-table`, ~9.2k tokens)
+### Ticker table (`ticker-table`, ~9.1k tokens)
 
 Live price table: symbol, name, sparkline with an end dot, rolling last price and a % change pill (up/down coloured). Feed it new `data` to tick. Price and change cells have a fixed width with tabular digits, so a tick never moves a column.
 
@@ -1422,7 +1422,7 @@ Streaming pipeline: particles leave each source at its event rate, pass through 
 - Embeds: AnimatedNumber, Button, FormFieldContext, MagnetBubble, MagnetMarks, Slider, Slot, Spinner
 - npm: motion, react
 
-### Gantt (`gantt`, ~30.3k tokens)
+### Gantt (`gantt`, ~30.4k tokens)
 
 Project plan. Phases collapse; drag a bar to move it, drag its right edge (or Shift + arrow keys) to change its duration, snapping to days. Dependants reschedule, and Links, Critical path, Baseline and Workload overlays toggle. Tasks with duration 0 are milestones; `milestone` (default: the last one) anchors the critical path. Thin connectors drop from each phase bar to its tasks' starts (brighter for the task under the pointer). On touch: tap a bar for its details and links, long-press it to move it, or drag the grip on its right edge to resize, so swipes over the chart still scroll. Narrow screens scroll the timeline inside the card, task names pinned.
 
@@ -1485,7 +1485,7 @@ SVG statechart: composite states, states, pseudo states (initial, final, history
 - Embeds: Icon, ScrollEdges
 - npm: motion, react
 
-### Trace waterfall (`trace-waterfall`, ~24.6k tokens)
+### Trace waterfall (`trace-waterfall`, ~25.1k tokens)
 
 Nested spans on one streaming timeline (agent runs, API requests, jobs). Plays when scrolled into view: bars grow with a cursor, the stat strip rolls (duration, cost, tokens, calls, errors) and a Live badge settles to Complete. Groups collapse. `failure` lets Simulate failure fail a span part-way and reveal its retry. Spawn connectors run from each parent bar, at the moment a child starts, down to that child's bar; hovering or tapping a span highlights its chain back to the root. Hover or tap a span for its numbers. On phones the timeline scrolls sideways with the span names pinned. `annotations` (deploys, approvals, retries; `at` in ms from the trace start) draw as dashed rules over the time grid with flags in a row of their own (reserved up front, so rows never move); flags that would overlap drop out to a dot on their rule, and `annotationStyle="rug"` shows icons instead, folding crowded ones into "+N". Hover, tap or focus a flag for its tooltip; the flag row is one Tab stop (←/→, Home/End, Escape).
 
@@ -1518,7 +1518,7 @@ World choropleth by country with a metric switch. Five-step ramp from the accent
 
 ## AI
 
-### Agent composer (`agent-composer`, ~78.7k tokens)
+### Agent composer (`agent-composer`, ~78.8k tokens)
 
 Agent composer that doubles as a control panel. A workspace beside it (`items`, `doc`) adds context (click an item, or select text and "Add to chat"; on phones it folds into a toggle and the bar shows icons only, its panels spanning the composer). Attach with +, drag and drop or paste (file chips with upload progress). Pick a permission mode, toggle connectors, choose the model with per-model speed/effort steps, and open advanced settings.
 
@@ -1579,7 +1579,7 @@ An approval prompt for an action the host wants to run: the tool, a summary, rec
 - Embeds: Badge, Button, Icon, Slot, Spinner
 - npm: motion, react
 
-### Assistant chat (`assistant-chat`, ~51.8k tokens)
+### Assistant chat (`assistant-chat`, ~51.9k tokens)
 
 Rich assistant chat. Starter chips, `/` commands with a keyboard popup, a log that stays pinned to the newest answer (with "Jump to latest" after you scroll up), Stop, and an action row (copy, thumbs up/down, regenerate).
 
@@ -1623,15 +1623,6 @@ Message box: grows with text, Enter sends (never mid IME composition), Shift+Ent
 - Embeds: AttachmentChip, Button, Icon, IconButton, PromptInput, SendButton, Slot, Spinner
 - npm: motion, react
 
-### Chat sources (`chat-sources`, ~3.5k tokens)
-
-@deprecated Use `SourceList` with `Source` items (`name` → `title`, `desc` → `domain`, `href` → `url`). Removed in 0.5.
-
-- File: https://lantos1618.github.io/oneshot-ui/files/chat-sources.tsx
-- Exports: ChatSources
-- Embeds: SourceList
-- npm: react
-
 ### Citation (`citation`, ~8.0k tokens)
 
 Inline [n] citation. Hover or focus previews the source; a tap or click pins it open (tap again, Esc or tap outside to close). The card clamps to the screen edges and flips below when there's no room above. (Built from spans, so it is valid inside a <p>; HoverCard's panel is a <div>.)
@@ -1668,7 +1659,7 @@ Inline completion: the rest of the best-matching suggestion shows in grey after 
 - Embeds: Kbd
 - npm: motion, react
 
-### Message (`message`, ~36.8k tokens)
+### Message (`message`, ~36.9k tokens)
 
 One message. A user message is a bubble on the inline end (the right in LTR, the left in RTL; its text as plain text, attachments as tiles above); an assistant message sits on the start side with a name row (`avatar`, `name`) and its MessageParts, then `actions` once it stopped streaming; a system message is a quiet centred line. Pass the same handlers (and `renderers`) as MessageParts.
 
@@ -1686,7 +1677,7 @@ The row under an answer: "Stopped" when it was cut short, Copy (`text`, read whe
 - Embeds: Button, CopyButton, Icon, IconButton, Slot, Spinner
 - npm: motion, react
 
-### Message parts (`message-parts`, ~36.1k tokens)
+### Message parts (`message-parts`, ~36.2k tokens)
 
 Renders a message's parts in order: text as Markdown (or through `renderers.text`; links through safeUrl, `[n]` is a Citation of the message's n-th source), reasoning as Reasoning, tool calls as ToolCard (approvals go to `onDecideTool`; data through `renderers.value`), files as attachment tiles, errors with a Retry (`onRetry`), and `data` parts through `renderData` (nothing by default). Sources are collected into numbered chips at the end. Model text never reaches the DOM as HTML. `renderers` (or an AiRenderersProvider above) adds code highlighting and JsonViewer: `<MessageParts message={m} renderers={AI_RICH_RENDERERS} />`.
 
@@ -1704,7 +1695,7 @@ Same prompt, several models streamed side by side at their own speeds: thinking 
 - Embeds: Button, Icon, IconButton, Slot, Spinner, TypingDots
 - npm: motion, react
 
-### Permission request (`permission-request`, ~20.2k tokens)
+### Permission request (`permission-request`, ~20.3k tokens)
 
 Ask before acting: say what, to whom, and why. Preview the payload (`recipients`, `total`, `list` and the `draft`), edit the draft, then Allow or Deny. The host does the work: `onDecide(allowed, always, draft)` gets the draft as edited, and may return a promise that settles when sending finished (false or a rejection shows "Not sent"). Pass `progress` ({ sent, total }) to show "n of 12 delivered" while it runs. With `onUndo`, a countdown ring offers Undo for `undoSeconds`; "Nothing reached the recipients" is shown only when onUndo resolves true. Every state swap animates height.
 
@@ -1722,7 +1713,7 @@ The prompt box for chats. Grows with its text up to `maxHeight`, then scrolls. E
 - Embeds: Button, Icon, IconButton, Slot, Spinner
 - npm: motion, react
 
-### Reasoning (`reasoning`, ~7.5k tokens)
+### Reasoning (`reasoning`, ~7.6k tokens)
 
 Collapsible model reasoning in the ThinkingSteps style. Open while it streams ("Thinking…" shimmers and counts), folded to "Thought for Ns" once done (click to read it again). The text is shown as plain text, never as markup.
 
@@ -1731,7 +1722,7 @@ Collapsible model reasoning in the ThinkingSteps style. Open while it streams ("
 - Embeds: Collapse, Icon, ShimmerText
 - npm: motion, react
 
-### Shimmer text (`shimmer-text`, ~643 tokens)
+### Shimmer text (`shimmer-text`, ~719 tokens)
 
 Text with a light sweeping across it. Use for in-progress labels ("Thinking…", "Reading 34 messages…").
 
@@ -1739,7 +1730,7 @@ Text with a light sweeping across it. Use for in-progress labels ("Thinking…",
 - Exports: ShimmerText
 - npm: motion, react
 
-### Source list (`source-list`, ~3.3k tokens)
+### Source list (`source-list`, ~3.4k tokens)
 
 Source chips under an answer: tile, title and domain, numbered, each a link when it has a `url`.
 
@@ -1747,7 +1738,7 @@ Source chips under an answer: tile, title and domain, numbered, each a link when
 - Exports: SourceList
 - npm: react
 
-### Sources panel (`sources-panel`, ~6.8k tokens)
+### Sources panel (`sources-panel`, ~6.9k tokens)
 
 Answer with numbered citations next to their source cards (stacked below on phones). Hovering or focusing either side highlights both; tapping or clicking a citation opens its card with a nudge (scrolling it into view) and keeps the pair highlighted; tapping a card expands it. Write `[1]` in `answer` for citation 1.
 
@@ -1764,7 +1755,7 @@ Reveals `text` word by word (useStreamedText as a component). Change `key` to re
 - Exports: StreamingText
 - npm: react
 
-### Suggested edit (`suggested-edit`, ~11.4k tokens)
+### Suggested edit (`suggested-edit`, ~11.5k tokens)
 
 Proposed rewrite. "Make it concise" shows "Rewriting…", then a word-level diff (struck deletions, green insertions, staggered in) with counts. Accept applies it with an "Applied" badge and Undo; Reject goes back.
 
@@ -1782,7 +1773,7 @@ Suggestion chips (starters, follow-ups). A group named by `label`; each chip cal
 - Embeds: Chip, Icon
 - npm: motion, react
 
-### Thinking steps (`thinking-steps`, ~10.7k tokens)
+### Thinking steps (`thinking-steps`, ~10.8k tokens)
 
 Reasoning as a vertical stepper. Static (pass `status` per step) or `autoPlay`: starts when scrolled into view, types the current step's detail and pops in its source chips while finished steps fold to one line (with their time; click one to read it again), and fills the connector. The list reserves the height of its tallest step up front, so playing never pushes the page. The header counts "Thinking… 3.2s", then reads "Thought for Xs · N steps"; click it to fold the steps away. `autoCollapse` folds them by itself when done (it changes the height, so use it where nothing sits below, e.g. the end of a chat). Change `replayKey` to run it again. Paused while off screen.
 
@@ -1791,7 +1782,7 @@ Reasoning as a vertical stepper. Static (pass `status` per step) or `autoPlay`: 
 - Embeds: Collapse, Icon, ShimmerText, StatusIcon
 - npm: motion, react
 
-### Tool call (`tool-call`, ~7.3k tokens)
+### Tool call (`tool-call`, ~7.4k tokens)
 
 Collapsible tool-call row: shimmering label and spinner while running, a check and the past tense when done. Click to see the call.
 
@@ -1800,7 +1791,7 @@ Collapsible tool-call row: shimmering label and spinner while running, a check a
 - Embeds: Collapse, Icon, ShimmerText, Spinner
 - npm: motion, react
 
-### Tool card (`tool-card`, ~11.8k tokens)
+### Tool card (`tool-card`, ~11.9k tokens)
 
 A tool call from a message: status icon, tool name and state, and (click to open) its arguments and result, as data (indented JSON, or `renderValue`, e.g. `v => <JsonViewer data={v} />`). While it awaits approval it shows an ApprovalCard; `onDecide` gets the decision (useAiChat's `decideTool`). A denied call says so and never shows a result.
 
@@ -1894,7 +1885,7 @@ Pricing table: monthly/yearly toggle (yearly saves `yearlyDiscount`), rolling pr
 - Embeds: ActiveIndicator, AnimatedNumber, Badge, Button, FormFieldContext, Icon, SegmentedControl, Slot, Spinner
 - npm: motion, react
 
-### Profile card (`profile-card`, ~17.8k tokens)
+### Profile card (`profile-card`, ~17.9k tokens)
 
 Profile card: gradient cover, avatar overlapping it, Message and Follow / Following (the compact follower count rolls), a Pro badge, bio, stats and Posts / Projects / About tabs.
 

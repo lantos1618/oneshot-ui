@@ -13,7 +13,7 @@ import * as pickers from '../../src/lib/pickers'
 import * as upload from '../../src/lib/upload'
 import * as lib from '../../src/lib'
 import * as examples from '../../src/examples'
-import { DATA_MESSAGES, ShortcutOverlay, ShortcutSheet, TaskList } from '../../src/lib/data'
+import { DATA_MESSAGES, ShortcutSheet, TaskList } from '../../src/lib/data'
 import { EDITOR_MESSAGES, RichTextEditor } from '../../src/lib/editor'
 
 const { DATE_FIELD_MESSAGES, DATE_PICKER_MESSAGES, DateTimePicker, InlineDatePicker, DateRangePicker } = pickers
@@ -36,9 +36,9 @@ describe('forms split', () => {
     expect(Object.keys(forms).sort()).toEqual([...new Set([fields, inputs, select, pickers, upload].flatMap(m => Object.keys(m)))].sort())
   })
 
-  it('InlineDatePicker now lives in pickers; ShortcutOverlay stays as an alias of ShortcutSheet', () => {
+  it('InlineDatePicker now lives in pickers; ShortcutOverlay is gone', () => {
     expect(pickers.InlineDatePicker).toBe(lib.InlineDatePicker)
-    expect(lib.ShortcutOverlay).toBe(ShortcutOverlay)
+    expect('ShortcutOverlay' in lib).toBe(false)
   })
 
   it('sample editor content is only in @lyndon/ui/examples', () => {
@@ -162,7 +162,7 @@ describe('DateTimePicker zone field and InlineDatePicker', () => {
 
 describe('ShortcutSheet', () => {
   const groups = [{ title: 'General', items: [['Search', ['⌘', 'K']]] as [string, string[]][] }]
-  it('renders inline, or as a dialog with variant="dialog"; ShortcutOverlay still works', async () => {
+  it('renders inline, or as a dialog with variant="dialog"', async () => {
     const user = userEvent.setup(), onOpenChange = vi.fn()
     const { rerender } = render(<ShortcutSheet groups={groups} />)
     expect(screen.getByRole('region', { name: 'General' })).toBeInTheDocument()
@@ -171,7 +171,5 @@ describe('ShortcutSheet', () => {
     const dialog = screen.getByRole('dialog', { name: 'Keyboard shortcuts' })
     await user.click(within(dialog).getByRole('button', { name: 'Close' }))
     expect(onOpenChange).toHaveBeenCalledWith(false)
-    rerender(<ShortcutOverlay open onOpenChange={onOpenChange} groups={groups} />)
-    expect(screen.getByRole('dialog', { name: 'Keyboard shortcuts' })).toBeInTheDocument()
   })
 })

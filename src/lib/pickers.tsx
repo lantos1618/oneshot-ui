@@ -467,8 +467,9 @@ function DatesSegments(p: DatesSegmentsProps) {
           const ph = datesPlaceholder(locale, t), sid = i === 0 && p.id ? p.id : `${uid}${t}`
           const widest = t === 'dayPeriod' ? periods.reduce((a, b) => (a.length >= b.length ? a : b)) : datesNum(locale, 0, t === 'year' ? 4 : 2)
           return (
-            <span key={k} className="relative inline-block">
-              <span aria-hidden className="invisible px-0.5 whitespace-pre tabular-nums">{text ? widest : ph}</span>
+            // each segment is a target of at least 24×24px (WCAG 2.5.8), digits centred in it
+            <span key={k} className="relative inline-block min-w-6 text-center">
+              <span aria-hidden className="invisible px-0.5 leading-6 whitespace-pre tabular-nums">{text ? widest : ph}</span>
               <input ref={el => { refs.current[i] = el; if (i === 0) formsAssignRef(p.inputRef, el) }} id={sid} role="spinbutton"
                 inputMode={t === 'dayPeriod' ? 'text' : 'numeric'} enterKeyHint="next" autoComplete="off" autoCorrect="off" spellCheck={false}
                 aria-label={datesFieldName(locale, t)} aria-labelledby={labelRef ? `${labelRef} ${sid}` : undefined}

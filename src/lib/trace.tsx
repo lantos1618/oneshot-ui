@@ -1,4 +1,4 @@
-import { Fragment, useEffect, useRef, useState, type PointerEvent as ReactPointerEvent, type ReactNode } from 'react'
+import { Fragment, useEffect, useLayoutEffect, useRef, useState, type PointerEvent as ReactPointerEvent, type ReactNode } from 'react'
 import { motion, useInView, useReducedMotion } from 'motion/react'
 import { AnimatedNumber, Badge, Button, Icon, ScrollEdges, Spinner, TOUCH, cn, defineMessages, isTouch, onMouseLeave, surface, useLocale, useMessages, useScrollEdges, useWidth, type IconName } from './core'
 import { Collapse } from './feedback'
@@ -82,7 +82,14 @@ export function TraceWaterfall({ spans, total, title, subtitle, failure, speed =
   const m = useMessages(TRACE_MESSAGES)
   /** Seconds on the plot's own scale: "1.5s" / "1,5 s" / "١٫٥ ث". */
   const secs = (v: number, d = 1) => fmt.number(v, { style: 'unit', unit: 'second', unitDisplay: 'narrow', minimumFractionDigits: d, maximumFractionDigits: d })
-  const [clock, setClock] = useState(0)
+  // The playhead advances every frame, but React renders the waterfall at most 10 times a second: the exact time lives
+  // in a ref, and each frame writes only the moving geometry (bar widths, their labels' positions, the playhead line)
+  // straight into the DOM. Rendering the whole tree every frame cost a phone (4× CPU) ~40% of its main thread.
+  const clockRef = useRef(0), [, setClockTick] = useState(0), sinceRender = useRef(0)
+  const setClock = (c: number) => { clockRef.current = c; setClockTick(x => x + 1) }
+  const clock = clockRef.current // eslint-disable-line react-hooks/refs
+  const geo = useRef(new Map<string, HTMLElement>()), headEl = useRef<HTMLDivElement>(null), drawFrame = useRef((c: number) => { void c })
+  const geoRef = (key: string) => (el: HTMLElement | null) => { if (el) geo.current.set(key, el); else geo.current.delete(key) }
   const [playing, setPlaying] = useState(false)
   const [fail, setFail] = useState(false)
   const [closed, setClosed] = useState<Set<string>>(new Set())
@@ -134,7 +141,25 @@ export function TraceWaterfall({ spans, total, title, subtitle, failure, speed =
   const D = (s: TraceSpan) => fail && s.id === failure?.span ? failure.at : s.duration
   const play = (withFail: boolean) => { setFail(withFail); if (reduce) { setClock(total); setPlaying(false) } else { setClock(0); setPlaying(true) } }
   useEffect(() => { if (inView && clock === 0 && !playing) play(false) }, [inView]) // eslint-disable-line react-hooks/exhaustive-deps
-  useFrameLoop(playing && onScreen, dt => setClock(c => { const n = c + dt * speed; if (n >= total) { setPlaying(false); return total } return n }), 0.25)
+  useFrameLoop(playing && onScreen, dt => {
+    const n = Math.min(total, clockRef.current + dt * speed)
+    clockRef.current = n
+    drawFrame.current(n)
+    if (n >= total) { setClock(total); setPlaying(false) } else if ((sinceRender.current += dt) >= 0.1) { sinceRender.current = 0; setClock(n) }
+  }, 0.25)
+  // the per-frame geometry, for the spans as rendered last (closes over the current failure mode and lane width)
+  useLayoutEffect(() => {
+    drawFrame.current = c => {
+      for (const s of spans) {
+        const bar = geo.current.get(s.id + ':bar'), label = geo.current.get(s.id + ':label')
+        if (!bar && !label) continue
+        const started = c >= s.start, w = started ? Math.min(c, s.start + D(s)) - s.start : 0, op = started ? '1' : '0'
+        if (bar) { bar.style.width = pct(w); bar.style.opacity = op }
+        if (label) { label.style.left = `calc(${pct(s.start + w)} + 10px)`; label.style.opacity = op } // rtl-lint-ignore: LTR plot
+      }
+      if (headEl.current && laneW > 0) headEl.current.style.left = `calc(var(--split) + ${(laneW * Math.min(c, total)) / total}px)` // rtl-lint-ignore: LTR plot
+    }
+  })
 
   // aggregate stats
   let cost = 0, tok = 0, llm = 0, tool = 0, errs = 0
@@ -199,11 +224,11 @@ export function TraceWaterfall({ spans, total, title, subtitle, failure, speed =
                 className={cn('pointer-events-none absolute transition-[opacity,border-color] duration-200', chain.has(c.id) ? TRACE_WIRE_ON : TRACE_WIRE,
                   part === 'elbow' ? 'top-0 h-5 w-[7px] rounded-es-[5px] border-b border-s' : 'w-0 border-s', part === 'stub' && 'top-[27px] bottom-0', part === 'through' && 'inset-y-0', part === 'stub' && !isOpen && 'opacity-0')} />
             ))}
-            <div className={cn('absolute top-[13px] h-3.5 min-w-0.5 overflow-hidden rounded-[var(--r-md)]', failed ? 'bg-[color-mix(in_srgb,var(--bad)_72%,var(--card))]' : TRACE_BAR[s.kind])}
+            <div ref={geoRef(s.id + ':bar')} className={cn('absolute top-[13px] h-3.5 min-w-0.5 overflow-hidden rounded-[var(--r-md)]', failed ? 'bg-[color-mix(in_srgb,var(--bad)_72%,var(--card))]' : TRACE_BAR[s.kind])}
               style={{ /* rtl-lint-ignore: LTR plot */ left: pct(s.start), width: pct(w), opacity: started ? 1 : 0 }}>
               {live && <span className="absolute inset-y-0 end-0 w-10 max-w-full bg-[linear-gradient(90deg,transparent,rgba(255,255,255,.55))]" />}
             </div>
-            <div className="absolute top-[11px] flex items-center gap-2 text-xs whitespace-nowrap text-[var(--fg2)]" style={{ /* rtl-lint-ignore: LTR plot */ left: `calc(${pct(s.start + w)} + 10px)`, opacity: started ? 1 : 0 }}>
+            <div ref={geoRef(s.id + ':label')} className="absolute top-[11px] flex items-center gap-2 text-xs whitespace-nowrap text-[var(--fg2)]" style={{ /* rtl-lint-ignore: LTR plot */ left: `calc(${pct(s.start + w)} + 10px)`, opacity: started ? 1 : 0 }}>
               {failed ? (
                 <span className="inline-flex items-center gap-1 font-medium text-[var(--bad)]"><Icon name="alertCircle" size={12} /><span dir={dir}>{m('failed', { time: secs(du), message: failure!.message })}</span></span>
               ) : started && (
@@ -286,7 +311,7 @@ export function TraceWaterfall({ spans, total, title, subtitle, failure, speed =
               )}
               {root && row(root)}
               {laneW > 0 && (
-                <div className="pointer-events-none absolute top-0 bottom-0 w-[1.5px] bg-[var(--accent)] opacity-80" style={{ /* rtl-lint-ignore: LTR plot */ left: `calc(var(--split) + ${(laneW * Math.min(clock, total)) / total}px)` }}>
+                <div ref={headEl} className="pointer-events-none absolute top-0 bottom-0 w-[1.5px] bg-[var(--accent)] opacity-80" style={{ /* rtl-lint-ignore: LTR plot */ left: `calc(var(--split) + ${(laneW * Math.min(clock, total)) / total}px)` }}>
                   <i className="absolute -top-1 -start-[3.5px] h-2 w-2 rounded-full bg-[var(--accent)]" />
                 </div>
               )}

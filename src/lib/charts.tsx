@@ -298,6 +298,17 @@ export const CHART_FOREST_MESSAGES = defineMessages('chart', {
 })
 
 /** The provider's locale for charts: messages, formatters, direction and the summary helpers. */
+/** A time label per locale formatter (one cached object per locale and time zone) and instant. A chart formats every x
+ * label on each render to size its axis (511 points for a long series), so the strings are kept, not re-made. */
+const chartTimeTexts = new WeakMap<object, Map<number, string>>()
+function chartTimeText(lf: { time: (d: number) => string }, ms: number) {
+  let m = chartTimeTexts.get(lf)
+  if (!m) chartTimeTexts.set(lf, m = new Map())
+  let s = m.get(ms)
+  if (s === undefined) { if (m.size > 20000) m.clear(); s = lf.time(ms); m.set(ms, s) }
+  return s
+}
+
 function useChartLocale<K extends string = never>(own?: MessageDefs<K>) {
   const { fmt, dir, locale, weekStartsOn } = useLocale(), kit = useMessages(CHART_MESSAGES), mine = useMessages<string>((own ?? CHART_MESSAGES) as MessageDefs<string>)
   // each chart carries only its own catalog plus the shared kit, so a drop-in file doesn't embed every chart's strings
@@ -660,7 +671,7 @@ export function Chart<T extends object = ChartDatum>({ data: allRows, x, series,
   }
   const X = (i: number) => (T && !banded ? linT(T[i]) : pad.l + (banded ? step * (i + 0.5) : step * i))
   const tx = (ms: number) => (banded ? pad.l + step * (fracAt(ms) + 0.5) : linT(ms))
-  const xText = (i: number) => (xFormat ? xFormat(data[i][x], i) : T ? lf.time(T[i]) : String(data[i][x] ?? ''))
+  const xText = (i: number) => (xFormat ? xFormat(data[i][x], i) : T ? chartTimeText(lf, T[i]) : String(data[i][x] ?? ''))
   // skip x labels that would collide: show every Nth (N from a tidy 1, 2, 3, 4, 5, 6, 10… set) so each one gets
   // its estimated 11px width plus a gap. Dense charts (histograms with gap={0}) rely on this.
   const labelW = maxOf(data.map((_, i) => xText(i).length), 0) * 6.6 + 10
@@ -749,7 +760,7 @@ export function Chart<T extends object = ChartDatum>({ data: allRows, x, series,
             ))}
             {L && L.ticks.map(t => <text key={t} x={pad.l - 8} y={L.Y(t)} dy="0.32em" textAnchor="end" fill="var(--fg3)">{format(t)}</text>)}
             {R && R.ticks.map(t => <text key={t} x={w - pad.r + 8} y={R.Y(t)} dy="0.32em" fill="var(--fg3)">{(rightFormat ?? format)(t)}</text>)}
-            {T && n > 1 ? timeTicks(t0, t1, iw, ms => lf.time(ms), Math.max(56, lf.time(t0).length * 6.6 + 18)).map(k => <g key={k.ms}>
+            {T && n > 1 ? timeTicks(t0, t1, iw, ms => chartTimeText(lf, ms), Math.max(56, chartTimeText(lf, t0).length * 6.6 + 18)).map(k => <g key={k.ms}>
               <line x1={tx(k.ms)} x2={tx(k.ms)} y1={pad.t} y2={pad.t + ih} stroke="var(--line)" strokeOpacity={0.6} />
               <text x={tx(k.ms)} y={height - 6} textAnchor="middle" fill="var(--fg3)">{k.label}</text>
             </g>) : data.map((_, i) => i % every === 0 && <text key={i} x={X(i)} y={height - 6} textAnchor="middle" fill="var(--fg3)">{xText(i)}</text>)}
@@ -1158,7 +1169,7 @@ export function Heatmap({ rows, cols, value, format: formatProp, cell = 18, touc
       <div ref={scroller} {...focus.props} dir="ltr"
         className="overflow-x-auto overscroll-x-contain rounded-[var(--r-sm)] outline-none focus-visible:shadow-[0_0_0_2px_var(--accent)]">
       {focus.a11y}
-      <div className="inline-grid gap-[3px] text-[11px] text-[var(--fg3)]" style={{ gridTemplateColumns: `auto repeat(${cols.length}, ${size}px)` }} onPointerLeave={onMouseLeave(() => setHover(null))}>
+      <div className="inline-grid gap-1 text-[11px] text-[var(--fg3)]" style={{ gridTemplateColumns: `auto repeat(${cols.length}, ${size}px)` }} onPointerLeave={onMouseLeave(() => setHover(null))}>
         <span className={pin} />{shown.map((c, i) => <span key={i} aria-hidden className="overflow-visible text-start whitespace-nowrap">{c}</span>)}
         {rows.map((r, ri) => [
           <span key={`r${ri}`} aria-hidden className={cn('pe-1.5', pin)} style={{ lineHeight: `${size}px` }}>{r}</span>,
@@ -1200,7 +1211,7 @@ export function CalendarHeatmap({ values, weeks = 26, end: endProp, className }:
   const wd = lf.weekdays('short') // rows from the locale's first day; every other one is labelled
   // label a column only where a new month starts
   const cols = start ? Array.from({ length: weeks }, (_, wk) => (wk === 0 || month(wk) !== month(wk - 1) ? month(wk) : '')) : []
-  const cell = Math.max(8, Math.min(14, Math.floor((w - 34) / weeks) - 3))
+  const cell = Math.max(8, Math.min(14, Math.floor((w - 34) / weeks) - 4)) // minus the Heatmap gap (gap-1)
   return (
     <div ref={ref} className={className}>
       {w > 0 && start && <Heatmap name={cm('lastWeeks', { n: weeks })} cell={cell} touchCell={20} scrollTo="end" rows={[wd[0], '', wd[2], '', wd[4], '', '']} cols={cols} value={(r, c) => values[dayKey(day(c, r))] ?? 0} shade={t => calShade(calLevel(t))}

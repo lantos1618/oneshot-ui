@@ -1,11 +1,7 @@
 {
   "desktop-dark": {},
   "desktop-light": {},
-  "iphone-13": {
-    "media": {
-      "label-content-name-mismatch": 16
-    }
-  },
+  "iphone-13": {},
   "iphone-rtl": {
     "layout": {
       "label-content-name-mismatch": 1

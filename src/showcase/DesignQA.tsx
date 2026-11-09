@@ -48,11 +48,40 @@ const qaPx = (v: string) => parseFloat(v) || 0
 const qaOnGrid = (n: number) => { const v = Math.abs(Math.round(n * 10) / 10); if (v === 0 || v === 1 || v === 1.5) return true; return v <= 12 ? v % 2 === 0 : v % 4 === 0 }
 const qaCard = (el: Element) => el.closest<HTMLElement>('[data-spec]')
 const qaVisible = (el: Element) => { const r = el.getBoundingClientRect(); return r.width > 0 && r.height > 0 && !!qaCard(el) }
+/** Visually hidden on its own: screen-reader-only text (`sr-only`: a clipped 1px box, e.g. the swimlane labels and the
+ * data grid's "Jump to rows" skip link) or a 1px invisible form proxy. Its "contrast", "clipping" and "height" are not
+ * what anyone sees, so the audit skips it and everything inside it. */
+function qaSrOnly(el: Element) {
+  const cs = getComputedStyle(el)
+  if (cs.clipPath === 'inset(50%)' || cs.clip === 'rect(0px, 0px, 0px, 0px)') return true
+  const r = el.getBoundingClientRect()
+  return (r.width <= 1 || r.height <= 1) && (cs.overflow !== 'visible' || parseFloat(cs.opacity) === 0)
+}
+/** Selectors of rules that set a negative margin only on a coarse pointer, read from the page's style sheets once per
+ * audit. The library makes touch targets bigger with transparent padding or taller controls, then pulls the extra back
+ * with a negative margin so the layout matches the mouse version (a card header's action row is `-my-[7px]` on touch
+ * around 32px buttons). That pull-back isn't a gap on the spacing scale. */
+function qaCoarsePullbacks(): string | null {
+  if (!matchMedia('(pointer: coarse)').matches) return null
+  const sels: string[] = [], neg = /(^|;)\s*margin[\w-]*\s*:\s*(-|calc\([^;]*\*\s*-)/
+  const walk = (rules: CSSRuleList, sel: string | null, coarse: boolean) => {
+    for (const r of rules) {
+      if (r instanceof CSSMediaRule) walk(r.cssRules, sel, coarse || /pointer:\s*coarse/.test(r.conditionText))
+      else if (r instanceof CSSStyleRule) { if (coarse && neg.test(r.style.cssText)) sels.push(r.selectorText); walk(r.cssRules, r.selectorText, coarse) }
+      else if ('style' in r && sel) { if (coarse && neg.test((r as CSSStyleRule).style.cssText)) sels.push(sel) } // nested declarations
+      else if ('cssRules' in r) walk((r as CSSGroupingRule).cssRules, sel, coarse) // @layer, @supports, @container
+    }
+  }
+  for (const sh of document.styleSheets) { try { walk(sh.cssRules, null, false) } catch { /* cross-origin sheet */ } }
+  const ok = sels.filter(x => { try { document.querySelector(x); return true } catch { return false } })
+  return ok.length ? ok.join(',') : null
+}
 /** A short readable name for an element: its card, then tag plus label or text. */
 function qaName(el: Element): [string, string] {
   const card = qaCard(el)?.dataset.spec ?? ''
   const label = el.getAttribute('aria-label') || el.getAttribute('role') || (el.textContent ?? '').trim().replace(/\s+/g, ' ')
-  const tag = el.tagName.toLowerCase() + (el.id && !el.id.startsWith('«') && !el.id.includes(':') ? '#' + el.id : '')
+  // generated ids (React's useId: «r1», :r1:, _r_1_) change between renders and builds: leave them out of the name
+  const tag = el.tagName.toLowerCase() + (el.id && !/^(«|_r_)/.test(el.id) && !el.id.includes(':') ? '#' + el.id : '')
   return [card, label ? `${tag} “${label.length > 18 ? label.slice(0, 17) + '…' : label}”` : tag]
 }
 
@@ -91,12 +120,27 @@ function qaOpacity(el: Element, bgAt: Element | null) {
   for (let e: Element | null = el; e && e !== bgAt && !e.hasAttribute('data-spec'); e = e.parentElement) o *= parseFloat(getComputedStyle(e).opacity)
   return o
 }
+/** True while the element or an ancestor inside its card is animating (an entry fade, a looping demo's rows fading in):
+ * its colour and opacity right now are one frame of a transition, so a contrast reading would be a snapshot (the agent
+ * transit map's rows read 2.2:1 at 33% opacity mid-fade). Re-run the audit once the page is still to judge it. */
+function qaAnimating(el: Element) {
+  for (let e: Element | null = el; e && !e.hasAttribute('data-spec'); e = e.parentElement) if (e.getAnimations().some(a => a.playState === 'running')) return true
+  return false
+}
 /** `fg` drawn at `alpha` over `bg`. */
 const qaBlend = (fg: QaRgb, bg: QaRgb, alpha: number): QaRgb => ({ r: fg.r * alpha + bg.r * (1 - alpha), g: fg.g * alpha + bg.g * (1 - alpha), b: fg.b * alpha + bg.b * (1 - alpha), a: 1 })
 
-/** Scan every visible card. Rules ported from the original page. */
-function qaAudit(): { issues: Record<QaKind, QaIssue[]>; checked: number } {
-  const els = [...document.querySelectorAll('main [data-spec] *')].filter(e => !e.closest('[data-qa-skip]') && qaVisible(e))
+/** Scan every visible card (or only the cards inside `scope`, e.g. one section). Rules ported from the original page. */
+function qaAudit(scope?: Element | null): { issues: Record<QaKind, QaIssue[]>; checked: number } {
+  const cardSel = scope ? '[data-spec]' : 'main [data-spec]', root: ParentNode = scope ?? document
+  const hidden = new Set<Element>()
+  const els = [...root.querySelectorAll(cardSel + ' *')].filter(e => {
+    if (e.closest('[data-qa-skip]') || !qaVisible(e)) return false
+    // document order: an sr-only ancestor was seen before its children
+    if (qaSrOnly(e) || (e.parentElement && hidden.has(e.parentElement))) { hidden.add(e); return false }
+    return true
+  })
+  const pullback = qaCoarsePullbacks(), checkedSet = new Set(els)
   const issues: Record<QaKind, QaIssue[]> = { spacing: [], size: [], radius: [], type: [], align: [], clip: [], contrast: [] }
   const hist = { h: new Map<number, Element[]>(), fs: new Map<number, Element[]>(), rad: new Map<number, Element[]>() }
   const add = (m: Map<number, Element[]>, k: number, el: Element) => { if (!m.has(k)) m.set(k, []); m.get(k)!.push(el) }
@@ -106,13 +150,24 @@ function qaAudit(): { issues: Record<QaKind, QaIssue[]>; checked: number } {
     // 1. spacing on a 4px scale (2px steps allowed up to 12px)
     const flexy = cs.display.includes('flex') || cs.display.includes('grid')
     const autoMargin = el.matches('.mt-auto,.mb-auto,.my-auto,.m-auto')
+    const coarsePull = !!pullback && el.matches(pullback)
+    // padding hidden under the background (`bg-clip-content`, e.g. a comment highlight on touch) is only hit area
+    const clearPad = cs.backgroundClip === 'content-box' && cs.borderTopWidth === '0px'
     for (const p of ['paddingTop', 'paddingRight', 'paddingBottom', 'paddingLeft', 'marginTop', 'marginBottom', 'rowGap', 'columnGap'] as const) {
       const v = qaPx(cs[p])
       if (p.startsWith('margin') && autoMargin) continue // an auto margin (pushing to the end of a flex column) isn't a spacing value
+      if (p.startsWith('margin') && (cs.position === 'absolute' || cs.position === 'fixed')) continue // an offset (centring an 18px thumb with -9px), not a gap: nothing flows next to it
+      // touch hit areas: padding cancelled by an equal negative margin on the same side (tag chips' 5.5px, sliders'
+      // 13px) changes neither the look nor the layout, only what a finger can hit; see also qaCoarsePullbacks
+      const side = p.replace(/^(padding|margin)/, '') as 'Top' | 'Right' | 'Bottom' | 'Left'
+      if (/^(padding|margin)/.test(p) && qaPx(cs[`padding${side}`]) > 0 && Math.abs(qaPx(cs[`padding${side}`]) + qaPx(cs[`margin${side}`])) < 0.25) continue
+      if (p.startsWith('margin') && v < 0 && coarsePull) continue
+      if (p.startsWith('padding') && clearPad) continue
       if (v && !qaOnGrid(v) && !(p.endsWith('Gap') && !flexy)) issues.spacing.push({ el, msg: `${p.replace(/([A-Z])/g, '-$1').toLowerCase()} ${v}px`, val: v })
     }
     // 2. control heights, font sizes and radii: collected, judged by rarity below
-    if (el.matches('button:not([role=switch]):not([role=checkbox]):not([role=radio]):not([role=tab]),input:not([type=checkbox]):not([type=radio]):not([type=range]):not([type=color]),select')) add(hist.h, Math.round(r.height), el)
+    // (a button taller than 64px is a tile or drop zone sized by its content, e.g. a masonry photo, not a control height)
+    if (r.height <= 64 && el.matches('button:not([role=switch]):not([role=checkbox]):not([role=radio]):not([role=tab]),input:not([type=checkbox]):not([type=radio]):not([type=range]):not([type=color]),select')) add(hist.h, Math.round(r.height), el)
     const hasText = [...el.childNodes].some(n => n.nodeType === 3 && n.textContent!.trim())
     if (hasText) {
       add(hist.fs, qaPx(cs.fontSize), el)
@@ -122,7 +177,7 @@ function qaAudit(): { issues: Record<QaKind, QaIssue[]>; checked: number } {
       if (fg && bgOf && alpha > 0.1 && !el.closest('[disabled],[aria-disabled="true"],[aria-hidden="true"],[inert]')) {
         const a = qaLum(qaBlend(fg, bgOf.c, alpha)), b = qaLum(bgOf.c), ratio = (Math.max(a, b) + 0.05) / (Math.min(a, b) + 0.05)
         const fs = qaPx(cs.fontSize), big = fs >= 18 || (fs >= 14 && +cs.fontWeight >= 700)
-        if (ratio < (big ? 3 : 4.5)) issues.contrast.push({ el, msg: `${ratio.toFixed(2)}:1 at ${fs}px${alpha < 0.99 ? `, ${Math.round(alpha * 100)}% opacity` : ''}`, val: ratio })
+        if (ratio < (big ? 3 : 4.5) && !qaAnimating(el)) issues.contrast.push({ el, msg: `${ratio.toFixed(2)}:1 at ${fs}px${alpha < 0.99 ? `, ${Math.round(alpha * 100)}% opacity` : ''}`, val: ratio })
       }
     }
     const rad = qaPx(cs.borderTopLeftRadius)
@@ -141,10 +196,13 @@ function qaAudit(): { issues: Record<QaKind, QaIssue[]>; checked: number } {
     }
   }
   // 6. near-miss left edges inside each card (1 to 3px apart looks like a mistake)
-  document.querySelectorAll<HTMLElement>('main [data-spec]').forEach(sp => {
+  root.querySelectorAll<HTMLElement>(cardSel).forEach(sp => {
     const base = sp.getBoundingClientRect().left
     if (!sp.getBoundingClientRect().width) return
-    const edges = [...sp.querySelectorAll('h3,p,label,input,select,textarea,button,[data-spec-body] > *')].filter(e => !e.closest('[data-qa-skip]') && qaVisible(e))
+    // Only edges meant to line up: items in a row (a wrapping flex row of buttons) or inline in text (a citation chip in
+    // a sentence) sit wherever the content before them ends, so two of them landing 1 to 3px apart is chance.
+    const flows = (e: Element) => getComputedStyle(e).display.startsWith('inline') || (p => !!p && getComputedStyle(p).display.includes('flex') && getComputedStyle(p).flexDirection.startsWith('row'))(e.parentElement)
+    const edges = [...sp.querySelectorAll('h3,p,label,input,select,textarea,button,[data-spec-body] > *')].filter(e => !e.closest('[data-qa-skip]') && checkedSet.has(e) && !flows(e))
       .map(e => ({ e, x: Math.round((e.getBoundingClientRect().left - base) * 2) / 2 }))
     for (const a of edges) {
       const near = edges.find(b => b !== a && Math.abs(b.x - a.x) >= 1 && Math.abs(b.x - a.x) <= 3 && a.e.parentElement === b.e.parentElement)
@@ -156,7 +214,7 @@ function qaAudit(): { issues: Record<QaKind, QaIssue[]>; checked: number } {
     const total = [...m.values()].reduce((a, v) => a + v.length, 0)
     for (const [k, arr] of m) if (arr.length <= 2 && arr.length / total < 0.02 && !allow(k)) arr.forEach(el => list.push({ el, msg: `${label} ${k}px (used ${arr.length}×)`, val: k }))
   }
-  rare(hist.h, issues.size, 'height', k => [28, 30, 32, 36, 40, 44].includes(k))
+  rare(hist.h, issues.size, 'height', k => [24, 28, 30, 32, 36, 40, 44].includes(k)) // 24 and 30: Button xs and sm
   rare(hist.fs, issues.type, 'font-size', k => [10, 11, 12, 13, 14, 15, 16, 17, 18, 20, 22, 24, 26, 28, 36, 40, 44].includes(k))
   rare(hist.rad, issues.radius, 'radius', k => k >= 18 || [2, 3, 4, 5, 6, 7, 8, 9, 10, 12, 13, 14, 16].includes(k))
   // one row per element and message
@@ -177,6 +235,25 @@ const QA_GROUPS: [QaKind, string, string, string][] = [
   ['contrast', 'Low contrast', 'bg-[var(--bad)]', 'text below WCAG AA'],
 ]
 const QA_TONE = { ok: 'ok', warn: 'warn', bad: 'bad' } as const
+
+/** How the panel colours each rule: red rules are the ones the e2e check (tests/e2e/design-qa.spec.ts) gates on. */
+export const QA_SEVERITY: Record<QaKind, 'red' | 'amber' | 'orange'> = { spacing: 'amber', size: 'amber', type: 'orange', radius: 'orange', align: 'red', clip: 'red', contrast: 'red' }
+/** One audit finding as plain data (for scripts and the e2e check). */
+export type QaFinding = { rule: QaKind; severity: 'red' | 'amber' | 'orange'; card: string; el: string; msg: string; val: number; tag: string }
+/** Run the audit over one section (by id) or the whole page and return plain findings. Also on `window.__designQA`. */
+function qaReport(section?: string): { checked: number; findings: QaFinding[] } {
+  const scope = section ? document.getElementById(section) : null
+  if (section && !scope) throw new Error(`Design QA: no section #${section}`)
+  const { issues, checked } = qaAudit(scope)
+  const findings = (Object.keys(issues) as QaKind[]).flatMap(rule => issues[rule].map(i => {
+    const [card, el] = qaName(i.el)
+    return { rule, severity: QA_SEVERITY[rule], card, el, msg: i.msg, val: Math.round(i.val * 100) / 100, tag: i.el.outerHTML.slice(0, i.el.outerHTML.indexOf('>') + 1).slice(0, 220) }
+  }))
+  return { checked, findings }
+}
+/** The live layout-shift (CLS) figures the panel shows, as plain data. */
+const qaClsReport = () => ({ score: qaCls.score, sum: qaCls.sum, count: qaCls.count, unsupported: qaCls.unsupported,
+  sources: [...qaCls.sources.values()].sort((a, b) => b.total - a.total).map(s => ({ name: s.name, total: s.total, count: s.count, tags: Object.fromEntries(s.tags) })) })
 
 /* Overlay drawing (imperative: it follows the pointer every frame) ──────────── */
 
@@ -375,6 +452,8 @@ export function DesignQA() {
   const runId = useRef(0)
 
   useEffect(() => { qaStartCls() }, [])
+  // scripted access for the e2e check and for `scripts/design-qa.mjs`: window.__designQA.audit('inputs')
+  useEffect(() => { (window as unknown as { __designQA?: object }).__designQA = { audit: qaReport, cls: qaClsReport } }, [])
   useEffect(() => { qaFlashHost = flashRef.current; return () => { qaFlashHost = null } })
 
   // ⇧D toggles the panel; with it open, M / G / O toggle the tools and Esc leaves measure mode

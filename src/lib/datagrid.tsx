@@ -372,7 +372,7 @@ function GridFilterBuilder({ tree, onChange, schema, fields, defaultField, count
         ))}
       </AnimatePresence>
       <button onClick={() => { const c = newCond(); setFocusNew(c.id); set({ ...ref.current, c: [...ref.current.c, c] }) }}
-        className="h-7 cursor-pointer rounded-[var(--r-md)] border border-dashed border-[var(--line2)] bg-transparent px-2.5 text-xs font-medium text-[var(--fg2)] hover:border-[var(--fg3)] hover:text-[var(--fg)] [@media(pointer:coarse)]:h-9 [@media(pointer:coarse)]:px-3.5">{tm('addFilter')}</button>
+        className="h-7 cursor-pointer rounded-[var(--r-md)] border border-dashed border-[var(--line2)] bg-transparent px-2.5 text-xs font-medium text-[var(--fg2)] hover:border-[var(--fg3)] hover:text-[var(--fg)] [@media(pointer:coarse)]:h-9 [@media(pointer:coarse)]:px-3">{tm('addFilter')}</button>
     </>
   ) : (
     <>

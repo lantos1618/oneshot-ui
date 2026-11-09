@@ -325,9 +325,10 @@ function JsonNode({ k, v, path, last, ctx }: { k: string | number | null; v: unk
   const hit = k !== null && !!ctx.q && String(k).toLowerCase().includes(ctx.q)
   const key = k !== null && (
     <><button data-jv-path={path} data-hit={hit || undefined} onClick={() => ctx.copy(path)} title={ctx.t('copyPath', { path })}
-      className={cn('cursor-pointer rounded-[var(--r-sm)] border-0 p-0 font-[inherit] text-[var(--accent)] hover:bg-[var(--accent-soft)] [@media(pointer:coarse)]:min-h-8 [@media(pointer:coarse)]:min-w-8 [@media(pointer:coarse)]:text-start', hit ? 'bg-[var(--warn-soft)]' : 'bg-transparent')}>
+      className={cn('min-w-6 cursor-pointer rounded-[var(--r-sm)] border-0 p-0 font-[inherit] text-[var(--accent)] hover:bg-[var(--accent-soft)] [@media(pointer:coarse)]:min-h-8 [@media(pointer:coarse)]:min-w-8 [@media(pointer:coarse)]:text-start', typeof k === 'number' ? 'text-end' : 'text-start', hit ? 'bg-[var(--warn-soft)]' : 'bg-transparent')}>
       {typeof k === 'number' ? k : `"${k}"`}</button><span className="text-[var(--fg2)]">: </span></>
   )
+  // keys and toggles are at least 24×24px (WCAG 2.5.8): rows are 24px tall (leading-6 on the box), index keys right-align
   const row = 'flex items-baseline whitespace-pre'
   const pad = <span className="w-[18px] flex-none [@media(pointer:coarse)]:w-7" />
   if (!isObj) return <div className={row}>{pad}{key}<JsonValue v={v} />{!last && <span className="text-[var(--fg3)]">,</span>}</div>
@@ -336,7 +337,7 @@ function JsonNode({ k, v, path, last, ctx }: { k: string | number | null; v: unk
     <div>
       <div className={row}>
         <button onClick={() => ctx.toggle(path)} aria-expanded={open} aria-label={ctx.t(open ? 'collapseNode' : 'expandNode', { path: path || ctx.t('root') })}
-          className="me-1 grid w-[14px] flex-none cursor-pointer place-items-center self-center border-0 bg-transparent p-0 text-[var(--fg3)] [@media(pointer:coarse)]:-ms-2 [@media(pointer:coarse)]:h-8 [@media(pointer:coarse)]:w-8">
+          className="-ms-1.5 grid h-6 w-6 flex-none cursor-pointer place-items-center self-center border-0 bg-transparent p-0 text-[var(--fg3)] [@media(pointer:coarse)]:-ms-2 [@media(pointer:coarse)]:me-1 [@media(pointer:coarse)]:h-8 [@media(pointer:coarse)]:w-8">
           <motion.span initial={false} animate={{ rotate: open ? 0 : -90 }} transition={{ duration: 0.15 }} className="grid"><Icon name="chevronDown" size={10} strokeWidth={2.5} /></motion.span>
         </button>
         {key}<span className="text-[var(--fg2)]">{arr ? '[' : '{'}</span>
@@ -408,7 +409,7 @@ export function JsonViewer({ data, defaultCollapsed = [], onCopyPath, maxHeight 
       </div>
       {/* touch: 32px rows so every key and toggle is a finger-sized target; the box scrolls both ways */}
       {/* JSON is code: the tree reads left to right in every locale */}
-      <div ref={box} dir="ltr" className="overflow-auto overscroll-x-contain rounded-[var(--r-md)] border border-[var(--line)] bg-[color-mix(in_srgb,var(--muted)_35%,var(--card))] px-2.5 py-2 font-[family-name:var(--mono)] text-xs leading-[1.75] [@media(pointer:coarse)]:text-[13px] [@media(pointer:coarse)]:leading-8" style={{ maxHeight }}>
+      <div ref={box} dir="ltr" className="overflow-auto overscroll-x-contain rounded-[var(--r-md)] border border-[var(--line)] bg-[color-mix(in_srgb,var(--muted)_35%,var(--card))] px-2.5 py-2 font-[family-name:var(--mono)] text-xs leading-6 [@media(pointer:coarse)]:text-[13px] [@media(pointer:coarse)]:leading-8" style={{ maxHeight }}>
 
         {/* as wide as the widest row, so long keys and values scroll with the box instead of being clipped by a branch */}
         <div className="w-max min-w-full"><JsonNode k={null} v={safe} path="" last ctx={ctx} /></div>
@@ -458,10 +459,3 @@ export function ShortcutSheet({ groups, columns, className, variant = 'inline', 
   )
 }
 
-/**
- * All shortcuts in a dialog. Pass `hotkey` to also toggle it with ? (ignored while typing in a field).
- * @deprecated Use `<ShortcutSheet variant="dialog" open onOpenChange groups />`; this name goes in 0.5.
- */
-export function ShortcutOverlay(props: { open: boolean; onOpenChange: (v: boolean) => void; groups: ShortcutGroup[]; hotkey?: boolean; className?: string }) {
-  return <ShortcutSheet {...props} variant="dialog" />
-}

@@ -51,28 +51,67 @@ export function mediaImage(kind: MediaArtKind, w: number, h: number, seed: numbe
   return url
 }
 
-/** Synthesises a short arpeggio track as a WAV blob URL, plus normalised waveform peaks. */
-export function mediaSynthTrack(seconds = 24, bpm = 92, sr = 22050): { url: string; peaks: number[] } {
+/** The synthesis as steps of roughly 15 ms each (desktop), so it can be spread over tasks (`mediaSynthTrackAsync`). */
+function* mediaSynthSteps(seconds: number, bpm: number, sr: number): Generator<void, { url: string; peaks: number[] }> {
   const N = Math.floor(sr * seconds), out = new Float32Array(N), beat = 60 / bpm / 2
+  // Each note: env = min(1, t / 0.02) · e^(−2.2t) (· e^t for a swell) over three partials. ~4M samples, so no Math.exp or
+  // Math.sin per sample: the decay is one multiply and each partial a phasor turned by a fixed angle (same samples to
+  // ~1e-8, about 8× faster; it was a ~1 s main-thread task on a phone).
   const tone = (f: number, dur: number, amp: number, s0: number, swell?: boolean) => {
-    const n = Math.floor(sr * dur)
-    for (let k = 0; k < n && s0 + k < N; k++) { const t = k / sr; let env = Math.min(1, t / 0.02) * Math.exp(-t * 2.2); if (swell) env *= Math.exp(t); out[s0 + k] += amp * env * (Math.sin(6.2832 * f * t) + 0.35 * Math.sin(12.566 * f * t) + 0.12 * Math.sin(18.85 * f * t)) }
+    const n = Math.min(Math.floor(sr * dur), N - s0), att = sr * 0.02, decay = Math.exp(-(swell ? 1.2 : 2.2) / sr)
+    const w1 = 6.2832 * f / sr, w2 = 12.566 * f / sr, w3 = 18.85 * f / sr
+    const c1 = Math.cos(w1), s1 = Math.sin(w1), c2 = Math.cos(w2), s2 = Math.sin(w2), c3 = Math.cos(w3), s3 = Math.sin(w3)
+    let e = amp, x1 = 1, y1 = 0, x2 = 1, y2 = 0, x3 = 1, y3 = 0, r = 0
+    for (let k = 0; k < n; k++) {
+      out[s0 + k] += (k < att ? k / att : 1) * e * (y1 + 0.35 * y2 + 0.12 * y3)
+      e *= decay
+      r = x1 * c1 - y1 * s1; y1 = x1 * s1 + y1 * c1; x1 = r
+      r = x2 * c2 - y2 * s2; y2 = x2 * s2 + y2 * c2; x2 = r
+      r = x3 * c3 - y3 * s3; y3 = x3 * s3 + y3 * c3; x3 = r
+    }
   }
   const CH = [[220, 277.18, 329.63, 440], [196, 246.94, 293.66, 392], [174.61, 220, 261.63, 349.23], [196, 246.94, 293.66, 392]], PAT = [0, 2, 1, 3, 2, 1, 3, 2]
   for (let i = 0; i < Math.floor(seconds / beat); i++) {
     const ch = CH[Math.floor(i / 8) % 4], f = ch[PAT[i % 8]] * (i % 16 > 11 ? 2 : 1), s0 = Math.floor(i * beat * sr); tone(f, 1.6, 0.16, s0)
     if (i % 8 === 0) ch.slice(0, 3).forEach(f2 => tone(f2 / 2, beat * 8, 0.07, s0, true))
+    if (i % 8 === 7) yield
   }
+  yield
   for (const [dly, g] of [[0.27, 0.35], [0.53, 0.2]]) { const d = Math.floor(sr * dly), copy = out.slice(0, N - d); for (let k = 0; k < copy.length; k++) out[k + d] += g * copy[k] }
   const fade = Math.floor(sr * 1.5); for (let k = 0; k < fade; k++) out[N - fade + k] *= 1 - k / fade
-  let mx = 0; for (let k = 0; k < N; k++) mx = Math.max(mx, Math.abs(out[k])); const norm = 1 / (mx * 1.15)
+  let mx = 0; for (let k = 0; k < N; k++) { const a = out[k] < 0 ? -out[k] : out[k]; if (a > mx) mx = a } const norm = 1 / (mx * 1.15)
   const buf = new ArrayBuffer(44 + N * 2), v = new DataView(buf), w = (o: number, str: string) => [...str].forEach((c, k) => v.setUint8(o + k, c.charCodeAt(0)))
   w(0, 'RIFF'); v.setUint32(4, 36 + N * 2, true); w(8, 'WAVEfmt '); v.setUint32(16, 16, true); v.setUint16(20, 1, true); v.setUint16(22, 1, true); v.setUint32(24, sr, true); v.setUint32(28, sr * 2, true); v.setUint16(32, 2, true); v.setUint16(34, 16, true); w(36, 'data'); v.setUint32(40, N * 2, true)
-  for (let k = 0; k < N; k++) v.setInt16(44 + k * 2, Math.max(-1, Math.min(1, out[k] * norm)) * 32767, true)
+  // 16-bit little-endian samples: a typed-array view where the platform is little-endian (all current ones), else DataView
+  const pcm = new Uint8Array(new Uint16Array([1]).buffer)[0] === 1 ? new Int16Array(buf, 44, N) : null
+  yield
+  for (let k = 0; k < N; k++) {
+    const x = out[k] * norm, q = (x > 1 ? 1 : x < -1 ? -1 : x) * 32767
+    if (pcm) pcm[k] = q; else v.setInt16(44 + k * 2, q, true)
+  }
+  yield
   const bars = 96, seg = Math.floor(N / bars), peaks: number[] = []
-  for (let b = 0; b < bars; b++) { let sum = 0; for (let k = b * seg; k < (b + 1) * seg; k++) sum += (out[k] * norm) ** 2; peaks.push(Math.sqrt(sum / seg)) }
+  for (let b = 0; b < bars; b++) { let sum = 0; for (let k = b * seg; k < (b + 1) * seg; k++) { const x = out[k] * norm; sum += x * x } peaks.push(Math.sqrt(sum / seg)) }
   let pm = 0; for (const p of peaks) if (p > pm) pm = p
   return { url: URL.createObjectURL(new Blob([buf], { type: 'audio/wav' })), peaks: peaks.map(p => Math.round(p / pm * 100) / 100) }
+}
+
+/** Synthesises a short arpeggio track as a WAV blob URL, plus normalised waveform peaks. */
+export function mediaSynthTrack(seconds = 24, bpm = 92, sr = 22050): { url: string; peaks: number[] } {
+  const steps = mediaSynthSteps(seconds, bpm, sr)
+  for (;;) { const r = steps.next(); if (r.done) return r.value }
+}
+
+/** mediaSynthTrack spread over many short tasks (a macrotask between steps), so making the track never blocks input or
+ * frames for long; resolves with the same track. */
+export function mediaSynthTrackAsync(seconds = 24, bpm = 92, sr = 22050): Promise<{ url: string; peaks: number[] }> {
+  const steps = mediaSynthSteps(seconds, bpm, sr)
+  return new Promise((resolve, reject) => {
+    const step = () => {
+      try { const r = steps.next(); if (r.done) resolve(r.value); else setTimeout(step, 0) } catch (e) { reject(e) }
+    }
+    setTimeout(step, 0)
+  })
 }
 
 let mediaVideoCache: { poster: string; ready: Promise<string | null>; setActive: (on: boolean) => void } | null = null
@@ -125,7 +164,7 @@ export function mediaRecordVideo(seconds = 8, w = 640, h = 360) {
         if (active) control.run()
       }
       if (!ctx) return begin(null)
-      fetch(mediaSynthTrack(seconds, 100).url).then(r => r.arrayBuffer()).then(b => ctx!.decodeAudioData(b)).then(begin, () => begin(null))
+      mediaSynthTrackAsync(seconds, 100).then(t => fetch(t.url)).then(r => r.arrayBuffer()).then(b => ctx!.decodeAudioData(b)).then(begin, () => begin(null))
     }
   })
   const setActive = (on: boolean) => {

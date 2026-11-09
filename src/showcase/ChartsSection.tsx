@@ -1,6 +1,7 @@
-import { useEffect, useMemo, useState, type ReactNode } from 'react'
+import { useEffect, useLayoutEffect, useMemo, useRef, useState, type ReactNode } from 'react'
+import { motion, useReducedMotion } from 'motion/react'
 import {
-  BarList, BoxViolinChart, BulletChart, Button, CalendarHeatmap, Chart, TagGlyph, DensityHistogram, DonutChart, ForestPlot, FunnelChart, Gauge, Heatmap, RadarChart, RegressionChart, ScatterChart, SegmentedControl, Slider, SparkChart, SparkTile, Switch, TOUCH, TickerTable, Treemap, dayKey, useLocale, useViewport, type ChartDatum, type TickerRow, type TimeTag, type TimeTagKind, type TimeTagStyle,
+  BarList, BoxViolinChart, BulletChart, Button, CalendarHeatmap, Chart, TagGlyph, DensityHistogram, DonutChart, ForestPlot, FunnelChart, Gauge, Heatmap, RadarChart, RegressionChart, ScatterChart, SegmentedControl, Slider, SparkChart, SparkTile, Switch, TOUCH, Tabs, TickerTable, Treemap, cn, dayKey, useLocale, useViewport, type ChartDatum, type TickerRow, type TimeTag, type TimeTagStyle,
 } from '../lib'
 import { TAGS_EVENT_KINDS, TAGS_KINDS, describeSample, tagsDay, type TagsDayVariant } from '../examples'
 import { Row, Section, Spec, SpecAction } from './kit'
@@ -282,57 +283,89 @@ function ChartsTreemapDemo() {
   )
 }
 
-/* ── Tags over time: the same workday drawn five ways plus 'auto', with one Light day / Busy day switch for all ── */
+/* ── Tags over time: one workday drawn six ways, one tab each (only the open tab's chart is mounted), with one Light day / Busy day switch for all ── */
 const TAGS_POSTURE_SPAN_KINDS = TAGS_KINDS.filter(k => ['slouching', 'moving', 'lying', 'lunch'].includes(k.kind))
-const TAGS_CARDS: { style: TimeTagStyle; title: string; desc: string; spans?: boolean; good: string; breaks: string }[] = [
-  { style: 'pins', title: 'A · Pins on the line', desc: 'Each tag sits on the curve where it happened, stacking when they collide (as in glucose apps and stock-chart news bubbles).',
-    good: 'Cause and effect at a glance: the 💧 sits right where the line steps up. Friendly and easy to read.',
-    breaks: 'A busy day piles pins on the line. Stacks get tall fast and the rest fold into “+N”.' },
-  { style: 'rug', title: 'B · Icon rug under the axis', desc: 'Tags in a strip under the time axis, a row per collision (as in event strips under activity charts).',
-    good: 'Keeps the line clean. Icons stay big enough to tap, and it is easy to scan for “when did I smoke?”.',
-    breaks: 'Your eye travels down to match an icon to the line. Clusters need rows, then “+N more”.' },
-  { style: 'flags', title: 'C · Vertical rules with flags', desc: 'A dashed rule per tag, labelled with a flag (as in Grafana point annotations and Datadog event overlays).',
-    good: 'Precise: you see exactly what the line did before and after each tag.',
-    breaks: 'Feels like a monitoring tool. A busy day turns into a barcode and most flags drop out.' },
-  { style: 'dots', spans: true, title: 'D · Shaded bands for durations', desc: 'Spans (lunch, moving, lying down, slouch spells) shaded behind the line, with a thin cap; point tags as dots.',
-    good: 'The right shape for things that last. It explains the flat and sagging parts of the line instantly.',
-    breaks: 'Only works for spans. Point tags still need dots, so it pairs with another style.' },
-  { style: 'rollup', title: 'G · Rolled-up counts', desc: 'Count chips per time bin, the bin size picked from the width (as in zoomed-out event rollups).',
-    good: 'Never clutters, however much you log. “💧 × 3, 14:00 to 14:30” is honest and readable.',
-    breaks: 'Loses exact times until you hover. Bins are arbitrary: best as the zoomed-out view of A or B.' },
-  { style: 'auto', title: 'Auto · Picks by width and density', desc: 'Pins while they fit in two rows, the rug while it fits in three, rollups after that. Room for all three is reserved (reserve="max"), so the plot never moves: drag the width or switch the day.',
+/** The legend under the chart: point kinds, plus the span kinds where spans are shaded. */
+const TAGS_POINT_KINDS = TAGS_EVENT_KINDS.filter(k => k.kind !== 'lunch'), TAGS_SPAN_LEGEND = [...TAGS_POINT_KINDS, ...TAGS_POSTURE_SPAN_KINDS]
+const TAGS_TABS: { style: TimeTagStyle; label: string; name: string; desc: string; spans?: boolean; good: string; breaks: string }[] = [
+  { style: 'auto', label: 'Auto', name: 'picked by width and density', desc: 'Pins while they fit in two rows, the rug while it fits in three, rollups after that. Room for all three is reserved (reserve="max"), so the plot never moves: drag the width or switch the day.',
     good: 'One setting for phone and desktop. With reserve="max" switching never moves the plot, which suits live data.',
     breaks: 'The view changes with width and data, so phone and desktop look different. The reserved room is empty on a light day (the default, reserve="current", eases the height instead).' },
+  { style: 'pins', label: 'Pins', name: 'pins on the line', desc: 'Each tag sits on the curve where it happened, stacking when they collide (as in glucose apps and stock-chart news bubbles).',
+    good: 'Cause and effect at a glance: the 💧 sits right where the line steps up. Friendly and easy to read.',
+    breaks: 'A busy day piles pins on the line. Stacks get tall fast and the rest fold into “+N”.' },
+  { style: 'rug', label: 'Rug', name: 'icon rug under the axis', desc: 'Tags in a strip under the time axis, a row per collision (as in event strips under activity charts).',
+    good: 'Keeps the line clean. Icons stay big enough to tap, and it is easy to scan for “when did I smoke?”.',
+    breaks: 'Your eye travels down to match an icon to the line. Clusters need rows, then “+N more”.' },
+  { style: 'flags', label: 'Flags', name: 'vertical rules with flags', desc: 'A dashed rule per tag, labelled with a flag (as in Grafana point annotations and Datadog event overlays).',
+    good: 'Precise: you see exactly what the line did before and after each tag.',
+    breaks: 'Feels like a monitoring tool. A busy day turns into a barcode and most flags drop out.' },
+  { style: 'dots', spans: true, label: 'Bands', name: 'shaded bands for durations', desc: 'Spans (lunch, moving, lying down, slouch spells) shaded behind the line, with a thin cap; point tags as dots.',
+    good: 'The right shape for things that last. It explains the flat and sagging parts of the line instantly.',
+    breaks: 'Only works for spans. Point tags still need dots, so it pairs with another style.' },
+  { style: 'rollup', label: 'Counts', name: 'rolled-up counts', desc: 'Count chips per time bin, the bin size picked from the width (as in zoomed-out event rollups).',
+    good: 'Never clutters, however much you log. “💧 × 3, 14:00 to 14:30” is honest and readable.',
+    breaks: 'Loses exact times until you hover. Bins are arbitrary: best as the zoomed-out view of Pins or Rug.' },
 ]
 
-/** The "Tags over time" cards: one shared day switch (in every card's header) drives all six charts. */
-function ChartsTagsOverTime() {
-  const [variant, setVariant] = useState<TagsDayVariant>('light')
-  const day = tagsDay(variant)
-  const day$ = <SegmentedControl aria-label="Day" size="sm" value={variant} onChange={v => setVariant(v as TagsDayVariant)} options={[{ value: 'light', label: 'Light day' }, { value: 'busy', label: 'Busy day' }]} />
-  return <>{TAGS_CARDS.map(c => <ChartsTagsCard key={c.style} card={c} tags={day.tags} points={day.points} actions={day$} />)}</>
+/** 220 ms ease-out: a height change that starts with a tab or day switch ends inside the 0.5 s input window. */
+const CHARTS_AUTOH_EASE = { duration: 0.22, ease: [0.22, 1, 0.36, 1] } as const
+/**
+ * Height follows the content (instant under reduced motion), so a tab or day switch eases the card instead
+ * of jumping. Like the library's AutoHeight, but a short tween (done within 0.5 s of the tap, so it never counts as a layout
+ * shift, where a spring's tail would) and it clips only while it moves: chart tooltips and focus rings stay visible.
+ */
+function ChartsAutoHeight({ children, className }: { children: ReactNode; className?: string }) {
+  const inner = useRef<HTMLDivElement>(null), reduce = useReducedMotion()
+  const [h, setH] = useState<number | 'auto'>('auto'), [moving, setMoving] = useState(false)
+  useLayoutEffect(() => {
+    const el = inner.current; if (!el) return
+    const ro = new ResizeObserver(() => setH(el.offsetHeight)); ro.observe(el)
+    return () => ro.disconnect()
+  }, [])
+  return (
+    <motion.div initial={false} animate={{ height: h }} transition={reduce ? { duration: 0 } : CHARTS_AUTOH_EASE}
+      onAnimationStart={() => setMoving(true)} onAnimationComplete={() => setMoving(false)} className={cn(moving && 'overflow-hidden', className)}>
+      <div ref={inner}>{children}</div>
+    </motion.div>
+  )
 }
 
-function ChartsTagsCard({ card, tags, points, actions }: { card: (typeof TAGS_CARDS)[number]; tags: TimeTag[]; points: ChartDatum[]; actions: ReactNode }) {
+/** "Tags over time": the same day in six annotation styles, one tab each. The day switch, the width and the selection are shared across tabs. */
+function ChartsTagsOverTime() {
   const { fmt } = useLocale()
-  const [picked, setPicked] = useState<TimeTag | null>(null)
+  const [variant, setVariant] = useState<TagsDayVariant>('light')
+  const [style, setStyle] = useState<string>('auto')
   const [width, setWidth] = useState(100)
-  const shown = card.spans ? tags : tags.filter(t => t.end === undefined)
-  const kinds: TimeTagKind[] = card.spans ? [...TAGS_EVENT_KINDS.filter(k => k.kind !== 'lunch'), ...TAGS_POSTURE_SPAN_KINDS] : TAGS_EVENT_KINDS.filter(k => k.kind !== 'lunch')
+  const [picked, setPicked] = useState<TimeTag | null>(null)
+  const day = tagsDay(variant)
+  const tab = TAGS_TABS.find(t => t.style === style) ?? TAGS_TABS[0]
   return (
-    <Spec title={card.title} desc={card.desc} span={3} actions={actions} notes={{ good: card.good, breaks: card.breaks }}
-      keys={card.style === 'auto' || card.style === 'pins' ? [[['Tab'], 'series, then tags'], [['←', '→'], 'step'], [['↵'], 'select'], [['Esc'], 'clear']] : undefined}>
-      {card.style === 'auto' && <Slider label="Width" min={35} max={100} value={width} onChange={setWidth} format={v => `${v}%`} className="max-w-xs" />}
-      <div style={{ width: `${width}%` }}>
-        <Chart data={points} x="t" height={220} legend={false} label={`Points, ${card.title.split(' · ')[1].toLowerCase()}`}
-          series={[{ key: 'points', label: 'Points', type: 'area', color: 'var(--c4)' }]}
-          annotations={{ tags: shown, kinds: TAGS_KINDS, style: card.style, spans: card.spans ? 'bands' : 'none', onSelect: setPicked, reserve: card.style === 'auto' ? 'max' : 'current' }} />
-      </div>
-      <div className="flex flex-wrap items-center gap-x-3 gap-y-1 text-xs text-[var(--fg2)]">
-        {kinds.map(k => <span key={k.kind} className="inline-flex items-center gap-1"><TagGlyph icon={k.icon} color={k.color} size={16} aria-hidden />{k.label}</span>)}
-        <span className="flex-1" />
-        <span aria-live="polite" className="text-[var(--fg3)]">{picked ? `Selected: ${picked.label}, ${fmt.time(+picked.at)}` : ''}</span>
-      </div>
+    <Spec title="Tags over time" span={3} desc="One workday with logged tags, drawn six ways. Pick a view; the day switch applies to all of them."
+      actions={<SegmentedControl aria-label="Day" size="sm" value={variant} onChange={v => setVariant(v as TagsDayVariant)} options={[{ value: 'light', label: 'Light day' }, { value: 'busy', label: 'Busy day' }]} />}
+      notes={{ good: <ChartsAutoHeight>{tab.good}</ChartsAutoHeight>, breaks: <ChartsAutoHeight>{tab.breaks}</ChartsAutoHeight> }}
+      keys={[[['Tab'], 'view, series, tags'], [['←', '→'], 'step'], [['↵'], 'select'], [['Esc'], 'clear']]}>
+      <Tabs.Root value={style} onValueChange={v => { setStyle(v); setPicked(null) }}>
+        <Tabs.List aria-label="Annotation style">{TAGS_TABS.map(t => <Tabs.Trigger key={t.style} value={t.style}>{t.label}</Tabs.Trigger>)}</Tabs.List>
+        {/* each view takes its own height; switching (a tap or a key, so not a layout shift) eases the card to it */}
+        <ChartsAutoHeight>
+        <p className="m-0 mt-2 text-xs leading-snug text-[var(--fg3)]">{tab.desc}</p>
+        {TAGS_TABS.map(t => (
+          <Tabs.Content key={t.style} value={t.style} className="flex flex-col gap-3">
+            {t.style === 'auto' && <Slider label="Width" min={35} max={100} value={width} onChange={setWidth} format={v => `${v}%`} className="max-w-xs" />}
+            <div style={t.style === 'auto' ? { width: `${width}%` } : undefined}>
+              <Chart data={day.points} x="t" height={220} legend={false} label={`Points, ${t.name}`}
+                series={[{ key: 'points', label: 'Points', type: 'area', color: 'var(--c4)' }]}
+                annotations={{ tags: t.spans ? day.tags : day.tags.filter(g => g.end === undefined), kinds: TAGS_KINDS, style: t.style, spans: t.spans ? 'bands' : 'none', onSelect: setPicked, reserve: t.style === 'auto' ? 'max' : 'current' }} />
+            </div>
+            <div className="flex flex-wrap items-center gap-x-3 gap-y-1 text-xs text-[var(--fg2)]">
+              {(t.spans ? TAGS_SPAN_LEGEND : TAGS_POINT_KINDS).map(k => <span key={k.kind} className="inline-flex items-center gap-1"><TagGlyph icon={k.icon} color={k.color} size={16} aria-hidden />{k.label}</span>)}
+            </div>
+          </Tabs.Content>
+        ))}
+        </ChartsAutoHeight>
+      </Tabs.Root>
+      <span aria-live="polite" className="-mt-1 min-h-[1lh] text-xs text-[var(--fg3)]">{picked ? `Selected: ${picked.label}, ${fmt.time(+picked.at)}` : ''}</span>
     </Spec>
   )
 }

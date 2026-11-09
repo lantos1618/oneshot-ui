@@ -801,7 +801,7 @@ function MdBlockNode({ block: b, caret }: { block: MdBlock; caret?: MdCaretKey }
     }
     case 'paragraph': return <p dir="auto" className="m-0">{mdRenderInline(b.children)}{caret ? <MdCaret key={caret} /> : null}</p>
     case 'code': return <MdCode text={b.text} lang={b.lang} open={!!b.open} />
-    case 'quote': return <blockquote dir="auto" className="m-0 border-s-2 border-[var(--line2)] ps-3.5 text-[var(--fg2)] [&>*+*]:mt-2"><MdBlocksView blocks={b.children} caret={caret} /></blockquote> // rtl-lint-ignore: a block type, not an icon
+    case 'quote': return <blockquote dir="auto" className="m-0 border-s-2 border-[var(--line2)] ps-3 text-[var(--fg2)] [&>*+*]:mt-2"><MdBlocksView blocks={b.children} caret={caret} /></blockquote> // rtl-lint-ignore: a block type, not an icon
     case 'list': {
       const L = b.ordered ? 'ol' : 'ul'
       return (

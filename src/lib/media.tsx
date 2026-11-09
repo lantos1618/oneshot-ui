@@ -51,19 +51,19 @@ export const MEDIA_MESSAGES = defineMessages('media', {
 /** Lightbox, MasonryGallery, MediaCard and ProgressiveImage (namespace 'media'). */
 export const MEDIA_GALLERY_MESSAGES = defineMessages('media', {
   en: {
-    imageViewer: 'Image viewer', counter: '{i} / {n}', openBy: 'Open {title} by {author}', save: 'Save', saved: 'Saved', saveTitle: 'Save {title}',
+    imageViewer: 'Image viewer', counter: '{i} / {n}', openBy: 'Open {title}, {count, plural, one {# like} other {# likes}}, by {author}', save: 'Save', saved: 'Saved', saveTitle: 'Save {title}',
     unsaveTitle: 'Unsave {title}', filter: 'Filter by category', all: 'All', gallery: 'Gallery', savedToBoard: 'Saved to board',
     loadMore: 'Load more', everything: 'That’s everything', bookmark: 'Bookmark', bookmarkTitle: 'Bookmark {title}',
     imageFailed: 'Image couldn’t load',
   },
   de: {
-    imageViewer: 'Bildbetrachter', counter: '{i} / {n}', openBy: '{title} von {author} öffnen', save: 'Merken', saved: 'Gemerkt',
+    imageViewer: 'Bildbetrachter', counter: '{i} / {n}', openBy: '{title}, {count, plural, one {# Like} other {# Likes}}, von {author} öffnen', save: 'Merken', saved: 'Gemerkt',
     saveTitle: '{title} merken', unsaveTitle: '{title} nicht mehr merken', filter: 'Nach Kategorie filtern', all: 'Alle', gallery: 'Galerie',
     savedToBoard: 'Auf der Pinnwand gespeichert', loadMore: 'Mehr laden', everything: 'Das ist alles', bookmark: 'Lesezeichen',
     bookmarkTitle: 'Lesezeichen für {title}', imageFailed: 'Bild konnte nicht geladen werden',
   },
   ar: {
-    imageViewer: 'عارض الصور', counter: '{i} / {n}', openBy: 'فتح {title} بواسطة {author}', save: 'حفظ', saved: 'محفوظ', saveTitle: 'حفظ {title}',
+    imageViewer: 'عارض الصور', counter: '{i} / {n}', openBy: 'فتح {title}، {count, plural, zero {لا إعجابات} one {إعجاب واحد} two {إعجابان} few {# إعجابات} many {# إعجابًا} other {# إعجاب}}، بواسطة {author}', save: 'حفظ', saved: 'محفوظ', saveTitle: 'حفظ {title}',
     unsaveTitle: 'إلغاء حفظ {title}', filter: 'التصفية حسب الفئة', all: 'الكل', gallery: 'المعرض', savedToBoard: 'حُفظ في اللوحة',
     loadMore: 'تحميل المزيد', everything: 'هذا كل شيء', bookmark: 'إشارة مرجعية', bookmarkTitle: 'إضافة {title} إلى الإشارات المرجعية',
     imageFailed: 'تعذّر تحميل الصورة',
@@ -587,7 +587,7 @@ export function VoiceNote({ track: shared, src, peaks, duration = 0, bars = 34, 
       </div>
       <span className="ui-num flex-none text-[11px] opacity-80">{fmt.clock(s.time || d)}</span>
       <button type="button" aria-label={m('speedLabel', { n: s.rate })} onClick={() => track.setRate(VOICE_SPEEDS[(VOICE_SPEEDS.indexOf(s.rate) + 1) % VOICE_SPEEDS.length])}
-        className="h-5 flex-none cursor-pointer rounded-full border-0 bg-[color-mix(in_srgb,var(--on-primary)_16%,transparent)] px-1.5 font-[family-name:var(--mono)] text-[11px] font-semibold text-inherit [@media(pointer:coarse)]:h-8 [@media(pointer:coarse)]:min-w-9 [@media(pointer:coarse)]:text-[11px]">
+        className="h-6 flex-none cursor-pointer rounded-full border-0 bg-[color-mix(in_srgb,var(--on-primary)_16%,transparent)] px-1.5 font-[family-name:var(--mono)] text-[11px] font-semibold text-inherit [@media(pointer:coarse)]:h-8 [@media(pointer:coarse)]:min-w-9 [@media(pointer:coarse)]:text-[11px]">
         <motion.span key={s.rate} className="inline-block" initial={{ scale: 0.8 }} animate={{ scale: 1 }} transition={spring(0.5, 0.3)}>{m('speed', { n: s.rate })}</motion.span>
       </button>
     </div>
@@ -758,7 +758,9 @@ function MasonryTile({ it, x: x0, y, width, imgH, delay, saved, onSave, onOpen, 
       transition={entered ? spring(0.15, 0.55) : { duration: 0.45, delay, ease: [0.22, 1, 0.36, 1] }} onAnimationComplete={() => setEntered(true)}
       className="group absolute top-0 start-0" style={{ width }}>
       <div className="relative overflow-hidden rounded-[var(--r-lg)] bg-[var(--muted)] has-[button:focus-visible]:shadow-[0_0_0_2px_var(--accent)]" style={{ height: imgH }}>
-        <button type="button" onClick={onOpen} aria-label={m('openBy', { title: it.title, author: it.author })} className="absolute inset-0 block cursor-zoom-in border-0 bg-transparent p-0 outline-none">
+        {/* the name includes the like count: on touch the caption (title and ♥ count) is always visible, and a spoken
+            command should match what's on screen (WCAG 2.5.3) */}
+        <button type="button" onClick={onOpen} aria-label={m('openBy', { title: it.title, author: it.author, count: it.likes })} className="absolute inset-0 block cursor-zoom-in border-0 bg-transparent p-0 outline-none">
           <img ref={imgRef} src={safeMediaUrl(it.src) || undefined} alt="" draggable={false} width={Math.round(width)} height={Math.round(imgH)} decoding="async" className="block h-full w-full object-cover transition-transform duration-500 ease-[cubic-bezier(.22,1,.36,1)] group-hover:scale-[1.04]" />
           <span aria-hidden className="absolute inset-0 flex items-end justify-between gap-2 bg-gradient-to-b from-transparent from-55% to-black/55 p-2.5 text-xs font-medium text-white opacity-0 transition-opacity group-hover:opacity-100 group-focus-within:opacity-100 [@media(pointer:coarse)]:opacity-100 max-sm:p-2">
             <span className="min-w-0 truncate">{it.title}</span><span className="flex-none">♥ {fmt.number(it.likes)}</span>
@@ -1066,7 +1068,7 @@ export function Carousel({ slides, aspect = '16/8', className }: { slides: { con
       <div className="-mt-1.5 flex justify-center">
         {slides.map((_, k) => (
           <button key={k} type="button" aria-label={m('goTo', { n: k + 1 })} aria-current={k === i} onClick={() => go(k)}
-            className="group/dot grid h-6 min-w-6 cursor-pointer place-items-center rounded-full border-0 bg-transparent px-[3px] outline-none focus-visible:shadow-[0_0_0_2px_var(--accent)] [@media(pointer:coarse)]:h-8 [@media(pointer:coarse)]:min-w-8">
+            className="group/dot grid h-6 min-w-6 cursor-pointer place-items-center rounded-full border-0 bg-transparent px-1 outline-none focus-visible:shadow-[0_0_0_2px_var(--accent)] [@media(pointer:coarse)]:h-8 [@media(pointer:coarse)]:min-w-8">
             <motion.span initial={false} animate={{ width: k === i ? 22 : 7 }} transition={spring(0.2, 0.35)}
               className={cn('block h-[7px] rounded-[var(--r-sm)] transition-colors', k === i ? 'bg-[var(--primary)]' : 'bg-[var(--line2)] group-hover/dot:bg-[var(--fg3)]')} />
           </button>

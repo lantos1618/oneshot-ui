@@ -476,7 +476,7 @@ export function ChatInbox({ conversations, replies = INBOX_REPLIES, simulateInco
           {typing[c.id] && <InboxTyping key="typing" name={c.name.split(' ')[0]} />}
         </AnimatePresence>
       </motion.div>
-      <form onSubmit={e => { e.preventDefault(); send() }} className="m-2.5 flex flex-none items-center gap-1.5 rounded-full border border-[var(--line)] bg-[var(--card)] py-1 pe-1 ps-3.5 focus-within:border-[var(--fg3)]">
+      <form onSubmit={e => { e.preventDefault(); send() }} className="m-2.5 flex flex-none items-center gap-1.5 rounded-full border border-[var(--line)] bg-[var(--card)] py-1 pe-1 ps-4 focus-within:border-[var(--fg3)]">
         <input ref={composer} value={draft} onChange={e => setDraft(e.target.value)} placeholder={m('writeMessage')} aria-label={m('message')}
           className={cn('h-7 min-w-0 flex-1 border-0 bg-transparent text-[13px] text-[var(--fg)] outline-none placeholder:text-[var(--fg3)] [@media(pointer:coarse)]:h-9', TOUCH.input)} />
         <motion.button type="submit" aria-label={ct('common.send')} disabled={!draft.trim()} whileTap={{ scale: 0.9 }}

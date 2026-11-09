@@ -64,14 +64,17 @@ const aiAround = (s: string): [string, string] => { const i = s.indexOf(AI_SLOT)
 export function ShimmerText({ children, active = true, className }: { children: ReactNode; active?: boolean; className?: string }) {
   const ref = useRef<HTMLSpanElement>(null)
   const onScreen = useInView(ref) // the sweep is a per-frame animation: only run it while visible
-  if (!active) return <span className={className}>{children}</span>
+  // one element in every state (switching between a span and a motion.span remounted the text, and everything inside
+  // it, on each render of the parent), and the sweep is a native animation: no script per frame
+  useEffect(() => {
+    const el = ref.current
+    if (!active || !onScreen || !el?.animate) return
+    const a = el.animate([{ backgroundPosition: '100% 0' }, { backgroundPosition: '-100% 0' }], { duration: 1600, easing: 'linear', iterations: Infinity })
+    return () => a.cancel()
+  }, [active, onScreen])
+  if (!active) return <span ref={ref} className={className}>{children}</span>
   const cls = cn('bg-[linear-gradient(90deg,var(--fg3)_0%,var(--fg)_40%,var(--fg3)_80%)] bg-[length:200%_100%] bg-clip-text text-transparent', className)
-  if (!onScreen) return <span ref={ref} className={cls} style={{ backgroundPosition: '100% 0' }}>{children}</span>
-  return (
-    <motion.span ref={ref} className={cls} initial={{ backgroundPosition: '100% 0' }} animate={{ backgroundPosition: '-100% 0' }} transition={{ duration: 1.6, ease: 'linear', repeat: Infinity }}>
-      {children}
-    </motion.span>
-  )
+  return <span ref={ref} className={cls} style={{ backgroundPosition: '100% 0' }}>{children}</span>
 }
 
 /**
@@ -744,7 +747,8 @@ export const AI_SOURCE_MESSAGES = defineMessages('aiSource', {
 const aiHost = (url: string) => { try { return new URL(url).hostname || url } catch { return url } }
 /** A source's short label: its `domain`, else its URL's host. */
 export const sourceDomain = (s: Source) => s.domain ?? (s.url ? aiHost(s.url) : '')
-/** A source's tile: its letter on its colour, darkened by `shade` % black so white text reads on any colour. */
+/** A source's tile: its letter on its colour, darkened to `shade` % (the rest black) so white text reads on any colour:
+ * at most about 62 keeps 11px white text at 4.5:1 or more, also on the dark theme's lighter accent. */
 function AiSourceTile({ s, shade, className }: { s: Source; shade: number; className: string }) {
   return <span className={cn('grid flex-none place-items-center text-[11px] font-bold text-white [@media(pointer:coarse)]:text-[11px]', className)}
     style={{ background: `color-mix(in srgb, ${safeColor(s.color, 'var(--accent)')} ${shade}%, #000)` }}>{s.letter ?? s.title[0]}</span>
@@ -757,7 +761,7 @@ export function SourceList({ sources, className }: { sources: Source[]; classNam
     <div className={cn('flex flex-wrap gap-1.5', className)}>
       {sources.map((s, i) => (
         <a key={i + s.title} href={safeUrl(s.url ?? '#ai')} target={s.url && /^https?:/i.test(safeUrl(s.url)) ? '_blank' : undefined} rel="noopener noreferrer" className={cn(surface.md, 'flex items-center gap-2 py-1.5 pe-2.5 ps-1.5 text-xs text-[var(--fg)] no-underline hover:border-[var(--fg3)]')}>
-          <AiSourceTile s={s} shade={80} className="h-[22px] w-[22px] rounded-[var(--r-md)]" />
+          <AiSourceTile s={s} shade={62} className="h-[22px] w-[22px] rounded-[var(--r-md)]" />
           <span><b dir="auto" className="block font-medium">{s.title}</b><span dir="ltr" className="text-[var(--fg3)]">{sourceDomain(s)}</span></span>
           <span className="ms-1 font-[family-name:var(--mono)] text-[11px] font-semibold text-[var(--fg3)] [@media(pointer:coarse)]:text-[11px]">{fmt.number(i + 1)}</span>
         </a>
@@ -858,7 +862,7 @@ export function GhostTextInput({ suggestions, suggest, placeholder, value, defau
       </motion.div>
       <span className="flex min-h-6 items-center text-xs text-[var(--fg3)]" aria-live="polite">{rest
         ? <button type="button" onMouseDown={e => e.preventDefault()} onClick={accept}
-            className="-mx-1.5 inline-flex min-w-0 cursor-pointer items-center gap-1.5 rounded-[var(--r-md)] border-0 bg-transparent px-1.5 py-0.5 text-start text-xs text-[var(--fg3)] hover:bg-[var(--muted)] hover:text-[var(--fg)] [@media(pointer:coarse)]:min-h-9 [@media(pointer:coarse)]:bg-[var(--muted)] [@media(pointer:coarse)]:text-[var(--fg2)]">
+            className="-mx-1.5 inline-flex min-h-6 min-w-0 cursor-pointer items-center gap-1.5 rounded-[var(--r-md)] border-0 bg-transparent px-1.5 text-start text-xs text-[var(--fg3)] hover:bg-[var(--muted)] hover:text-[var(--fg)] [@media(pointer:coarse)]:min-h-9 [@media(pointer:coarse)]:bg-[var(--muted)] [@media(pointer:coarse)]:text-[var(--fg2)]">
             <span className="[@media(pointer:coarse)]:hidden">{(([a, b]) => <>{a}<Kbd>{AI_TAB}</Kbd>{b}</>)(aiAround(t('pressTab', { key: AI_SLOT })))}</span>
             <span className="hidden min-w-0 truncate [@media(pointer:coarse)]:inline">{t('tapAccept')} <b className="font-medium text-[var(--fg)]">{full}</b></span>
           </button>
@@ -1012,7 +1016,7 @@ export function VoiceInput({ transcript = '', listening: lc, onListeningChange, 
             </Button>
           </motion.span>
         </span>
-        <Waveform peaks={listening ? AI_VOICE_BARS : AI_VOICE_FLAT} live={listening} played={listening ? 1 : 0} tone="ink" barWidth={3} minHeight={12.5} intro={false} className="h-8 min-w-0 flex-1 gap-[3px] overflow-hidden" />
+        <Waveform peaks={listening ? AI_VOICE_BARS : AI_VOICE_FLAT} live={listening} played={listening ? 1 : 0} tone="ink" barWidth={3} minHeight={12.5} intro={false} className="h-8 min-w-0 flex-1 gap-1 overflow-hidden" />
       </div>
       <div className="min-h-[20px] text-[13px]" aria-live="polite">
         {listening ? <span className="text-[var(--fg3)]">{heard ? <>{words.slice(0, heard).join(' ')}<span className="ui-caret" /></> : t('listening')}</span>
@@ -1025,8 +1029,6 @@ export function VoiceInput({ transcript = '', listening: lc, onListeningChange, 
 
 /* Sources panel ──────────────────────────────────────────────────────────── */
 
-/** @deprecated Use `Source` (the same fields, all but `title` optional). Removed in 0.5. */
-export type SourceCard = Source
 /**
  * Answer with numbered citations next to their source cards (stacked below on phones). Hovering or focusing either
  * side highlights both; tapping or clicking a citation opens its card with a nudge (scrolling it into view) and keeps

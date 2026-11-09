@@ -76,12 +76,15 @@ try {
     expect('ThemeScript reads ui-theme:v1 and validates css', src.includes('"ui-theme:v1"') && src.includes('"ui-theme"') && src.includes('R.test'), src.slice(0, 120))
   }
   const dir = join(root, 'src/showcase')
+  // card bodies mount lazily in the browser; render them eagerly here so every component is server-rendered
+  const { SpecEagerContext } = await vite.ssrLoadModule('/src/showcase/kit.tsx')
+  const eager = el => h(SpecEagerContext.Provider, { value: true }, el)
   for (const f of readdirSync(dir).filter(f => f.endsWith('Section.tsx')).sort()) {
     const mod = await vite.ssrLoadModule(`/src/showcase/${f}`).catch(e => ({ __loadError: e }))
     if (mod.__loadError) { results.push({ name: f, ok: false, error: `import failed: ${mod.__loadError.message}`, warnings: [] }); continue }
-    for (const [name, C] of Object.entries(mod)) if (/Section$/.test(name) && typeof C === 'function') await check(name, () => h(lib.UIProvider, null, h(C)))
+    for (const [name, C] of Object.entries(mod)) if (/Section$/.test(name) && typeof C === 'function') await check(name, () => h(lib.UIProvider, null, eager(h(C))))
   }
-  await check('Showcase (whole page)', async () => h((await vite.ssrLoadModule('/src/showcase/index.tsx')).default))
+  await check('Showcase (whole page)', async () => eager(h((await vite.ssrLoadModule('/src/showcase/index.tsx')).default)))
   // right to left: the whole page in Arabic carries dir="rtl" and lang="ar-EG" on its .ui-root (in the server HTML)
   {
     const Showcase = (await vite.ssrLoadModule('/src/showcase/index.tsx')).default

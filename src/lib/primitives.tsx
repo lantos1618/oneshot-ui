@@ -306,6 +306,11 @@ export function Skeleton({ className }: { className?: string }) {
   return <div ref={pause.ref} style={pause.style} className={cn('ui-shimmer rounded-[var(--r-md)] bg-[var(--muted)]', className)} />
 }
 
+/** Initials are about 36% of the avatar, snapped to the type scale (a 34px avatar gets 12px, not 12.24px); small
+ * avatars round to whole pixels. */
+const AV_TYPE = [11, 12, 13, 14, 16, 18, 20, 24, 28, 32, 36, 40]
+const avFont = (size: number) => size < 28 ? Math.round(size * 0.36)
+  : AV_TYPE.reduce((a, b) => Math.abs(b - size * 0.36) < Math.abs(a - size * 0.36) ? b : a)
 const AV_COLORS = ['#DBEAFE:#1E40AF', '#FCE7F3:#9D174D', '#DCFCE7:#166534', '#FEF3C7:#92400E', '#EDE9FE:#5B21B6', '#E0F2FE:#075985']
 
 export function Avatar({ name, src, size = 32, status, className }:
@@ -314,7 +319,7 @@ export function Avatar({ name, src, size = 32, status, className }:
   const [bg, fg] = AV_COLORS[[...name].reduce((a, c) => a + c.charCodeAt(0), 0) % AV_COLORS.length].split(':')
   return (
     <span className={cn('relative inline-grid flex-none place-items-center rounded-full border-2 border-[var(--card)] font-semibold', className)}
-      style={{ width: size, height: size, fontSize: size >= 28 ? Math.max(11, size * 0.36) : size * 0.36, background: bg, color: fg }} title={name}>
+      style={{ width: size, height: size, fontSize: avFont(size), background: bg, color: fg }} title={name}>
       {img ? <img src={img} alt={name} className="h-full w-full rounded-full object-cover" /> : initials}
       {status && <span className={cn('absolute -end-0.5 -bottom-0.5 h-2.5 w-2.5 rounded-full border-2 border-[var(--card)]',
         status === 'online' ? 'bg-[var(--ok)]' : status === 'away' ? 'bg-[var(--warn)]' : 'bg-[var(--line2)]')} />}

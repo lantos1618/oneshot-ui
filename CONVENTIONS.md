@@ -122,12 +122,22 @@ Test with Playwright device emulation: `devices['iPhone 13']` (390px, touch) and
   `E2E_BASE_URL=http://localhost:5173 pnpm test:e2e` uses the dev server instead (a test that sees a hot reload
   skips itself). Every section on desktop light, desktop dark and iPhone 13 must log no console errors, stay inside
   its layout-shift budget, add no axe violations beyond the baseline, and (phone) not make the page scroll sideways.
-  `--project desktop-light` or `-g "section charts"` narrows a run.
+  `--project desktop-light` or `-g "section charts"` narrows a run (it also matches the Design QA test of that section).
 - **axe baseline:** `tests/e2e/axe-baseline.json` holds today's known violations (profile → section → rule → node
   count). A test fails only on a new rule or a higher count. After fixing violations run
   `pnpm test:e2e:update-baseline` (accepts the same filters) and commit the smaller file; never raise a count to make
   a new violation pass.
 - **Budgets:** `tests/e2e/budgets.ts`: the CLS budget (0.05 per section), per-section overrides with a reason, and
   tolerated console errors. Remove an override when the fix lands.
+- **Run Design QA before shipping a change** to a component or a showcase card. On the page: ⇧D (or the ruler button),
+  then Run audit, on desktop and in the browser's iPhone emulation. Red groups (misalignment, clipped content, low
+  contrast) are bugs; amber and orange ones (off-grid spacing, one-off sizes) are worth a look. As a test,
+  `pnpm test:e2e design-qa` (`tests/e2e/design-qa.spec.ts`) runs the audit per section on desktop-light, iphone-13
+  and iphone-rtl. It fails on a red finding beyond `tests/e2e/design-qa-baseline.json` (profile → section → rule →
+  count) or on a CLS meter rated Poor. Add `E2E_BASE_URL=http://localhost:5173` to use the dev server, and
+  `--project iphone-13` or `-g "design qa: section forms"` to narrow the run. CI runs it as part of `pnpm test:e2e`.
+  `pnpm test:e2e:update-baseline design-qa` rewrites the baseline; run it only after a fix, never to let a new
+  finding pass. If a finding is the tool's mistake, fix the rule in `src/showcase/DesignQA.tsx` with a comment
+  saying why. Scripts can call `window.__designQA.audit('forms')`.
 - **Before a PR:** `pnpm check` (types, tests' types, build, single files, SSR, unit tests), `pnpm test:pack` after a
-  build, and `pnpm test:e2e`. CI runs the same (README, "CI").
+  build, and `pnpm test:e2e` (which includes Design QA). CI runs the same (README, "CI").

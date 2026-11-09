@@ -113,11 +113,6 @@ export function ChatCard({ title, sub, badge, children, className }: { title?: R
   )
 }
 
-/** @deprecated Use `SourceList` with `Source` items (`name` → `title`, `desc` → `domain`, `href` → `url`). Removed in 0.5. */
-export function ChatSources({ items, className }: { items: { name: string; desc: string; color?: string; href?: string }[]; className?: string }) {
-  return <SourceList className={className} sources={items.map(s => ({ title: s.name, domain: s.desc, color: s.color, url: s.href }))} />
-}
-
 /** Checklist answer: tick items off; the count updates and confetti fires when everything is done. */
 export function ChatChecklist({ title, items, className }: { title: string; items: { label: string; note: string; tone?: Tone }[]; className?: string }) {
   const [done, setDone] = useState<boolean[]>(items.map(() => false))

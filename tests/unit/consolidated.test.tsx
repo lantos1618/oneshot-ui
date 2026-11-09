@@ -7,7 +7,7 @@ import * as lib from '../../src/lib'
 import { UIProvider } from '../../src/lib/provider'
 import { AutoHeight, Collapse, ToastProvider } from '../../src/lib/feedback'
 import { Citation, PromptInput, SourceList, SourcesPanel, sourceDomain } from '../../src/lib/ai'
-import { AgentComposer, ChatSources } from '../../src/lib/aichat'
+import { AgentComposer } from '../../src/lib/aichat'
 import { StateMachine } from '../../src/lib/statechart'
 import { AgentTransitMap } from '../../src/lib/aiagent'
 import { Globe, WorldMap, loadWorldMap } from '../../src/lib/geo'
@@ -45,15 +45,13 @@ describe('sources', () => {
     expect(sourceDomain({ title: 'A', domain: 'Slack', url: 'https://x.dev' })).toBe('Slack')
     expect(sourceDomain({ title: 'A' })).toBe('')
   })
-  it('SourceList links each source; ChatSources is an alias with the old item shape', () => {
+  it('SourceList links each source and neutralises unsafe URLs', () => {
     const { container, unmount } = render(<SourceList sources={[{ title: 'Docs', url: 'https://docs.example.com/a' }, { title: 'Bad', url: 'javascript:alert(1)' }]} />)
     const links = within(container).getAllByRole('link')
     expect(links[0]).toHaveAttribute('href', 'https://docs.example.com/a')
     expect(links[0]).toHaveTextContent('docs.example.com')
     expect(links[1].getAttribute('href')).not.toMatch(/^javascript:/i)
     unmount()
-    render(<ChatSources items={[{ name: 'Linear', desc: 'Weekly digest' }]} />)
-    expect(screen.getByRole('link')).toHaveTextContent(/Linear\s*Weekly digest/)
   })
   it('Citation and SourcesPanel take the same Source', () => {
     const s = { title: 'Pricing study', url: 'https://research.example.com/p', snippet: 'Annual plans churn less.' }

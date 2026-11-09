@@ -458,7 +458,7 @@ function KanbanCardView({ card, dragging, sortProps, label, hint, open, onToggle
         <>
           {/* the name reads "Checklist 2/4 done": it contains the visible "2/4" */}
           <button onClick={onToggleOpen} aria-expanded={open} data-no-drag aria-label={tm('checklist', { done, total })}
-            className={cn('-mt-0.5 mb-1.5 flex w-full cursor-pointer items-center gap-2 border-0 bg-transparent px-0 py-0.5 text-[11px] font-medium tabular-nums text-[var(--fg2)]', TOUCH.tap)}>
+            className={cn('-mt-1 mb-1.5 flex min-h-6 w-full cursor-pointer items-center gap-2 border-0 bg-transparent p-0 text-[11px] font-medium tabular-nums text-[var(--fg2)]', TOUCH.tap)}>
             <span aria-hidden className="h-[5px] flex-1 overflow-hidden rounded-full bg-[var(--muted)]">
               <motion.span className={cn('block h-full rounded-full', total && done === total ? 'bg-[var(--ok)]' : 'bg-[var(--accent)]')} initial={false} animate={{ scaleX: total ? done / total : 0 }} style={{ originX: rtl ? 1 : 0 }} transition={spring(0.2, 0.4)} />
             </span><span aria-hidden>{fmt.number(done)}/{fmt.number(total)}</span>

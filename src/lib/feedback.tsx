@@ -182,11 +182,13 @@ export function ProgressRing({ value, size = 56, stroke = 5, label, tone = 'prim
 /** Centred icon, title, hint and action. The icon bobs gently (off for reduced motion or `bob={false}`). */
 export function EmptyState({ icon = 'inbox', title, description, action, bob = true, className }:
   { icon?: IconName; title: ReactNode; description?: ReactNode; action?: ReactNode; bob?: boolean; className?: string }) {
+  // the loop runs only while the icon is on screen (an endless animation off screen still costs a frame each tick)
+  const ref = useRef<HTMLSpanElement>(null), onScreen = useInView(ref)
   return (
     <div className={cn('flex flex-col items-center gap-3 py-4 text-center', className)}>
-      <motion.span initial={{ scale: 0.8, opacity: 0 }} animate={{ scale: 1, opacity: 1 }} transition={spring(0.4, 0.5)}
+      <motion.span ref={ref} initial={{ scale: 0.8, opacity: 0 }} animate={{ scale: 1, opacity: 1 }} transition={spring(0.4, 0.5)}
         className="grid h-12 w-12 place-items-center rounded-[var(--r-lg)] bg-[var(--muted)] text-[var(--fg3)]">
-        <motion.span className="grid" animate={bob ? { y: [0, -5, 0] } : undefined} transition={{ duration: 2.6, repeat: Infinity, ease: 'easeInOut' }}><Icon name={icon} size={22} /></motion.span>
+        <motion.span className="grid" animate={bob && onScreen ? { y: [0, -5, 0], transition: { duration: 2.6, repeat: Infinity, ease: 'easeInOut' } } : { y: 0, transition: { duration: 0.2 } }}><Icon name={icon} size={22} /></motion.span>
       </motion.span>
       <div><div className="font-semibold">{title}</div>{description && <div className="text-xs text-[var(--fg3)]">{description}</div>}</div>
       {action}
@@ -520,8 +522,9 @@ export function OfflineIndicator({ online, onRetry, retryEvery = 5, paused = fal
                   </span>
                 </span>
               </span>
+              {/* a 24px target (32px on touch) around the text, pulled back so the bar keeps its height */}
               <button type="button" onClick={runRetry}
-                className="flex-none cursor-pointer border-0 bg-transparent p-0 text-xs font-semibold text-current underline [@media(pointer:coarse)]:-my-2 [@media(pointer:coarse)]:min-h-8 [@media(pointer:coarse)]:px-1">{t('common.retryNow')}</button>
+                className="-my-1 min-h-6 flex-none cursor-pointer border-0 bg-transparent p-0 text-xs font-semibold text-current underline [@media(pointer:coarse)]:-my-2 [@media(pointer:coarse)]:min-h-8 [@media(pointer:coarse)]:px-1">{t('common.retryNow')}</button>
             </div>
             <div aria-hidden inert={offline} className={cn(layer, offline ? 'opacity-0' : 'opacity-100')}>
               <Icon name="check" size={14} strokeWidth={2.6} className="flex-none" />
