@@ -1,5 +1,5 @@
 import { useState, type ReactNode } from 'react'
-import { AnimatedNumber, Calendar, Checkbox, ColorPicker, Combobox, CurrencyInput, DateField, DatePicker, DateRangePicker, type DateRange, DateTimePicker, Field, FileUpload, Input, Label, LocaleProvider, MonthPicker, MultiSelect, NumberStepper, OTPInput, type Option, PasswordInput, PhoneInput, RadioGroup, RangeSlider, Rating, SegmentedControl, Select, Slider, Switch, TagInput, Textarea, TimeField, TimePicker, YearPicker, cn, formDate, localeDir, localeHourCycle, localeWeekStart } from '../lib'
+import { AnimatedNumber, Calendar, Checkbox, ColorPicker, Combobox, CurrencyInput, DateField, DatePicker, DateRangePicker, type DateRange, DateTimePicker, Field, FileUpload, Input, Label, LocaleProvider, type Magnet, type MagnetZonePull, MonthPicker, MultiSelect, NumberStepper, OTPInput, type Option, PasswordInput, PhoneInput, RadioGroup, RangeSlider, Rating, SegmentedControl, Select, Slider, Switch, TagInput, Textarea, TimeField, TimePicker, YearPicker, cn, formDate, localeDir, localeHourCycle, localeWeekStart } from '../lib'
 import { Row, Section, Spec } from './kit'
 
 const COUNTRIES: Option[] = ([['🇦🇺', 'Australia'], ['🇦🇹', 'Austria'], ['🇧🇪', 'Belgium'], ['🇨🇦', 'Canada'], ['🇩🇰', 'Denmark'], ['🇫🇮', 'Finland'], ['🇫🇷', 'France'], ['🇩🇪', 'Germany'], ['🇮🇪', 'Ireland'], ['🇮🇹', 'Italy'], ['🇯🇵', 'Japan'], ['🇳🇱', 'Netherlands'], ['🇳🇿', 'New Zealand'], ['🇳🇴', 'Norway'], ['🇵🇹', 'Portugal'], ['🇸🇬', 'Singapore'], ['🇪🇸', 'Spain'], ['🇸🇪', 'Sweden'], ['🇨🇭', 'Switzerland'], ['🇬🇧', 'United Kingdom'], ['🇺🇸', 'United States']] as const)
@@ -13,6 +13,26 @@ const eur = { style: 'currency', currency: 'EUR', maximumFractionDigits: 0 } as 
 const DUE = new Date(2026, 10, 20)
 const lastWeek = (): DateRange => { const t = new Date(); const end = new Date(t.getFullYear(), t.getMonth(), t.getDate()); return [new Date(end.getFullYear(), end.getMonth(), end.getDate() - 6), end] }
 
+const IN_PULLS = ['Edges', 'Center', 'Inside'] as const
+const IN_PRICE_MARKS = [100, 250, 500, 750, 1000]
+/** Volume with a detent at 100% (above it is boost), points every 25 and a recommended zone whose pull you can switch; a price filter with common price points. */
+function InMagnets() {
+  const [pull, setPull] = useState<(typeof IN_PULLS)[number]>('Edges')
+  const [snap, setSnap] = useState<string>('')
+  const volume: Magnet[] = [0, 25, 50, 75, { value: 100, label: '100%, no boost', strength: 1.5 }, { from: 40, to: 60, label: 'Recommended 40–60%', pull: pull.toLowerCase() as MagnetZonePull }]
+  return (
+    <>
+      <Slider label="Volume" defaultValue={30} max={150} magnets={volume} valueText={v => `${v}%`} onSnap={h => setSnap(h ? h.label ?? `${h.value}%` : '')}
+        format={v => <AnimatedNumber value={v / 100} format={{ style: 'percent' }} />} />
+      <div className="flex flex-wrap items-center justify-between gap-2 text-xs text-[var(--fg3)]">
+        <SegmentedControl aria-label="Zone pull" size="sm" options={[...IN_PULLS]} value={pull} onChange={x => setPull(x as typeof pull)} />
+        <span className="ui-num min-h-4" aria-hidden>{snap ? `On ${snap}` : 'Free'}</span>
+      </div>
+      <RangeSlider label="Price" name="price" defaultValue={[240, 760]} min={0} max={1000} step={10} minGap={50} magnets={IN_PRICE_MARKS}
+        format={v => <AnimatedNumber value={v} format={eur} />} valueText={v => `€${v}`} />
+    </>
+  )
+}
 /** A compact row of the same control in its other states, under the live demo. */
 function InStates({ children, className }: { children: ReactNode; className?: string }) {
   return (
@@ -152,6 +172,11 @@ export function InputsSection() {
         <Slider label="Volume" defaultValue={62} format={v => <AnimatedNumber value={v / 100} format={{ style: 'percent' }} />} />
         <InStates><Slider label="Disabled" defaultValue={30} disabled /><Slider label="Read-only" defaultValue={70} readOnly /></InStates>
       </Spec>
+      <Spec title="Slider with magnets" desc="Marks pull the thumb in and hold it a little, like snapping in Figma or the detents on iOS. Flick past them, or hold Alt (⌥) or put a second finger down to drag freely"
+        keys={[[['PgUp', 'PgDn'], 'Next, previous mark'], [['←', '→'], 'Step as usual'], [['⌥'], 'Hold while dragging: no snapping']]}
+        notes={{ good: 'Values people usually want (defaults, round numbers, a recommended band, the 100% before a boost) while keeping every value reachable.', breaks: 'Marks are closer than a finger’s width or the useful values aren’t known: snapping then just feels sticky. Use steps or a number field.' }}>
+        <InMagnets />
+      </Spec>
       <Spec title="Rating" desc="Stars pop in sequence"><Rating /><InStates><InGrid min={140}><InState label="With a value"><Rating aria-label="Rating with a value" defaultValue={4} /></InState>
         <InState label="Read-only"><Rating aria-label="Read-only rating" defaultValue={3} readOnly /></InState><InState label="Disabled"><Rating aria-label="Disabled rating" defaultValue={2} disabled /></InState></InGrid></InStates></Spec>
       <Spec title="Tag input" desc="Enter adds, backspace removes"><TagInput defaultValue={['design', 'research']} placeholder="Add tag" />
@@ -207,7 +232,7 @@ export function InputsSection() {
         <Field label="Password" htmlFor="in-pw"><PasswordInput id="in-pw" placeholder="At least 8 characters" strength /></Field>
         <InStates><InGrid min={140}><Field label="Disabled"><PasswordInput defaultValue="hunter22" disabled /></Field><Field label="Invalid" error="Too short"><PasswordInput defaultValue="abc" /></Field></InGrid></InStates>
       </Spec>
-      <Spec title="Colour picker" desc="Swatches, hue, and hex"><ColorPicker /><InStates><Field label="Disabled"><ColorPicker defaultValue="#16A34A" disabled swatches={['#16A34A', '#2563EB']} /></Field></InStates></Spec>
+      <Spec title="Colour picker" desc="Swatches, hue, and hex. The hue snaps to the primary and secondary hues (hold Alt to drag freely)"><ColorPicker hueMagnets /><InStates><Field label="Disabled"><ColorPicker defaultValue="#16A34A" disabled swatches={['#16A34A', '#2563EB']} /></Field></InStates></Spec>
       <Spec title="File upload" desc="Drop or browse, per-file progress" span={2}><FileUpload accept="image/*,.pdf" hint="Images or PDF, up to 20 MB" defaultFiles={[{ name: 'brand-guidelines.pdf', size: 2_400_000 }]} /></Spec>
       <Spec title="Range slider" desc="Two handles, values roll">
         <RangeSlider label="Price" defaultValue={[200, 750]} min={0} max={1000} step={10} minGap={50}

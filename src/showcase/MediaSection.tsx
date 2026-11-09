@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState } from 'react'
 import { useInView } from 'motion/react'
 import {
-  AudioPlayer, AvatarCropper, Button, Carousel, ImageCompare, MasonryGallery, MediaCard, MiniAudioPlayer, ProgressiveImage, Skeleton, VideoPlayer, VoiceNote, createAudioTrack, type GalleryItem,
+  AudioPlayer, AvatarCropper, Button, Carousel, ImageCompare, MasonryGallery, MediaCard, MiniAudioPlayer, ProgressiveImage, Skeleton, VideoPlayer, VoiceNote, createAudioTrack, type GalleryItem, type MediaChapter,
 } from '../lib'
 import { mediaArt, mediaImage, mediaRecordVideo, mediaSynthTrack, type MediaArtKind } from '../examples'
 import { Section, Spec } from './kit'
@@ -28,6 +28,9 @@ const nightDriveCover = demoOnce(() => {
   return c.toDataURL('image/jpeg', 0.85)
 })
 
+const MEDIA_VIDEO_CHAPTERS: MediaChapter[] = [{ start: 0, title: 'Dusk' }, { start: 2.5, title: 'Aurora' }, { start: 5.5, title: 'Fade out' }]
+const MEDIA_AUDIO_CHAPTERS: MediaChapter[] = [{ start: 0, title: 'Intro' }, { start: 6, title: 'Drive' }, { start: 14, title: 'Bridge' }, { start: 19, title: 'Outro' }]
+
 function VideoDemo() {
   const ref = useRef<HTMLDivElement>(null)
   const onScreen = useInView(ref)
@@ -36,7 +39,7 @@ function VideoDemo() {
   useEffect(() => { if (!video) return; let live = true; video.ready.then(url => { if (live) setSrc(url) }); return () => { live = false } }, [video])
   // the recording (a canvas frame loop) only runs while the player is on screen
   useEffect(() => { if (!video) return; video.setActive(onScreen); return () => video.setActive(false) }, [video, onScreen])
-  return <div ref={ref}><VideoPlayer src={src} poster={video?.poster} preparing={src === undefined} title="Aurora loop" meta="Generated · 0:08" duration={8} /></div>
+  return <div ref={ref}><VideoPlayer src={src} poster={video?.poster} preparing={src === undefined} title="Aurora loop" meta="Generated · 0:08" duration={8} chapters={MEDIA_VIDEO_CHAPTERS} /></div>
 }
 
 const KINDS: MediaArtKind[] = ['mountains', 'sea', 'city', 'dunes', 'abstract']
@@ -124,10 +127,10 @@ export function MediaSection() {
   useEffect(() => () => demo?.shared.pause(), [demo])
   return (
     <Section id="media" title="Media" desc="Players, viewers and image layouts. Everything here is generated in the page, so it all works offline.">
-      <Spec title="Video player" desc="Custom controls. On touch, tap shows the controls and double-tap seeks ±5 s." span={2}
-        keys={[[['Space'], 'Play'], [['←', '→'], 'Seek'], [['M'], 'Mute'], [['F'], 'Fullscreen']]}><VideoDemo /></Spec>
-      <Spec title="Audio player" desc="Waveform you can click, tap or drag to seek">
-        {demo ? <AudioPlayer track={demo.shared} title="Night Drive" meta="Synth demo · 0:24" cover={demo.cover} peaks={demo.track.peaks} duration={24} /> : <Skeleton className="h-[140px]" />}
+      <Spec title="Video player" desc="Custom controls. Chapters cut the seek bar and pull the scrubber to their starts (hold Alt to scrub freely). On touch, tap shows the controls and double-tap seeks ±5 s." span={2}
+        keys={[[['Space'], 'Play'], [['←', '→'], 'Seek'], [['PgUp', 'PgDn'], 'Next, previous chapter'], [['M'], 'Mute'], [['F'], 'Fullscreen']]}><VideoDemo /></Spec>
+      <Spec title="Audio player" desc="Waveform you can click, tap or drag to seek. Scrubbing sticks to chapter starts; PgUp / PgDn jump between them">
+        {demo ? <AudioPlayer track={demo.shared} title="Night Drive" meta="Synth demo · 0:24" cover={demo.cover} peaks={demo.track.peaks} duration={24} chapters={MEDIA_AUDIO_CHAPTERS} /> : <Skeleton className="h-[140px]" />}
       </Spec>
       <Spec title="Carousel" desc="Snap scrolling, arrows, dots, swipe on touch. Wraps around." span={2}><Carousel slides={demo?.slides ?? placeholderSlides} /></Spec>
       <Spec title="Before / after" desc="Drag the handle, or use arrow keys"><CompareDemo /></Spec>

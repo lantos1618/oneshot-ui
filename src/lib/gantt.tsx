@@ -4,6 +4,7 @@ import { Avatar, Button, Chip, ScrollEdges, TOUCH, addDays, cn, defineMessages, 
 import { Collapse } from './feedback'
 import { PointerTooltip, usePointerTooltip } from './overlay'
 import { DG_COLLAPSE_STICKY, DgChevron, dgSafeId } from './diagramkit'
+import { type Magnet, useMagnet } from './magnet'
 
 /* DIAGRAMS · Gantt: a project plan with dependencies, critical path, baseline and workload. */
 
@@ -38,6 +39,7 @@ export const GANTT_MESSAGES = defineMessages('gantt', {
     late: '{n, plural, one {# day later than planned} other {# days later than planned}}',
     early: '{n, plural, one {# day early} other {# days early}}',
     onPlan: 'on plan',
+    startOf: 'Start of {name}', endOf: 'End of {name}',
   },
   de: {
     links: 'Verknüpfungen', critical: 'Kritischer Pfad', baseline: 'Basisplan', workload: 'Auslastung', task: 'Aufgabe', phase: 'Phase', milestone: 'Meilenstein', slack: 'Puffer',
@@ -56,6 +58,7 @@ export const GANTT_MESSAGES = defineMessages('gantt', {
     late: '{n, plural, one {# Tag später als geplant} other {# Tage später als geplant}}',
     early: '{n, plural, one {# Tag früher} other {# Tage früher}}',
     onPlan: 'im Plan',
+    startOf: 'Beginn von {name}', endOf: 'Ende von {name}',
   },
   ar: {
     links: 'الروابط', critical: 'المسار الحرج', baseline: 'الخطة الأساسية', workload: 'عبء العمل', task: 'المهمة', phase: 'المرحلة', milestone: 'معلم رئيسي', slack: 'الفائض الزمني',
@@ -74,6 +77,7 @@ export const GANTT_MESSAGES = defineMessages('gantt', {
     late: 'متأخر {n, plural, one {يومًا واحدًا} two {يومين} few {# أيام} many {# يومًا} other {# يوم}} عن الخطة',
     early: 'مبكر {n, plural, one {يومًا واحدًا} two {يومين} few {# أيام} many {# يومًا} other {# يوم}}',
     onPlan: 'وفق الخطة',
+    startOf: 'بداية {name}', endOf: 'نهاية {name}',
   },
 })
 
@@ -87,8 +91,10 @@ const GANTT_CELL = { 1: 'bg-[color-mix(in_srgb,var(--ok)_22%,transparent)] text-
  * On touch: tap a bar for its details and links, long-press it to move it, or drag the grip on its right edge to
  * resize, so swipes over the chart still scroll. Narrow screens scroll the timeline inside the card, task names pinned.
  */
-export function Gantt({ phases, dependencies, start, days = 42, today, people = {}, milestone, className }:
-  { phases: GanttPhase[]; dependencies: [string, string][]; start: Date; days?: number; today?: number; people?: Record<string, string>; milestone?: string; className?: string }) {
+export function Gantt({ phases, dependencies, start, days = 42, today, people = {}, milestone, magnets, className }:
+  { phases: GanttPhase[]; dependencies: [string, string][]; start: Date; days?: number; today?: number; people?: Record<string, string>; milestone?: string
+    /** while dragging, a bar's edges stick to other tasks' starts and ends and to the today line (true for both, or pick); a guide marks the match. Alt drags freely */
+    magnets?: boolean | { tasks?: boolean; today?: boolean }; className?: string }) {
   const { t: ct, fmt, dir } = useLocale()
   const m = useMessages(GANTT_MESSAGES)
   const tasks = useMemo(() => phases.flatMap(p => p.tasks.map(t => ({ ...t, phase: p.id }))), [phases])
@@ -98,7 +104,7 @@ export function Gantt({ phases, dependencies, start, days = 42, today, people = 
   const [view, setView] = useState({ lk: false, cp: false, bl: false, wl: false })
   const [hover, setHover] = useState<string | null>(null)
   const [dragId, setDragId] = useState<string | null>(null)
-  const drag = useRef<{ id: string; mode: 'move' | 'size'; s0: number; d0: number; dw: number } | null>(null)
+  const drag = useRef<{ id: string; mode: 'move' | 'size'; s0: number; d0: number; dw: number; at: typeof sched } | null>(null)
   const press = useRef<{ x: number; y: number; moved: boolean } | null>(null) // a touch that may still become a long-press drag
   const { tip, show, hide } = usePointerTooltip()
   const [laneRef, laneW] = useWidth<HTMLDivElement>()
@@ -164,19 +170,51 @@ export function Gantt({ phases, dependencies, start, days = 42, today, people = 
     const t = byId[id], x = sched[id], sl = slackOf(id)
     return <><b className="font-semibold">{t.name}</b><br /><span className="text-[var(--fg2)]">{t.duration === 0 ? fdate(x.s) : m('taskTip', { from: fdate(x.s), to: fdate(ganttEnd(x) - 1), days: x.d, pct: fpct(t.progress) })}{sl ? ` · ${m('slackTip', { n: sl })}` : ''}</span></>
   }
+  // magnets (opt-in): the dragged bar's start or end sticks to other tasks' edges and to today; `guides` maps each
+  // magnet to the day line it lines up with (for a moved bar's end that is its start + duration)
+  const mOn = magnets === true ? { tasks: true, today: true } : magnets || null
+  const { guides, edgeMarks } = useMemo(() => {
+    const guides = new Map<Magnet, number>(), edgeMarks: Magnet[] = []
+    const g = dragId ? drag.current : null
+    if (!mOn || !g) return { guides, edgeMarks }
+    // the plan as it was when the drag began, minus the tasks this one pushes (their edges move with it)
+    const pushed = new Set<string>([g.id]), walk = (id: string) => succs(id).forEach(n => { if (!pushed.has(n)) { pushed.add(n); walk(n) } })
+    walk(g.id)
+    const targets: { at: number; label: string }[] = []
+    if (mOn.tasks !== false) for (const t of tasks) if (!pushed.has(t.id)) {
+      const x = g.at[t.id]
+      targets.push({ at: x.s, label: m('startOf', { name: t.name }) })
+      if (x.d) targets.push({ at: ganttEnd(x), label: m('endOf', { name: t.name }) })
+    }
+    if (mOn.today !== false && today !== undefined) targets.push({ at: today, label: ct('date.today') })
+    const d = g.d0
+    for (const tg of targets) {
+      const edges = g.mode === 'size' ? [0] : d ? [0, d] : [0] // which of the bar's edges meets the target: start, or end (start = target − d)
+      for (const off of edges) { const mk = { value: tg.at - off, label: tg.label }; guides.set(mk, tg.at); edgeMarks.push(mk) }
+    }
+    return { guides, edgeMarks }
+  }, [dragId, tasks, today, m, ct]) // eslint-disable-line react-hooks/exhaustive-deps
+  const gm = useMagnet({ magnets: edgeMarks, min: 0, max: days, step: 1 })
+  const [guide, setGuide] = useState<number | null>(null)
   // dragging: usePointerDrag (capture, cancel and unmount handled); on touch a bar is picked up by a long-press,
   // so a swipe over the chart still scrolls it, and its resize grip drags straight away
   const barDrag = usePointerDrag({
     onMove: p => {
       const g = drag.current; if (!g) return
+      if (gm.enabled) {
+        const res = gm.apply((g.mode === 'size' ? g.s0 + g.d0 : g.s0) + p.dx / g.dw, { px: g.dw * days, event: p.event })
+        setGuide(res.snapped ? guides.get(res.snapped.magnet) ?? null : null)
+        if (g.mode === 'size') moveTo(g.id, sched[g.id].s, res.value - sched[g.id].s); else moveTo(g.id, res.value, sched[g.id].d)
+        return
+      }
       const dd = Math.round(p.dx / g.dw)
       if (g.mode === 'size') moveTo(g.id, sched[g.id].s, g.d0 + dd); else moveTo(g.id, g.s0 + dd, sched[g.id].d)
     },
-    onEnd: () => { drag.current = null; setDragId(null) },
+    onEnd: () => { drag.current = null; setDragId(null); gm.reset(); setGuide(null) },
   })
   const begin = (el: HTMLElement, e: { pointerId: number; clientX: number; clientY: number }, id: string, mode: 'move' | 'size') => {
     const lane = (el.parentElement as HTMLElement).getBoundingClientRect().width
-    drag.current = { id, mode, s0: sched[id].s, d0: sched[id].d, dw: lane / days }
+    drag.current = { id, mode, s0: sched[id].s, d0: sched[id].d, dw: lane / days, at: sched }
     barDrag.start(e, el); setDragId(id); hide()
   }
   const hold = useLongPress({ ms: 380, onPress: p => {
@@ -387,6 +425,7 @@ export function Gantt({ phases, dependencies, start, days = 42, today, people = 
                 })}
               </svg>
             )}
+            {guide !== null && dragId && <div aria-hidden className="absolute top-0 bottom-0 -ms-px border-s border-dashed border-[var(--accent)]" style={{ /* rtl-lint-ignore: LTR plot */ left: pct(guide) }} />}
             {today !== undefined && (
               <div className="absolute top-0 bottom-0 w-[1.5px] bg-[var(--accent)]" style={{ /* rtl-lint-ignore: LTR plot */ left: pct(today) }}>
                 <span className="absolute -top-[26px] -start-5 rounded-full bg-[var(--accent)] px-1.5 py-0.5 text-[11px] leading-none font-semibold whitespace-nowrap text-[var(--card)]">{ct('date.today')}</span>

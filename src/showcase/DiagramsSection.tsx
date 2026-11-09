@@ -1,7 +1,7 @@
-import { useMemo } from 'react'
-import { DataFlow, type DiagramState, type DiagramTransition, Gantt, type GanttPhase, Globe, type GlobeHub, type GlobeRoute, NetworkGraph, ProcessFlow, Sankey, StateDiagram, StateMachine, TraceWaterfall, type TraceSpan, type WorldMapData, WorldMap, useLocale, useToast, useWorldMap, type LocaleFmt } from '../lib'
-import { AGENT_WORKFLOWS, AGENT_WORKFLOW_ORDER } from '../examples'
-import { Section, Spec } from './kit'
+import { useMemo, useState, type ReactNode } from 'react'
+import { Chart, ChartWithJournal, DataFlow, type DiagramState, type DiagramTransition, Gantt, type GanttPhase, Globe, type GlobeHub, type GlobeRoute, NetworkGraph, ProcessFlow, Sankey, SegmentedControl, StateDiagram, StateMachine, StateRibbon, Swimlanes, Switch, TraceWaterfall, type TimeTag, type TimeTagKind, type TraceSpan, type WorldMapData, WorldMap, useLocale, useToast, useWorldMap, type LocaleFmt } from '../lib'
+import { AGENT_WORKFLOWS, AGENT_WORKFLOW_ORDER, TAGS_EVENT_KINDS, TAGS_KINDS, tagsDay, type TagsDay, type TagsDayVariant } from '../examples'
+import { Section, Spec, type SpecNotes } from './kit'
 
 /* Gantt: a six-week launch plan ─────────────────────────────────────────── */
 const GANTT_PHASES: GanttPhase[] = [
@@ -56,6 +56,115 @@ const TRACE: TraceSpan[] = ([
   ['br', 'cd', 'Create branch', 'Git', 'tool', 'branch', 15.9, 2.1, 0, 0],
   ['wp', 'cd', 'Write pricing page', 'GPT-6 Sol', 'llm', 'code', 18.3, 3.7, 0.06, 6000],
 ] as const).map(([id, parent, name, meta, kind, icon, start, duration, cost, tokens]) => ({ id, parent, name, meta, kind, icon, start, duration, cost, tokens }))
+
+/* Trace annotations: what happened around the run (ms from the trace start) */
+const TRACE_EVENT_KINDS: TimeTagKind[] = [
+  { kind: 'deploy', label: 'Deploy', icon: '🚀', color: 'var(--c3)' },
+  { kind: 'approval', label: 'Approval', icon: '✅', color: 'var(--ok)' },
+  { kind: 'retry', label: 'Retry', icon: '↻', color: 'var(--warn)' },
+]
+const traceEvents = (rows: [number, string, string, string?][]): TimeTag[] => rows.map(([s, kind, label, detail], i) => ({ id: `te${i}`, at: s * 1000, kind, label, ...(detail ? { detail } : {}) }))
+const TRACE_EVENTS: Record<TagsDayVariant, TimeTag[]> = {
+  light: traceEvents([[7.9, 'approval', 'Plan approved', 'Signed off by Dana'], [12.1, 'retry', 'Retry', 'web_search after 429'], [20.6, 'deploy', 'Preview deployed', 'pricing-v2.vercel.app']]),
+  busy: traceEvents([
+    [1.2, 'deploy', 'Config pushed'], [3.4, 'approval', 'Budget approved', 'Up to $1'], [7.9, 'approval', 'Plan approved', 'Signed off by Dana'], [8.6, 'deploy', 'Flag on: pricing-v2'],
+    [10.4, 'retry', 'Retry', 'web_search after 502'], [11.2, 'retry', 'Retry', 'web_search after 429'], [12.1, 'retry', 'Retry', 'web_search after 429'], [13.8, 'approval', 'Copy approved'],
+    [15.5, 'deploy', 'Branch created'], [16.1, 'retry', 'Retry', 'Read pricing frames'], [19.2, 'deploy', 'Preview building'], [20.6, 'deploy', 'Preview deployed', 'pricing-v2.vercel.app'], [21.4, 'approval', 'QA approved'],
+  ]),
+}
+
+/* Tags over time (patterns E, F, H): the sample workday from the examples, light or busy */
+const TL_LANE_KINDS: TimeTagKind[] = [...TAGS_EVENT_KINDS, { kind: 'coffee', label: 'Coffee', icon: '☕', color: 'var(--c-neutral)' }]
+const tlEvents = (d: TagsDay) => d.tags.filter(t => TAGS_EVENT_KINDS.some(k => k.kind === t.kind))
+const TL_NOTES: Record<'lanes' | 'ribbon' | 'journal' | 'trace', SpecNotes> = {
+  lanes: { good: 'Scales to any number of kinds, and habits jump out: water in the morning, a smoke after lunch. Good for labelling and review tools.',
+    breaks: 'A row per kind costs height and feels clinical. Empty lanes look broken unless they say “None”; dense ones need count chips.' },
+  ribbon: { good: 'The whole day in one compact strip: good posture against slouching at a glance, with tags pinned above. Fits widgets and phones.',
+    breaks: 'Drops the points line, so the score story is gone. One-minute slivers need a minimum width and a bigger hit area to tap.' },
+  journal: { good: 'Every tag gets words, a time and edit or delete. Hovering either side lights up the other, and the list scrolls to follow.',
+    breaks: 'Needs width, so it stacks on phones, and there are two places to look. Long days need a scrolling, virtualised list.' },
+  trace: { good: 'Ties a deploy, an approval or a retry to exactly what the run was doing at that moment.',
+    breaks: 'Many events turn into a barcode: flags drop out to dots on their rules, and you hover to read them.' },
+}
+
+/** The Light day / Busy day switch shared by the tag cards (one state, a control in each card's header). */
+function DgDaySwitch({ value, onChange }: { value: TagsDayVariant; onChange: (v: TagsDayVariant) => void }) {
+  return <SegmentedControl aria-label="Day" size="sm" value={value} onChange={v => onChange(v as TagsDayVariant)} options={[{ value: 'light', label: 'Light day' }, { value: 'busy', label: 'Busy day' }]} />
+}
+
+/** The points line as a plain area chart on a time axis (no annotations: the lanes carry the tags). */
+function DgPointsChart({ day, height = 150 }: { day: TagsDay; height?: number }) {
+  return <Chart data={day.points} x="t" xTime height={height} legend={false} label="Points over the day" series={[{ key: 'points', label: 'Points', type: 'area', color: 'var(--c4)' }]} />
+}
+
+function DgSwimlanesCard({ day, actions }: { day: TagsDay; actions: ReactNode }) {
+  const [busiest, setBusiest] = useState(false)
+  const [hide, setHide] = useState(false)
+  const [picked, setPicked] = useState<TimeTag | null>(null)
+  const { fmt } = useLocale()
+  return (
+    <Spec span={3} title="E · Swimlanes per tag" actions={actions} notes={TL_NOTES.lanes}
+      desc="One lane per kind under the points line, on the same time axis (as in Dynatrace annotation tracks and the LifeLines patient timeline). Dots a few pixels apart merge into a count."
+      keys={[[['Tab'], 'lanes'], [['←', '→'], 'along a lane'], [['↑', '↓'], 'between lanes'], [['↵'], 'select'], [['Esc'], 'clear']]}>
+      <div className="flex flex-wrap items-center gap-x-5 gap-y-2">
+        <Switch label="Busiest first" checked={busiest} onChange={setBusiest} />
+        <Switch label="Hide empty lanes" checked={hide} onChange={setHide} />
+        <span className="flex-1" />
+        <span aria-live="polite" className="text-xs text-[var(--fg3)]">{picked ? `Selected: ${picked.label}, ${fmt.time(+picked.at)}` : ''}</span>
+      </div>
+      <Swimlanes tags={tlEvents(day)} kinds={TL_LANE_KINDS} start={day.start} end={day.end} order={busiest ? 'count' : 'kinds'} hideEmpty={hide} axis={false} onSelect={setPicked}
+        top={<DgPointsChart day={day} />} />
+    </Spec>
+  )
+}
+
+function DgRibbonCard({ day, actions }: { day: TagsDay; actions: ReactNode }) {
+  const pins = day.tags.filter(t => t.end === undefined), bars = day.tags.filter(t => t.kind === 'lunch')
+  return (
+    <Spec span={3} title="F · State ribbon with tags" actions={actions} notes={TL_NOTES.ribbon}
+      desc="Posture as one strip of contiguous states, logged tags pinned above and lunch as a bar below (as in sleep-stage bars and Toggl or RescueTime day timelines)."
+      keys={[[['Tab'], 'ribbon'], [['←', '→'], 'along a row'], [['↑', '↓'], 'pins, states, bars'], [['Esc'], 'clear']]}>
+      <StateRibbon states={day.states} pins={pins} bars={bars} kinds={TAGS_KINDS} start={day.start} end={day.end} label="Posture over the day" />
+      <div className="mt-2 max-w-[320px] rounded-[var(--r-lg)] border border-[var(--line)] p-3">
+        <div className="mb-2 flex items-baseline justify-between text-xs"><b className="font-semibold">Today</b><span className="text-[var(--fg3)]">Compact, for widgets</span></div>
+        <StateRibbon size="compact" states={day.states} pins={pins} kinds={TAGS_KINDS} start={day.start} end={day.end} legend={false} label="Posture over the day, compact" />
+      </div>
+    </Spec>
+  )
+}
+
+function DgJournalCard({ day, actions }: { day: TagsDay; actions: ReactNode }) {
+  const toast = useToast()
+  const { fmt } = useLocale()
+  const [removed, setRemoved] = useState<Set<string>>(new Set())
+  const [byHour, setByHour] = useState(false)
+  const tags = tlEvents(day).filter(t => !removed.has(t.id))
+  const del = (t: TimeTag) => {
+    setRemoved(r => new Set(r).add(t.id))
+    toast({ title: `Deleted ${t.label}`, description: fmt.time(+t.at), action: { label: 'Undo', onClick: () => setRemoved(r => { const n = new Set(r); n.delete(t.id); return n }) } })
+  }
+  return (
+    <Spec span={3} title="H · Chart plus linked journal" actions={actions} notes={TL_NOTES.journal}
+      desc="The points line with dots, and the day's log beside it (as in Oura and WHOOP journals). Hover or focus either side to light up the other; the list scrolls to the lit tag."
+      keys={[[['Tab'], 'chart, tags, journal'], [['↑', '↓'], 'journal rows'], [['←', '→'], 'chart tags'], [['Esc'], 'clear']]}>
+      <Switch label="Group by hour" checked={byHour} onChange={setByHour} />
+      <ChartWithJournal tags={tags} kinds={TAGS_KINDS} groupBy={byHour ? 'hour' : undefined} height={250} label="Today's journal"
+        onEdit={t => toast({ title: `Edit ${t.label}`, description: 'Open your edit form here.' })} onDelete={del}
+        chart={link => <Chart data={day.points} x="t" height={250} legend={false} label="Points with logged tags" series={[{ key: 'points', label: 'Points', type: 'area', color: 'var(--c4)' }]}
+          annotations={{ ...link, style: 'dots', spans: 'bands' }} />} />
+    </Spec>
+  )
+}
+
+/** The tag cards (patterns E, F and H): one day switch drives all three. */
+function DgTagsOverTime({ variant, setVariant }: { variant: TagsDayVariant; setVariant: (v: TagsDayVariant) => void }) {
+  const day = tagsDay(variant), actions = <DgDaySwitch value={variant} onChange={setVariant} />
+  return <>
+    <DgSwimlanesCard day={day} actions={actions} />
+    <DgRibbonCard day={day} actions={actions} />
+    <DgJournalCard day={day} actions={actions} />
+  </>
+}
 
 /* Map: seeded demo metrics per country ──────────────────────────────────── */
 const MAP_KEY: Record<string, number> = { 'United States of America': 98, 'United Kingdom': 88, Germany: 84, Switzerland: 80, France: 74, Canada: 70, Netherlands: 68, Australia: 66, Japan: 62, Sweden: 58, Spain: 52, Italy: 50, Ireland: 49, Singapore: 47, Brazil: 44, India: 42, 'South Korea': 40, Norway: 38, Denmark: 37, Austria: 36, Belgium: 35, Poland: 33, Mexico: 30, 'New Zealand': 29, Finland: 28, Portugal: 26, 'United Arab Emirates': 25, Israel: 24, China: 22, Nigeria: 18, 'South Africa': 20, Argentina: 17, Indonesia: 15, Turkey: 16, Chile: 14 }
@@ -123,10 +232,11 @@ export function DiagramsSection() {
   const toast = useToast()
   const { fmt } = useLocale()
   const metrics = useMemo(() => mapMetrics(fmt), [fmt])
+  const [variant, setVariant] = useState<TagsDayVariant>('light')
   return (
     <Section id="diagrams" title="Diagrams & maps" desc="Plans, statecharts, traces, flows and maps. Drag, hover and fire events: everything is live and themed.">
       <Spec span={3} title="Gantt" desc="The plan: phases, progress, dependencies and milestones. Drag a bar to move it (on touch, hold it first), drag its right edge to change duration; dependants reschedule automatically.">
-        <Gantt phases={GANTT_PHASES} dependencies={GANTT_DEPS} start={new Date(2026, 9, 19)} days={42} today={19} people={GANTT_PEOPLE} milestone="go" />
+        <Gantt phases={GANTT_PHASES} dependencies={GANTT_DEPS} start={new Date(2026, 9, 19)} days={42} today={19} people={GANTT_PEOPLE} milestone="go" magnets />
       </Spec>
       <Spec span={3} title="State diagram" desc="UML-style subscription lifecycle: a composite state, a history state (resume returns to where you paused), guards in [brackets], actions after the slash, a self-transition, initial and final states. Fire events to walk it.">
         <StateDiagram states={SD_STATES} transitions={SD_TRANSITIONS} initial="init" history={SD_HISTORY} />
@@ -134,9 +244,12 @@ export function DiagramsSection() {
       <Spec span={3} title="State machine" desc="Statechart of the agent workflows, live. Lit states hold jobs right now, dots travel each transition as it happens, guards and fork / join are labelled.">
         <StateMachine machines={AGENT_WORKFLOWS} order={AGENT_WORKFLOW_ORDER} />
       </Spec>
-      <Spec span={3} title="Trace waterfall" desc="What actually ran: nested spans on a shared timeline, streaming live. Works for API requests, jobs or agent runs.">
-        <TraceWaterfall spans={TRACE} total={22} subtitle="Launch the new pricing page by Friday" failure={{ span: 'ws2', at: 2.6, message: '429 rate limited', retry: 'ws2r' }} />
+      <Spec span={3} title="Trace waterfall" desc="What actually ran: nested spans on a shared timeline, streaming live, with deploys, approvals and retries flagged over the grid. Works for API requests, jobs or agent runs."
+        actions={<DgDaySwitch value={variant} onChange={setVariant} />} notes={TL_NOTES.trace}>
+        <TraceWaterfall spans={TRACE} total={22} subtitle="Launch the new pricing page by Friday" failure={{ span: 'ws2', at: 2.6, message: '429 rate limited', retry: 'ws2r' }}
+          annotations={TRACE_EVENTS[variant]} annotationKinds={TRACE_EVENT_KINDS} />
       </Spec>
+      <DgTagsOverTime variant={variant} setVariant={setVariant} />
       <Spec title="Sankey" desc="Flows between stages. Hover or tap a ribbon or a node to isolate it.">
         <Sankey sources={[{ label: 'Organic', color: 'var(--c2)' }, { label: 'Paid', color: 'var(--c3)' }]} targets={[{ label: 'Signed up', color: 'var(--ok)' }, { label: 'Bounced', color: 'var(--fg3)' }, { label: 'Browsing', color: 'var(--warn)' }]}
           links={[[0, 0, 30], [0, 1, 18], [0, 2, 12], [1, 0, 15], [1, 1, 17], [1, 2, 8]]} height={300} />

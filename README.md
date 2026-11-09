@@ -580,6 +580,52 @@ search (⌘K), the theme toggle and a phone layout. `pnpm docs:dev` runs it; `pn
 writes `docs-dist/` with the docs, the showcase under `showcase/`, the registry and `llms.txt`, and
 `.github/workflows/pages.yml` deploys that to GitHub Pages.
 
+## Tags over time (annotations and timelines)
+
+Put events and periods on a time axis. One tag type, `TimeTag` (`{ id, at, end?, kind, label, icon?, color?, detail? }`;
+`at`/`end` are epoch ms or `Date`), feeds every view:
+
+```tsx
+<Chart data={points} x="t" xTime series={[{ key: 'points' }]}
+  annotations={{ tags, kinds, style: 'auto' }} />          // pins → rug → rolled-up counts as tags crowd
+<Swimlanes tags={tags} kinds={kinds} start={dayStart} end={dayEnd} top={<Chart … />} />
+<StateRibbon states={postureStates} pins={tags} start={dayStart} end={dayEnd} />
+<ChartWithJournal tags={tags} kinds={kinds} chart={link => <Chart … annotations={{ ...link, style: 'dots' }} />} />
+<TraceWaterfall … annotations={deploys} />                  // flags over the trace (rug when crowded)
+```
+
+- `style`: `pins` (on the line), `rug` (icon row under the axis), `flags` (dashed rules), `rollup` (count chips per
+  time bin), `dots`, or `auto`, which measures collisions at the current width and falls back pins → rug → rollup.
+  Spans render as shaded bands (`spans: 'bands' | 'none'`).
+- `reserve: 'current'` (default) reserves only the room the shown style needs and eases when it changes; use `'max'`
+  for live or streaming data so the chart's height never changes.
+- Linking: `activeId` / `onActiveChange` / `onSelect` connect a chart, lanes, ribbon and journal. Each view is one Tab
+  stop; ←/→ move through tags in time order (↑/↓ between lanes), Enter selects, Escape clears.
+- Plots stay left to right in RTL; labels, legends and lists mirror. Strings: `ANNOTATE_MESSAGES`, `TIMELINE_MESSAGES`.
+
+## Magnets (snapping for sliders and drags)
+
+Opt-in snapping that pulls a drag onto meaningful values and lets go when you push past or flick through:
+
+```tsx
+<Slider label="Volume" magnets={[0, 25, 50, 75, { value: 100, label: 'Max', strength: 1.5 },
+  { from: 40, to: 60, label: 'Recommended', pull: 'edges' }]} onSnap={m => …} />
+<RangeSlider magnets={[10, 25, 50, 100]} />          // thumbs also stick to each other (± minGap)
+<SplitPane magnets />                                 // thirds, half and the collapse point
+<VideoPlayer chapters={[{ start: 0, title: 'Intro' }, …]} />   // chapter starts are magnets
+<Gantt magnets />                                     // bar edges stick to other tasks and the today line
+<ColorPicker hueMagnets />
+```
+
+- Points: `number | { value, label?, radius?, strength? }`. Zones: `{ from, to, label?, pull?: 'edges' | 'center' |
+  'inside' }` (`edges`: sticky boundaries; `center`: snaps the middle; `inside`: slows the thumb without sticking).
+- Capture 8 px / release 18 px with a mouse (12 / 26 on touch), shrunk between crowded marks; flicks faster than 1 px/ms
+  pass through. Hold **Alt/Option** (or put a second finger down) to bypass.
+- Feedback: a short haptic tick on touch, a spring settle (none under reduced motion), the mark's label in the thumb
+  bubble and a polite "Snapped to {label}" announcement. PageUp/PageDown and Ctrl/⌘+arrows jump between marks.
+- Custom drags: `useMagnet`, the pure `magnetize`, `MagnetMarks` and `MagnetBubble` from `@lyndon/ui/magnet`.
+  Snapped values submit through FormData like any other value.
+
 ## Forms
 
 Every value-holding control (Select, Combobox, MultiSelect, DatePicker, DateRangePicker, DateField, TimeField, TimePicker,

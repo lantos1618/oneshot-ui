@@ -1,10 +1,11 @@
-import { useEffect, useLayoutEffect, useRef, useState, useSyncExternalStore, type KeyboardEvent as RKeyboardEvent, type PointerEvent as RPointerEvent, type ReactNode, type RefObject } from 'react'
+import { useEffect, useLayoutEffect, useMemo, useRef, useState, useSyncExternalStore, type KeyboardEvent as RKeyboardEvent, type PointerEvent as RPointerEvent, type ReactNode, type RefObject } from 'react'
 import { AnimatePresence, animate, motion, useInView, useMotionValue, useReducedMotion } from 'motion/react'
 import { Avatar, Badge, Button, Chip, Icon, IconButton, TOUCH, clamp, cn, cssUrl, defineMessages, dirX, logicalArrow, safeMediaUrl, Spinner, spring, surface, useFocusTrap, useLocale, useMessages, useWidth, uiShared } from './core'
 import { Slider } from './forms'
 import { useToast } from './feedback'
 import { OverlayPortal, useScrollLock } from './overlay'
 import { useFrameLoop, useViewport } from './motion'
+import { MAGNET_MESSAGES, MagnetMarks, magnetKeyDirection, useMagnet } from './magnet'
 
 /* ════════════════════════════════════════════════════════════════════════════
  * Media: players, gallery, lightbox, cards, image states, avatar crop, carousel, compare.
@@ -157,47 +158,78 @@ function useOwnTrack(track: AudioTrackHandle | undefined, src: string | undefine
   return t
 }
 
+/** A chapter of a video or audio track: where it starts (seconds) and its title. */
+export type MediaChapter = { start: number; title: string }
+/** The chapter playing at `t` (the last one that has started), or undefined. */
+export const mediaChapterAt = (chapters: readonly MediaChapter[] | undefined, t: number) => chapters?.reduce<MediaChapter | undefined>((cur, c) => c.start <= t + 1e-6 && (!cur || c.start >= cur.start) ? c : cur, undefined)
+
 /**
  * A seek bar for media players: returns `bind` (role=slider props: value, ARIA text, pointer and keyboard handlers) to
  * spread on the bar, plus `drag` (scrubbing) and `hover` (0..1 under the mouse, or under the finger while scrubbing).
  * Mouse seeks on press and while dragging; touch and pen use `touch-action: pan-y` (give the bar `touch-pan-y`), so a
  * vertical swipe still scrolls the page, a sideways drag scrubs and a tap seeks to where it landed. Keys: ← / → move
  * `step` seconds, Home / End jump, Space calls `onToggle`. The pointer is captured, so drags keep working outside the bar.
+ * `chapters`: their starts become magnets while scrubbing (useMagnet: the thumb sticks to a chapter start for a few px,
+ * Alt drags freely), PageUp / PageDown and Ctrl/⌘ + ← / → jump between them, the ARIA text names the chapter, and
+ * `chapter` is the one under the hover point or playing now.
  */
-export function useSeekSlider({ time, duration, onSeek, step = 2, onToggle, label, valueText, focusable = true }:
-  { time: number; duration: number; onSeek: (t: number) => void; step?: number; onToggle?: () => void; label?: string; valueText?: (t: number, d: number) => string; focusable?: boolean }) {
+export function useSeekSlider({ time, duration, onSeek, step = 2, onToggle, label, valueText, focusable = true, chapters }:
+  { time: number; duration: number; onSeek: (t: number) => void; step?: number; onToggle?: () => void; label?: string; valueText?: (t: number, d: number) => string; focusable?: boolean
+    chapters?: readonly MediaChapter[] }) {
   const [drag, setDrag] = useState(false)
   const [hover, setHover] = useState<number | null>(null)
-  const m = useMessages(MEDIA_MESSAGES), { fmt } = useLocale()
+  const m = useMessages(MEDIA_MESSAGES), mm = useMessages(MAGNET_MESSAGES), { fmt } = useLocale()
   const text = valueText ?? ((t: number, dd: number) => m('seekValue', { t: fmt.clock(t), d: fmt.clock(dd) }))
   const start = useRef<{ x: number; y: number; touch: boolean } | null>(null)
   const d = duration || 1
+  const marks = useMemo(() => chapters?.length ? chapters.map(c => ({ value: c.start, label: c.title })) : null, [chapters])
+  const mg = useMagnet({ magnets: marks, min: 0, max: d, describe: fmt.clock })
   const frac = (e: RPointerEvent) => { const r = e.currentTarget.getBoundingClientRect(); return clamp((e.clientX - r.left) / (r.width || 1), 0, 1) }
-  const seek = (f: number) => onSeek(f * d)
-  const begin = (e: RPointerEvent) => { try { e.currentTarget.setPointerCapture(e.pointerId) } catch { /* pointer already gone */ } setDrag(true); seek(frac(e)) }
+  // with chapters the raw position goes through the magnets (the hover preview shows where it actually lands)
+  const seekAt = (e: RPointerEvent) => {
+    const f = frac(e)
+    if (!mg.enabled) { onSeek(f * d); return f }
+    const at = mg.apply(f * d, { px: e.currentTarget.getBoundingClientRect().width, event: e.nativeEvent }).value
+    onSeek(at); return at / d
+  }
+  const begin = (e: RPointerEvent) => { try { e.currentTarget.setPointerCapture(e.pointerId) } catch { /* pointer already gone */ } setDrag(true); mg.reset(); seekAt(e) }
+  const end = () => { setDrag(false); mg.reset() }
+  const chapterNow = mediaChapterAt(chapters, time)
   const bind = {
     // the media timeline runs left to right in every locale (platform convention), so the bar is an LTR island and
     // ← / → follow it physically
-    dir: 'ltr', role: 'slider', tabIndex: focusable ? 0 : -1, 'aria-label': label ?? m('seek'), 'aria-valuemin': 0, 'aria-valuemax': Math.round(d), 'aria-valuenow': Math.round(time), 'aria-valuetext': text(time, d),
+    dir: 'ltr', role: 'slider', tabIndex: focusable ? 0 : -1, 'aria-label': label ?? m('seek'), 'aria-valuemin': 0, 'aria-valuemax': Math.round(d), 'aria-valuenow': Math.round(time),
+    'aria-valuetext': chapterNow ? mm('valueAt', { value: text(time, d), label: chapterNow.title }) : text(time, d), 'aria-keyshortcuts': mg.enabled ? 'PageUp PageDown' : undefined,
     onPointerDown: (e: RPointerEvent) => { const touch = e.pointerType !== 'mouse'; start.current = { x: e.clientX, y: e.clientY, touch }; if (!touch) begin(e) },
     onPointerMove: (e: RPointerEvent) => {
-      if (drag) { const f = frac(e); setHover(f); seek(f); return }
+      if (drag) { setHover(seekAt(e)); return }
       if (e.pointerType === 'mouse') setHover(frac(e))
       const s = start.current; if (!s?.touch) return
       const dx = Math.abs(e.clientX - s.x), dy = Math.abs(e.clientY - s.y)
       if (dx > 6 && dx > dy) begin(e)
     },
-    onPointerUp: (e: RPointerEvent) => { const s = start.current; start.current = null; if (s?.touch && !drag) seek(frac(e)); setDrag(false); if (e.pointerType !== 'mouse') setHover(null) },
-    onPointerCancel: () => { start.current = null; setDrag(false); setHover(null) },
+    onPointerUp: (e: RPointerEvent) => { const s = start.current; start.current = null; if (s?.touch && !drag) { mg.reset(); seekAt(e) } end(); if (e.pointerType !== 'mouse') setHover(null) },
+    onPointerCancel: () => { start.current = null; end(); setHover(null) },
     onPointerLeave: (e: RPointerEvent) => { if (e.pointerType === 'mouse' && !drag) setHover(null) },
     onKeyDown: (e: RKeyboardEvent) => {
+      const jump = mg.enabled ? magnetKeyDirection(e, 'ltr') : 0 // the LTR timeline: Ctrl + → is the next chapter in every locale
+      if (jump) {
+        // back from inside a chapter goes to its start first (like a CD player); from (near) its start, to the previous one
+        const to = jump > 0 ? mg.next(time, 1) : mg.next(time - 0.75, -1) ?? 0
+        e.preventDefault(); if (to !== null) onSeek(clamp(to, 0, d)); return
+      }
       // rtl-lint-ignore: the LTR timeline (→ is later in every locale)
       const to = e.key === 'ArrowRight' || e.key === 'ArrowUp' ? time + step : e.key === 'ArrowLeft' || e.key === 'ArrowDown' ? time - step : e.key === 'Home' ? 0 : e.key === 'End' ? d - 0.1 : null
       if (to !== null) { e.preventDefault(); onSeek(clamp(to, 0, d)) }
       else if (e.key === ' ' && onToggle) { e.preventDefault(); onToggle() }
     },
   } as const
-  return { bind, drag, hover }
+  return {
+    bind, drag, hover,
+    /** the chapter under the hover point (or playing now) */ chapter: mediaChapterAt(chapters, hover != null ? hover * d : time),
+    /** chapter ticks for the bar: <MagnetMarks {...seek.marks} /> */ marks: { magnets: marks, min: 0, max: d },
+    /** the polite "Snapped to {chapter}" region: render it next to the bar */ live: mg.live,
+  }
 }
 
 const WAVE_TONE = {
@@ -300,8 +332,9 @@ const VIDEO_BTN = '!h-[34px] !w-[34px] [@media(pointer:coarse)]:!h-10 [@media(po
  * While `preparing` (no `src` yet) the poster shows with Play enabled: pressing it shows "Starting…" and playback
  * begins as soon as the source arrives (press again to cancel).
  */
-export function VideoPlayer({ src, poster, title, meta, duration: fallback = 0, preparing, className }:
-  { src?: string | null; poster?: string; title?: ReactNode; meta?: ReactNode; duration?: number; preparing?: boolean; className?: string }) {
+export function VideoPlayer({ src, poster, title, meta, duration: fallback = 0, preparing, chapters, className }:
+  { src?: string | null; poster?: string; title?: ReactNode; meta?: ReactNode; duration?: number; preparing?: boolean
+    /** chapter starts: gaps in the seek bar, magnets while scrubbing, titles in the hover time and PageUp / PageDown to jump */ chapters?: readonly MediaChapter[]; className?: string }) {
   const box = useRef<HTMLDivElement>(null), vid = useRef<HTMLVideoElement>(null)
   const toast = useToast()
   const m = useMessages(MEDIA_MESSAGES), { t: ct, fmt } = useLocale()
@@ -329,7 +362,7 @@ export function VideoPlayer({ src, poster, title, meta, duration: fallback = 0, 
     want(false)
     if (v.paused) v.play().catch(() => toast({ title: m('playFailVideo'), description: m('blocked'), tone: 'bad' })); else v.pause()
   }
-  const seek = useSeekSlider({ time: t, duration: d, onSeek: s => { seekTo(s); wake() }, onToggle: toggle })
+  const seek = useSeekSlider({ time: t, duration: d, onSeek: s => { seekTo(s); wake() }, onToggle: toggle, chapters })
   useEffect(() => () => { clearTimeout(idleT.current); clearTimeout(tapT.current) }, [])
   useEffect(() => { if (vid.current) vid.current.volume = 0.8 }, [])
   const { visible: onScreen } = useViewport(box, { amount: 0 })
@@ -420,9 +453,11 @@ export function VideoPlayer({ src, poster, title, meta, duration: fallback = 0, 
           <span className="absolute inset-x-0 h-1 rounded-[var(--r-sm)] bg-white/25 transition-[height] group-hover:h-1.5" />
           <span className="absolute start-0 h-1 rounded-[var(--r-sm)] bg-white/35 transition-[height] group-hover:h-1.5" style={{ width: `${Math.min(100, buf / d * 100)}%` }} />
           <span className="absolute start-0 h-1 rounded-[var(--r-sm)] bg-white transition-[height] group-hover:h-1.5" style={{ width: `${t / d * 100}%` }} />
+          {chapters && <span className="absolute inset-x-0 h-1 transition-[height] group-hover:h-1.5"><MagnetMarks {...seek.marks} tone="onDark" /></span>}
           <span className={cn('absolute -ms-1.5 h-[13px] w-[13px] rounded-full bg-white shadow-[0_1px_4px_rgba(0,0,0,.4)] transition-transform group-hover:scale-100 group-focus-visible:scale-100 [@media(pointer:coarse)]:scale-100', seek.drag ? 'scale-100 [@media(pointer:coarse)]:scale-125' : 'scale-0')} style={{ /* rtl-lint-ignore: physical geometry */ left: `${t / d * 100}%` }} />
-          {seek.hover != null && <span className="pointer-events-none absolute bottom-5 -translate-x-1/2 rounded-[var(--r-sm)] bg-black/75 px-1.5 py-1 font-[family-name:var(--mono)] text-[11px] font-medium" style={{ left: `${seek.hover * 100}%` }}>{fmt.clock(seek.hover * d)}</span>}{/* rtl-lint-ignore: inside the LTR seek bar */}
+          {seek.hover != null && <span className="pointer-events-none absolute bottom-5 -translate-x-1/2 rounded-[var(--r-sm)] bg-black/75 px-1.5 py-1 font-[family-name:var(--mono)] text-[11px] font-medium" style={{ left: `${seek.hover * 100}%` }}>{fmt.clock(seek.hover * d)}{seek.chapter && <span className="ms-1.5 font-[family-name:var(--font)] font-normal opacity-85"><bdi>{seek.chapter.title}</bdi></span>}</span>}{/* rtl-lint-ignore: inside the LTR seek bar */}
         </div>
+        {seek.live}
         <div className="mt-0.5 flex items-center gap-0.5">
           {/* transport keeps the timeline's LTR order and unmirrored icons; the rest of the bar mirrors */}
           <div dir="ltr" className="flex items-center gap-0.5">
@@ -465,8 +500,9 @@ function MediaPlayButton({ playing, label, size, iconSize, className, onClick }:
  * (hovering previews the jump; on touch, tap or swipe sideways along it, while a vertical swipe still scrolls the page). The waveform is a slider: ← / → seek 2 s, Home / End, Space plays.
  * Pass `track` (createAudioTrack) to share playback with other players, or just `src`.
  */
-export function AudioPlayer({ track: shared, src, title, meta, cover, peaks, duration = 0, className }:
-  { track?: AudioTrackHandle; src?: string; title: ReactNode; meta?: ReactNode; cover?: string | ReactNode; peaks: number[]; duration?: number; className?: string }) {
+export function AudioPlayer({ track: shared, src, title, meta, cover, peaks, duration = 0, chapters, className }:
+  { track?: AudioTrackHandle; src?: string; title: ReactNode; meta?: ReactNode; cover?: string | ReactNode; peaks: number[]; duration?: number
+    /** chapter starts: gaps in the waveform, magnets while scrubbing, the current title under it and PageUp / PageDown to jump */ chapters?: readonly MediaChapter[]; className?: string }) {
   const root = useRef<HTMLDivElement>(null)
   const track = useOwnTrack(shared, src, duration, root)
   const s = useAudioTrack(track)
@@ -474,7 +510,7 @@ export function AudioPlayer({ track: shared, src, title, meta, cover, peaks, dur
   const m = useMessages(MEDIA_MESSAGES), { t: ct, fmt } = useLocale()
   const d = s.duration || duration || 1
   const toggle = () => track.toggle().then(ok => { if (!ok) toast({ title: m('playFailAudio'), description: m('blocked'), tone: 'bad' }) })
-  const seek = useSeekSlider({ time: s.time, duration: d, onSeek: track.seek, onToggle: toggle })
+  const seek = useSeekSlider({ time: s.time, duration: d, onSeek: track.seek, onToggle: toggle, chapters })
   const [plays, setPlays] = useState(0)
   useEffect(() => { if (s.playing) setPlays(p => p + 1) }, [s.playing])
   return (
@@ -499,10 +535,13 @@ export function AudioPlayer({ track: shared, src, title, meta, cover, peaks, dur
           </div>
         </div>
       </div>
-      <div {...seek.bind} className="h-12 cursor-pointer touch-pan-y rounded-[var(--r-md)] outline-none select-none focus-visible:shadow-[0_0_0_2px_var(--accent)]">
+      <div {...seek.bind} className="relative h-12 cursor-pointer touch-pan-y rounded-[var(--r-md)] outline-none select-none focus-visible:shadow-[0_0_0_2px_var(--accent)]">
         <Waveform peaks={peaks} played={s.time / d} hover={seek.hover} className="h-full" />
+        {chapters && <span className="pointer-events-none absolute inset-x-0 -bottom-2 h-1.5"><MagnetMarks {...seek.marks} value={seek.chapter?.start} tone="under" /></span>}
       </div>
-      <div dir="ltr" className="ui-num -mt-1 flex justify-between text-[11px] text-[var(--fg3)]"><span>{fmt.clock(s.time)}</span><span>{fmt.clock(d)}</span></div>
+      {seek.live}
+      <div dir="ltr" className="ui-num -mt-1 flex justify-between gap-3 text-[11px] text-[var(--fg3)]"><span>{fmt.clock(s.time)}</span>
+        {chapters && <bdi className="min-w-0 truncate font-[family-name:var(--font)] font-medium text-[var(--fg2)]">{seek.chapter?.title}</bdi>}<span>{fmt.clock(d)}</span></div>
     </div>
   )
 }

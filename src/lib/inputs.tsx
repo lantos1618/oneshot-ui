@@ -1,11 +1,12 @@
-import { useEffect, useId, useLayoutEffect, useRef, useState, type InputHTMLAttributes, type ReactNode, type Ref, type TextareaHTMLAttributes } from 'react'
-import { AnimatePresence, animate, motion, useReducedMotion } from 'motion/react'
-import { AnimatedNumber, FormFieldContext, type FormControlProps, formDisabledClass, formReadOnlyClass, useFormControl, useFormFieldProps, Button, Icon, clamp, cn, defineMessages, logicalArrow, numberFormat, useDir, useLocale, useMessages, hex2hue, hsl2hex, inputClass, isTouch, prefersReducedMotion, spring, useDisclosure, usePointerDrag, useRoving } from './core'
+import { useEffect, useId, useLayoutEffect, useRef, useState, type InputHTMLAttributes, type ReactNode, type Ref, type RefObject, type TextareaHTMLAttributes } from 'react'
+import { AnimatePresence, animate, motion, useReducedMotion, useTransform } from 'motion/react'
+import { AnimatedNumber, FormFieldContext, type FormControlProps, formDisabledClass, formReadOnlyClass, useFormControl, useFormFieldProps, Button, Icon, clamp, cn, defineMessages, logicalArrow, numberFormat, useDir, useLocale, useMessages, hex2hue, hsl2hex, inputClass, isTouch, prefersReducedMotion, spring, useCoarsePointer, useDisclosure, usePointerDrag, useRoving } from './core'
 import { play, shake } from './motion'
 import { FloatingPanel } from './overlay'
 import { useFormsAfterReset, formsAssignRef, formsInterleave, formsMergeRefs } from './formkit'
 import { inputShellClass, rangeInputClass, type Option } from './fields'
 import { OptionList } from './select'
+import { MAGNET_MESSAGES, type Magnet, type MagnetHit, MagnetBubble, MagnetMarks, magnetKeyDirection, useMagnet, useMagnetSettle } from './magnet'
 
 
 /** The input controls' own strings (machine-drafted de/ar). Override one with `<UIProvider messages={{ 'input.quantity': … }}>`. */
@@ -15,7 +16,8 @@ export const INPUT_MESSAGES = defineMessages('input', {
     strength: 'Strength {score} of 4', quantity: 'Quantity', decrease: 'Decrease {label}', increase: 'Increase {label}',
     rating: 'Rating', stars: '{count, plural, one {# star} other {# stars}}', tapToRate: 'Tap to rate',
     terrible: 'Terrible', bad: 'Bad', okay: 'Okay', good: 'Good', excellent: 'Excellent',
-    addTag: 'Add a tag…', otp: 'One-time code', digit: 'Digit {n}', hex: 'Hex colour', hue: 'Hue',
+    addTag: 'Add a tag…', otp: 'One-time code', digit: 'Digit {n}', hex: 'Hex colour', hue: 'Hue', hueValue: '{n} degrees',
+    red: 'Red', yellow: 'Yellow', green: 'Green', cyan: 'Cyan', blue: 'Blue', magenta: 'Magenta',
     range: '{from} to {to}', minimum: 'Minimum', maximum: 'Maximum', minimumOf: 'Minimum {label}', maximumOf: 'Maximum {label}',
     phone: 'Phone number', country: 'Country: {name} {dial}', countries: 'Country',
     currency: 'Currency {code}, change currency', amountIn: 'Amount in {code}', switchCurrency: 'Tap the currency to switch',
@@ -25,7 +27,8 @@ export const INPUT_MESSAGES = defineMessages('input', {
     strength: 'Stärke {score} von 4', quantity: 'Menge', decrease: '{label} verringern', increase: '{label} erhöhen',
     rating: 'Bewertung', stars: '{count, plural, one {# Stern} other {# Sterne}}', tapToRate: 'Tippe zum Bewerten',
     terrible: 'Furchtbar', bad: 'Schlecht', okay: 'Okay', good: 'Gut', excellent: 'Ausgezeichnet',
-    addTag: 'Schlagwort hinzufügen…', otp: 'Einmalcode', digit: 'Ziffer {n}', hex: 'Hex-Farbe', hue: 'Farbton',
+    addTag: 'Schlagwort hinzufügen…', otp: 'Einmalcode', digit: 'Ziffer {n}', hex: 'Hex-Farbe', hue: 'Farbton', hueValue: '{n} Grad',
+    red: 'Rot', yellow: 'Gelb', green: 'Grün', cyan: 'Cyan', blue: 'Blau', magenta: 'Magenta',
     range: '{from} bis {to}', minimum: 'Minimum', maximum: 'Maximum', minimumOf: '{label} (Minimum)', maximumOf: '{label} (Maximum)',
     phone: 'Telefonnummer', country: 'Land: {name} {dial}', countries: 'Land',
     currency: 'Währung {code}, Währung wechseln', amountIn: 'Betrag in {code}', switchCurrency: 'Tippe auf die Währung, um sie zu wechseln',
@@ -35,7 +38,8 @@ export const INPUT_MESSAGES = defineMessages('input', {
     strength: 'القوة {score} من 4', quantity: 'الكمية', decrease: 'إنقاص {label}', increase: 'زيادة {label}',
     rating: 'التقييم', stars: '{count, plural, zero {لا نجوم} one {نجمة واحدة} two {نجمتان} few {# نجوم} many {# نجمة} other {# نجمة}}', tapToRate: 'انقر للتقييم',
     terrible: 'سيئ جدًا', bad: 'سيئ', okay: 'مقبول', good: 'جيد', excellent: 'ممتاز',
-    addTag: 'أضف وسمًا…', otp: 'رمز لمرة واحدة', digit: 'الرقم {n}', hex: 'لون سداسي عشري', hue: 'درجة اللون',
+    addTag: 'أضف وسمًا…', otp: 'رمز لمرة واحدة', digit: 'الرقم {n}', hex: 'لون سداسي عشري', hue: 'درجة اللون', hueValue: '{n} درجة',
+    red: 'أحمر', yellow: 'أصفر', green: 'أخضر', cyan: 'سماوي', blue: 'أزرق', magenta: 'أرجواني',
     range: 'من {from} إلى {to}', minimum: 'الحد الأدنى', maximum: 'الحد الأقصى', minimumOf: 'الحد الأدنى لـ{label}', maximumOf: 'الحد الأقصى لـ{label}',
     phone: 'رقم الهاتف', country: 'الدولة: {name} {dial}', countries: 'الدولة',
     currency: 'العملة {code}، تغيير العملة', amountIn: 'المبلغ بـ{code}', switchCurrency: 'انقر على العملة للتبديل',
@@ -163,21 +167,85 @@ export function PasswordInput({ strength, rules = strength, className, onChange,
 }
 
 /**
+ * Magnets on a native range input (Slider, the colour picker's hue): our own pointer drag through useMagnet (the native
+ * drag is stopped on pointerdown and touchstart), the jump keys, a thumb position that settles with a spring, and focus
+ * bookkeeping (we focus the input ourselves, which browsers count as focus-visible, so a pointer focus shows no ring).
+ * The input stays for arrow keys, forms and screen readers. `inset` is the thumb's radius: its centre stops that far
+ * short of each end. Spread `bind` on the input; draw the thumb at `thumbAt`.
+ */
+function useInputsMagnetRange({ input, magnets, min, max, step, value, locked, inset, set, describe, onSnap }: {
+  input: RefObject<HTMLInputElement | null>; magnets?: readonly Magnet[] | null; min: number; max: number; step: number; value: number; locked: boolean; inset: number
+  set: (v: number) => void; describe?: (v: number) => string; onSnap?: (hit: MagnetHit | null, value: number) => void }) {
+  const { dir } = useLocale(), rtl = dir === 'rtl'
+  const mg = useMagnet({ magnets, min, max, step, describe, onSnap })
+  const on = mg.enabled
+  const live = useRef(value)
+  useLayoutEffect(() => { live.current = value }, [value])
+  const [dragging, setDragging] = useState(false), [kick, setKick] = useState(0), [focusVisible, setFocusVisible] = useState(false)
+  const [pointerFocus, setPointerFocus] = useState(false)
+  const commit = (n: number) => { if (n !== live.current) { live.current = n; set(n) } }
+  const moveTo = (x: number, event: PointerEvent) => {
+    const r = input.current?.getBoundingClientRect(); if (!r) return
+    const w = Math.max(1, r.width - 2 * inset), f = clamp(((rtl ? r.right - x : x - r.left) - inset) / w, 0, 1)
+    const res = mg.apply(min + f * (max - min), { px: w, event })
+    if (res.captured || res.released) setKick(k => k + 1)
+    commit(res.value)
+  }
+  const drag = usePointerDrag({ onMove: p => moveTo(p.x, p.event), onEnd: () => { mg.reset(); setDragging(false) }, cursor: 'grabbing' })
+  useEffect(() => {
+    const el = input.current; if (!on || !el || locked) return
+    // a touch drags a native range from touchstart: stop that so our drag (and its magnets) owns the gesture
+    const stop = (e: TouchEvent) => { if (e.cancelable) e.preventDefault() }
+    el.addEventListener('touchstart', stop, { passive: false })
+    return () => el.removeEventListener('touchstart', stop)
+  }, [on, locked, input])
+  const settled = useMagnetSettle(clamp((value - min) / (max - min || 1), 0, 1), kick)
+  const thumbAt = useTransform(settled, f => `calc(${inset}px + ${f} * (100% - ${2 * inset}px))`)
+  const bind = on ? {
+    'aria-keyshortcuts': 'PageUp PageDown',
+    onPointerDown: (e: React.PointerEvent<HTMLInputElement>) => {
+      if (e.button !== 0 || locked) return
+      e.preventDefault(); setPointerFocus(true); input.current?.focus({ preventScroll: true }); setDragging(true); mg.reset()
+      drag.start(e, input.current); moveTo(e.clientX, e.nativeEvent)
+    },
+    onKeyDown: (e: React.KeyboardEvent<HTMLInputElement>) => {
+      setPointerFocus(false); setFocusVisible(true)
+      const d = magnetKeyDirection(e, dir), to = d && !locked ? mg.next(live.current, d) : null
+      if (to === null) return // not a jump key, or past the last mark: the native key does what it always did
+      e.preventDefault(); commit(to); setKick(k => k + 1)
+    },
+    onFocus: (e: React.FocusEvent<HTMLInputElement>) => { try { setFocusVisible(!pointerFocus && e.currentTarget.matches(':focus-visible')) } catch { setFocusVisible(false) } },
+    onBlurCapture: () => { setFocusVisible(false); setPointerFocus(false) },
+  } : {}
+  return { mg, on, dragging, focusVisible, pointerFocus, thumbAt, bind }
+}
+
+/** Thumb radius of the magnetised Slider (px): the native range's thumb centre stops this far short of each end. */
+const SLIDER_INSET = 8
+
+/**
  * Range slider with live value. `disabled` fades only the track (label and value stay legible in --fg3; the group gets aria-disabled). Native input: keyboard and screen readers for free, a 32px hit area on touch.
  * `steps` makes it a stepped picker over named stops (value = index; the names show under the track and can be tapped).
  * `compact` uses a smaller grey readout (settings panels).
+ * `magnets` (see useMagnet) pull the thumb onto marks while dragging: ticks and zone bands on the track, the mark's label
+ * in a bubble over the thumb, a spring as it settles, a tick on touch, "Snapped to …" announced. Hold Alt (Option) or put a
+ * second finger down to drag freely; PageUp / PageDown and Ctrl/⌘ + arrows jump between marks, arrows still step.
+ * The value stays a plain number (forms submit it as usual). `valueText` names a value for screen readers.
  */
-export function Slider({ value, defaultValue, onChange, min: minProp = 0, max: maxProp = 100, step: stepProp = 1, label, format, compact, steps, className, ref, ...fp }: FormControlProps &
+export function Slider({ value, defaultValue, onChange, min: minProp = 0, max: maxProp = 100, step: stepProp = 1, label, format, compact, steps, magnets, onSnap, valueText, className, ref, ...fp }: FormControlProps &
   { value?: number; defaultValue?: number; onChange?: (v: number) => void; min?: number; max?: number; step?: number; label?: string; format?: (v: number) => ReactNode
-    compact?: boolean; steps?: string[]; className?: string; ref?: Ref<HTMLInputElement> }) {
+    compact?: boolean; steps?: string[]; magnets?: readonly Magnet[] | null; onSnap?: (hit: MagnetHit | null, value: number) => void; valueText?: (v: number) => string; className?: string; ref?: Ref<HTMLInputElement> }) {
   const named = !!steps && steps.length > 1
   const min = named ? 0 : minProp, max = named ? steps.length - 1 : maxProp, step = named ? 1 : stepProp
   const input = useRef<HTMLInputElement>(null)
   const fc = useFormControl<number>({ ...fp, value, defaultValue: defaultValue ?? (named ? 0 : (min + max) / 2), onChange, serialize: n => String(n), focus: () => input.current?.focus() })
-  const v = fc.value, set = fc.set, disabled = fc.disabled
-  const rtl = useDir() === 'rtl'
+  const v = fc.value, set = fc.set, disabled = fc.disabled, locked = disabled || fc.readOnly
+  const { dir, fmt } = useLocale(), rtl = dir === 'rtl'
   const pct = clamp(((v - min) / (max - min || 1)) * 100, 0, 100)
   const shown = named ? steps[clamp(Math.round(v), 0, steps.length - 1)] : format ? format(v) : v
+  const text = (n: number) => valueText?.(n) ?? fmt.number(n)
+  const { mg, on, dragging, focusVisible, pointerFocus, thumbAt, bind } = useInputsMagnetRange({ input, magnets: named ? null : magnets, min, max, step, value: v, locked, inset: SLIDER_INSET, set, describe: text, onSnap })
+  const mark = on ? mg.at(v) : null
   return (
     // disabled: only the track and thumb fade; the label and value switch to --fg3 (still ≥4.5:1, never faded with opacity)
     <div role="group" aria-label={label} aria-disabled={disabled || undefined} className={cn('relative', className)} onBlur={fc.onBlur}>
@@ -187,11 +255,27 @@ export function Slider({ value, defaultValue, onChange, min: minProp = 0, max: m
           <span className={cn('ui-num', compact || disabled ? 'text-[var(--fg3)]' : 'font-medium', compact && 'text-xs')}>{shown}</span>
         </div>
       )}
-      <input type="range" ref={formsMergeRefs(input, ref)} {...fc.control} min={min} max={max} step={step} value={v} disabled={disabled} aria-label={label} aria-labelledby={label ? undefined : fc.labelledBy}
-        aria-readonly={fc.readOnly || undefined} aria-valuetext={named ? String(shown) : undefined}
-        onChange={e => set(Number(e.target.value))}
-        className={cn(rangeInputClass, 'h-1.5 accent-[var(--primary)] transition-opacity disabled:cursor-not-allowed disabled:opacity-40', fc.readOnly && 'cursor-default', fc.invalid && 'outline outline-1 outline-offset-2 outline-[var(--bad)]')}
-        style={{ backgroundImage: `linear-gradient(to ${rtl ? 'left' : 'right'}, var(--primary) ${pct}%, var(--muted) ${pct}%)` }} />
+      <div className={on ? 'group/mg relative' : 'contents'}>
+        <input type="range" ref={formsMergeRefs(input, ref)} {...fc.control} min={min} max={max} step={step} value={v} disabled={disabled} aria-label={label} aria-labelledby={label ? undefined : fc.labelledBy}
+          aria-readonly={fc.readOnly || undefined} aria-valuetext={named ? String(shown) : mark?.label ? mg.valueText(v, text(v)) : valueText?.(v)}
+          onChange={e => set(Number(e.target.value))} {...bind}
+          className={cn(rangeInputClass, 'h-1.5 accent-[var(--primary)] transition-opacity disabled:cursor-not-allowed disabled:opacity-40', fc.readOnly && 'cursor-default', fc.invalid && 'outline outline-1 outline-offset-2 outline-[var(--bad)]',
+            on && pointerFocus && 'outline-none', on && 'relative z-[1] !bg-transparent [&::-moz-range-thumb]:h-4 [&::-moz-range-thumb]:w-4 [&::-moz-range-thumb]:opacity-0 [&::-webkit-slider-thumb]:h-4 [&::-webkit-slider-thumb]:w-4 [&::-webkit-slider-thumb]:appearance-none [&::-webkit-slider-thumb]:opacity-0',
+            on && !locked && (dragging ? 'cursor-grabbing' : 'cursor-pointer'))}
+          style={on ? undefined : { backgroundImage: `linear-gradient(to ${rtl ? 'left' : 'right'}, var(--primary) ${pct}%, var(--muted) ${pct}%)` }} />
+        {on && (
+          // the drawn track: fill, bands, ticks and a thumb that springs onto marks (the input above it is transparent)
+          <span aria-hidden className={cn('pointer-events-none absolute inset-x-0 top-1/2 h-1.5 -translate-y-1/2 transition-opacity', disabled && 'opacity-40')}>
+            <span className="absolute inset-0 rounded-full bg-[var(--muted)]" />
+            <motion.span className="absolute inset-y-0 start-0 rounded-full bg-[var(--primary)]" style={{ width: thumbAt }} />
+            <MagnetMarks magnets={magnets} min={min} max={max} value={v} inset={SLIDER_INSET} />
+            <motion.span style={{ insetInlineStart: thumbAt }} animate={{ scale: dragging ? 1.15 : 1 }} transition={spring(0.4, 0.3)}
+              className={cn('absolute top-1/2 -ms-2 -mt-2 h-4 w-4 rounded-full bg-[var(--primary)] shadow-[0_1px_3px_rgba(0,0,0,.2)]', !pointerFocus && 'group-has-[input:focus-visible]/mg:shadow-[0_0_0_2px_var(--card),0_0_0_4px_var(--accent)]')}>
+              <MagnetBubble label={mark?.label} show={(dragging || focusVisible) && !locked} />
+            </motion.span>
+          </span>
+        )}
+      </div>
       {named && (
         <span className="relative mt-1.5 block h-4 [@media(pointer:coarse)]:mt-1 [@media(pointer:coarse)]:h-8">
           {steps.map((x, k) => (
@@ -201,6 +285,7 @@ export function Slider({ value, defaultValue, onChange, min: minProp = 0, max: m
           ))}
         </span>
       )}
+      {mg.live}
       {fc.inputs}
     </div>
   )
@@ -404,11 +489,14 @@ const formsHexOk = (s: string) => /^#[0-9a-f]{6}$/i.test(s)
 
 /**
  * Swatches, a hue slider and a hex field. The preview pops when a swatch or hex changes it (not while dragging hue).
+ * `hueMagnets` pulls the hue thumb onto the primary hues (or your own marks) while dragging; see Slider's `magnets`.
  * Form-native: `name` submits "#RRGGBB" (upper case; the last valid colour while the hex field holds a typo), `required`,
  * `disabled`, `readOnly` (shows the colour and hex only), `invalid`, `onBlur`, `form`, and `ref` on the hex field.
  */
-export function ColorPicker({ value, defaultValue = '#2563EB', onChange, swatches = ['#18181B', '#2563EB', '#0891B2', '#16A34A', '#CA8A04', '#F97316', '#DC2626', '#DB2777'], className, ref, ...fp }: FormControlProps &
-  { value?: string; defaultValue?: string; onChange?: (v: string) => void; swatches?: string[]; className?: string; ref?: Ref<HTMLInputElement> }) {
+export function ColorPicker({ value, defaultValue = '#2563EB', onChange, swatches = ['#18181B', '#2563EB', '#0891B2', '#16A34A', '#CA8A04', '#F97316', '#DC2626', '#DB2777'], hueMagnets, className, ref, ...fp }: FormControlProps &
+  { value?: string; defaultValue?: string; onChange?: (v: string) => void; swatches?: string[]
+    /** pull the hue thumb onto marks while dragging: true for the six primary and secondary hues (red, yellow, green, cyan, blue, magenta), or your own (degrees) */ hueMagnets?: boolean | readonly Magnet[]
+    className?: string; ref?: Ref<HTMLInputElement> }) {
   const hexRef = useRef<HTMLInputElement>(null)
   const t = useMessages(INPUT_MESSAGES), rtl = useDir() === 'rtl'
   const fc = useFormControl<string>({ ...fp, value: value?.toUpperCase(), defaultValue: defaultValue.toUpperCase(), onChange, serialize: x => x, focus: () => hexRef.current?.focus() })
@@ -424,6 +512,12 @@ export function ColorPicker({ value, defaultValue = '#2563EB', onChange, swatche
     if (src !== 'hex') setText(h)
     if (src !== 'hue') { setHue(hex2hue(h)); setPops(n => n + 1) }
   }
+  const hueInput = useRef<HTMLInputElement>(null), coarse = useCoarsePointer()
+  const hueMarks: readonly Magnet[] | null = hueMagnets === true
+    ? ([['red', 0], ['yellow', 60], ['green', 120], ['cyan', 180], ['blue', 240], ['magenta', 300], ['red', 360]] as const).map(([k, value]) => ({ value, label: t(k) }))
+    : hueMagnets || null
+  const setHueFrom = (h: number) => { setHue(h); apply(hsl2hex(h, 83, 53), 'hue') }
+  const hm = useInputsMagnetRange({ input: hueInput, magnets: hueMarks, min: 0, max: 360, step: 1, value: hue, locked, inset: coarse ? 12 : 9, set: setHueFrom, describe: n => t('hueValue', { n }) })
   return (
     <div className={cn('relative flex flex-col gap-3', className)} onBlur={fc.onBlur}>
       <div className="flex items-center gap-3">
@@ -435,9 +529,23 @@ export function ColorPicker({ value, defaultValue = '#2563EB', onChange, swatche
             aria-label={fc.labelledBy ? undefined : t('hex')} dir="ltr" />
         </FormFieldContext.Provider>
       </div>
-      <input type="range" min={0} max={360} value={hue} aria-label={t('hue')} disabled={locked} onChange={e => { const h = +e.target.value; setHue(h); apply(hsl2hex(h, 83, 53), 'hue') }}
-        className="h-2.5 w-full disabled:cursor-not-allowed disabled:opacity-40 cursor-pointer appearance-none rounded-full bg-clip-content [@media(pointer:coarse)]:box-content [@media(pointer:coarse)]:-my-[11px] [@media(pointer:coarse)]:py-[11px] [@media(pointer:coarse)]:[&::-webkit-slider-thumb]:h-6 [@media(pointer:coarse)]:[&::-webkit-slider-thumb]:w-6 [@media(pointer:coarse)]:[&::-moz-range-thumb]:h-6 [@media(pointer:coarse)]:[&::-moz-range-thumb]:w-6 [&::-moz-range-thumb]:h-4 [&::-moz-range-thumb]:w-4 [&::-moz-range-thumb]:rounded-full [&::-moz-range-thumb]:border-2 [&::-moz-range-thumb]:border-[rgba(0,0,0,.25)] [&::-moz-range-thumb]:bg-white [&::-webkit-slider-thumb]:h-[18px] [&::-webkit-slider-thumb]:w-[18px] [&::-webkit-slider-thumb]:appearance-none [&::-webkit-slider-thumb]:rounded-full [&::-webkit-slider-thumb]:border-2 [&::-webkit-slider-thumb]:border-[rgba(0,0,0,.25)] [&::-webkit-slider-thumb]:bg-white"
+      <div className={hm.on ? 'group/mg relative' : 'contents'}>
+      <input type="range" ref={hueInput} min={0} max={360} value={hue} aria-label={t('hue')} disabled={locked} onChange={e => setHueFrom(+e.target.value)}
+        aria-valuetext={hm.on ? hm.mg.valueText(hue, t('hueValue', { n: hue })) : undefined} {...hm.bind}
+        className={cn(hm.on && 'relative [&::-moz-range-thumb]:opacity-0 [&::-webkit-slider-thumb]:opacity-0', hm.on && hm.pointerFocus && 'outline-none', hm.on && !locked && hm.dragging && '!cursor-grabbing', "h-2.5 w-full disabled:cursor-not-allowed disabled:opacity-40 cursor-pointer appearance-none rounded-full bg-clip-content [@media(pointer:coarse)]:box-content [@media(pointer:coarse)]:-my-[11px] [@media(pointer:coarse)]:py-[11px] [@media(pointer:coarse)]:[&::-webkit-slider-thumb]:h-6 [@media(pointer:coarse)]:[&::-webkit-slider-thumb]:w-6 [@media(pointer:coarse)]:[&::-moz-range-thumb]:h-6 [@media(pointer:coarse)]:[&::-moz-range-thumb]:w-6 [&::-moz-range-thumb]:h-4 [&::-moz-range-thumb]:w-4 [&::-moz-range-thumb]:rounded-full [&::-moz-range-thumb]:border-2 [&::-moz-range-thumb]:border-[rgba(0,0,0,.25)] [&::-moz-range-thumb]:bg-white [&::-webkit-slider-thumb]:h-[18px] [&::-webkit-slider-thumb]:w-[18px] [&::-webkit-slider-thumb]:appearance-none [&::-webkit-slider-thumb]:rounded-full [&::-webkit-slider-thumb]:border-2 [&::-webkit-slider-thumb]:border-[rgba(0,0,0,.25)] [&::-webkit-slider-thumb]:bg-white")}
         style={{ backgroundImage: `linear-gradient(${rtl ? 270 : 90}deg,#f00,#ff0,#0f0,#0ff,#00f,#f0f,#f00)` }} />
+      {hm.on && (
+        // ticks under the track and a drawn thumb that settles onto the marks (the native one is hidden)
+        <span aria-hidden className={cn('pointer-events-none absolute inset-x-0 top-1/2 h-2.5 -translate-y-1/2', locked && 'opacity-40')}>
+          <MagnetMarks magnets={hueMarks} min={0} max={360} value={hue} inset={coarse ? 12 : 9} />
+          <motion.span style={{ insetInlineStart: hm.thumbAt }} animate={{ scale: hm.dragging ? 1.12 : 1 }} transition={spring(0.4, 0.3)}
+            className={cn('absolute top-1/2 -ms-[9px] -mt-[9px] h-[18px] w-[18px] rounded-full border-2 border-[rgba(0,0,0,.25)] bg-white [@media(pointer:coarse)]:-ms-3 [@media(pointer:coarse)]:-mt-3 [@media(pointer:coarse)]:h-6 [@media(pointer:coarse)]:w-6',
+              !hm.pointerFocus && 'group-has-[input:focus-visible]/mg:shadow-[0_0_0_2px_var(--card),0_0_0_4px_var(--accent)]')}>
+            <MagnetBubble label={hm.mg.at(hue).label} show={(hm.dragging || hm.focusVisible) && !locked} />
+          </motion.span>
+        </span>
+      )}
+      </div>
       <div className="flex flex-wrap gap-2 [@media(pointer:coarse)]:grid [@media(pointer:coarse)]:grid-cols-[repeat(auto-fill,minmax(32px,1fr))] [@media(pointer:coarse)]:justify-items-center [@media(pointer:coarse)]:gap-1.5">
         {swatches.map(s => {
           const on = s.toUpperCase() === c
@@ -448,6 +556,7 @@ export function ColorPicker({ value, defaultValue = '#2563EB', onChange, swatche
           )
         })}
       </div>
+      {hm.mg.live}
       {fc.inputs}
     </div>
   )
@@ -458,14 +567,17 @@ export function ColorPicker({ value, defaultValue = '#2563EB', onChange, swatche
 /**
  * Two-thumb slider for a range. Drag either thumb (mouse or touch), click the track to move the nearest thumb there,
  * or use arrows / PageUp / PageDown / Home / End. `minGap` keeps the thumbs apart. The readout rolls (pass `format` to change it).
+ * `magnets` (see useMagnet) pull a dragged thumb onto marks, and onto the other thumb (as close as `minGap` allows)
+ * unless `magnetThumbs={false}`; PageUp / PageDown and Ctrl/⌘ + arrows jump between marks (past the last one PageUp /
+ * PageDown take a 10% step as before); hold Alt (Option) or a second finger to drag freely.
  * Form-native: `name` submits two fields, low then high ("200", "750"; read with formData.getAll), `disabled` (the track
  * and thumbs fade, the label stays legible), `readOnly`, `invalid`, `onBlur`, `form`, and `ref` on the low thumb.
  */
-export function RangeSlider({ value, defaultValue = [20, 80], onChange, min = 0, max = 100, step = 1, minGap = 0, label, format: formatProp, valueText: valueTextProp, className, ref, ...fp }: FormControlProps &
+export function RangeSlider({ value, defaultValue = [20, 80], onChange, min = 0, max = 100, step = 1, minGap = 0, label, format: formatProp, valueText: valueTextProp, magnets, magnetThumbs = true, onSnap, className, ref, ...fp }: FormControlProps &
   { value?: [number, number]; defaultValue?: [number, number]; onChange?: (v: [number, number]) => void; min?: number; max?: number; step?: number; minGap?: number
-    label?: string; format?: (v: number) => ReactNode; valueText?: (v: number) => string; className?: string; ref?: Ref<HTMLButtonElement> }) {
+    label?: string; format?: (v: number) => ReactNode; valueText?: (v: number) => string; magnets?: readonly Magnet[] | null; magnetThumbs?: boolean; onSnap?: (hit: MagnetHit | null, value: number) => void; className?: string; ref?: Ref<HTMLButtonElement> }) {
   const track = useRef<HTMLDivElement>(null), thumbs = useRef<(HTMLButtonElement | null)[]>([])
-  const t = useMessages(INPUT_MESSAGES), { locale, dir, fmt: lf } = useLocale(), rtl = dir === 'rtl'
+  const t = useMessages(INPUT_MESSAGES), tm = useMessages(MAGNET_MESSAGES), { locale, dir, fmt: lf } = useLocale(), rtl = dir === 'rtl'
   const format = formatProp ?? ((n: number) => <AnimatedNumber value={n} locale={locale} />), valueText = valueTextProp ?? lf.number
   const fc = useFormControl<[number, number]>({ ...fp, value, defaultValue, onChange, serialize: r => [String(r[0]), String(r[1])], focus: () => thumbs.current[0]?.focus() })
   const v = fc.value, set = fc.set, locked = fc.disabled || fc.readOnly
@@ -474,6 +586,12 @@ export function RangeSlider({ value, defaultValue = [20, 80], onChange, min = 0,
   const [dragging, setDragging] = useState<0 | 1 | null>(null)
   const pct = (n: number) => clamp(((n - min) / (max - min || 1)) * 100, 0, 100)
   const snap = (n: number) => clamp(Math.round((n - min) / step) * step + min, min, max)
+  // while a thumb is dragged it is also pulled onto the other thumb (as close as minGap allows)
+  const own = !!magnets?.length
+  const other = (k: 0 | 1): Magnet => ({ value: k === 0 ? v[1] - minGap : v[0] + minGap, label: minGap ? tm('gap') : tm('meet') })
+  const mg = useMagnet({ magnets: own && magnetThumbs && dragging !== null ? [...magnets!, other(dragging)] : magnets, min, max, step, describe: valueText, onSnap })
+  const [kicks, setKicks] = useState([0, 0]), [dragLabel, setDragLabel] = useState<string | undefined>(), [focusK, setFocusK] = useState<0 | 1 | null>(null)
+  const kick = (k: 0 | 1) => setKicks(ks => k ? [ks[0], ks[1] + 1] : [ks[0] + 1, ks[1]])
   const move = (k: 0 | 1, n: number) => {
     if (locked) return
     const cur = live.current, x = snap(n), next: [number, number] = [cur[0], cur[1]]
@@ -482,8 +600,15 @@ export function RangeSlider({ value, defaultValue = [20, 80], onChange, min = 0,
   }
   // the low end is the start edge: the left in LTR, the right in RTL
   const valAt = (x: number) => { const r = track.current?.getBoundingClientRect(); return r ? min + ((rtl ? r.right - x : x - r.left) / (r.width || 1)) * (max - min) : min }
+  const dragTo = (k: 0 | 1, x: number, event: PointerEvent) => {
+    if (!own) return move(k, valAt(x))
+    const res = mg.apply(valAt(x), { px: track.current?.getBoundingClientRect().width || undefined, event })
+    if (res.captured || res.released) kick(k)
+    setDragLabel(res.snapped?.label ?? res.zone?.label)
+    move(k, res.value)
+  }
   const thumb = useRef<0 | 1>(0)
-  const thumbDrag = usePointerDrag({ onMove: p => move(thumb.current, valAt(p.x)), onEnd: () => setDragging(null), cursor: 'grabbing' })
+  const thumbDrag = usePointerDrag({ onMove: p => dragTo(thumb.current, p.x, p.event), onEnd: () => { mg.reset(); setDragging(null) }, cursor: 'grabbing' })
   const startDrag = (k: 0 | 1, e: React.PointerEvent) => {
     if (e.button !== 0 || locked) return
     e.preventDefault(); thumbs.current[k]?.focus(); thumb.current = k; setDragging(k)
@@ -493,32 +618,43 @@ export function RangeSlider({ value, defaultValue = [20, 80], onChange, min = 0,
     if (locked) return
     const n = valAt(e.clientX), d0 = Math.abs(n - v[0]), d1 = Math.abs(n - v[1])
     const k: 0 | 1 = d0 < d1 ? 0 : d1 < d0 ? 1 : n < v[0] ? 0 : 1
-    move(k, n); startDrag(k, e)
+    mg.reset(); dragTo(k, e.clientX, e.nativeEvent); startDrag(k, e)
   }
   const thumbLabel = (k: 0 | 1) => label ? t(k ? 'maximumOf' : 'minimumOf', { label: label.toLocaleLowerCase(locale) }) : t(k ? 'maximum' : 'minimum')
+  const s0 = useMagnetSettle(pct(v[0]) / 100, kicks[0]), s1 = useMagnetSettle(pct(v[1]) / 100, kicks[1])
+  const pos = [useTransform(s0, f => `${f * 100}%`), useTransform(s1, f => `${f * 100}%`)] as const
+  const fillEnd = useTransform(s1, f => `${100 - f * 100}%`)
   return (
     <div role="group" aria-label={label} aria-labelledby={label ? undefined : fc.labelledBy} aria-disabled={fc.disabled || undefined} id={fc.control.id} aria-describedby={fc.control['aria-describedby']}
       className={cn('relative', className)} onBlur={fc.onBlur}>
       {label && <div className="mb-2 flex justify-between text-[13px]"><span className={fc.disabled ? 'text-[var(--fg3)]' : 'text-[var(--fg2)]'}>{label}</span><span className={fc.disabled ? 'text-[var(--fg3)]' : 'font-medium'}>{formsInterleave(t('range'), { from: format(v[0]), to: format(v[1]) })}</span></div>}
       <div ref={track} className={cn('relative h-5 touch-none transition-opacity [@media(pointer:coarse)]:-my-1.5 [@media(pointer:coarse)]:h-8', fc.disabled ? 'cursor-not-allowed opacity-40' : fc.readOnly ? 'cursor-default' : 'cursor-pointer')} onPointerDown={onTrackDown}>
         <div className={cn('absolute inset-x-0 top-2 h-1 rounded-full [@media(pointer:coarse)]:top-3.5', fc.invalid ? 'bg-[var(--bad-soft)] shadow-[0_0_0_1px_var(--bad)]' : 'bg-[var(--muted)]')} />
-        <div className="absolute top-2 h-1 rounded-full bg-[var(--primary)] [@media(pointer:coarse)]:top-3.5" style={{ insetInlineStart: `${pct(v[0])}%`, insetInlineEnd: `${100 - pct(v[1])}%` }} />
+        <motion.div className="absolute top-2 h-1 rounded-full bg-[var(--primary)] [@media(pointer:coarse)]:top-3.5" style={{ insetInlineStart: pos[0], insetInlineEnd: fillEnd }} />
+        {own && <MagnetMarks magnets={magnets} min={min} max={max} value={v} />}
         {([0, 1] as const).map(k => (
-          <motion.button type="button" key={k} ref={el => { thumbs.current[k] = el; if (k === 0) formsAssignRef(ref, el) }} role="slider" aria-label={thumbLabel(k)} aria-valuemin={min} aria-valuemax={max} aria-valuenow={v[k]} aria-valuetext={valueText(v[k])}
+          <motion.button type="button" key={k} ref={el => { thumbs.current[k] = el; if (k === 0) formsAssignRef(ref, el) }} role="slider" aria-label={thumbLabel(k)} aria-valuemin={min} aria-valuemax={max} aria-valuenow={v[k]}
+            aria-valuetext={own ? mg.valueText(v[k], valueText(v[k])) : valueText(v[k])} aria-keyshortcuts={own ? 'PageUp PageDown' : undefined}
             disabled={fc.disabled} aria-readonly={fc.readOnly || undefined} aria-invalid={fc.control['aria-invalid']}
             animate={{ scale: dragging === k ? 1.15 : 1 }} transition={spring(0.4, 0.3)}
-            onPointerDown={e => { e.stopPropagation(); startDrag(k, e) }}
+            onPointerDown={e => { e.stopPropagation(); mg.reset(); startDrag(k, e) }}
+            onFocus={own ? e => { try { if (e.currentTarget.matches(':focus-visible')) setFocusK(k) } catch { /* old selector engines */ } } : undefined}
+            onBlur={own ? () => setFocusK(null) : undefined}
             onKeyDown={e => {
+              const jump = own ? magnetKeyDirection(e, dir) : 0, to0 = jump ? mg.next(v[k], jump) : null
+              if (to0 !== null) { e.preventDefault(); move(k, to0); kick(k); return }
               const big = Math.max(step, (max - min) / 10)
               const to = ({ ArrowRight: v[k] + step, ArrowUp: v[k] + step, ArrowLeft: v[k] - step, ArrowDown: v[k] - step, PageUp: v[k] + big, PageDown: v[k] - big, Home: min, End: max } as Record<string, number>)[logicalArrow(e.key, dir)]
               if (to !== undefined) { e.preventDefault(); move(k, to) }
             }}
             /* rtl-lint-ignore: the centring translate has its rtl: twin */
-            className={cn('absolute top-0 h-5 w-5 -translate-x-1/2 rtl:translate-x-1/2 touch-none rounded-full border-0 bg-transparent p-0 [@media(pointer:coarse)]:h-8 [@media(pointer:coarse)]:w-8', locked ? fc.disabled ? 'cursor-not-allowed' : 'cursor-default' : dragging === k ? 'z-10 cursor-grabbing' : 'cursor-grab')} style={{ insetInlineStart: `${pct(v[k])}%` }}>
+            className={cn('absolute top-0 h-5 w-5 -translate-x-1/2 rtl:translate-x-1/2 touch-none rounded-full border-0 bg-transparent p-0 [@media(pointer:coarse)]:h-8 [@media(pointer:coarse)]:w-8', locked ? fc.disabled ? 'cursor-not-allowed' : 'cursor-default' : dragging === k ? 'z-10 cursor-grabbing' : 'cursor-grab')} style={{ insetInlineStart: pos[k] }}>
             <span aria-hidden className="absolute inset-0 rounded-full border-2 border-[var(--primary)] bg-[var(--card)] shadow-[0_1px_3px_rgba(0,0,0,.2)] [@media(pointer:coarse)]:inset-1" />
+            {own && <MagnetBubble label={dragging === k ? dragLabel : mg.at(v[k]).label} show={(dragging === k || focusK === k) && !locked} />}
           </motion.button>
         ))}
       </div>
+      {mg.live}
       {fc.inputs}
     </div>
   )

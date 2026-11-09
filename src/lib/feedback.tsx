@@ -12,14 +12,17 @@ const FEEDBACK_MSG = defineMessages('feedback', {
   en: {
     new: 'New', holdToDelete: 'Hold to delete', deleted: 'Deleted', holdIdle: 'Release early to cancel', holdHolding: 'Keep holding…',
     holdCancelled: 'Cancelled. Release early to cancel', backOnline: 'Back online.',
+    offlineSaved: 'You’re offline. Edits are saved locally.', retryIn: 'Retrying in {seconds} s', retrying: 'Retrying…', offlineSaid: 'You’re offline. Retrying automatically.',
   },
   de: {
     new: 'Neu', holdToDelete: 'Zum Löschen halten', deleted: 'Gelöscht', holdIdle: 'Früher loslassen, um abzubrechen', holdHolding: 'Weiter halten…',
     holdCancelled: 'Abgebrochen. Früher loslassen, um abzubrechen', backOnline: 'Wieder online.',
+    offlineSaved: 'Du bist offline. Änderungen werden lokal gespeichert.', retryIn: 'Neuer Versuch in {seconds} s', retrying: 'Neuer Versuch…', offlineSaid: 'Du bist offline. Es wird automatisch erneut versucht.',
   },
   ar: {
     new: 'جديد', holdToDelete: 'اضغط مطولًا للحذف', deleted: 'تم الحذف', holdIdle: 'أفلت مبكرًا للإلغاء', holdHolding: 'استمر في الضغط…',
     holdCancelled: 'أُلغي. أفلت مبكرًا للإلغاء', backOnline: 'عاد الاتصال.',
+    offlineSaved: 'أنت غير متصل. تُحفظ التعديلات محليًا.', retryIn: 'إعادة المحاولة خلال {seconds} ث', retrying: 'جارٍ إعادة المحاولة…', offlineSaid: 'أنت غير متصل. ستتم إعادة المحاولة تلقائيًا.',
   },
 })
 
@@ -448,52 +451,82 @@ export function HoldToConfirm({ onConfirm, duration = 1200, children, doneLabel,
 /* Connection ───────────────────────────────────────────────────── */
 
 /**
- * Connection bar for the top of a view. When `online` turns false it slides down, explains that
- * edits are kept locally and counts down to the next automatic retry (calling `onRetry`), with a
- * "Retry now" link. Back online, it turns green with `backMessage` and hides itself after a moment.
+ * Connection bar for the top of a view. When `online` turns false it slides down, explains that edits are kept
+ * locally and counts down to the next automatic retry (calling `onRetry`), with a "Retry now" link; at each retry a
+ * small spinner reads "Retrying…" for a second, in place. Back online, the same bar cross-fades to green with
+ * `backMessage` and slides away after a moment. One persistent bar: both states share one grid cell, so nothing
+ * stacks, jumps or reflows (the countdown has a fixed width), and only appearing/disappearing moves it (a transform,
+ * none under reduced motion). Screen readers hear the state changes only, never the countdown. `paused` stops the
+ * countdown and automatic retries (e.g. while the view is off screen) without pretending to be online.
  */
-export function OfflineIndicator({ online, onRetry, retryEvery = 5, backMessage, className }:
-  { online: boolean; onRetry?: () => void; retryEvery?: number; /** default "Back online." in the locale; say what synced, e.g. "Back online. Synced 3 changes." */ backMessage?: ReactNode; className?: string }) {
+export function OfflineIndicator({ online, onRetry, retryEvery = 5, paused = false, backMessage, className }: {
+  online: boolean; onRetry?: () => void; retryEvery?: number
+  /** stop counting down and retrying automatically (e.g. while off screen); "Retry now" still works */ paused?: boolean
+  /** default "Back online." in the locale; say what synced, e.g. "Back online. Synced 3 changes." */ backMessage?: ReactNode; className?: string
+}) {
   const { t, fmt } = useLocale(), tf = useMessages(FEEDBACK_MSG)
   const [mode, setMode] = useState<'hidden' | 'offline' | 'back'>(online ? 'hidden' : 'offline')
   const [left, setLeft] = useState(retryEvery)
-  const [pulse, setPulse] = useState(0), [shake, setShake] = useState(0)
-  const was = useRef(online), retry = useRef(onRetry), count = useRef(retryEvery); retry.current = onRetry
+  const [retrying, setRetrying] = useState(false)
+  const [changed, setChanged] = useState(false) // the live region speaks only after a change, never on mount
+  const was = useRef(online), retry = useRef(onRetry), count = useRef(retryEvery), spinT = useRef<ReturnType<typeof setTimeout>>(undefined)
+  retry.current = onRetry
+  const runRetry = useCallback(() => {
+    retry.current?.(); count.current = retryEvery; setLeft(retryEvery)
+    setRetrying(true); clearTimeout(spinT.current); spinT.current = setTimeout(() => setRetrying(false), 1000)
+  }, [retryEvery])
+  useEffect(() => () => clearTimeout(spinT.current), [])
   useEffect(() => {
     if (online === was.current) return
-    was.current = online
-    if (!online) { count.current = retryEvery; setLeft(retryEvery); setMode('offline'); return }
-    setMode('back')
-    const t = setTimeout(() => setMode('hidden'), 2200)
-    return () => clearTimeout(t)
+    was.current = online; setChanged(true)
+    if (online) { setMode('back'); return }
+    count.current = retryEvery; setLeft(retryEvery); setRetrying(false); setMode('offline')
   }, [online, retryEvery])
+  useEffect(() => { if (mode !== 'back') return; const id = setTimeout(() => setMode('hidden'), 2200); return () => clearTimeout(id) }, [mode])
   useEffect(() => {
-    if (mode !== 'offline') return
-    const t = setInterval(() => {
-      count.current -= 1
-      if (count.current <= 0) { count.current = retryEvery; retry.current?.(); setPulse(k => k + 1) }
-      setLeft(count.current)
-    }, 1000)
-    return () => clearInterval(t)
-  }, [mode, retryEvery])
+    if (mode !== 'offline' || paused) return
+    const id = setInterval(() => { count.current -= 1; if (count.current <= 0) runRetry(); else setLeft(count.current) }, 1000)
+    return () => clearInterval(id)
+  }, [mode, paused, runRetry])
+  const offline = mode === 'offline'
+  // the countdown keeps one width: every digit is stacked invisibly in the same cell (tabular in Latin, any width in
+  // Arabic), drawn by CSS so the text stays "Retrying in 4 s" for copy and tests
+  const digits = String(Math.max(1, Math.floor(retryEvery))).length
+  const num = (
+    <span className="ui-num inline-grid justify-items-center font-semibold [&>*]:[grid-area:1/1]">
+      {'0123456789'.split('').map(d => <span key={d} data-n={fmt.number(Number(d.repeat(digits)))} className="invisible before:content-[attr(data-n)]" />)}
+      <span>{fmt.number(left)}</span>
+    </span>
+  )
+  const [before, after] = tf('retryIn', { seconds: '\u0000' }).split('\u0000')
+  const live = !changed || mode === 'hidden' ? '' : offline ? tf('offlineSaid') : (backMessage ?? tf('backOnline'))
+  const layer = 'col-start-1 row-start-1 flex min-w-0 items-center gap-2 transition-opacity duration-200'
   return (
     <div className={cn('pointer-events-none absolute inset-x-0 top-0 z-10 overflow-hidden', className)}>
+      <span role="status" className="sr-only">{live}</span>
       <AnimatePresence initial={false}>
         {mode !== 'hidden' && (
-          <motion.div key={mode} role="status" initial={{ y: '-100%' }} animate={{ y: 0 }} exit={{ y: '-100%', transition: { duration: 0.25 } }} transition={spring(0.2, 0.35)}
-            className={cn('pointer-events-auto flex items-center gap-2 px-3 py-2 text-xs', mode === 'offline' ? TONE_SOFT.warn : TONE_SOFT.ok)}>
-            <Icon name={mode === 'offline' ? 'wifiOff' : 'check'} size={14} strokeWidth={mode === 'offline' ? 2 : 2.6} />
-            {mode === 'offline' ? (
-              <>
-                <motion.span key={pulse} className="flex-1" initial={pulse ? { opacity: 0.5 } : false} animate={{ opacity: 1 }} transition={{ duration: 0.3 }}>
-                  {/* the countdown is bold: split the message around its {seconds} placeholder */}
-                  {t('status.offline', { seconds: '\u0000' }).split('\u0000').flatMap((part, i) => i ? [<b key={i} className="ui-num">{fmt.number(left)}</b>, part] : [part])}
-                </motion.span>
-                <motion.button key={`r${shake}`} className="flex-none cursor-pointer border-0 bg-transparent p-0 text-xs font-semibold text-current underline [@media(pointer:coarse)]:-my-2 [@media(pointer:coarse)]:min-h-8 [@media(pointer:coarse)]:px-1"
-                  animate={shake ? { x: [0, -3, 3, 0] } : undefined} transition={{ duration: 0.25 }}
-                  onClick={() => { retry.current?.(); count.current = retryEvery; setLeft(retryEvery); setShake(k => k + 1) }}>{t('common.retryNow')}</motion.button>
-              </>
-            ) : <span className="flex-1">{backMessage ?? tf('backOnline')}</span>}
+          <motion.div key="bar" initial={{ y: '-100%' }} animate={{ y: 0 }} exit={{ y: '-100%', transition: { duration: 0.25 } }} transition={spring(0.2, 0.35)}
+            className={cn('pointer-events-auto grid min-h-9 items-center px-3 py-1.5 text-xs transition-[background-color,color] duration-300', offline ? TONE_SOFT.warn : TONE_SOFT.ok)}>
+            <div inert={!offline} className={cn(layer, offline ? 'opacity-100' : 'opacity-0')}>
+              <Icon name="wifiOff" size={14} className="flex-none" />
+              <span className="min-w-0 flex-1">
+                {tf('offlineSaved')}{' '}
+                {/* the countdown and the brief "Retrying…" share a cell; screen readers get the state from the live region */}
+                <span aria-hidden className="inline-grid whitespace-nowrap align-bottom [&>*]:[grid-area:1/1]">
+                  <span className={cn('transition-opacity duration-200', retrying ? 'opacity-0' : 'opacity-100')}>{before}{num}{after}</span>
+                  <span className={cn('inline-flex items-center gap-1 transition-opacity duration-200', retrying ? 'opacity-100' : 'opacity-0')}>
+                    {retrying && <Spinner size={10} label="" className="!border-[1.5px]" />}{tf('retrying')}
+                  </span>
+                </span>
+              </span>
+              <button type="button" onClick={runRetry}
+                className="flex-none cursor-pointer border-0 bg-transparent p-0 text-xs font-semibold text-current underline [@media(pointer:coarse)]:-my-2 [@media(pointer:coarse)]:min-h-8 [@media(pointer:coarse)]:px-1">{t('common.retryNow')}</button>
+            </div>
+            <div aria-hidden inert={offline} className={cn(layer, offline ? 'opacity-0' : 'opacity-100')}>
+              <Icon name="check" size={14} strokeWidth={2.6} className="flex-none" />
+              <span className="min-w-0 flex-1">{backMessage ?? tf('backOnline')}</span>
+            </div>
           </motion.div>
         )}
       </AnimatePresence>

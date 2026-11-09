@@ -5,6 +5,7 @@ import { Collapse } from './feedback'
 import { PointerTooltip, usePointerTooltip } from './overlay'
 import { useFrameLoop } from './motion'
 import { DG_COLLAPSE_STICKY, DgChevron } from './diagramkit'
+import { TAG_SR_ONLY, TagGlyph, layoutTimeTags, timeTagLook, timeTagMs, timeTagTint, useTagFocus, type TimeTag, type TimeTagKind } from './annotate'
 
 /* DIAGRAMS · Trace waterfall: nested spans on one streaming timeline. */
 
@@ -32,6 +33,7 @@ export const TRACE_MESSAGES = defineMessages('trace', {
     duration: 'Duration', cost: 'Cost', tokens: 'Tokens', llmCalls: 'LLM calls', toolCalls: 'Tool calls', errors: 'Errors',
     tipStart: 'Start {start} · {elapsed}', soFar: '{elapsed} so far', tokenCount: '{n} tokens',
     failed: 'Failed after {time} · {message}', slowest: 'Slowest', running: '{name} running',
+    events: 'Events', eventAt: '{label} at {time}',
   },
   de: {
     title: 'Trace', span: 'Span', simulate: 'Fehler simulieren', replay: 'Wiederholen',
@@ -40,6 +42,7 @@ export const TRACE_MESSAGES = defineMessages('trace', {
     duration: 'Dauer', cost: 'Kosten', tokens: 'Tokens', llmCalls: 'LLM-Aufrufe', toolCalls: 'Tool-Aufrufe', errors: 'Fehler',
     tipStart: 'Start {start} · {elapsed}', soFar: 'bisher {elapsed}', tokenCount: '{n} Tokens',
     failed: 'Fehlgeschlagen nach {time} · {message}', slowest: 'Langsamster', running: '{name} läuft',
+    events: 'Ereignisse', eventAt: '{label} bei {time}',
   },
   ar: {
     title: 'التتبّع', span: 'المقطع', simulate: 'محاكاة إخفاق', replay: 'إعادة التشغيل',
@@ -48,6 +51,7 @@ export const TRACE_MESSAGES = defineMessages('trace', {
     duration: 'المدة', cost: 'التكلفة', tokens: 'الرموز', llmCalls: 'استدعاءات النموذج', toolCalls: 'استدعاءات الأدوات', errors: 'الأخطاء',
     tipStart: 'البدء {start}، {elapsed}', soFar: '{elapsed} حتى الآن', tokenCount: '{n} رمز',
     failed: 'أخفق بعد {time}، {message}', slowest: 'الأبطأ', running: '{name} قيد التشغيل',
+    events: 'الأحداث', eventAt: '{label} عند {time}',
   },
 })
 
@@ -58,10 +62,21 @@ export const TRACE_MESSAGES = defineMessages('trace', {
  * Spawn connectors run from each parent bar, at the moment a child starts, down to that child's bar; hovering or
  * tapping a span highlights its chain back to the root. Hover or tap a span for its numbers. On phones the timeline
  * scrolls sideways with the span names pinned.
+ * `annotations` (deploys, approvals, retries; `at` in ms from the trace start) draw as dashed rules over the time grid
+ * with flags in a row of their own (reserved up front, so rows never move); flags that would overlap drop out to a dot
+ * on their rule, and `annotationStyle="rug"` shows icons instead, folding crowded ones into "+N". Hover, tap or focus a
+ * flag for its tooltip; the flag row is one Tab stop (←/→, Home/End, Escape).
  */
-export function TraceWaterfall({ spans, total, title, subtitle, failure, speed = 1.2, className }:
+export function TraceWaterfall({ spans, total, title, subtitle, failure, speed = 1.2, annotations, annotationKinds, annotationStyle = 'flags', className }:
   { spans: TraceSpan[]; total: number; title?: ReactNode; subtitle?: ReactNode
-    failure?: { span: string; at: number; message: string; retry?: string }; speed?: number; className?: string }) {
+    failure?: { span: string; at: number; message: string; retry?: string }; speed?: number
+    /** events over the run, `at` in ms from the trace start: deploys, approvals, retries */
+    annotations?: TimeTag[]
+    /** labels, icons and colours per annotation kind */
+    annotationKinds?: TimeTagKind[]
+    /** 'flags' (default): rules with labelled flags; 'rug': icons only */
+    annotationStyle?: 'flags' | 'rug'
+    className?: string }) {
   const reduce = useReducedMotion()
   const { fmt, dir, locale } = useLocale()
   const m = useMessages(TRACE_MESSAGES)
@@ -78,6 +93,40 @@ export function TraceWaterfall({ spans, total, title, subtitle, failure, speed =
   const [scrollRef, scroll] = useScrollEdges<HTMLDivElement>()
   const { tip, show, hide } = usePointerTooltip()
   const [hot, setHot] = useState<string | null>(null)
+  // annotations: one flag row (reserved whenever the prop is set) and rules through every row
+  const ann = annotations ?? []
+  const [annOn, setAnnOn] = useState<string | null>(null)
+  const annRow = useRef<HTMLDivElement>(null)
+  const annSec = (t: TimeTag) => timeTagMs(t.at) / 1000
+  const annFocus = useTagFocus({ tags: ann, activeId: annOn, onActive: setAnnOn, label: m('events'), describe: t => m('eventAt', { label: t.label, time: secs(annSec(t)) }) })
+  const annW = (t: TimeTag) => t.label.length * 6.2 + 26
+  const annLayout = laneW > 0 && ann.length ? layoutTimeTags(ann, { x: ms => (ms / 1000 / total) * laneW, width: laneW, style: annotationStyle, maxStack: 1, size: 16, labelWidth: annW }) : null
+  // a flag that only dropped out because it would run past the end flips to the left of its rule when there is room
+  const annFlip = new Set<string>()
+  if (annLayout?.style === 'flags') {
+    let end = -Infinity
+    for (const p of annLayout.points) {
+      if (p.flag) { end = p.x + annW(p.tag); continue }
+      if (p.x + annW(p.tag) > laneW && p.x - annW(p.tag) >= end + 2) { p.flag = true; annFlip.add(p.tag.id); end = p.x }
+    }
+  }
+  const annTip = (t: TimeTag) => {
+    const { icon, color } = timeTagLook(t, annotationKinds)
+    return (
+      <span className="flex items-start gap-1.5">
+        <TagGlyph aria-hidden icon={icon} color={color} size={16} className="mt-px" />
+        <span><b className="font-semibold">{t.label}</b> <span className="ui-num text-[var(--fg2)]">{secs(annSec(t))}</span>{t.detail && <><br /><span className="text-[var(--fg2)]">{t.detail}</span></>}</span>
+      </span>
+    )
+  }
+  // the tooltip of the lit flag sits under it (hover, tap or keyboard alike)
+  useEffect(() => {
+    if (!annOn) return
+    const t = ann.find(a => a.id === annOn), el = annRow.current?.querySelector<HTMLElement>(`[data-ann="${CSS.escape(annOn)}"]`)
+    if (!t || !el) return
+    const r = el.getBoundingClientRect()
+    show({ clientX: r.left + Math.min(r.width, 24) / 2, clientY: r.bottom + 50 }, annTip(t))
+  }, [annOn]) // eslint-disable-line react-hooks/exhaustive-deps
   const kids = (id: string | null) => spans.filter(s => (s.parent ?? null) === id && (fail || s.id !== failure?.retry))
   const root0 = () => spans.find(s => !s.parent)
   const depth = (s: TraceSpan): number => s.parent ? 1 + depth(spans.find(x => x.id === s.parent)!) : 0
@@ -206,10 +255,49 @@ export function TraceWaterfall({ spans, total, title, subtitle, failure, speed =
               <div ref={laneRef} className="relative h-full border-s border-[var(--line)]">{ticks.map(t => <span key={t} className="absolute top-2.5 translate-x-1.5" style={{ left: pct(t) }}>{secs(t, 0)}</span>)}</div>{/* rtl-lint-ignore: LTR plot geometry */}
             </div>
             <div className="relative">
+              {annotations && (
+                <div className="grid h-9 grid-cols-[var(--split)_1fr] items-center border-b border-[var(--line)]">
+                  <div dir={dir} className="sticky left-0 z-[3] flex h-full items-center bg-[var(--card)] ps-4 text-xs text-[var(--fg3)] shadow-[1px_0_0_var(--line)]">{m('events')}</div>{/* rtl-lint-ignore: pinned column of the LTR plot */}
+                  <div ref={annRow} {...annFocus.props} className="relative z-[2] h-full rounded-[var(--r-sm)] border-s border-[var(--line)] outline-none focus-visible:shadow-[inset_0_0_0_2px_var(--accent)]"
+                    onPointerLeave={onMouseLeave(() => { setAnnOn(null); hide() })}>
+                    {ann.map(t => {
+                      const p = annLayout?.points.find(q => q.tag.id === t.id), { icon, color } = timeTagLook(t, annotationKinds)
+                      const on = annOn === t.id, reached = clock >= annSec(t), opt = annFocus.option(t)
+                      const bind = { 'data-ann': t.id, onPointerEnter: () => setAnnOn(t.id), onPointerDown: (e: ReactPointerEvent) => { if (isTouch(e)) setAnnOn(t.id) } }
+                      const left = `${(annSec(t) / total) * 100}%` /* rtl-lint-ignore: LTR plot */
+                      if (!p || p.hidden) return <span key={t.id} {...opt} {...bind} style={TAG_SR_ONLY} />
+                      if (annotationStyle === 'rug') return (
+                        <span key={t.id} {...opt} {...bind} className="ui-target absolute top-1/2 -translate-x-1/2 -translate-y-1/2 cursor-default transition-opacity duration-200" style={{ /* rtl-lint-ignore: inside the LTR plot island */ left, opacity: reached || on ? 1 : 0.55 }}>
+                          <TagGlyph aria-hidden icon={icon} color={color} size={16} active={on} more={p.more?.length} />
+                        </span>
+                      )
+                      return p.flag ? (
+                        <span key={t.id} {...opt} {...bind} className={cn('absolute top-1 flex h-5 cursor-default items-center gap-1 px-1.5 text-[11px] leading-none font-medium whitespace-nowrap text-[var(--fg)] transition-[opacity,box-shadow] duration-200',
+                          /* rtl-lint-ignore: LTR plot island */ annFlip.has(t.id) ? 'flex-row-reverse -translate-x-full rounded-s-[var(--r-sm)] border-e-2' : 'rounded-e-[var(--r-sm)] border-s-2')}
+                          style={{ /* rtl-lint-ignore: inside the LTR plot island */ left, borderColor: color, background: timeTagTint(color, on ? 30 : reached ? 16 : 7), color: reached || on ? undefined : 'var(--fg2)' }}>
+                          {icon && <span aria-hidden className="text-[10px]">{icon}</span>}{t.label}
+                        </span>
+                      ) : (
+                        <span key={t.id} {...opt} {...bind} className={cn('ui-target absolute bottom-1 h-1.5 w-1.5 -translate-x-1/2 cursor-default rounded-full transition-transform duration-150', on && 'scale-150')} style={{ /* rtl-lint-ignore: inside the LTR plot island */ left, background: color, opacity: reached || on ? 1 : 0.55 }} />
+                      )
+                    })}
+                  </div>
+                </div>
+              )}
               {root && row(root)}
               {laneW > 0 && (
                 <div className="pointer-events-none absolute top-0 bottom-0 w-[1.5px] bg-[var(--accent)] opacity-80" style={{ /* rtl-lint-ignore: LTR plot */ left: `calc(var(--split) + ${(laneW * Math.min(clock, total)) / total}px)` }}>
                   <i className="absolute -top-1 -start-[3.5px] h-2 w-2 rounded-full bg-[var(--accent)]" />
+                </div>
+              )}
+              {ann.length > 0 && (
+                <div aria-hidden className="pointer-events-none absolute inset-0 z-[1]">
+                  {ann.map(t => {
+                    const on = annOn === t.id, f = annSec(t) / total
+                    if (annotationStyle === 'rug' && !on) return null
+                    return <span key={t.id} className={cn('absolute inset-y-0 border-s transition-opacity duration-200', on ? 'border-solid' : 'border-dashed')}
+                      style={{ /* rtl-lint-ignore: LTR plot */ left: `calc(var(--split) + (100% - var(--split)) * ${f})`, borderColor: timeTagLook(t, annotationKinds).color, opacity: on ? 1 : clock >= annSec(t) ? 0.7 : 0.3 }} />
+                  })}
                 </div>
               )}
             </div>

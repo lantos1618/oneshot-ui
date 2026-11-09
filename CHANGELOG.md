@@ -3,6 +3,39 @@
 All notable changes to `@lyndon/ui`. The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/);
 versions follow [semver](https://semver.org/) (while on 0.x, a minor version may break APIs).
 
+## [0.5.0]
+
+Tags over time, magnets, and fixes from review.
+
+### Added
+- **Chart annotations** (`@lyndon/ui/annotate`): `Chart` takes `annotations` (`TimeTag[]` with kinds) drawn as pins,
+  an icon rug, flags, shaded bands, rolled-up counts or dots; `style: 'auto'` switches pins → rug → rollup by
+  measured density at the current width; `reserve: 'current' | 'max'`; linking via `activeId`/`onActiveChange`;
+  keyboard tag list. `xTime` time axis with locale-formatted round ticks. Helpers: `layoutTimeTags`, `timeTicks`,
+  `useTagFocus`, `TagGlyph`, `TagTooltip`, `timeTagBadge`.
+- **Timelines** (`@lyndon/ui/timeline`): `Swimlanes`, `StateRibbon` (with `compact` size), `TagJournal`
+  (virtualised) and `ChartWithJournal` (two-way linked hover, focus and selection); `TraceWaterfall` takes
+  `annotations` (deploys, approvals) as flags or a rug.
+- **Magnets** (`@lyndon/ui/magnet`): point and zone magnets with hysteresis, flick pass-through, Alt/two-finger
+  bypass, haptics, spring settle and announcements, on `Slider`, `RangeSlider`, `ColorPicker` (`hueMagnets`),
+  `SplitPane`, media seek bars (`chapters`) and `Gantt` task drag; `useMagnet` and `magnetize` for custom drags.
+- **TreeView `lines`** (`true | 'hover'`): Reddit-style thread lines; click a line to collapse its branch.
+- `OfflineIndicator` `paused`; Slider `valueText`; showcase cards show "Good at / Breaks when" notes and a
+  Light day / Busy day switch for the timeline demos (sample data in `@lyndon/ui/examples`: `tagsDay`).
+
+### Fixed
+- DataGrid: pinned columns left a blank strip (or overlapped) on narrow screens because the table's automatic width
+  overrode `table-layout: fixed`; the table width is now the sum of its columns, so sticky offsets match.
+- OfflineIndicator no longer flashes on each retry, jumps when switching to "Back online", or announces the countdown
+  every second; one bar changes in place.
+- Hover in self-scrolling linked lists no longer steals the active item while navigating by keyboard.
+
+### Changed
+- `OfflineIndicator` reads new message keys (`feedback.offlineSaved`, `feedback.retryIn`, `feedback.retrying`,
+  `feedback.offlineSaid`) instead of `status.offline`; override those to change its text.
+- Drop-ins that gained features are larger: `chart` ~62 → 92 KB, `slider` ~44 → 79 KB, `trace-waterfall` ~64 → 86 KB
+  (annotation and magnet code is included even when unused).
+
 ## [0.4.0]
 
 ### Breaking

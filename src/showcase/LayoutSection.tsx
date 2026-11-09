@@ -1,5 +1,5 @@
 import { Fragment, useMemo, useState, type ReactNode } from 'react'
-import { Kanban, type KanbanColumn, OrgChart, type OrgNode, highlightCode, Scheduler, type SchedulerEvent, SortableList, SplitPane, Timeline, type TimelineItem, type TreeNode, TreeView, useToast } from '../lib'
+import { Kanban, type KanbanColumn, OrgChart, type OrgNode, highlightCode, Scheduler, type SchedulerEvent, SortableList, SplitPane, Switch, Timeline, type TimelineItem, type TreeNode, TreeView, useToast } from '../lib'
 import { Section, Spec, SpecAction } from './kit'
 
 const LAYOUT_PEOPLE: Record<string, string> = { AL: 'Alex Lee', BK: 'Bea Kim', CM: 'Chris Moe', DN: 'Dana Ng', EP: 'Eli Park' }
@@ -131,7 +131,7 @@ function LayoutBigTree() {
         <span className="ui-num">{total.toLocaleString('en-GB')} nodes · {folders.length} folders</span>
         <SpecAction onClick={() => setAll(a => !a)}>{all ? 'Collapse all' : 'Expand all'}</SpecAction>
       </div>
-      <TreeView key={all ? 'all' : 'some'} nodes={nodes} height={340} defaultExpanded={all ? folders : ['mono', 'packages', 'auth', 'auth/components']} aria-label="Monorepo files"
+      <TreeView key={all ? 'all' : 'some'} nodes={nodes} height={340} defaultExpanded={all ? folders : ['mono', 'packages', 'auth', 'auth/components']} aria-label="Monorepo files" lines
         className="rounded-[var(--r-md)] border border-[var(--line)] p-1" onOpen={n => toast({ title: 'Opened', description: n.label })} />
     </>
   )
@@ -146,6 +146,7 @@ export function LayoutSection() {
   ])
   const [feed, setFeed] = useState(LAYOUT_TIMELINE)
   const [events] = useState(layoutEvents)
+  const [treeLines, setTreeLines] = useState(true)
   const simulate = () => {
     const p = LAYOUT_POOL[Math.floor(Math.random() * LAYOUT_POOL.length)]
     setFeed(f => {
@@ -163,8 +164,9 @@ export function LayoutSection() {
       <Spec title="Sortable list" desc="Drag the handle to reorder" keys={[[['Alt', '↑', '↓'], 'Move the focused row']]}>
         <SortableList items={list} onChange={setList} render={i => i.t} label="Growth experiments" />
       </Spec>
-      <Spec title="Tree view" desc="Double-click a file to rename it" keys={[[['↑', '↓'], 'Move'], [['←', '→'], 'Fold'], [['↵'], 'Open'], [['F2'], 'Rename']]}>
-        <TreeView nodes={LAYOUT_TREE} defaultExpanded={['my-app', 'src', 'components', 'hooks']} aria-label="Project files"
+      <Spec title="Tree view" desc="Double-click a file to rename it. Thread lines show each folder’s contents; click a line to collapse its folder." keys={[[['↑', '↓'], 'Move'], [['←', '→'], 'Fold'], [['↵'], 'Open'], [['F2'], 'Rename']]}
+        actions={<Switch label={<span className="text-xs text-[var(--fg2)]">Lines</span>} checked={treeLines} onChange={setTreeLines} />}>
+        <TreeView nodes={LAYOUT_TREE} defaultExpanded={['my-app', 'src', 'components', 'hooks']} aria-label="Project files" lines={treeLines}
           onOpen={n => toast({ title: 'Opened', description: n.label })} onRename={(_, v, prev) => toast({ title: 'Renamed', description: `${prev} → ${v}` })} />
       </Spec>
       <Spec title="Tree view · 10k nodes" desc="Ten thousand files in a generated monorepo. Only the rows in view are rendered (flattened open folders), so Expand all stays instant; arrows, Page Up/Down and Home/End scroll the focused row into view."
@@ -174,13 +176,13 @@ export function LayoutSection() {
       <Spec title="Activity timeline" desc="Grouped by day, new events slide in" actions={<SpecAction onClick={simulate}>Simulate event</SpecAction>}>
         <Timeline items={feed} />
       </Spec>
-      <Spec title="Split panes" desc="Drag a divider to resize, double-click it to reset. Panes snap closed below their minimum." span={3}
-        keys={[[['←', '→'], 'Nudge the focused divider'], [['⇧', '←', '→'], 'Big steps'], [['↵'], 'Reset']]}>
+      <Spec title="Split panes" desc="Drag a divider to resize, double-click it to reset. Dividers snap to a third, half and two thirds (guides show while you drag; hold Alt to drag freely), and panes snap closed below their minimum." span={3}
+        keys={[[['←', '→'], 'Nudge the focused divider'], [['⇧', '←', '→'], 'Big steps'], [['PgUp', 'PgDn'], 'Next, previous snap point'], [['↵'], 'Reset']]}>
         <div className="overflow-hidden rounded-[var(--r-lg)] border border-[var(--line)] bg-[var(--card)]">
-          <SplitPane className="h-[340px] max-sm:h-[560px]" defaultSize={26} min={14} label="Resize explorer"
-            first={<LayoutPane title="Explorer" plain><TreeView compact nodes={LAYOUT_EXPLORER} defaultExpanded={['src', 'components']} aria-label="Explorer" /></LayoutPane>}
+          <SplitPane className="h-[340px] max-sm:h-[560px]" defaultSize={26} min={14} label="Resize explorer" magnets
+            first={<LayoutPane title="Explorer" plain><TreeView compact lines="hover" nodes={LAYOUT_EXPLORER} defaultExpanded={['src', 'components']} aria-label="Explorer" /></LayoutPane>}
             second={
-              <SplitPane direction="vertical" defaultSize={62} min={18} label="Resize terminal"
+              <SplitPane direction="vertical" defaultSize={62} min={18} label="Resize terminal" magnets
                 first={<LayoutPane title="editor.ts">{LAYOUT_EDITOR.map((l, i) => <Fragment key={i}>{i > 0 && '\n'}{highlightCode(l, 'ts')}</Fragment>)}</LayoutPane>}
                 second={<LayoutPane title="Terminal"><span className="text-[var(--ok)]">❯</span>{' npm run dev\n  Ready in 640 ms\n  Local: http://localhost:3000'}</LayoutPane>} />
             } />

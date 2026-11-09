@@ -3,6 +3,7 @@ import { AnimatePresence, LayoutGroup, motion } from 'motion/react'
 import { AvatarStack, Badge, DeltaBadge, Icon, type IconName, ScrollEdges, StatusIcon, type StatusIconStatus, TOUCH, type Tone, clamp, cn, defineMessages, logicalArrow, prefersReducedMotion, safeColor, spring, surface, useCoarsePointer, useControllable, useDir, useLocale, useLongPress, useMessages, usePointerDrag, useScrollEdges, useWidth, SparkChart } from './core'
 import { Collapse, useToast } from './feedback'
 import { useVirtual } from './virtual'
+import { MAGNET_MESSAGES, type Magnet, MagnetBubble, magnetKeyDirection, useMagnet } from './magnet'
 
 /* ════════════════════════════════════════════════════════════════════════════
  * 10. LAYOUT: drag-sort engine, kanban, sortable list, tree, timeline, split panes
@@ -547,7 +548,19 @@ function TreeIcon({ name, dir, open }: { name: string; dir: boolean; open: boole
 const treeCount = (ns: TreeNode[]): number => ns.reduce((s, n) => s + 1 + (n.children ? treeCount(n.children) : 0), 0)
 /** Trees with more nodes than this render only the rows in view. */
 const TREE_VIRTUAL_AT = 300
-type TreeFlat = { n: TreeNode; parent: TreeNode | null; depth: number; pos: number; size: number }
+/** TreeView's own strings (machine-drafted de/ar). Override with `<UIProvider messages={{ 'tree.collapseBranch': … }}>`. */
+const TREE_MSG = defineMessages('tree', {
+  en: { collapseBranch: 'Collapse {name}' },
+  de: { collapseBranch: '{name} einklappen' },
+  ar: { collapseBranch: 'طي {name}' },
+})
+type TreeFlat = {
+  n: TreeNode; parent: TreeNode | null; depth: number; pos: number; size: number
+  /** ancestors, root first (path[d] owns the thread line at level d) */ path: TreeNode[]
+  /** per depth 0..depth: whether the node at that depth on this row's path has siblings after it (its parent's thread continues below) */ rails: boolean[]
+}
+/** Indent geometry shared by rows and thread lines: the row's start padding and the per-level step (px). */
+const treeIndent = (compact?: boolean) => compact ? { base: 4, step: 12 } : { base: 8, step: 16 }
 
 /**
  * File tree with roving focus: ↑ / ↓ move, → opens or steps into a folder, ← closes or jumps to the parent,
@@ -556,14 +569,23 @@ type TreeFlat = { n: TreeNode; parent: TreeNode | null; depth: number; pos: numb
  * `compact` gives denser rows without the counts (for side panels such as an IDE explorer). Trees of more than 300
  * nodes (or `virtualize`) render only the visible rows of the flattened open nodes inside a `height` px scroller,
  * with aria-level / aria-setsize / aria-posinset on each row, so 10k-node trees stay instant.
+ * `lines` draws thread lines (Reddit / VS Code style): a vertical guide per level from each open folder down through
+ * its children, with an elbow into each child row. They are drawn per row, so they follow the open/close animation
+ * and virtualisation; the selected row's branch is highlighted, and so is a line under the pointer. Clicking a line
+ * collapses that folder (and selects it); keyboard users use ← instead, so the lines are not in the Tab order.
+ * `'hover'` shows them only while the pointer or focus is in the tree (always on touch screens). Turning them on or
+ * off never moves a row: the indent is the same either way.
  */
-export function TreeView({ nodes, defaultExpanded = [], onSelect, onOpen, onRename, compact, virtualize, height = 360, className, 'aria-label': ariaLabelProp }:
+export function TreeView({ nodes, defaultExpanded = [], onSelect, onOpen, onRename, compact, lines = false, virtualize, height = 360, className, 'aria-label': ariaLabelProp }:
   { nodes: TreeNode[]; defaultExpanded?: string[]; onSelect?: (n: TreeNode) => void; onOpen?: (n: TreeNode) => void
     onRename?: (n: TreeNode, name: string, previous: string) => void; compact?: boolean
+    /** thread lines from each folder through its children (default false); 'hover' shows them while the tree is hovered or focused */ lines?: boolean | 'hover'
     /** render only the rows in view: true, false, or above this many nodes (default 300) */ virtualize?: boolean | number
     /** px, virtual mode: the tree scrolls inside this height */ height?: number; className?: string; 'aria-label'?: string }) {
   const [open, setOpen] = useState(() => new Set(defaultExpanded))
-  const tm = useMessages(LAYOUT_MSG), rtl = useDir() === 'rtl', ariaLabel = ariaLabelProp ?? tm('files')
+  const tm = useMessages(LAYOUT_MSG), tt = useMessages(TREE_MSG), rtl = useDir() === 'rtl', ariaLabel = ariaLabelProp ?? tm('files')
+  const uid = useId()
+  const [hot, setHot] = useState<string | null>(null) // the folder whose thread line is under the pointer
   const [names, setNames] = useState<Record<string, string>>({})
   const [sel, setSel] = useState<string>(nodes[0]?.id ?? '')
   const [editing, setEditing] = useState<string | null>(null)
@@ -572,11 +594,12 @@ export function TreeView({ nodes, defaultExpanded = [], onSelect, onOpen, onRena
   const name = (n: TreeNode) => names[n.id] ?? n.label
   const flat = useMemo(() => {
     const out: TreeFlat[] = []
-    const walk = (list: TreeNode[], parent: TreeNode | null, depth: number) => list.forEach((n, i) => {
-      out.push({ n, parent, depth, pos: i + 1, size: list.length })
-      if (n.children && open.has(n.id)) walk(n.children, n, depth + 1)
+    const walk = (list: TreeNode[], parent: TreeNode | null, depth: number, path: TreeNode[], rails: boolean[]) => list.forEach((n, i) => {
+      const own = [...rails, i < list.length - 1]
+      out.push({ n, parent, depth, pos: i + 1, size: list.length, path, rails: own })
+      if (n.children && open.has(n.id)) walk(n.children, n, depth + 1, [...path, n], own)
     })
-    walk(nodes, null, 0)
+    walk(nodes, null, 0, [], [])
     return out
   }, [nodes, open])
   const indexOf = useMemo(() => new Map(flat.map((f, i) => [f.n.id, i])), [flat])
@@ -612,16 +635,48 @@ export function TreeView({ nodes, defaultExpanded = [], onSelect, onOpen, onRena
     const key = logicalArrow(e.key, rtl ? 'rtl' : 'ltr') // → opens toward the inline end: ← in RTL
     if (act[key]) { e.preventDefault(); act[key]() }
   }
+  const { base, step } = treeIndent(compact)
+  // the selected row's branch is highlighted: an open folder's own thread, otherwise the thread it hangs from
+  const selF = flat[selAt], activeOwner = selF && (selF.n.children && open.has(selF.n.id) ? selF.n.id : selF.parent?.id)
+  /** The thread lines of one row: for each ancestor level, a vertical line (when that folder's children continue below
+      this row) or, for the row's own parent, an elbow into the row. Each is a button that collapses its folder. */
+  const threads = (f: TreeFlat) => f.path.map((owner, d) => {
+    const own = d === f.depth - 1, cont = f.rails[d + 1]
+    if (!own && !cont) return null
+    const tone = owner.id === hot ? 'var(--fg3)' : owner.id === activeOwner ? 'var(--accent)' : 'var(--line2)'
+    // the elbow reaches the chevron of a folder, or runs on under the empty chevron cell to the icon of a file
+    const reach = step - 7 + (f.n.children ? -1 : 10)
+    const ln = 'absolute transition-colors duration-150'
+    return (
+      <button key={owner.id} type="button" tabIndex={-1} aria-label={tt('collapseBranch', { name: name(owner) })}
+        onClick={e => { e.stopPropagation(); toggle(owner.id, false); select(owner) }} onDoubleClick={e => e.stopPropagation()}
+        onPointerEnter={() => setHot(owner.id)} onPointerLeave={() => setHot(h => (h === owner.id ? null : h))}
+        style={{ insetInlineStart: base + d * step + 7 - step / 2, width: step, '--tl': tone } as CSSProperties}
+        className={cn('ui-target absolute inset-y-0 cursor-pointer border-0 bg-transparent p-0 outline-none', lines === 'hover' && 'opacity-0 transition-opacity duration-150 group-focus-within/tree:opacity-100 group-hover/tree:opacity-100 [@media(pointer:coarse)]:opacity-100')}>
+        {own && !cont
+          ? <span className={cn(ln, 'top-0 h-1/2 rounded-es-[var(--r-sm)] border-s border-b border-[var(--tl)]')} style={{ insetInlineStart: step / 2, width: reach }} />
+          : <>
+            <span className={cn(ln, 'inset-y-0 w-px bg-[var(--tl)]')} style={{ insetInlineStart: step / 2 }} />
+            {own && <span className={cn(ln, 'top-1/2 h-px bg-[var(--tl)]')} style={{ insetInlineStart: step / 2, width: reach }} />}
+          </>}
+      </button>
+    )
+  })
   const row = (f: TreeFlat, i: number, extra?: { style?: CSSProperties; aria?: Record<string, number> }) => {
     const { n, depth, parent } = f, dir = !!n.children, isOpen = open.has(n.id)
+    // with lines on, the row is named by its label and count only (not by the "Collapse …" buttons inside it)
+    const idl = `${uid}t${encodeURIComponent(n.id)}`, named = !!lines && depth > 0 && editing !== n.id
     return (
       <div ref={el => { if (!el) return; rows.current.set(n.id, el); return () => { if (rows.current.get(n.id) === el) rows.current.delete(n.id) } }} role="treeitem" aria-level={depth + 1} aria-selected={sel === n.id}
         aria-expanded={dir ? isOpen : undefined} tabIndex={sel === n.id ? 0 : -1} data-index={virtualOn ? i : undefined} {...extra?.aria}
-        style={{ paddingInlineStart: (compact ? 4 : 8) + depth * (compact ? 12 : 16), ...extra?.style }}
+        aria-labelledby={named ? (compact ? `${idl}l` : `${idl}l ${idl}c`) : undefined}
+        style={{ paddingInlineStart: base + depth * step, ...extra?.style }}
         onClick={() => { select(n); if (dir) toggle(n.id) }} onDoubleClick={() => !dir && setEditing(n.id)} onKeyDown={e => onKey(e, n, i, parent)}
-        className={cn('flex cursor-pointer items-center gap-1.5 rounded-[var(--r-md)] pe-2 whitespace-nowrap outline-none focus-visible:shadow-[inset_0_0_0_2px_var(--accent)] [@media(pointer:coarse)]:h-9 [@media(pointer:coarse)]:text-sm', compact ? 'h-6 text-xs' : 'h-7 text-[13px]',
+        className={cn('relative flex cursor-pointer items-center gap-1.5 rounded-[var(--r-md)] pe-2 whitespace-nowrap outline-none focus-visible:shadow-[inset_0_0_0_2px_var(--accent)] [@media(pointer:coarse)]:h-9 [@media(pointer:coarse)]:text-sm', compact ? 'h-6 text-xs' : 'h-7 text-[13px]',
           sel === n.id ? 'bg-[var(--accent-soft)] text-[color-mix(in_srgb,var(--accent)_78%,var(--fg))]' : 'hover:bg-[var(--muted)]')}>
-        <span className="grid w-3.5 flex-none place-items-center text-[var(--fg3)]">
+        {lines && threads(f)}
+        {/* above the thread lines' widened hit areas, so a click on the chevron toggles this row */}
+        <span className="relative z-[1] grid w-3.5 flex-none place-items-center text-[var(--fg3)]">
           {dir && <motion.span initial={false} animate={{ rotate: isOpen ? (rtl ? -90 : 90) : 0 }} transition={spring(0.2, 0.25)} className="grid"><Icon name="chevronRight" size={11} strokeWidth={3} className="ui-flip" /></motion.span>}
         </span>
         {n.icon ? <Icon name={n.icon} size={15} className="text-[var(--fg3)]" /> : <TreeIcon name={name(n)} dir={dir} open={isOpen} />}
@@ -640,13 +695,14 @@ export function TreeView({ nodes, defaultExpanded = [], onSelect, onOpen, onRena
               if (val && val !== prev) { setNames(m => ({ ...m, [n.id]: val })); onRename?.(n, val, prev) }
             }}
             className={cn('w-[140px] min-w-0 rounded-[var(--r-sm)] border border-[var(--accent)] bg-[var(--card)] px-1 py-px text-[13px] text-[var(--fg)] outline-none [@media(pointer:coarse)]:flex-1', TOUCH.input)} />
-          : <motion.span key={name(n)} initial={{ opacity: names[n.id] ? 0.3 : 1 }} animate={{ opacity: 1 }} className="truncate">{name(n)}</motion.span>}
-        {!compact && <span className="ms-auto ps-2 text-[11px] tabular-nums text-[var(--fg2)]">{dir ? n.children!.length : n.size}</span>}
+          : <motion.span key={name(n)} id={`${idl}l`} initial={{ opacity: names[n.id] ? 0.3 : 1 }} animate={{ opacity: 1 }} className="truncate">{name(n)}</motion.span>}
+        {/* the space keeps label and count apart in the accessible name (flex drops it visually) */}
+        {!compact && <>{' '}<span id={`${idl}c`} dir="auto" className="ms-auto ps-2 text-[11px] tabular-nums text-[var(--fg2)]">{dir ? n.children!.length : n.size}</span></>}
       </div>
     )
   }
   if (virtualOn) return (
-    <div ref={box} role="tree" aria-label={ariaLabel} className={cn('relative overflow-auto overscroll-contain select-none', className)} style={{ height }}>
+    <div ref={box} role="tree" aria-label={ariaLabel} className={cn('group/tree relative overflow-auto overscroll-contain select-none', className)} style={{ height }}>
       <div style={{ height: v.totalSize, position: 'relative' }}>
         {v.items.map(it => {
           const f = flat[it.index]
@@ -655,16 +711,17 @@ export function TreeView({ nodes, defaultExpanded = [], onSelect, onOpen, onRena
       </div>
     </div>
   )
-  const render = (list: TreeNode[], depth: number, parent: TreeNode | null): ReactNode => list.map((n, k) => {
-    const i = indexOf.get(n.id) ?? -1, f = flat[i] ?? { n, parent, depth, pos: k + 1, size: list.length } // inside a closed (closing) folder
+  const render = (list: TreeNode[], depth: number, parent: TreeNode | null, path: TreeNode[], rails: boolean[]): ReactNode => list.map((n, k) => {
+    // rows inside a closed (closing) folder aren't in `flat`: build their entry (and thread lines) here
+    const i = indexOf.get(n.id) ?? -1, own = [...rails, k < list.length - 1], f = flat[i] ?? { n, parent, depth, pos: k + 1, size: list.length, path, rails: own }
     return (
       <li key={n.id} role="none">
         {row(f, i)}
-        {n.children && <Collapse open={open.has(n.id)}><ul role="group" className="m-0 list-none p-0">{render(n.children, depth + 1, n)}</ul></Collapse>}
+        {n.children && <Collapse open={open.has(n.id)}><ul role="group" className="m-0 list-none p-0">{render(n.children, depth + 1, n, [...path, n], own)}</ul></Collapse>}
       </li>
     )
   })
-  return <ul role="tree" aria-label={ariaLabel} className={cn('m-0 list-none p-0 select-none', className)}>{render(nodes, 0, null)}</ul>
+  return <ul role="tree" aria-label={ariaLabel} className={cn('group/tree m-0 list-none p-0 select-none', className)}>{render(nodes, 0, null, [], [])}</ul>
 }
 
 /* Activity timeline ──────────────────────────────────────────────────────── */
@@ -738,38 +795,54 @@ export function Timeline({ items, className }: { items: TimelineItem[]; classNam
  * or focus it and use the arrow keys (Shift for big steps); Enter or double-click resets with a spring.
  * Releasing the first pane below `min` snaps it closed; drag the divider back out to reopen it.
  * Side-by-side panes stack (first on top) while the pane is narrower than `stackBelow` px (640 by default; 0 never stacks).
+ * `magnets` (first-pane sizes in %, see useMagnet; `true` = thirds, half and the collapse point) pull the divider while
+ * dragging, with guides and the mark's name by the divider; PageUp / PageDown and Ctrl/⌘ + arrows jump between them, Alt
+ * (Option) drags freely.
  */
-export function SplitPane({ first, second, direction = 'horizontal', defaultSize = 40, min = 15, max = 85, stackBelow = 640, label, className, style }:
+export function SplitPane({ first, second, direction = 'horizontal', defaultSize = 40, min = 15, max = 85, stackBelow = 640, label, magnets, className, style }:
   { first: ReactNode; second: ReactNode; direction?: 'horizontal' | 'vertical'; /** first pane, % */ defaultSize?: number; min?: number; max?: number
-    stackBelow?: number; label?: string; className?: string; style?: CSSProperties }) {
-  const [state, setState] = useState({ size: defaultSize, spring: false })
+    stackBelow?: number; label?: string; magnets?: boolean | readonly Magnet[]; className?: string; style?: CSSProperties }) {
+  const [state, setState] = useState<{ size: number; spring: false | 'reset' | 'snap' }>({ size: defaultSize, spring: false })
   const [box, boxW] = useWidth<HTMLDivElement>()
   const h = direction === 'horizontal' && !(boxW > 0 && boxW < stackBelow)
-  const dir = useDir(), tm = useMessages(LAYOUT_MSG)
+  const { dir, fmt } = useLocale(), tm = useMessages(LAYOUT_MSG), mt = useMessages(MAGNET_MESSAGES), pctText = (n: number) => fmt.percent(n / 100, 0)
+  const marks = useMemo<readonly Magnet[] | null>(() => magnets === true
+    ? [{ value: 0, label: mt('collapse') }, { value: 100 / 3, label: mt('third') }, { value: 50, label: mt('half') }, { value: 200 / 3, label: mt('twoThirds') }].filter(m => m.value <= max)
+    : magnets || null, [magnets, max, mt])
+  const mg = useMagnet({ magnets: marks, min: 0, max: 100, describe: pctText })
+  const [snapLabel, setSnapLabel] = useState<string | undefined>()
   const drag = usePointerDrag({
     cursor: h ? 'col-resize' : 'row-resize',
     onMove: p => {
       const r = box.current?.getBoundingClientRect(); if (!r) return
       // the first pane starts at the inline start: measured from the right edge in RTL
-      setState({ size: clamp(h ? ((dir === 'rtl' ? r.right - p.x : p.x - r.left) / r.width) * 100 : ((p.y - r.top) / r.height) * 100, 0, max), spring: false })
+      const raw = h ? ((dir === 'rtl' ? r.right - p.x : p.x - r.left) / r.width) * 100 : ((p.y - r.top) / r.height) * 100
+      const res = mg.apply(clamp(raw, 0, 100), { px: h ? r.width : r.height, event: p.event })
+      const size = clamp(res.value, 0, max), how = res.captured || res.released ? 'snap' as const : false
+      if (mg.enabled) setSnapLabel(res.snapped?.label)
+      setState(s => s.size === size ? s : { size, spring: how })
     },
-    onEnd: () => setState(s => s.size > 0 && s.size < min ? { size: 0, spring: true } : s), // released below min: snap closed
+    onEnd: () => { mg.reset(); setSnapLabel(undefined); setState(s => s.size > 0 && s.size < min ? { size: 0, spring: 'reset' } : s) }, // released below min: snap closed
   })
   const dragging = drag.dragging
-  const set = (pct: number, animate = false) => { const p = clamp(pct, 0, max); setState({ size: p < min && !dragging ? 0 : p, spring: animate }) }
+  const set = (pct: number, animate: false | 'reset' | 'snap' = false) => { const p = clamp(pct, 0, max); setState({ size: p < min && !dragging ? 0 : p, spring: animate }) }
   const onKey = (e: RKeyboardEvent) => {
+    const jump = mg.enabled ? magnetKeyDirection(e, h ? dir : 'ltr') : 0, to = jump ? mg.next(state.size, jump) : null
+    if (to !== null) { e.preventDefault(); set(to, 'snap'); return }
     const step = e.shiftKey ? 10 : 2, k = h ? { ArrowLeft: -step, ArrowRight: step } : { ArrowUp: -step, ArrowDown: step }
     const d = (k as unknown as Record<string, number | undefined>)[logicalArrow(e.key, dir)]
     if (d !== undefined) { e.preventDefault(); set(state.size === 0 && d > 0 ? min : state.size + d) }
-    if (e.key === 'Enter' || e.key === 'Home') { e.preventDefault(); set(defaultSize, true) }
+    if (e.key === 'Enter' || e.key === 'Home') { e.preventDefault(); set(defaultSize, 'reset') }
   }
+  const pos = (v: number) => `${clamp(v, 0, 100)}%`
   return (
-    <div ref={box} className={cn('flex min-h-0 min-w-0 overflow-hidden', h ? 'flex-row' : 'h-full flex-col', className)} style={style}>
+    <div ref={box} className={cn('relative flex min-h-0 min-w-0 overflow-hidden', h ? 'flex-row' : 'h-full flex-col', className)} style={style}>
       <motion.div className="flex min-h-0 min-w-0 flex-none flex-col overflow-hidden" initial={false} animate={{ flexBasis: `${state.size}%` }}
-        transition={state.spring ? spring(0.15, 0.4) : { duration: 0 }}>{first}</motion.div>
+        transition={state.spring === 'reset' ? spring(0.15, 0.4) : state.spring === 'snap' && !prefersReducedMotion() ? spring(0.2, 0.25) : { duration: 0 }}>{first}</motion.div>
       <div role="separator" aria-orientation={h ? 'vertical' : 'horizontal'} aria-label={label ?? tm('resizePanes')}
- aria-valuemin={0} aria-valuemax={max} aria-valuenow={Math.round(state.size)} tabIndex={0}
-        onPointerDown={e => { if (e.button === 0) drag.start(e) }} onDoubleClick={() => set(defaultSize, true)} onKeyDown={onKey}
+ aria-valuemin={0} aria-valuemax={max} aria-valuenow={Math.round(state.size)} aria-valuetext={mg.enabled ? mg.valueText(state.size, pctText(state.size)) : undefined}
+        aria-keyshortcuts={mg.enabled ? 'PageUp PageDown' : undefined} tabIndex={0}
+        onPointerDown={e => { if (e.button === 0) { mg.reset(); drag.start(e) } }} onDoubleClick={() => set(defaultSize, 'reset')} onKeyDown={onKey}
         data-dragging={dragging || undefined}
         className={cn('group relative z-[2] flex-none touch-none outline-none', h ? '-mx-1 w-[7px] cursor-col-resize [@media(pointer:coarse)]:-mx-4 [@media(pointer:coarse)]:w-8' : '-my-1 h-[7px] cursor-row-resize [@media(pointer:coarse)]:-my-4 [@media(pointer:coarse)]:h-8')}>
         <span className={cn('absolute bg-[var(--line)] transition-all group-hover:bg-[var(--accent)] group-focus-visible:bg-[var(--accent)] group-data-[dragging]:bg-[var(--accent)]',
@@ -778,8 +851,16 @@ export function SplitPane({ first, second, direction = 'horizontal', defaultSize
         {/* touch: a visible grip in the middle of the divider, inside the wider hit area */}
         <span aria-hidden className={cn('absolute top-1/2 left-1/2 hidden -translate-x-1/2 -translate-y-1/2 rounded-full border border-[var(--line2)] bg-[var(--card)] shadow-[0_1px_3px_rgba(0,0,0,.12)] group-data-[dragging]:border-[var(--accent)] [@media(pointer:coarse)]:block',
           h ? 'h-9 w-3' : 'h-3 w-9')} />
+        {mg.enabled && <MagnetBubble label={snapLabel} show={dragging} className={h ? '!bottom-auto top-3 !mb-0' : '!bottom-auto top-1/2 !mb-0 -translate-y-1/2'} />}
       </div>
       <div className="flex min-h-0 min-w-0 flex-1 flex-col overflow-hidden">{second}</div>
+      {/* while dragging: faint guides at each mark, the one the divider sits on in the accent */}
+      {mg.enabled && dragging && mg.stops.filter(v => v > 0 && v <= max).map(v => (
+        <span key={v} aria-hidden className={cn('pointer-events-none absolute z-[1]', h ? 'inset-y-0 w-px -ms-px' : 'inset-x-0 h-px -mt-px',
+          Math.abs(v - state.size) < 1e-6 ? 'bg-[var(--accent)]' : 'bg-[color-mix(in_srgb,var(--accent)_35%,transparent)]')}
+          style={h ? { insetInlineStart: pos(v) } : { top: pos(v) }} />
+      ))}
+      {mg.live}
     </div>
   )
 }

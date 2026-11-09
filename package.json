@@ -1,6 +1,6 @@
 {
   "name": "@lyndon/ui",
-  "version": "0.4.0",
+  "version": "0.5.0",
   "description": "Animated React 19 components with themes, in the shadcn style: forms, overlays, data grids, charts, diagrams, maps, AI chat. Also ships as drop-in single files for AI tools.",
   "keywords": [
     "react",
@@ -97,6 +97,10 @@
       "types": "./dist/virtual.d.ts",
       "default": "./dist/virtual.js"
     },
+    "./magnet": {
+      "types": "./dist/magnet.d.ts",
+      "default": "./dist/magnet.js"
+    },
     "./overlay": {
       "types": "./dist/overlay.d.ts",
       "default": "./dist/overlay.js"
@@ -192,6 +196,14 @@
     "./charts": {
       "types": "./dist/charts.d.ts",
       "default": "./dist/charts.js"
+    },
+    "./annotate": {
+      "types": "./dist/annotate.d.ts",
+      "default": "./dist/annotate.js"
+    },
+    "./timeline": {
+      "types": "./dist/timeline.d.ts",
+      "default": "./dist/timeline.js"
     },
     "./diagrams": {
       "types": "./dist/diagrams.d.ts",

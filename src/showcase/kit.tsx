@@ -7,6 +7,16 @@ import { openCodeDrawer } from './CodeDrawer'
 
 /** Use-case tags per card title, copied from the original page. The filter and ⌘K match on them. */
 export const SPEC_TAGS: Record<string, string> = {
+  'A · Pins on the line': 'charts, annotations, events, timeline, health',
+  'B · Icon rug under the axis': 'charts, annotations, events, timeline, monitoring',
+  'C · Vertical rules with flags': 'charts, annotations, events, monitoring, deploys',
+  'D · Shaded bands for durations': 'charts, annotations, durations, timeline, health',
+  'G · Rolled-up counts': 'charts, annotations, aggregation, timeline, monitoring',
+  'Auto · Picks by width and density': 'charts, annotations, events, timeline, health',
+  'E · Swimlanes per tag': 'diagrams, timeline, events, lanes, habits',
+  'F · State ribbon with tags': 'diagrams, timeline, states, widgets, health',
+  'H · Chart plus linked journal': 'diagrams, timeline, journal, linked views, editing',
+  'Slider with magnets': 'user input, range, snapping, haptics, settings',
   'Accordion · composable': 'data, disclosure, composable, FAQ', 'Composable overlays': 'overlay, dialog, popover, tooltip, composable, asChild',
   'Context menu · composable': 'navigation, menu, right click, composable, keyboard', 'Links as buttons (asChild)': 'navigation, links, routing, asChild, buttons',
   'Tabs · vertical and overflow': 'navigation, tabs, composable, keyboard', 'Toolbar and toggle group': 'navigation, toolbar, toggle, formatting, keyboard',
@@ -112,7 +122,7 @@ type KitShell = { query: string; setQuery: (q: string) => void; focusFilter: () 
 /** The showcase chrome's own strings (cards, sidebar, header). Demo content stays English. de/ar machine-drafted. */
 export const SHOWCASE_MSG = defineMessages('showcase', {
   en: {
-    openState: 'Open state', viewCode: 'View code', viewCodeFor: 'View code for {title}', keyboard: 'Keyboard', tagsFor: 'Use-case tags for {title}',
+    goodAt: 'Good at', breaksWhen: 'Breaks when', openState: 'Open state', viewCode: 'View code', viewCodeFor: 'View code for {title}', keyboard: 'Keyboard', tagsFor: 'Use-case tags for {title}',
     showTagged: 'Show components tagged {tag}', skipNext: 'Skip to next card', sections: 'Sections', filterPlaceholder: 'Search by name or use case',
     filterShort: 'Name or use case', filterLabel: 'Filter components by name or use case', filterComponents: 'Filter components', filter: 'Filter',
     matches: 'Matches', noMatches: 'No matches', found: '{count} found', searchComponents: 'Search components',
@@ -121,7 +131,7 @@ export const SHOWCASE_MSG = defineMessages('showcase', {
     clearFilter: 'Clear filter', auto: 'Auto ({dir})', tagline: 'React · Motion · Tailwind', libraryName: 'UI library',
   },
   de: {
-    openState: 'Geöffneter Zustand', viewCode: 'Code anzeigen', viewCodeFor: 'Code für {title} anzeigen', keyboard: 'Tastatur', tagsFor: 'Anwendungsfälle für {title}',
+    goodAt: 'Gut für', breaksWhen: 'Stößt an Grenzen, wenn', openState: 'Geöffneter Zustand', viewCode: 'Code anzeigen', viewCodeFor: 'Code für {title} anzeigen', keyboard: 'Tastatur', tagsFor: 'Anwendungsfälle für {title}',
     showTagged: 'Komponenten mit {tag} anzeigen', skipNext: 'Zur nächsten Karte springen', sections: 'Abschnitte', filterPlaceholder: 'Nach Name oder Anwendungsfall suchen',
     filterShort: 'Name oder Anwendungsfall', filterLabel: 'Komponenten nach Name oder Anwendungsfall filtern', filterComponents: 'Komponenten filtern', filter: 'Filtern',
     matches: 'Treffer', noMatches: 'Keine Treffer', found: '{count} gefunden', searchComponents: 'Komponenten suchen',
@@ -130,7 +140,7 @@ export const SHOWCASE_MSG = defineMessages('showcase', {
     clearFilter: 'Filter entfernen', auto: 'Automatisch ({dir})', tagline: 'React · Motion · Tailwind', libraryName: 'UI-Bibliothek',
   },
   ar: {
-    openState: 'الحالة المفتوحة', viewCode: 'عرض الشيفرة', viewCodeFor: 'عرض شيفرة {title}', keyboard: 'لوحة المفاتيح', tagsFor: 'وسوم حالات الاستخدام لـ {title}',
+    goodAt: 'مناسب لـ', breaksWhen: 'يتعثر عندما', openState: 'الحالة المفتوحة', viewCode: 'عرض الشيفرة', viewCodeFor: 'عرض شيفرة {title}', keyboard: 'لوحة المفاتيح', tagsFor: 'وسوم حالات الاستخدام لـ {title}',
     showTagged: 'عرض المكونات الموسومة بـ {tag}', skipNext: 'انتقل إلى البطاقة التالية', sections: 'الأقسام', filterPlaceholder: 'ابحث بالاسم أو حالة الاستخدام',
     filterShort: 'الاسم أو حالة الاستخدام', filterLabel: 'تصفية المكونات بالاسم أو حالة الاستخدام', filterComponents: 'تصفية المكونات', filter: 'تصفية',
     matches: 'النتائج المطابقة', noMatches: 'لا توجد نتائج مطابقة', found: 'عُثر على {count}', searchComponents: 'البحث في المكونات',
@@ -210,8 +220,11 @@ export function SpecPreview({ children, className, label }: { children: ReactNod
  * Keyboard: the code button is one Tab stop and the tag chips another (arrows move between chips). Demos with many
  * controls get a "Skip to next card" link right after the header, so Tab doesn't have to walk the whole demo.
  */
-export function Spec({ title, desc, children, span = 1, actions, keys }:
-  { title: string; desc?: string; children: ReactNode; span?: 1 | 2 | 3; actions?: ReactNode; keys?: SpecKey[] }) {
+/** What a pattern is good at and where it breaks down, shown under the demo (helps pick between similar components). */
+export type SpecNotes = { good: ReactNode; breaks: ReactNode }
+
+export function Spec({ title, desc, children, span = 1, actions, keys, notes }:
+  { title: string; desc?: string; children: ReactNode; span?: 1 | 2 | 3; actions?: ReactNode; keys?: SpecKey[]; notes?: SpecNotes }) {
   const key = useId()
   const section = useContext(SectionContext)
   const { query, setQuery, focusFilter } = useContext(ShellContext)
@@ -284,6 +297,12 @@ export function Spec({ title, desc, children, span = 1, actions, keys }:
           {t('skipNext')} ↓
         </a>
         <div ref={bodyRef} data-spec-body className="flex flex-1 flex-col gap-3">{children}</div>
+        {notes && (
+          <dl className="m-0 mt-4 grid gap-x-6 gap-y-3 border-t border-[var(--line)] pt-3 text-xs leading-relaxed sm:grid-cols-2">
+            <div><dt className="mb-0.5 text-[11px] font-semibold tracking-[.06em] text-[var(--fg3)] uppercase">{t('goodAt')}</dt><dd className="m-0 text-[var(--fg2)]">{notes.good}</dd></div>
+            <div><dt className="mb-0.5 text-[11px] font-semibold tracking-[.06em] text-[var(--fg3)] uppercase">{t('breaksWhen')}</dt><dd className="m-0 text-[var(--fg2)]">{notes.breaks}</dd></div>
+          </dl>
+        )}
       </Card>
     </Reveal>
   )

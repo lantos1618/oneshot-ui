@@ -1,7 +1,8 @@
 import { useEffect, useId, useLayoutEffect, useMemo, useRef, useState, type FocusEvent as ReactFocusEvent, type KeyboardEvent as ReactKeyboardEvent, type PointerEvent as ReactPointerEvent, type ReactNode, type RefObject } from 'react'
 import { motion } from 'motion/react'
-import { AnimatedNumber, DeltaBadge, SparkChart, TOUCH, chartPath, type Curve, type UIDir, addDays, clamp, cn, dayKey, defineMessages, extent, fmt, isTouch, logicalArrow, maxOf, minOf, type MessageDefs, type MessageKeyOf, type MessageVars, onMouseLeave, prefersReducedMotion, releaseTouchCapture, safeColor, spring, startOfWeek, surface, useCoarsePointer, useLocale, useMessages, useOutside, useWidth } from './core'
+import { AnimatedNumber, DeltaBadge, SparkChart, TOUCH, chartPath, type Curve, type UIDir, addDays, clamp, cn, dayKey, defineMessages, extent, fmt, isTouch, logicalArrow, maxOf, minOf, type MessageDefs, type MessageKeyOf, type MessageVars, onMouseLeave, prefersReducedMotion, releaseTouchCapture, safeColor, spring, startOfWeek, surface, useCoarsePointer, useControllable, useLocale, useMessages, useOutside, useWidth } from './core'
 import { useTween, useViewport } from './motion'
+import { ANNOTATE_MESSAGES, TAG_SR_ONLY, TagGlyph, TagTooltip, layoutTimeTags, timeTagLook, timeTagTint, timeTicks, useTagFocus, type TimeTag, type TimeTagKind, type TimeTagStyle } from './annotate'
 
 /* ════════════════════════════════════════════════════════════════════════════
  * 13. CHARTS: one small SVG kit (no chart library). Every chart shares the palette,
@@ -422,6 +423,24 @@ export function useChartFocus({ count, index, onIndex, label, summary, describe,
 }
 /** Focus ring for a chart's focusable box (the active point carries the second, data-level mark). */
 const CHART_FOCUS = 'rounded-[var(--r-md)] outline-none focus-visible:outline-solid focus-visible:outline-2 focus-visible:outline-offset-4 focus-visible:outline-[var(--accent)]'
+/** Ease numbers to `to` in 250 ms; `snap`, the value after a snap and reduced motion jump. */
+function useChartEase(to: number[], snap: boolean) {
+  const [v, setV] = useState(to), cur = useRef<number[] | null>(null), key = to.join(), jump = snap || !cur.current
+  useEffect(() => {
+    const from = cur.current
+    if (jump || !from || prefersReducedMotion()) { cur.current = snap ? null : to; setV(to); return }
+    const t0 = performance.now()
+    let raf = 0
+    const step = (now: number) => {
+      const u = Math.min(1, (now - t0) / 250), e = 1 - (1 - u) ** 3
+      cur.current = to.map((x, i) => from[i] + (x - from[i]) * e); setV(cur.current)
+      if (u < 1) raf = requestAnimationFrame(step)
+    }
+    raf = requestAnimationFrame(step)
+    return () => cancelAnimationFrame(raf)
+  }, [key, jump]) // eslint-disable-line react-hooks/exhaustive-deps
+  return jump ? to : v
+}
 /** A hover index that is dropped (not left dangling) when the data shrinks under it. */
 const chartIndex = (i: number | null, n: number) => (i !== null && i >= 0 && i < n ? i : null)
 
@@ -536,6 +555,18 @@ export type Series<T extends object = ChartDatum> = {
   /** Small label above each bar, e.g. '+25'. */
   labelOf?: (d: T, i: number) => string | null
 }
+/**
+ * Tags on a time-axis Chart. `style` 'auto' (default: pins → rug → rollup by width and density, see layoutTimeTags),
+ * 'pins', 'rug', 'flags', 'rollup' or 'dots'; the room a style may need is reserved, so switching never moves the plot.
+ * `spans: 'bands'` (default) shades durations. `activeId`/`onActiveChange` link to a list; `onSelect` runs on click,
+ * Enter or a second tap; `label` names the tag list ("Tags").
+ */
+export type ChartAnnotations = {
+  tags: TimeTag[]; kinds?: TimeTagKind[]; style?: TimeTagStyle; spans?: 'bands' | 'none'; activeId?: string | null
+  onActiveChange?: (id: string | null) => void; onSelect?: (tag: TimeTag) => void; label?: string
+  /** 'current' (default): room for the shown style's rows, eased when data or width change it. 'max': room for every style, so the height never changes: use it for live or streaming data. */
+  reserve?: 'current' | 'max'
+}
 /** Props of Chart over rows of type `T`. */
 export type ChartProps<T extends object = ChartDatum> = {
   data: T[]; x: NoInfer<keyof T & string>; series: Series<NoInfer<T>>[]; height?: number; stacked?: boolean
@@ -557,6 +588,10 @@ export type ChartProps<T extends object = ChartDatum> = {
   summary?: string
   /** Formats the x values for the axis, the tooltip header and the keyboard readout (e.g. day numbers → dates). */
   xFormat?: (v: NoInfer<T>[keyof T], i: number) => string
+  /** Time x axis (rows placed by time, clock ticks): `true` reads epoch ms/Dates from `x`, or map a row. On with `annotations` over numeric/Date x. */
+  xTime?: boolean | ((d: NoInfer<T>) => number | Date)
+  /** tags over time (point events and spans); needs a time x axis */
+  annotations?: ChartAnnotations
   className?: string
 }
 
@@ -575,7 +610,7 @@ export type ChartProps<T extends object = ChartDatum> = {
  * Keyboard: the chart is one Tab stop; arrows, Home and End move the same crosshair and tooltip (useChartFocus).
  * Draws in when scrolled into view.
  */
-export function Chart<T extends object = ChartDatum>({ data: allRows, x, series, height = 220, stacked, band, gap = 0.3, format: formatProp, rightFormat, legend = true, curve = 'linear', zero = true, domain, tooltip, maxPoints, label, summary, xFormat, className }: ChartProps<T>) {
+export function Chart<T extends object = ChartDatum>({ data: allRows, x, series, height = 220, stacked, band, gap = 0.3, format: formatProp, rightFormat, legend = true, curve = 'linear', zero = true, domain, tooltip, maxPoints, label, summary, xFormat, xTime, annotations: A, className }: ChartProps<T>) {
   const { cm, fmt: lf, range } = useChartLocale()
   const format = formatProp ?? lf.compact
   const data = useMemo(() => chartDownsample(allRows, maxPoints), [allRows, maxPoints])
@@ -586,8 +621,11 @@ export function Chart<T extends object = ChartDatum>({ data: allRows, x, series,
   const S = series.map((s, i) => ({ ...s, type: s.type ?? 'line', color: s.color ?? PALETTE[i % PALETTE.length], label: s.label ?? s.key, axis: s.axis ?? 'left', curve: s.curve ?? curve }))
   type RS = (typeof S)[number]
   const hasL = S.some(s => s.axis === 'left'), hasR = S.some(s => s.axis === 'right')
+  // annotations reserve their room for every style they may switch to (no layout shift): pins headroom on top, the rug/rollup band below
+  // annotations add headroom (pins, flags) and a band under the axis (rug, rollup); set once the layout is known, below
+  const aStyle = A?.style ?? 'auto', ROW = 23
   const pad = { l: 8, r: 10, t: S.some(s => s.labelOf) ? 22 : 10, b: 24 }
-  const ih = height - pad.t - pad.b
+  let ih = height - pad.t - pad.b
   const n = data.length, slots = S.filter(s => s.type === 'bar' || s.type === 'float'), banded = slots.length > 0
   // stacking: each series sits on the sum of the stackable series before it (same type, same axis)
   const base = (i: number, si: number) => stacked ? S.slice(0, si).filter(s => s.type === S[si].type && s.axis === S[si].axis).reduce((a, s) => a + (num(data[i][s.key]) ?? 0), 0) : 0
@@ -607,8 +645,22 @@ export function Chart<T extends object = ChartDatum>({ data: allRows, x, series,
   const iw = Math.max(0, w - pad.l - pad.r)
   const sc = (s: RS) => (s.axis === 'right' ? R : L) ?? G!
   const step = iw / Math.max(1, banded ? n : n - 1)
-  const X = (i: number) => pad.l + (banded ? step * (i + 0.5) : step * i)
-  const xText = (i: number) => (xFormat ? xFormat(data[i][x], i) : String(data[i][x] ?? ''))
+  // time x axis: rows placed by time; tx(ms) maps any time (a tag) onto the plot
+  const v0: unknown = data[0]?.[x]
+  const timeOf = typeof xTime === 'function' ? (d: T) => +xTime(d) : xTime || (xTime === undefined && A && (typeof v0 === 'number' || v0 instanceof Date)) ? (d: T) => +(d[x] as number | Date) : null
+  const T = timeOf ? data.map(timeOf) : null
+  const t0 = T?.[0] ?? 0, t1 = T?.[n - 1] ?? 1, linT = (ms: number) => pad.l + ((ms - t0) / (t1 - t0 || 1)) * iw
+  /** fractional row index of a time (binary search over the rows' times) */
+  const fracAt = (ms: number) => {
+    if (!T || n < 2 || ms <= T[0]) return 0
+    let lo = 0, hi = n - 1
+    if (ms >= T[hi]) return hi
+    while (hi - lo > 1) { const mid = (lo + hi) >> 1; if (T[mid] <= ms) lo = mid; else hi = mid }
+    return lo + (ms - T[lo]) / (T[hi] - T[lo] || 1)
+  }
+  const X = (i: number) => (T && !banded ? linT(T[i]) : pad.l + (banded ? step * (i + 0.5) : step * i))
+  const tx = (ms: number) => (banded ? pad.l + step * (fracAt(ms) + 0.5) : linT(ms))
+  const xText = (i: number) => (xFormat ? xFormat(data[i][x], i) : T ? lf.time(T[i]) : String(data[i][x] ?? ''))
   // skip x labels that would collide: show every Nth (N from a tidy 1, 2, 3, 4, 5, 6, 10… set) so each one gets
   // its estimated 11px width plus a gap. Dense charts (histograms with gap={0}) rely on this.
   const labelW = maxOf(data.map((_, i) => xText(i).length), 0) * 6.6 + 10
@@ -628,7 +680,7 @@ export function Chart<T extends object = ChartDatum>({ data: allRows, x, series,
     const v = top(i, si); return v === null ? null : [base(i, si), v]
   }
   const fmtOf = (s: RS) => (s.axis === 'right' ? rightFormat ?? format : format)
-  const pick = (px: number) => setHover(Math.max(0, Math.min(n - 1, Math.round((px - pad.l - (banded ? step / 2 : 0)) / step))))
+  const pick = (px: number) => setHover(Math.max(0, Math.min(n - 1, Math.round(T && !banded ? fracAt(t0 + ((px - pad.l) / (iw || 1)) * (t1 - t0)) : (px - pad.l - (banded ? step / 2 : 0)) / step))))
   useOutside([ref], () => setHover(null), hover !== null, { escape: true })
   const valueText = (i: number, si: number) => {
     const s = S[si]
@@ -642,6 +694,41 @@ export function Chart<T extends object = ChartDatum>({ data: allRows, x, series,
     summary: summary ?? (n ? [cm('pointsFromTo', { n, from: xText(0), to: xText(n - 1) }), ...S.map(s => cm('seriesRange', { name: s.label, range: range(data.map((_, i) => s.type === 'float' ? num(data[i][s.key]) ?? NaN : top(i, S.indexOf(s)) ?? NaN), fmtOf(s)) }))].join(' ') : cm('noData')),
     describe: i => `${xText(i)}: ${S.map((s, si) => { const v = valueText(i, si); return v === null ? null : `${s.label} ${v}` }).filter(Boolean).join(', ')}`,
   })
+  /* ── annotations: tags over time (annotate.tsx) ── */
+  const am = useMessages(ANNOTATE_MESSAGES)
+  const aTags = !A ? [] : A.spans === 'none' ? A.tags.filter(t => t.end === undefined) : A.tags
+  const [activeAt, setActiveRaw] = useControllable<string | null>(A?.activeId, null, A?.onActiveChange)
+  const setActive = (id: string | null) => { if (id !== activeAt) setActiveRaw(id) }
+  const tags = useTagFocus({ tags: aTags, activeId: activeAt, onActive: setActive, onSelect: A?.onSelect, label: A?.label })
+  const tl = A && T && iw > 0 ? layoutTimeTags(aTags, { x: tx, width: w - pad.r, style: aStyle, domain: [t0, t1] }) : null
+  // room for the tags: 'max' every style it may switch to; 'current' the shown style's rows, eased when they change
+  const aMax = !tl || A?.reserve === 'max', st = aMax ? aStyle : tl.style, rows = aMax ? 3 : Math.max(1, tl.rows)
+  const want = !A ? [0, 0] : [st === 'pins' ? 8 + (aMax && st === aStyle ? 3 : rows) * ROW : st === 'auto' ? 8 + 2 * ROW : st === 'flags' ? 24 : 6, /auto|rug|rollup/.test(st) ? rows * ROW + 6 : 0]
+  const [aTop, aBand] = useChartEase(want, aMax)
+  pad.t += aTop; ih = height - pad.t - pad.b
+  const s0 = S.findIndex(s => s.type === 'line' || s.type === 'area')
+  /** y of the first line series at a time (interpolated), or the plot floor */
+  const lineY = (ms: number) => {
+    const f = fracAt(ms), i = Math.floor(f), a = s0 < 0 || !n ? null : top(i, s0), b = s0 < 0 || !n ? null : top(Math.min(n - 1, i + 1), s0)
+    const v = a === null ? b : b === null ? a : a + (b - a) * (f - i)
+    return v === null ? pad.t + ih : sc(S[s0]).Y(v)
+  }
+  const pinY = (ms: number, row: number) => Math.max(10, lineY(ms) - 17 - row * ROW), rugY = (row: number) => height + 4 + ROW / 2 + row * ROW
+  const look = (t: TimeTag) => timeTagLook(t, A?.kinds)
+  const placed = tl?.points.find(p => p.tag.id === activeAt), host = placed?.hidden ? tl!.points.find(p => p.more?.includes(placed.tag.id)) : placed
+  const aSpan = tl?.spans.find(p => p.tag.id === activeAt), aBin = placed?.bin !== undefined ? tl!.bins[placed.bin] : undefined
+  const activeTag = placed?.tag ?? aSpan?.tag ?? null
+  const anchor = !tl ? null : aSpan ? { x: clamp((aSpan.x0 + aSpan.x1) / 2, pad.l, w - pad.r), y: pad.t } : !host ? null
+    : { x: aBin ? aBin.x : host.x, y: aBin ? rugY(aBin.row) : tl.style === 'pins' ? pinY(host.ms, host.row) : tl.style === 'rug' ? rugY(host.row) : tl.style === 'flags' ? pad.t : lineY(host.ms) }
+  useOutside([ref], () => setActive(null), !!activeTag, { escape: true })
+  const tap = useRef({ type: '', was: false })
+  const tagPtr = (t: TimeTag) => ({
+    onPointerEnter: (e: ReactPointerEvent) => { if (!isTouch(e)) { setHover(null); setActive(t.id) } },
+    onPointerLeave: onMouseLeave(() => setActive(null)),
+    onPointerDown: (e: ReactPointerEvent) => { tap.current = { type: e.pointerType, was: activeAt === t.id }; releaseTouchCapture(e); setHover(null); setActive(t.id) },
+    onClick: () => { if (tap.current.type !== 'touch' || tap.current.was) A?.onSelect?.(t) },
+  })
+  const fade = { opacity: seen ? 1 : 0, transition: 'opacity .3s' }
   const whiskers = (caps: boolean) => S.map(s => s.whisker && !!s.whisker.caps === caps && data.map((d, i) => {
     const lo = num(d[s.whisker!.low]), hi = num(d[s.whisker!.high]), mid = num(d[s.key]); if (lo === null || hi === null || mid === null) return null
     const { Y } = sc(s), cx = bx(i, s) + bw / 2, cw = Math.min(7, bw / 2)
@@ -652,17 +739,28 @@ export function Chart<T extends object = ChartDatum>({ data: allRows, x, series,
   return (
     <div className={className}>
       {/* an LTR plot in every locale (see CHART_MESSAGES); legend and tooltip text follow the locale */}
-      <div ref={ref} {...focus.props} dir="ltr" className={cn('relative', CHART_FOCUS)} style={{ height }} onPointerLeave={onMouseLeave(() => setHover(null))}>
+      <div ref={ref} {...focus.props} dir="ltr" className={cn('relative', CHART_FOCUS)} style={{ height: height + aBand }} onPointerLeave={onMouseLeave(() => setHover(null))}>
         {focus.a11y}
         {w > 0 && G && (
-          <svg width={w} height={height} aria-hidden className="block touch-pan-y overflow-visible text-[11px]"
+          <svg width={w} height={height + aBand} aria-hidden className="block touch-pan-y overflow-visible text-[11px]"
             onPointerDown={e => pick(e.clientX - e.currentTarget.getBoundingClientRect().left)} onPointerMove={e => pick(e.clientX - e.currentTarget.getBoundingClientRect().left)}>
             {G.ticks.map(t => (
               <line key={t} x1={pad.l} x2={w - pad.r} y1={G.Y(t)} y2={G.Y(t)} stroke="var(--line)" strokeDasharray={t === 0 ? undefined : '3 3'} />
             ))}
             {L && L.ticks.map(t => <text key={t} x={pad.l - 8} y={L.Y(t)} dy="0.32em" textAnchor="end" fill="var(--fg3)">{format(t)}</text>)}
             {R && R.ticks.map(t => <text key={t} x={w - pad.r + 8} y={R.Y(t)} dy="0.32em" fill="var(--fg3)">{(rightFormat ?? format)(t)}</text>)}
-            {data.map((_, i) => i % every === 0 && <text key={i} x={X(i)} y={height - 6} textAnchor="middle" fill="var(--fg3)">{xText(i)}</text>)}
+            {T && n > 1 ? timeTicks(t0, t1, iw, ms => lf.time(ms), Math.max(56, lf.time(t0).length * 6.6 + 18)).map(k => <g key={k.ms}>
+              <line x1={tx(k.ms)} x2={tx(k.ms)} y1={pad.t} y2={pad.t + ih} stroke="var(--line)" strokeOpacity={0.6} />
+              <text x={tx(k.ms)} y={height - 6} textAnchor="middle" fill="var(--fg3)">{k.label}</text>
+            </g>) : data.map((_, i) => i % every === 0 && <text key={i} x={X(i)} y={height - 6} textAnchor="middle" fill="var(--fg3)">{xText(i)}</text>)}
+            {tl && <g style={fade}>
+              {tl.spans.map(p => { const c = look(p.tag).color, on = p.tag.id === activeAt; return <g key={p.tag.id}>
+                <rect x={p.x0} y={pad.t} width={Math.max(1, p.x1 - p.x0)} height={ih} fill={c} fillOpacity={on ? 0.24 : 0.1} />
+                <rect x={p.x0} y={pad.t} width={Math.max(1, p.x1 - p.x0)} height={3} fill={c} />
+              </g> })}
+              {tl.style === 'flags' && tl.points.map(p => <line key={p.tag.id} x1={p.x} x2={p.x} y1={pad.t - (p.flag ? 4 : 10)} y2={pad.t + ih} stroke={look(p.tag).color} strokeDasharray="3 3" strokeOpacity={p.tag.id === activeAt ? 1 : 0.7} strokeWidth={p.tag.id === activeAt ? 2 : 1} />)}
+              {aBin && <rect x={tx(aBin.from)} y={pad.t} width={Math.max(1, tx(aBin.to) - tx(aBin.from))} height={ih} fill="var(--line)" fillOpacity={0.5} />}
+            </g>}
             {band && L && (() => {
               const pts = data.map((d, i) => [i, num(d[band.lower]), num(d[band.upper])] as const).filter(p => p[1] !== null && p[2] !== null)
               const dd = chartPath(pts.map(p => [X(p[0]), L.Y(p[2]!)]), curve) + chartPath(pts.slice().reverse().map(p => [X(p[0]), L.Y(p[1]!)]), curve, true) + 'Z'
@@ -706,9 +804,53 @@ export function Chart<T extends object = ChartDatum>({ data: allRows, x, series,
             }))}
             {whiskers(true)}
             {hover !== null && S.map((s, si) => { const v = top(hover, si); return (s.type === 'line' || s.type === 'area') && v !== null && <circle key={s.key} cx={X(hover)} cy={sc(s).Y(v)} r={4} fill={s.color} stroke="var(--card)" strokeWidth={2} /> })}
+            {tl && /pins|dots/.test(tl.style) && <g style={fade}>{tl.points.map(p => {
+              const c = look(p.tag).color, y = lineY(p.ms), stem = tl.style === 'pins' && !p.hidden
+              return <g key={p.tag.id}>
+                {stem && <line x1={p.x} x2={p.x} y1={y} y2={pinY(p.ms, p.row) + 10} stroke={c} strokeOpacity={0.5} />}
+                <circle cx={p.x} cy={y} r={tl.style === 'dots' ? 0 : 2.5} fill={c} />
+              </g>
+            })}</g>}
+            {activeTag && anchor && !aSpan && tl && <g pointerEvents="none">
+              {(tl.style === 'rug' || tl.style === 'rollup') && <line x1={anchor.x} x2={anchor.x} y1={lineY(host!.ms)} y2={height - 18} stroke="var(--fg3)" strokeDasharray="2 3" />}
+              <circle cx={host!.x} cy={lineY(host!.ms)} r={4.5} fill={look(activeTag).color} stroke="var(--card)" strokeWidth={2} />
+            </g>}
           </svg>
         )}
-        {hover !== null && w > 0 && (
+        {tl && aTags.length > 0 && (
+          // the tags: one Tab stop after the series (useTagFocus); glyphs are its options, folded ones visually hidden
+          <div {...tags.props} onFocus={e => { setHover(null); tags.props.onFocus(e) }} className="pointer-events-none absolute inset-0 outline-none" style={fade}>
+            {/* options in time order (spans by their start), as the keyboard walks them */}
+            {[...tl.spans.map(p => [p.from, <div key={p.tag.id} {...tags.option(p.tag)} {...tagPtr(p.tag)} className={cn(TOUCH.hit, 'pointer-events-auto absolute cursor-pointer')}
+              style={{ /* rtl-lint-ignore: LTR plot */ left: p.x0, width: Math.max(8, p.x1 - p.x0), top: pad.t - 5, height: 12 }} />] as const), ...tl.points.map(p => [p.ms, (() => {
+              const { icon, color } = look(p.tag), on = p.tag.id === activeAt || (host === p && !!activeTag), o = { ...tags.option(p.tag), ...tagPtr(p.tag) }
+              if (p.hidden || tl.style === 'rollup') return <span key={p.tag.id} {...o} style={TAG_SR_ONLY} />
+              if (tl.style === 'flags') return p.flag
+                ? <div key={p.tag.id} {...o} className={cn(TOUCH.hit, 'pointer-events-auto absolute h-[18px] cursor-pointer rounded-e-[var(--r-sm)] border-s-2 px-1.5 text-[11px] leading-[16px] font-medium whitespace-nowrap text-[var(--fg)]')}
+                  style={{ /* rtl-lint-ignore: LTR plot */ left: p.x - 1, top: pad.t - 22, borderColor: color, background: timeTagTint(color, on ? 32 : 18) }}>{p.tag.label}</div>
+                : <div key={p.tag.id} {...o} className={cn(TOUCH.hit, 'pointer-events-auto absolute w-2.5 cursor-pointer')} style={{ /* rtl-lint-ignore: LTR plot */ left: p.x - 5, top: pad.t - 10, height: 14 }} />
+              if (tl.style === 'dots') return <span key={p.tag.id} {...o} className={cn(TOUCH.hit, 'pointer-events-auto absolute cursor-pointer rounded-full border-2 border-[var(--card)] motion-safe:transition-transform', on && 'scale-150')}
+                style={{ /* rtl-lint-ignore: LTR plot */ left: p.x - 5, top: lineY(p.ms) - 5, width: 10, height: 10, background: color }} />
+              const y = tl.style === 'pins' ? pinY(p.ms, p.row) : rugY(p.row)
+              return <TagGlyph key={p.tag.id} {...o} icon={icon} color={color} active={on} more={p.more?.length} className={cn(TOUCH.hit, 'pointer-events-auto !absolute cursor-pointer motion-safe:[transition:left_.3s,top_.3s,transform_.15s]')}
+                style={{ /* rtl-lint-ignore: LTR plot */ left: p.x - 10, top: y - 10 }} />
+            })()] as const)].sort((a, b) => a[0] - b[0]).map(e => e[1])}
+            {tl.bins.map(b => {
+              const k = A!.kinds?.find(q => q.kind === b.kind), color = b.kind === '*' ? 'var(--c-neutral)' : safeColor(k?.color, 'var(--accent)'), on = aBin === b
+              const first = tl.points.find(p => p.tag.id === b.ids[0])!.tag
+              return <div key={`${b.from}${b.kind}`} aria-hidden {...tagPtr(first)} className={cn(TOUCH.hit, 'ui-num pointer-events-auto absolute flex h-[18px] cursor-pointer items-center gap-0.5 overflow-hidden rounded-full px-1.5 text-[11px] whitespace-nowrap text-[var(--fg)]')}
+                style={{ /* rtl-lint-ignore: LTR plot */ left: b.x, top: rugY(b.row) - 9, maxWidth: b.w - 2, transform: 'translateX(-50%)', background: timeTagTint(color, on ? 34 : 18), boxShadow: on ? `0 0 0 1.5px ${color}` : undefined }}>
+                <span className="text-[10px]">{b.kind === '*' ? '+' : k?.icon}</span>{b.count}
+              </div>
+            })}
+          </div>
+        )}
+        {activeTag && anchor && w > 0 && (
+          <ChartTooltip x={anchor.x} y={clamp(anchor.y - 10, 0, height + aBand - 64)} width={w}>
+            <TagTooltip tag={activeTag} kinds={A?.kinds} extra={aBin && aBin.count > 1 ? am('bin', { label: aBin.kind === '*' ? am('others') : look(activeTag).kindLabel, n: aBin.count, from: lf.time(aBin.from), to: lf.time(aBin.to) }) : undefined} />
+          </ChartTooltip>
+        )}
+        {hover !== null && w > 0 && !activeTag && (
           <ChartTooltip x={X(hover)} y={pad.t} width={w}>
             {tooltip ? tooltip(data[hover], hover) : <>
               <div className="mb-1 font-medium">{xText(hover)}</div>

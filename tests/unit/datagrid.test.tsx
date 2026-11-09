@@ -214,4 +214,34 @@ describe('DataGrid: columns', () => {
     expect(headers()).toEqual(['Name', 'Amount']) // Amount is pinned right, so it stays last
     expect(within(grid()).getByRole('columnheader', { name: /Amount/ }).getAttribute('style')).toMatch(/inset-inline-end: 0px/)
   })
+
+  // 0.5 regression (iPhone report: a blank strip between ID and Customer): the table used `width: auto`, so the browser
+  // ignored `table-layout: fixed` and sized columns from their content, while the sticky offsets assumed the colgroup widths.
+  it('offsets consecutive pinned columns by the cumulative colgroup widths, and lays the table out at exactly those widths', () => {
+    type Big = Row & { mrr: number; extra: string }
+    const cols: GridColumn<Big>[] = [{ key: 'id', label: 'ID', width: 84, type: 'number' }, { key: 'name', label: 'Customer', width: 170 },
+      { key: 'region', label: 'Region', width: 110 }, { key: 'extra', label: 'Extra', width: 150 }, { key: 'amount', label: 'Amount', width: 90, type: 'number' }, { key: 'mrr', label: 'MRR', width: 100, type: 'number' }]
+    const rows: Big[] = makeRows(40).map(r => ({ ...r, mrr: r.amount * 2, extra: 'x' }))
+    const startOf = (el: HTMLElement) => parseFloat(el.style.insetInlineStart), endOf = (el: HTMLElement) => parseFloat(el.style.insetInlineEnd)
+    for (const dir of ['ltr', 'rtl'] as const) {
+      const { unmount } = render(<div dir={dir}><DataGrid aria-label="Customers" columns={cols} defaultRows={rows} rowKey={r => r.id} defaultPinnedColumns={{ start: ['id', 'name'], end: ['amount', 'mrr'] }} /></div>)
+      const ths = within(grid()).getAllByRole('columnheader')
+      const th = (name: string) => ths.find(h => h.textContent?.startsWith(name))!
+      const widths = [...grid().querySelectorAll('col')].map(c => parseFloat((c as HTMLElement).style.width))
+      expect(widths).toEqual([40, 84, 170, 110, 150, 90, 100])
+      // start pins: the checkbox column (40), then ID, then Customer right after ID; end pins stack from the end
+      expect(startOf(th('ID'))).toBe(40)
+      expect(startOf(th('Customer'))).toBe(40 + 84)
+      expect(endOf(th('MRR'))).toBe(0)
+      expect(endOf(th('Amount'))).toBe(100)
+      // body cells use the same offsets as their headers
+      const cell = (k: string) => grid().querySelector<HTMLElement>(`tbody td[data-gk="${k}"]`)!
+      expect(startOf(cell('name'))).toBe(startOf(th('Customer')))
+      expect(endOf(cell('amount'))).toBe(endOf(th('Amount')))
+      // the table's width is the colgroup total (at least the scroller's), so table-layout: fixed applies
+      expect(grid().style.width).toBe(`${widths.reduce((a, b) => a + b, 0)}px`)
+      expect(grid().style.minWidth).toBe('100%')
+      unmount()
+    }
+  })
 })

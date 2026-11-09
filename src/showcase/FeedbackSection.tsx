@@ -113,12 +113,12 @@ function FbCookieDemo() {
 }
 
 function FbOfflineDemo() {
-  // starts offline so the card shows the banner; it only counts down while on screen (off screen it reads as online)
+  // starts offline so the card shows the banner; off screen it pauses the countdown (it stays offline, nothing replays)
   const [online, setOnline] = useState(false)
   const ref = useRef<HTMLDivElement>(null), inView = useInView(ref)
   return (
     <>
-      <div ref={ref}><FbMockWindow><OfflineIndicator online={online || !inView} /></FbMockWindow></div>
+      <div ref={ref}><FbMockWindow><OfflineIndicator online={online} paused={!inView} /></FbMockWindow></div>
       <Switch label={<span className="text-[13px] text-[var(--fg2)]">Connected</span>} checked={online} onChange={setOnline} />
     </>
   )

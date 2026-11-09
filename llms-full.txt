@@ -4,7 +4,7 @@
 > CSS variables (seven palette families, light and dark). Forms, overlays, navigation, data grid, charts, diagrams, maps,
 > media, AI chat and agent UIs. Every component is also a self-contained .tsx drop-in file.
 
-Version 0.4.0. Source: https://github.com/lantos1618/oneshot-ui. Docs: https://lantos1618.github.io/oneshot-ui/. Licence: MIT with a revenue threshold (free up to USD 200k ARR).
+Version 0.5.0. Source: https://github.com/lantos1618/oneshot-ui. Docs: https://lantos1618.github.io/oneshot-ui/. Licence: MIT with a revenue threshold (free up to USD 200k ARR).
 
 ## Use it
 
@@ -22,8 +22,8 @@ and motion. Attach the ones you need plus ui-provider.tsx; they share one UIProv
 - CLI (offline, from the installed package): `npx @lyndon/ui add data-grid dialog --dir src/components/ui`, `npx @lyndon/ui list`, `npx @lyndon/ui info data-grid`
 - shadcn CLI: `npx shadcn add https://lantos1618.github.io/oneshot-ui/r/data-grid.json` (pulls in ui-provider)
 - Index with sizes, exports and embedded components: https://lantos1618.github.io/oneshot-ui/index.json
-- The same files from npm: https://unpkg.com/@lyndon/ui@0.4.0/dist-registry/files/<name>.tsx
-- Whole library in one file (dist-single/ui-all.tsx, ~548.9k tokens): only for tools with a very large context; prefer the drop-ins
+- The same files from npm: https://unpkg.com/@lyndon/ui@0.5.0/dist-registry/files/<name>.tsx
+- Whole library in one file (dist-single/ui-all.tsx, ~588.9k tokens): only for tools with a very large context; prefer the drop-ins
 
 ## Foundation
 
@@ -228,13 +228,13 @@ Checkbox with a drawn checkmark; `children` is its label. Form-native like Switc
 - Embeds: FormFieldContext
 - npm: motion, react
 
-### Color picker (`color-picker`, ~9.6k tokens)
+### Color picker (`color-picker`, ~19.8k tokens)
 
-Swatches, a hue slider and a hex field. The preview pops when a swatch or hex changes it (not while dragging hue). Form-native: `name` submits "#RRGGBB" (upper case; the last valid colour while the hex field holds a typo), `required`, `disabled`, `readOnly` (shows the colour and hex only), `invalid`, `onBlur`, `form`, and `ref` on the hex field.
+Swatches, a hue slider and a hex field. The preview pops when a swatch or hex changes it (not while dragging hue). `hueMagnets` pulls the hue thumb onto the primary hues (or your own marks) while dragging; see Slider's `magnets`. Form-native: `name` submits "#RRGGBB" (upper case; the last valid colour while the hex field holds a typo), `required`, `disabled`, `readOnly` (shows the colour and hex only), `invalid`, `onBlur`, `form`, and `ref` on the hex field.
 
 - File: https://lantos1618.github.io/oneshot-ui/files/color-picker.tsx
 - Exports: ColorPicker
-- Embeds: FormFieldContext, Input
+- Embeds: FormFieldContext, Input, MagnetBubble, MagnetMarks
 - npm: motion, react
 
 ### Combobox (`combobox`, ~27.2k tokens)
@@ -246,7 +246,7 @@ Type to filter (the match is bolded), arrows to move, Enter to choose. Options c
 - Embeds: Button, CheckMark, CheckboxBox, FloatingPanel, FormFieldContext, Icon, OptionList, Slot, Spinner
 - npm: motion, react, react-dom
 
-### Currency input (`currency-input`, ~9.0k tokens)
+### Currency input (`currency-input`, ~9.1k tokens)
 
 Amount field: thousands separators appear while you type, using the currency's locale (1’234.50 CHF, 1.234,50 EUR…), at most two decimals. Tap the code to cycle currencies; the formatted amount is written out below. Controlled with `value` (a number, or null for empty) or uncontrolled with `defaultValue`. Form-native: `name` submits the amount as a plain number string ("1234.5", '' when empty; no separators or symbol), `currencyName` also submits the currency code ("CHF"); `required`, `disabled`, `readOnly`, `invalid`, `onBlur`, `form`, and `ref` on the amount field. Reset returns to `defaultValue` and `defaultCurrency`.
 
@@ -353,7 +353,7 @@ Pick several: ticks draw in the list, chosen items become chips (with their colo
 - Embeds: Button, CheckMark, CheckboxBox, FloatingPanel, FormFieldContext, Icon, OptionList, Slot, Spinner
 - npm: motion, react, react-dom
 
-### Number stepper (`number-stepper`, ~10.6k tokens)
+### Number stepper (`number-stepper`, ~10.7k tokens)
 
 − value + with a rolling number. The whole control is one spinbutton tab stop: ↑/→ and ↓/← step, Home and End jump to min and max, and it wiggles when you push past either limit. Form-native: `name` submits the number as a plain string ("3"); `disabled`, `readOnly`, `invalid`, `onBlur`, `form`, and `ref` on the spinbutton. Inside a FormField the field's label names it (otherwise `label`).
 
@@ -362,7 +362,7 @@ Pick several: ticks draw in the list, chosen items become chips (with their colo
 - Embeds: AnimatedNumber, FormFieldContext, Icon
 - npm: motion, react
 
-### OTP input (`otp-input`, ~9.0k tokens)
+### OTP input (`otp-input`, ~9.1k tokens)
 
 One-time code: auto-advance, paste fills every box, typing into a filled box replaces and re-pops it. `onChange` fires with the partial code on every edit (use it to reset your hint), `onComplete` with the full code. Controlled with `value` (set it to '' to clear the boxes) or uncontrolled with `defaultValue`; `length` may change. Pass `status="bad"` after a wrong code and the boxes shake (again on every wrong attempt); `"ok"` makes them hop. Form-native: `name` submits the digits typed so far ("123456"), `required` (every box filled), `disabled`, `readOnly`, `invalid` (same look as status "bad"), `onBlur`, `form`, and `ref` on the first box.
 
@@ -371,7 +371,7 @@ One-time code: auto-advance, paste fills every box, typing into a filled box rep
 - Embeds: FormFieldContext
 - npm: motion, react
 
-### Password input (`password-input`, ~11.0k tokens)
+### Password input (`password-input`, ~11.1k tokens)
 
 Password with show/hide (the eye pops when it flips). `strength` adds four bars that fill in a stagger and a rules checklist (8+ characters, uppercase, number, symbol) that ticks green as each is met.
 
@@ -380,7 +380,7 @@ Password with show/hide (the eye pops when it flips). `strength` adds four bars 
 - Embeds: Button, FormFieldContext, Icon, Slot, Spinner
 - npm: motion, react
 
-### Phone input (`phone-input`, ~25.4k tokens)
+### Phone input (`phone-input`, ~25.5k tokens)
 
 Phone number with a country picker (flags and dial codes). Digits are formatted with the country's mask as you type, and the digits still to come show as a grey placeholder. Typing `+44…` or `0044…` switches the country. Controlled with `value` (E.164, e.g. "+41791234567": a new value picks the country and digits) or uncontrolled with `defaultCountry` + `defaultValue` (national digits). Form-native: `name` submits E.164 ("+41791234567"; '' while no digits are typed), `required`, `disabled`, `readOnly`, `invalid`, `onBlur`, `form`, and `ref` on the number field. Reset returns to the default country and digits.
 
@@ -398,7 +398,7 @@ Radio group with arrow-key navigation. Form-native: `name` submits the chosen va
 - Embeds: FormFieldContext
 - npm: motion, react
 
-### Rating (`rating`, ~9.5k tokens)
+### Rating (`rating`, ~9.6k tokens)
 
 1–5 stars: every lit star pops again in sequence on each pick. Arrow keys change the rating. Form-native: `name` submits the rating ("4"; '' while unrated), `required` (must be rated), `disabled`, `readOnly` (shows the stars, no picking), `invalid`, `onBlur`, `form`, and `ref` on the star holding the Tab stop.
 
@@ -425,13 +425,13 @@ Custom select: arrows, Enter/Space, type-ahead that cycles through options start
 - Embeds: CheckMark, CheckboxBox, FloatingPanel, FormFieldContext, Icon
 - npm: motion, react, react-dom
 
-### Slider (`slider`, ~12.3k tokens)
+### Slider (`slider`, ~22.0k tokens)
 
-Range slider with live value. `disabled` fades only the track (label and value stay legible in --fg3; the group gets aria-disabled). Native input: keyboard and screen readers for free, a 32px hit area on touch. `steps` makes it a stepped picker over named stops (value = index; the names show under the track and can be tapped). `compact` uses a smaller grey readout (settings panels).
+Range slider with live value. `disabled` fades only the track (label and value stay legible in --fg3; the group gets aria-disabled). Native input: keyboard and screen readers for free, a 32px hit area on touch. `steps` makes it a stepped picker over named stops (value = index; the names show under the track and can be tapped). `compact` uses a smaller grey readout (settings panels). `magnets` (see useMagnet) pull the thumb onto marks while dragging: ticks and zone bands on the track, the mark's label in a bubble over the thumb, a spring as it settles, a tick on touch, "Snapped to …" announced. Hold Alt (Option) or put a second finger down to drag freely; PageUp / PageDown and Ctrl/⌘ + arrows jump between marks, arrows still step. The value stays a plain number (forms submit it as usual). `valueText` names a value for screen readers.
 
 - File: https://lantos1618.github.io/oneshot-ui/files/slider.tsx
 - Exports: Slider, RangeSlider
-- Embeds: AnimatedNumber, FormFieldContext
+- Embeds: AnimatedNumber, FormFieldContext, MagnetBubble, MagnetMarks
 - npm: motion, react
 
 ### Switch (`switch`, ~5.1k tokens)
@@ -443,7 +443,7 @@ Toggle. The knob springs across and stretches (squash replays on every toggle). 
 - Embeds: FormFieldContext
 - npm: motion, react
 
-### Tag input (`tag-input`, ~8.2k tokens)
+### Tag input (`tag-input`, ~8.3k tokens)
 
 Type and press Enter (or comma) to add; Backspace on empty removes the last tag. Duplicates wiggle. IME-safe. Form-native: `name` submits each tag as its own field (name=a&name=b, so tags may contain commas; read them with formData.getAll), `required` (at least one tag), `disabled`, `readOnly` (chips only), `invalid`, `onBlur`, `form`, and `ref` on the text input. A tag still being typed is added on blur.
 
@@ -452,7 +452,7 @@ Type and press Enter (or comma) to add; Backspace on empty removes the last tag.
 - Embeds: FormFieldContext
 - npm: motion, react
 
-### Textarea (`textarea`, ~7.1k tokens)
+### Textarea (`textarea`, ~7.2k tokens)
 
 Auto-growing textarea; the height animates as lines are added or removed. With `maxLength` it shows "N left" and a ring that fills toward the limit, turning amber under 20 and red under 5, and pops at 0.
 
@@ -740,7 +740,7 @@ Runs an async action: the button's width tweens down to a spinner square, then o
 - Embeds: Button, CheckMark, Slot, Spinner
 - npm: motion, react
 
-### Banner (`banner`, ~9.9k tokens)
+### Banner (`banner`, ~10.1k tokens)
 
 Dismissible banner. Collapses its height smoothly when closed; controllable (`open`/`onOpenChange`) so it can be shown again.
 
@@ -775,7 +775,7 @@ Centred icon, title, hint and action. The icon bobs gently (off for reduced moti
 - Embeds: Icon
 - npm: motion, react
 
-### Hold to confirm (`hold-to-confirm`, ~9.5k tokens)
+### Hold to confirm (`hold-to-confirm`, ~9.7k tokens)
 
 Press and hold (pointer, touch, Space or Enter) to confirm a destructive action. The fill sweeps across and the label inverts exactly where the fill has reached; releasing early springs it back. When it completes the button pops, shows `doneLabel`, and resets after `resetAfter` ms. A status line under it reads Keep holding… / Cancelled / done (`status={false}` hides it). `duration` is at least 500 ms. It guards against slips, not against a hostile page: serve pages that use it with `frame-ancestors 'none'` (or 'self') so another site can't frame it and coach a user into holding.
 
@@ -793,13 +793,13 @@ Heart that bursts on like, with a rolling count. Controlled (`liked`) or uncontr
 - Embeds: AnimatedNumber, Button, Icon, Slot, Spinner
 - npm: motion, react
 
-### Offline indicator (`offline-indicator`, ~6.7k tokens)
+### Offline indicator (`offline-indicator`, ~8.2k tokens)
 
-Connection bar for the top of a view. When `online` turns false it slides down, explains that edits are kept locally and counts down to the next automatic retry (calling `onRetry`), with a "Retry now" link. Back online, it turns green with `backMessage` and hides itself after a moment.
+Connection bar for the top of a view. When `online` turns false it slides down, explains that edits are kept locally and counts down to the next automatic retry (calling `onRetry`), with a "Retry now" link; at each retry a small spinner reads "Retrying…" for a second, in place. Back online, the same bar cross-fades to green with `backMessage` and slides away after a moment. One persistent bar: both states share one grid cell, so nothing stacks, jumps or reflows (the countdown has a fixed width), and only appearing/disappearing moves it (a transform, none under reduced motion). Screen readers hear the state changes only, never the countdown. `paused` stops the countdown and automatic retries (e.g. while the view is off screen) without pretending to be online.
 
 - File: https://lantos1618.github.io/oneshot-ui/files/offline-indicator.tsx
 - Exports: OfflineIndicator
-- Embeds: Icon
+- Embeds: Icon, Spinner
 - npm: motion, react
 
 ### Progress (`progress`, ~3.8k tokens)
@@ -848,7 +848,7 @@ Any list whose items animate in, out and into new positions.
 - Exports: AnimatedList
 - npm: motion, react
 
-### Data grid (`data-grid`, ~67.6k tokens)
+### Data grid (`data-grid`, ~67.8k tokens)
 
 Data grid, generic over the row type, from a few rows to 100k (rows are virtualised above 100: only the ones in view are in the DOM). Filter with Bricks (chips joined by AND/OR), a Text query (`status is active and mrr > 500`, with highlighting and parse errors) or Scratch-style Blocks with nested groups (drag ⠿) — all three edit one filter. Search every cell ripgrep-style (regex, smart case, whole word, literal; `-i -w -F` flags work too) with highlighted hits. Group by a column with collapsible groups, counts and totals. Click headers to sort, drag their edge to resize, drag a header (or Ctrl+Shift+← →) to reorder; the Columns menu hides, pins (left/right) and reorders. Shift-click checkboxes for ranges, then Export or Delete (with Undo). Double-click a cell to edit; Enter saves, Escape cancels. Keyboard: one Tab stop in the cells, arrows, Home/End, Ctrl+Home/End, PageUp/PageDown, Enter/F2 edits, Space selects. `server` hands sorting, filtering, search and paging to your API (`rowCount`, `page`/`pageSize` or `onLoadMore`, `loading`, `error`); `selection` is controlled with "select all across pages" semantics (see GridSelection).
 
@@ -931,12 +931,13 @@ Reorderable list. Drag the ⠿ handle (only the handle starts a drag, so text st
 - Embeds: Icon
 - npm: motion, react
 
-### Split pane (`split-pane`, ~8.4k tokens)
+### Split pane (`split-pane`, ~15.0k tokens)
 
-Two resizable panes, side by side or stacked (nest one inside another for IDE layouts). Drag the divider, or focus it and use the arrow keys (Shift for big steps); Enter or double-click resets with a spring. Releasing the first pane below `min` snaps it closed; drag the divider back out to reopen it. Side-by-side panes stack (first on top) while the pane is narrower than `stackBelow` px (640 by default; 0 never stacks).
+Two resizable panes, side by side or stacked (nest one inside another for IDE layouts). Drag the divider, or focus it and use the arrow keys (Shift for big steps); Enter or double-click resets with a spring. Releasing the first pane below `min` snaps it closed; drag the divider back out to reopen it. Side-by-side panes stack (first on top) while the pane is narrower than `stackBelow` px (640 by default; 0 never stacks). `magnets` (first-pane sizes in %, see useMagnet; `true` = thirds, half and the collapse point) pull the divider while dragging, with guides and the mark's name by the divider; PageUp / PageDown and Ctrl/⌘ + arrows jump between them, Alt (Option) drags freely.
 
 - File: https://lantos1618.github.io/oneshot-ui/files/split-pane.tsx
 - Exports: SplitPane
+- Embeds: MagnetBubble
 - npm: motion, react
 
 ### Timeline (`timeline`, ~3.1k tokens)
@@ -948,9 +949,9 @@ Activity feed grouped by day. Prepend items (with new ids) and they slide in whi
 - Embeds: Icon
 - npm: motion, react
 
-### Tree view (`tree-view`, ~17.4k tokens)
+### Tree view (`tree-view`, ~18.9k tokens)
 
-File tree with roving focus: ↑ / ↓ move, → opens or steps into a folder, ← closes or jumps to the parent, Home / End jump, Enter opens (folders toggle, files call `onOpen`). F2 renames any row (file or folder) in place; double-click renames a file. Folders show their item count, files their size; icons are coloured by extension. `compact` gives denser rows without the counts (for side panels such as an IDE explorer). Trees of more than 300 nodes (or `virtualize`) render only the visible rows of the flattened open nodes inside a `height` px scroller, with aria-level / aria-setsize / aria-posinset on each row, so 10k-node trees stay instant.
+File tree with roving focus: ↑ / ↓ move, → opens or steps into a folder, ← closes or jumps to the parent, Home / End jump, Enter opens (folders toggle, files call `onOpen`). F2 renames any row (file or folder) in place; double-click renames a file. Folders show their item count, files their size; icons are coloured by extension. `compact` gives denser rows without the counts (for side panels such as an IDE explorer). Trees of more than 300 nodes (or `virtualize`) render only the visible rows of the flattened open nodes inside a `height` px scroller, with aria-level / aria-setsize / aria-posinset on each row, so 10k-node trees stay instant. `lines` draws thread lines (Reddit / VS Code style): a vertical guide per level from each open folder down through its children, with an elbow into each child row. They are drawn per row, so they follow the open/close animation and virtualisation; the selected row's branch is highlighted, and so is a line under the pointer. Clicking a line collapses that folder (and selects it); keyboard users use ← instead, so the lines are not in the Tab order. `'hover'` shows them only while the pointer or focus is in the tree (always on touch screens). Turning them on or off never moves a row: the indent is the same either way.
 
 - File: https://lantos1618.github.io/oneshot-ui/files/tree-view.tsx
 - Exports: TreeView
@@ -1103,22 +1104,22 @@ Terminal: commands type out character by character, output streams in, then a pr
 
 ## Media
 
-### Audio player (`audio-player`, ~16.6k tokens)
+### Audio player (`audio-player`, ~23.9k tokens)
 
 Audio player: cover, title, back / forward 10 s, speed cycle and a waveform you click or drag to seek (hovering previews the jump; on touch, tap or swipe sideways along it, while a vertical swipe still scrolls the page). The waveform is a slider: ← / → seek 2 s, Home / End, Space plays. Pass `track` (createAudioTrack) to share playback with other players, or just `src`.
 
 - File: https://lantos1618.github.io/oneshot-ui/files/audio-player.tsx
 - Exports: AudioPlayer, useAudioTrack, createAudioTrack, useSeekSlider
-- Embeds: Button, Icon, IconButton, Slot, Spinner, Waveform
+- Embeds: Button, Icon, IconButton, MagnetMarks, Slot, Spinner, Waveform
 - npm: motion, react
 
-### Avatar cropper (`avatar-cropper`, ~12.0k tokens)
+### Avatar cropper (`avatar-cropper`, ~21.9k tokens)
 
 Avatar cropper: the photo sits under a circular mask; drag (or arrow keys) to reposition, clamped so the circle stays covered; zoom with the slider, the wheel, a two-finger pinch or + / −. "Choose photo" loads a local file and 48 / 32 / 22 px previews update live. `onChange` receives the 256 px circle crop as a PNG data URL once the crop settles (not on every pointer move). Chosen files must be images of at most `maxBytes` (15 MB) and `maxPixels` (40 megapixels, checked from the header before anything is drawn); they load as object URLs, revoked when replaced or on unmount. A rejected file shows why (and calls `onError`).
 
 - File: https://lantos1618.github.io/oneshot-ui/files/avatar-cropper.tsx
 - Exports: AvatarCropper
-- Embeds: FormFieldContext, Slider
+- Embeds: FormFieldContext, MagnetBubble, MagnetMarks, Slider
 - npm: motion, react
 
 ### Carousel (`carousel`, ~7.6k tokens)
@@ -1166,7 +1167,7 @@ Article / video card: image with a tag and duration badge, date line, title, des
 - Embeds: Avatar, Badge, Button, Icon, IconButton, Slot, Spinner
 - npm: motion, react
 
-### Mini audio player (`mini-audio-player`, ~9.6k tokens)
+### Mini audio player (`mini-audio-player`, ~15.9k tokens)
 
 Slim pill player: play, title, a thin draggable progress bar (← / → when focused; a 32px touch band on phones) and the time. Share `track` to sync with a full player.
 
@@ -1184,16 +1185,16 @@ Image that blurs up: a tiny placeholder shows blurred, then the full image cross
 - Embeds: Button, Icon, Slot, Spinner
 - npm: motion, react
 
-### Video player (`video-player`, ~21.4k tokens)
+### Video player (`video-player`, ~32.2k tokens)
 
 Video player with custom controls: big play button, title that fades while playing, seek bar with buffer, hover time and drag, back 5 s, mute + volume, time, speed cycle and fullscreen. Controls hide when idle. Keys (when the player itself is focused): Space / K play, ← / → seek 2 s, M mute, F fullscreen. Its controls keep their own keys (the seek bar: ← / → and Home / End), so nothing fires twice. Touch: tap shows or hides the controls (tap while paused plays), double-tap the left or right half to seek ∓5 s, and the seek bar and buttons grow to finger size. Clicking the picture toggles playback. While `preparing` (no `src` yet) the poster shows with Play enabled: pressing it shows "Starting…" and playback begins as soon as the source arrives (press again to cancel).
 
 - File: https://lantos1618.github.io/oneshot-ui/files/video-player.tsx
 - Exports: VideoPlayer
-- Embeds: Badge, Button, FormFieldContext, Icon, IconButton, Slider, Slot, Spinner
+- Embeds: Badge, Button, FormFieldContext, Icon, IconButton, MagnetBubble, MagnetMarks, Slider, Slot, Spinner
 - npm: motion, react
 
-### Voice note (`voice-note`, ~10.4k tokens)
+### Voice note (`voice-note`, ~16.7k tokens)
 
 Chat-style voice note bubble: play, a waveform you tap or drag to seek, elapsed / total time and a speed chip.
 
@@ -1297,12 +1298,13 @@ GitHub-style contribution grid in 4 levels with a Less → More legend. `values`
 - Embeds: Heatmap
 - npm: motion, react
 
-### Chart (`chart`, ~17.1k tokens)
+### Chart (`chart`, ~25.6k tokens)
 
 The cartesian chart. Mix series types freely: line <Chart data x="month" series={[{ key: 'revenue' }]} curve="monotone" /> stacked area series={[{ key: 'a', type: 'area' }, { key: 'b', type: 'area' }]} stacked grouped / stacked bars series={[{ key: 'a', type: 'bar' }, { key: 'b', type: 'bar' }]} (stacked) combo, two axes series={[{ key: 'orders', type: 'bar' }, { key: 'rate', axis: 'right', points: true }]} forecast / confidence band={{ lower: 'lo', upper: 'hi' }} plus a dashed series; nulls leave gaps histogram bars with gap={0} (1px separators) waterfall { type: 'float', from: 'start', key: 'end', connectors: true, labelOf, colorOf } candlestick { type: 'float', from: 'open', key: 'close', whisker: { low: 'low', high: 'high' }, axis: 'right' } error bars { type: 'float', from: 'floor', key: 'mean', whisker: { low: 'lo', high: 'hi', caps: true } } Hover, tap or drag a finger sideways for a crosshair and tooltip (`tooltip` replaces its body); tap outside to dismiss. Keyboard: the chart is one Tab stop; arrows, Home and End move the same crosshair and tooltip (useChartFocus). Draws in when scrolled into view.
 
 - File: https://lantos1618.github.io/oneshot-ui/files/chart.tsx
 - Exports: Chart, Legend, useChartFocus, niceTicks, compact, chartDownsample, PALETTE, CHART_NEUTRAL
+- Embeds: TagGlyph, TagTooltip
 - npm: motion, react
 
 ### Density histogram (`density-histogram`, ~12.7k tokens)
@@ -1411,16 +1413,16 @@ Squarified treemap: area ∝ value. Tiles grow out of their centres when scrolle
 
 ## Diagrams
 
-### Data flow (`data-flow`, ~19.6k tokens)
+### Data flow (`data-flow`, ~29.6k tokens)
 
 Streaming pipeline: particles leave each source at its event rate, pass through the processing engine (its stage label cycles) and fan out to destinations by share. Hover, tap or focus a node to trace its path. Speed slider, Pause, and a live stat strip (throughput, processed, in flight, p95 latency). Below 560px the pipeline turns vertical (sources above the engine, destinations below) so labels stay full size on phones. Particles are drawn on one canvas from per-path lookup tables (no DOM reads or writes per frame), capped at 120 in flight, and everything pauses while the diagram is off screen.
 
 - File: https://lantos1618.github.io/oneshot-ui/files/data-flow.tsx
 - Exports: DataFlow
-- Embeds: AnimatedNumber, Button, FormFieldContext, Slider, Slot, Spinner
+- Embeds: AnimatedNumber, Button, FormFieldContext, MagnetBubble, MagnetMarks, Slider, Slot, Spinner
 - npm: motion, react
 
-### Gantt (`gantt`, ~24.1k tokens)
+### Gantt (`gantt`, ~30.3k tokens)
 
 Project plan. Phases collapse; drag a bar to move it, drag its right edge (or Shift + arrow keys) to change its duration, snapping to days. Dependants reschedule, and Links, Critical path, Baseline and Workload overlays toggle. Tasks with duration 0 are milestones; `milestone` (default: the last one) anchors the critical path. Thin connectors drop from each phase bar to its tasks' starts (brighter for the task under the pointer). On touch: tap a bar for its details and links, long-press it to move it, or drag the grip on its right edge to resize, so swipes over the chart still scroll. Narrow screens scroll the timeline inside the card, task names pinned.
 
@@ -1483,13 +1485,13 @@ SVG statechart: composite states, states, pseudo states (initial, final, history
 - Embeds: Icon, ScrollEdges
 - npm: motion, react
 
-### Trace waterfall (`trace-waterfall`, ~18.2k tokens)
+### Trace waterfall (`trace-waterfall`, ~24.6k tokens)
 
-Nested spans on one streaming timeline (agent runs, API requests, jobs). Plays when scrolled into view: bars grow with a cursor, the stat strip rolls (duration, cost, tokens, calls, errors) and a Live badge settles to Complete. Groups collapse. `failure` lets Simulate failure fail a span part-way and reveal its retry. Spawn connectors run from each parent bar, at the moment a child starts, down to that child's bar; hovering or tapping a span highlights its chain back to the root. Hover or tap a span for its numbers. On phones the timeline scrolls sideways with the span names pinned.
+Nested spans on one streaming timeline (agent runs, API requests, jobs). Plays when scrolled into view: bars grow with a cursor, the stat strip rolls (duration, cost, tokens, calls, errors) and a Live badge settles to Complete. Groups collapse. `failure` lets Simulate failure fail a span part-way and reveal its retry. Spawn connectors run from each parent bar, at the moment a child starts, down to that child's bar; hovering or tapping a span highlights its chain back to the root. Hover or tap a span for its numbers. On phones the timeline scrolls sideways with the span names pinned. `annotations` (deploys, approvals, retries; `at` in ms from the trace start) draw as dashed rules over the time grid with flags in a row of their own (reserved up front, so rows never move); flags that would overlap drop out to a dot on their rule, and `annotationStyle="rug"` shows icons instead, folding crowded ones into "+N". Hover, tap or focus a flag for its tooltip; the flag row is one Tab stop (←/→, Home/End, Escape).
 
 - File: https://lantos1618.github.io/oneshot-ui/files/trace-waterfall.tsx
 - Exports: TraceWaterfall
-- Embeds: AnimatedNumber, Badge, Button, Collapse, Icon, PointerTooltip, ScrollEdges, Slot, Spinner
+- Embeds: AnimatedNumber, Badge, Button, Collapse, Icon, PointerTooltip, ScrollEdges, Slot, Spinner, TagGlyph
 - npm: motion, react, react-dom
 
 
@@ -1516,13 +1518,13 @@ World choropleth by country with a metric switch. Five-step ramp from the accent
 
 ## AI
 
-### Agent composer (`agent-composer`, ~68.9k tokens)
+### Agent composer (`agent-composer`, ~78.7k tokens)
 
 Agent composer that doubles as a control panel. A workspace beside it (`items`, `doc`) adds context (click an item, or select text and "Add to chat"; on phones it folds into a toggle and the bar shows icons only, its panels spanning the composer). Attach with +, drag and drop or paste (file chips with upload progress). Pick a permission mode, toggle connectors, choose the model with per-model speed/effort steps, and open advanced settings.
 
 - File: https://lantos1618.github.io/oneshot-ui/files/agent-composer.tsx
 - Exports: AgentComposer
-- Embeds: ApprovalCard, AttachmentChip, Badge, Button, Citation, Collapse, CopyButton, FloatingPanel, FormFieldContext, Icon, IconButton, InlineCode, Kbd, Markdown, MenuItem, MessageActions, MessageParts, PromptInput, Reasoning, ScrollEdges, SendButton, ShimmerText, Slider, Slot, SourceList, Spinner, StreamingText, Switch, ToolCard, TypingDots
+- Embeds: ApprovalCard, AttachmentChip, Badge, Button, Citation, Collapse, CopyButton, FloatingPanel, FormFieldContext, Icon, IconButton, InlineCode, Kbd, MagnetBubble, MagnetMarks, Markdown, MenuItem, MessageActions, MessageParts, PromptInput, Reasoning, ScrollEdges, SendButton, ShimmerText, Slider, Slot, SourceList, Spinner, StreamingText, Switch, ToolCard, TypingDots
 - npm: motion, react
 
 ### Agent plan (`agent-plan`, ~9.9k tokens)
@@ -1534,13 +1536,13 @@ Plan first, then live progress. Pass `steps` with statuses to drive it yourself,
 - Embeds: Button, Icon, Progress, Slot, Spinner, StatusIcon
 - npm: motion, react
 
-### Agent transit map (`agent-transit-map`, ~35.0k tokens)
+### Agent transit map (`agent-transit-map`, ~45.0k tokens)
 
 Live multi-agent "transit map", driven by the same WorkflowEngine as StateMachine. The Indexing loop and the Intake endpoint fire events into a queue (drawn on the map, under Intake); jobs start as slots free up and travel their state graph along the drawn lines, bends included. Agents take one job at a time: the others line up on the incoming line with a counter, and track segments warm up (grey, amber, red) as tokens pile onto them. Orchestrators route with guards, Product forks reviews and joins them, endpoints emit follow-up triggers. Human and Risk stations wait for approval when human-in-the-loop is on: the station gets a countdown ring and an approval card floats beside it, over the map, so nothing on the page moves. Pause, speed and max-jobs controls, fire-event chips, and a live trace table (time, tokens, USD) whose connectors link a follow-up job to the job that triggered it: hover a row, or press its job button, to follow that job on the map. Moving parts are drawn every frame without re-rendering; the panels refresh about 8 times a second. Reduced motion places tokens at their stations without travel. On phones the map keeps a readable size and scrolls sideways inside the card, as does the trace table. Pass `machines` whose stations are the map's (the sample is `AGENT_WORKFLOWS` / `AGENT_WORKFLOW_ORDER` in `@lyndon/ui/examples`); without any, the map is drawn with no traffic.
 
 - File: https://lantos1618.github.io/oneshot-ui/files/agent-transit-map.tsx
 - Exports: AgentTransitMap
-- Embeds: Badge, Button, Chip, FormFieldContext, Icon, IconButton, ScrollEdges, Slider, Slot, Spinner, Switch, WorkflowEngine
+- Embeds: Badge, Button, Chip, FormFieldContext, Icon, IconButton, MagnetBubble, MagnetMarks, ScrollEdges, Slider, Slot, Spinner, Switch, WorkflowEngine
 - npm: motion, react
 
 ### AI canvas (`ai-canvas`, ~27.8k tokens)
@@ -1819,22 +1821,22 @@ Mic button with a live waveform. While listening, interim words appear in grey; 
 
 ## Theming
 
-### Appearance menu (`appearance-menu`, ~27.1k tokens)
+### Appearance menu (`appearance-menu`, ~39.0k tokens)
 
 The appearance panel behind a gear button for your app header (the gear turns while it is open). Controlled with `open`/`onOpenChange` so a command palette entry can open it too.
 
 - File: https://lantos1618.github.io/oneshot-ui/files/appearance-menu.tsx
 - Exports: AppearanceMenu
-- Embeds: ActiveIndicator, AppearancePanel, Badge, Button, FloatingPanel, FormFieldContext, Icon, IconButton, Popover, PopoverClose, PopoverContent, PopoverRoot, PopoverTrigger, SegmentedControl, Slider, Slot, Spinner, ThemePreview
+- Embeds: ActiveIndicator, AppearancePanel, Badge, Button, FloatingPanel, FormFieldContext, Icon, IconButton, MagnetBubble, MagnetMarks, Popover, PopoverClose, PopoverContent, PopoverRoot, PopoverTrigger, SegmentedControl, Slider, Slot, Spinner, ThemePreview
 - npm: motion, react
 
-### Appearance panel (`appearance-panel`, ~21.7k tokens)
+### Appearance panel (`appearance-panel`, ~33.6k tokens)
 
 Everything in the appearance panel, without the popover: mode, theme families with split previews, variant chips (Ayu Mirage / Dark, Tokyo Night / Storm), a Customise grid that creates a Custom theme, corner radius, font, Reset and Copy CSS. Use it inside your own panel, or use AppearanceMenu. Font previews load from Google Fonts only when the provider has `fonts` on; otherwise each font shows in the system fallback.
 
 - File: https://lantos1618.github.io/oneshot-ui/files/appearance-panel.tsx
 - Exports: AppearancePanel
-- Embeds: ActiveIndicator, Badge, Button, FormFieldContext, Icon, IconButton, SegmentedControl, Slider, Slot, Spinner, ThemePreview
+- Embeds: ActiveIndicator, Badge, Button, FormFieldContext, Icon, IconButton, MagnetBubble, MagnetMarks, SegmentedControl, Slider, Slot, Spinner, ThemePreview
 - npm: motion, react
 
 ### Theme preview (`theme-preview`, ~1.1k tokens)
@@ -1856,7 +1858,7 @@ One-click light/dark switch for the header. The new theme sweeps out from the bu
 
 ## Blocks (copy-in page sections)
 
-### Checkout (`checkout`, ~37.8k tokens)
+### Checkout (`checkout`, ~37.9k tokens)
 
 Checkout: Cart → Details → Payment with slide transitions, quantity steppers and an order summary whose subtotal, promo, VAT and total all roll. Promo codes come from `promoCodes` (wrong code shakes), the email is validated, the card number is grouped as you type with a VISA / Mastercard / Amex badge, expiry is masked MM / YY, and paying shows Processing then a success screen with confetti.
 
@@ -1900,4 +1902,74 @@ Profile card: gradient cover, avatar overlapping it, Message and Follow / Follow
 - Exports: ProfileCard
 - Embeds: ActiveIndicator, AnimatedNumber, Avatar, Badge, Button, Icon, IconButton, ScrollEdges, Slot, Spinner, Tabs, TabsContent, TabsList, TabsRoot, TabsTrigger
 - npm: motion, react
+
+
+## Other
+
+### Chart with journal (`chart-with-journal`, ~23.1k tokens)
+
+A chart and its journal side by side (pattern H), linked both ways: hovering, focusing or tapping a tag on either side lights it on the other, and the list scrolls the lit row into view without moving focus. Below 640 px of width the list stacks under the chart. The chart is a render prop, so any annotated chart works: `<ChartWithJournal tags={tags} chart={link => <Chart data={day} x="t" series={…} annotations={{ ...link, style: 'dots' }} />} />`.
+
+- File: https://lantos1618.github.io/oneshot-ui/files/chart-with-journal.tsx
+- Exports: ChartWithJournal
+- Embeds: Button, Icon, IconButton, Slot, Spinner, TagGlyph, TagJournal, VirtualList
+- npm: motion, react, react-dom
+
+### Magnet bubble (`magnet-bubble`, ~653 tokens)
+
+The label bubble above a thumb (the shared tooltip look). Put it inside the thumb; it pops in while `show`.
+
+- File: https://lantos1618.github.io/oneshot-ui/files/magnet-bubble.tsx
+- Exports: MagnetBubble
+- npm: motion, react
+
+### Magnet marks (`magnet-marks`, ~1.7k tokens)
+
+The track decorations: a tick for each point (and each zone centre), a tinted band for each zone. Put it inside the track (it fills it, absolutely positioned, aria-hidden). `inset` is the thumb's radius in px when the thumb's centre stops short of the track's ends (native range inputs), so ticks line up with it. Positions are logical (inset-inline-start), so they mirror with the track in RTL and stay put inside an LTR island.
+
+- File: https://lantos1618.github.io/oneshot-ui/files/magnet-marks.tsx
+- Exports: MagnetMarks
+
+### State ribbon (`state-ribbon`, ~16.5k tokens)
+
+What you were doing all day in one strip (pattern F: sleep stages, Toggl and RescueTime day bars): contiguous states coloured by kind, optional pins above for point tags (merged into counts when crowded) and bars below for spans. Slivers too thin to see get a minimum width, runs of them merge into one "mixed" segment, and on touch every thin mark has a finger-sized hit area. Hover, focus or tap for state and duration. Keyboard: one Tab stop, ←/→ along a row, ↑/↓ between pins, states and bars. `size="compact"` suits phones and widgets.
+
+- File: https://lantos1618.github.io/oneshot-ui/files/state-ribbon.tsx
+- Exports: StateRibbon
+- Embeds: TagGlyph, TagTooltip
+- npm: motion, react
+
+### Swimlanes (`swimlanes`, ~14.9k tokens)
+
+One lane per kind of tag on a shared time axis (pattern E: Dynatrace annotation tracks, LifeLines): dots for point tags, rounded pills for spans, an icon and label at the start of each lane, an optional chart on top (`top`) aligned to the same `start`–`end`. Dots closer than `mergePx` merge into a count chip; empty lanes say "None" (or hide with `hideEmpty`); more than `maxLanes` lanes scroll. Hover, focus or tap a mark for its tooltip. Keyboard: the lanes are one Tab stop, ←/→ move along a lane, ↑/↓ between lanes, Enter selects, Escape clears. Link it to other views with `activeId` / `onActiveChange`. The plot runs left to right in every locale; labels and tooltips follow the locale.
+
+- File: https://lantos1618.github.io/oneshot-ui/files/swimlanes.tsx
+- Exports: Swimlanes
+- Embeds: TagGlyph, TagTooltip
+- npm: motion, react
+
+### Tag glyph (`tag-glyph`, ~1.1k tokens)
+
+A tag's icon in a coloured ring; `active` grows it with a halo, `more` adds a "+N" badge on its end side (timeTagBadge wide). Decorative unless given a role.
+
+- File: https://lantos1618.github.io/oneshot-ui/files/tag-glyph.tsx
+- Exports: TagGlyph
+- npm: react
+
+### Tag journal (`tag-journal`, ~22.5k tokens)
+
+A time-ordered list of tags (pattern H: Oura and WHOOP journals): time, glyph, label and detail, optionally grouped by hour, virtualised so long days stay fast. Hovering or focusing a row lights that tag (`activeId` / `onActiveChange`), and when the active tag changes elsewhere (a linked chart) the list scrolls it into view without moving focus. `onEdit` / `onDelete` add labelled icon buttons. Keyboard: the list is one Tab stop (then the row's buttons), ↑/↓ move between rows, Home/End jump, Enter selects, Escape clears.
+
+- File: https://lantos1618.github.io/oneshot-ui/files/tag-journal.tsx
+- Exports: TagJournal
+- Embeds: Button, Icon, IconButton, Slot, Spinner, TagGlyph, VirtualList
+- npm: motion, react, react-dom
+
+### Tag tooltip (`tag-tooltip`, ~2.7k tokens)
+
+Tooltip body for a tag: icon and label, the time (or from–to for a span) and the detail. Put it in any tooltip surface.
+
+- File: https://lantos1618.github.io/oneshot-ui/files/tag-tooltip.tsx
+- Exports: TagTooltip
+- npm: react
 

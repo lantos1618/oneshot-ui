@@ -659,6 +659,7 @@ export function DataGrid<T extends object>(props: DataGridProps<T>) {
   {
     // on a phone only the first start pin stays sticky (as in 0.2): more would leave no room for the rest of the row
     const first = cols.filter(c => pinOf(c.key) === 'start').slice(0, narrow ? 1 : undefined), last = narrow ? [] : cols.filter(c => pinOf(c.key) === 'end')
+    // offsets are the cumulative colgroup widths, so the table must lay out at exactly those widths (see the table's style)
     let x = 40; first.forEach((c, i) => { stick.set(c.key, { side: 'start', at: x, edge: i === first.length - 1 }); x += colW(c, cols.indexOf(c)) })
     let r = 0; [...last].reverse().forEach((c, i) => { stick.set(c.key, { side: 'end', at: r, edge: i === last.length - 1 }); r += colW(c, cols.indexOf(c)) })
   }
@@ -1053,6 +1054,8 @@ export function DataGrid<T extends object>(props: DataGridProps<T>) {
   const count = server ? tm('rowCount', { count: total }) : tm('rowsOf', { shown: fmtN(visible.length), total: data.length })
   const startW = cols.reduce((s, c, i) => s + (stick.get(c.key)?.side === 'start' ? colW(c, i) : 0), 40)
   const endW = cols.reduce((s, c, i) => s + (stick.get(c.key)?.side === 'end' ? colW(c, i) : 0), 0)
+  /** the checkbox column plus every visible column, exactly as the colgroup declares them */
+  const tableW = cols.reduce((s, c, i) => s + colW(c, i), 40)
   const visibleCols = cols.length
 
   /** "Jump to rows": focus the grid's current cell (the one Tab would reach) */
@@ -1123,8 +1126,12 @@ export function DataGrid<T extends object>(props: DataGridProps<T>) {
       <div className="relative min-w-0">
       <div ref={scroller} aria-busy={loading || undefined} className={cn('relative overflow-auto overscroll-x-contain border border-[var(--line)] bg-[var(--card)]', paged ? 'rounded-none' : 'rounded-b-[var(--r-md)]')}
         style={{ maxHeight, scrollPaddingTop: rowH, scrollPaddingInlineStart: startW, scrollPaddingInlineEnd: endW }}>
+        {/* The table's width is the sum of its columns (at least the scroller's): with `width: auto` a browser ignores
+            `table-layout: fixed` and sizes columns from their content, so cells drift from the widths the sticky offsets
+            are computed from (a gap, or an overlap, between pinned columns). */}
         <table ref={tableRef} role="grid" aria-label={ariaLabelProp ?? tm('rows')} aria-rowcount={rowCountAria} aria-colcount={nCols} aria-multiselectable="true"
-          className={cn('min-w-full table-fixed border-separate border-spacing-0 text-[13px] transition-opacity', loading && dispCount > 0 && !infinite && 'opacity-60')}>
+          style={{ width: tableW, minWidth: '100%' }}
+          className={cn('table-fixed border-separate border-spacing-0 text-[13px] transition-opacity', loading && dispCount > 0 && !infinite && 'opacity-60')}>
           {/* on a phone the first pinned column is capped so the rest of the row has room to scroll past it */}
           <colgroup><col style={{ width: 40 }} />{cols.map((c, i) => <col key={c.key} style={{ width: colW(c, i) }} />)}</colgroup>
           <thead>

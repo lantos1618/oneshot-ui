@@ -4,7 +4,7 @@
 > CSS variables (seven palette families, light and dark). Forms, overlays, navigation, data grid, charts, diagrams, maps,
 > media, AI chat and agent UIs. Every component is also a self-contained .tsx drop-in file.
 
-Version 0.4.0. Source: https://github.com/lantos1618/oneshot-ui. Docs: https://lantos1618.github.io/oneshot-ui/. Licence: MIT with a revenue threshold (free up to USD 200k ARR).
+Version 0.5.0. Source: https://github.com/lantos1618/oneshot-ui. Docs: https://lantos1618.github.io/oneshot-ui/. Licence: MIT with a revenue threshold (free up to USD 200k ARR).
 
 ## Use it
 
@@ -22,8 +22,8 @@ and motion. Attach the ones you need plus ui-provider.tsx; they share one UIProv
 - CLI (offline, from the installed package): `npx @lyndon/ui add data-grid dialog --dir src/components/ui`, `npx @lyndon/ui list`, `npx @lyndon/ui info data-grid`
 - shadcn CLI: `npx shadcn add https://lantos1618.github.io/oneshot-ui/r/data-grid.json` (pulls in ui-provider)
 - Index with sizes, exports and embedded components: https://lantos1618.github.io/oneshot-ui/index.json
-- The same files from npm: https://unpkg.com/@lyndon/ui@0.4.0/dist-registry/files/<name>.tsx
-- Whole library in one file (dist-single/ui-all.tsx, ~548.9k tokens): only for tools with a very large context; prefer the drop-ins
+- The same files from npm: https://unpkg.com/@lyndon/ui@0.5.0/dist-registry/files/<name>.tsx
+- Whole library in one file (dist-single/ui-all.tsx, ~588.9k tokens): only for tools with a very large context; prefer the drop-ins
 
 ## Foundation
 
@@ -57,9 +57,9 @@ and motion. Attach the ones you need plus ui-provider.tsx; they share one UIProv
 
 - [calendar](https://lantos1618.github.io/oneshot-ui/files/calendar.tsx): Month grid (an ARIA grid; day cells grow to 40×40 on touch). (~16.2k tokens)
 - [checkbox](https://lantos1618.github.io/oneshot-ui/files/checkbox.tsx): Checkbox with a drawn checkmark; `children` is its label. (~4.3k tokens)
-- [color-picker](https://lantos1618.github.io/oneshot-ui/files/color-picker.tsx): Swatches, a hue slider and a hex field. (~9.6k tokens)
+- [color-picker](https://lantos1618.github.io/oneshot-ui/files/color-picker.tsx): Swatches, a hue slider and a hex field. (~19.8k tokens)
 - [combobox](https://lantos1618.github.io/oneshot-ui/files/combobox.tsx): Type to filter (the match is bolded), arrows to move, Enter to choose. (~27.2k tokens)
-- [currency-input](https://lantos1618.github.io/oneshot-ui/files/currency-input.tsx): Amount field: thousands separators appear while you type, using the currency's locale (1’234.50 CHF, 1.234,50 EUR…), at most two decimals. (~9.0k tokens)
+- [currency-input](https://lantos1618.github.io/oneshot-ui/files/currency-input.tsx): Amount field: thousands separators appear while you type, using the currency's locale (1’234.50 CHF, 1.234,50 EUR…), at most two decimals. (~9.1k tokens)
 - [date-field](https://lantos1618.github.io/oneshot-ui/files/date-field.tsx): Typed date entry: day, month and year segments in the locale's order, separators and digits (en-GB dd/mm/yyyy, en-US mm/dd/yyyy, de-DE tt.mm.jjjj, ja-JP yyyy/mm/dd). (~15.5k tokens)
 - [date-picker](https://lantos1618.github.io/oneshot-ui/files/date-picker.tsx): Date field: the calendar pops from the field (keyboard ready), the picked day pops, Today and Clear sit under the grid. (~28.4k tokens)
 - [date-range-picker](https://lantos1618.github.io/oneshot-ui/files/date-range-picker.tsx): Range picker with presets (the matching preset stays highlighted; presets that fall outside `min`/`max` or start or end on an unavailable day are disabled). (~29.2k tokens)
@@ -71,18 +71,18 @@ and motion. Attach the ones you need plus ui-provider.tsx; they share one UIProv
 - [input](https://lantos1618.github.io/oneshot-ui/files/input.tsx): Text input. (~1.8k tokens)
 - [month-picker](https://lantos1618.github.io/oneshot-ui/files/month-picker.tsx): Month and year picker: a field that opens a grid of months (its title opens a grid of years), in the locale. (~20.2k tokens)
 - [multi-select](https://lantos1618.github.io/oneshot-ui/files/multi-select.tsx): Pick several: ticks draw in the list, chosen items become chips (with their colour dot) in the field. (~29.0k tokens)
-- [number-stepper](https://lantos1618.github.io/oneshot-ui/files/number-stepper.tsx): − value + with a rolling number. (~10.6k tokens)
-- [otp-input](https://lantos1618.github.io/oneshot-ui/files/otp-input.tsx): One-time code: auto-advance, paste fills every box, typing into a filled box replaces and re-pops it. (~9.0k tokens)
-- [password-input](https://lantos1618.github.io/oneshot-ui/files/password-input.tsx): Password with show/hide (the eye pops when it flips). (~11.0k tokens)
-- [phone-input](https://lantos1618.github.io/oneshot-ui/files/phone-input.tsx): Phone number with a country picker (flags and dial codes). (~25.4k tokens)
+- [number-stepper](https://lantos1618.github.io/oneshot-ui/files/number-stepper.tsx): − value + with a rolling number. (~10.7k tokens)
+- [otp-input](https://lantos1618.github.io/oneshot-ui/files/otp-input.tsx): One-time code: auto-advance, paste fills every box, typing into a filled box replaces and re-pops it. (~9.1k tokens)
+- [password-input](https://lantos1618.github.io/oneshot-ui/files/password-input.tsx): Password with show/hide (the eye pops when it flips). (~11.1k tokens)
+- [phone-input](https://lantos1618.github.io/oneshot-ui/files/phone-input.tsx): Phone number with a country picker (flags and dial codes). (~25.5k tokens)
 - [radio-group](https://lantos1618.github.io/oneshot-ui/files/radio-group.tsx): Radio group with arrow-key navigation. (~6.7k tokens)
-- [rating](https://lantos1618.github.io/oneshot-ui/files/rating.tsx): 1–5 stars: every lit star pops again in sequence on each pick. (~9.5k tokens)
+- [rating](https://lantos1618.github.io/oneshot-ui/files/rating.tsx): 1–5 stars: every lit star pops again in sequence on each pick. (~9.6k tokens)
 - [segmented-control](https://lantos1618.github.io/oneshot-ui/files/segmented-control.tsx): Segmented control with a sliding pill: a single choice, so it is a radiogroup (role=radio + aria-checked). (~7.6k tokens)
 - [select](https://lantos1618.github.io/oneshot-ui/files/select.tsx): Custom select: arrows, Enter/Space, type-ahead that cycles through options starting with the typed letter (works closed too), springs open, flips upward near the bottom of the viewport, checkmark on the current option. (~22.8k tokens)
-- [slider](https://lantos1618.github.io/oneshot-ui/files/slider.tsx): Range slider with live value. (~12.3k tokens)
+- [slider](https://lantos1618.github.io/oneshot-ui/files/slider.tsx): Range slider with live value. (~22.0k tokens)
 - [switch](https://lantos1618.github.io/oneshot-ui/files/switch.tsx): Toggle. (~5.1k tokens)
-- [tag-input](https://lantos1618.github.io/oneshot-ui/files/tag-input.tsx): Type and press Enter (or comma) to add; Backspace on empty removes the last tag. (~8.2k tokens)
-- [textarea](https://lantos1618.github.io/oneshot-ui/files/textarea.tsx): Auto-growing textarea; the height animates as lines are added or removed. (~7.1k tokens)
+- [tag-input](https://lantos1618.github.io/oneshot-ui/files/tag-input.tsx): Type and press Enter (or comma) to add; Backspace on empty removes the last tag. (~8.3k tokens)
+- [textarea](https://lantos1618.github.io/oneshot-ui/files/textarea.tsx): Auto-growing textarea; the height animates as lines are added or removed. (~7.2k tokens)
 - [time-field](https://lantos1618.github.io/oneshot-ui/files/time-field.tsx): Typed time entry: hour and minute (and second) segments, with an am/pm segment on a 12-hour clock (from the locale or `hourCycle`); type "930" or "9" then ":" and "30", ↑/↓ step a segment, "a"/"p" sets am/pm, pasting "14:30" or "2:30 PM" fills it. (~21.1k tokens)
 - [time-picker](https://lantos1618.github.io/oneshot-ui/files/time-picker.tsx): Time picker: a TimeField (type the time, or step it with ↑/↓) plus a clock button listing times every `step` minutes (15) between `from` and `to` (07:00 to 21:00), opening scrolled to the current one. (~21.2k tokens)
 - [time-zone-picker](https://lantos1618.github.io/oneshot-ui/files/time-zone-picker.tsx): Searchable time-zone picker: a Combobox of `Intl.supportedValuesOf('timeZone')` (about 420 zones, virtualised), labelled with their current offset, "(GMT+01:00) Europe/Zurich", and sorted by it; type a city or "GMT+05". (~30.5k tokens)
@@ -122,13 +122,13 @@ and motion. Attach the ones you need plus ui-provider.tsx; they share one UIProv
 
 - [alert](https://lantos1618.github.io/oneshot-ui/files/alert.tsx): Tinted message: icon + bold title + text. (~2.0k tokens)
 - [async-button](https://lantos1618.github.io/oneshot-ui/files/async-button.tsx): Runs an async action: the button's width tweens down to a spinner square, then out to a green “Saved” with a drawn check, then back. (~6.2k tokens)
-- [banner](https://lantos1618.github.io/oneshot-ui/files/banner.tsx): Dismissible banner. (~9.9k tokens)
+- [banner](https://lantos1618.github.io/oneshot-ui/files/banner.tsx): Dismissible banner. (~10.1k tokens)
 - [collapse](https://lantos1618.github.io/oneshot-ui/files/collapse.tsx): Animated height. (~1.0k tokens)
 - [copy-button](https://lantos1618.github.io/oneshot-ui/files/copy-button.tsx): Copies `text`. (~6.9k tokens)
 - [empty-state](https://lantos1618.github.io/oneshot-ui/files/empty-state.tsx): Centred icon, title, hint and action. (~1.9k tokens)
-- [hold-to-confirm](https://lantos1618.github.io/oneshot-ui/files/hold-to-confirm.tsx): Press and hold (pointer, touch, Space or Enter) to confirm a destructive action. (~9.5k tokens)
+- [hold-to-confirm](https://lantos1618.github.io/oneshot-ui/files/hold-to-confirm.tsx): Press and hold (pointer, touch, Space or Enter) to confirm a destructive action. (~9.7k tokens)
 - [like-button](https://lantos1618.github.io/oneshot-ui/files/like-button.tsx): Heart that bursts on like, with a rolling count. (~7.3k tokens)
-- [offline-indicator](https://lantos1618.github.io/oneshot-ui/files/offline-indicator.tsx): Connection bar for the top of a view. (~6.7k tokens)
+- [offline-indicator](https://lantos1618.github.io/oneshot-ui/files/offline-indicator.tsx): Connection bar for the top of a view. (~8.2k tokens)
 - [progress](https://lantos1618.github.io/oneshot-ui/files/progress.tsx): Linear progress bar; the fill springs to each new value. (~3.8k tokens)
 - [toast](https://lantos1618.github.io/oneshot-ui/files/toast.tsx): Hosts its own toasts for the tree inside it. (~8.9k tokens)
 - [typing-dots](https://lantos1618.github.io/oneshot-ui/files/typing-dots.tsx): Three bouncing dots: someone (the assistant, a teammate) is typing. (~2.1k tokens)
@@ -137,7 +137,7 @@ and motion. Attach the ones you need plus ui-provider.tsx; they share one UIProv
 
 - [accordion](https://lantos1618.github.io/oneshot-ui/files/accordion.tsx): Accordion: panels grow to their content height and the chevron rotates. (~6.0k tokens)
 - [animated-list](https://lantos1618.github.io/oneshot-ui/files/animated-list.tsx): Any list whose items animate in, out and into new positions. (~2.2k tokens)
-- [data-grid](https://lantos1618.github.io/oneshot-ui/files/data-grid.tsx): Data grid, generic over the row type, from a few rows to 100k (rows are virtualised above 100: only the ones in view are in the DOM). (~67.6k tokens)
+- [data-grid](https://lantos1618.github.io/oneshot-ui/files/data-grid.tsx): Data grid, generic over the row type, from a few rows to 100k (rows are virtualised above 100: only the ones in view are in the DOM). (~67.8k tokens)
 - [data-table](https://lantos1618.github.io/oneshot-ui/files/data-table.tsx): Sortable table; rows slide to their new position when the order changes. (~3.2k tokens)
 - [json-viewer](https://lantos1618.github.io/oneshot-ui/files/json-viewer.tsx): JSON tree with typed colours (strings, numbers, booleans, null). (~14.8k tokens)
 - [shortcut-sheet](https://lantos1618.github.io/oneshot-ui/files/shortcut-sheet.tsx): Keyboard shortcuts in titled groups (General / Navigation / Editing…). (~15.6k tokens)
@@ -149,9 +149,9 @@ and motion. Attach the ones you need plus ui-provider.tsx; they share one UIProv
 
 - [kanban](https://lantos1618.github.io/oneshot-ui/files/kanban.tsx): Board with rich cards. (~30.4k tokens)
 - [sortable-list](https://lantos1618.github.io/oneshot-ui/files/sortable-list.tsx): Reorderable list. (~13.3k tokens)
-- [split-pane](https://lantos1618.github.io/oneshot-ui/files/split-pane.tsx): Two resizable panes, side by side or stacked (nest one inside another for IDE layouts). (~8.4k tokens)
+- [split-pane](https://lantos1618.github.io/oneshot-ui/files/split-pane.tsx): Two resizable panes, side by side or stacked (nest one inside another for IDE layouts). (~15.0k tokens)
 - [timeline](https://lantos1618.github.io/oneshot-ui/files/timeline.tsx): Activity feed grouped by day. (~3.1k tokens)
-- [tree-view](https://lantos1618.github.io/oneshot-ui/files/tree-view.tsx): File tree with roving focus: ↑ / ↓ move, → opens or steps into a folder, ← closes or jumps to the parent, Home / End jump, Enter opens (folders toggle, files call `onOpen`). (~17.4k tokens)
+- [tree-view](https://lantos1618.github.io/oneshot-ui/files/tree-view.tsx): File tree with roving focus: ↑ / ↓ move, → opens or steps into a folder, ← closes or jumps to the parent, Home / End jump, Enter opens (folders toggle, files call `onOpen`). (~18.9k tokens)
 
 ## Editors and content
 
@@ -179,17 +179,17 @@ and motion. Attach the ones you need plus ui-provider.tsx; they share one UIProv
 
 ## Media
 
-- [audio-player](https://lantos1618.github.io/oneshot-ui/files/audio-player.tsx): Audio player: cover, title, back / forward 10 s, speed cycle and a waveform you click or drag to seek (hovering previews the jump; on touch, tap or swipe sideways along it, while a vertical swipe still scrolls the page). (~16.6k tokens)
-- [avatar-cropper](https://lantos1618.github.io/oneshot-ui/files/avatar-cropper.tsx): Avatar cropper: the photo sits under a circular mask; drag (or arrow keys) to reposition, clamped so the circle stays covered; zoom with the slider, the wheel, a two-finger pinch or + / −. (~12.0k tokens)
+- [audio-player](https://lantos1618.github.io/oneshot-ui/files/audio-player.tsx): Audio player: cover, title, back / forward 10 s, speed cycle and a waveform you click or drag to seek (hovering previews the jump; on touch, tap or swipe sideways along it, while a vertical swipe still scrolls the page). (~23.9k tokens)
+- [avatar-cropper](https://lantos1618.github.io/oneshot-ui/files/avatar-cropper.tsx): Avatar cropper: the photo sits under a circular mask; drag (or arrow keys) to reposition, clamped so the circle stays covered; zoom with the slider, the wheel, a two-finger pinch or + / −. (~21.9k tokens)
 - [carousel](https://lantos1618.github.io/oneshot-ui/files/carousel.tsx): Scroll-snap carousel with arrows, dots, swipe and ← / → (all wrap around). (~7.6k tokens)
 - [image-compare](https://lantos1618.github.io/oneshot-ui/files/image-compare.tsx): Before / after comparison: drag anywhere (or arrow keys / Home / End on the handle). (~7.7k tokens)
 - [lightbox](https://lantos1618.github.io/oneshot-ui/files/lightbox.tsx): Full-screen image viewer. (~15.7k tokens)
 - [masonry-gallery](https://lantos1618.github.io/oneshot-ui/files/masonry-gallery.tsx): Pinterest-style masonry: each tile drops into the shortest column; columns follow the width (two on phones). (~21.1k tokens)
 - [media-card](https://lantos1618.github.io/oneshot-ui/files/media-card.tsx): Article / video card: image with a tag and duration badge, date line, title, description, author and a bookmark toggle. (~12.0k tokens)
-- [mini-audio-player](https://lantos1618.github.io/oneshot-ui/files/mini-audio-player.tsx): Slim pill player: play, title, a thin draggable progress bar (← / → when focused; a 32px touch band on phones) and the time. (~9.6k tokens)
+- [mini-audio-player](https://lantos1618.github.io/oneshot-ui/files/mini-audio-player.tsx): Slim pill player: play, title, a thin draggable progress bar (← / → when focused; a 32px touch band on phones) and the time. (~15.9k tokens)
 - [progressive-image](https://lantos1618.github.io/oneshot-ui/files/progressive-image.tsx): Image that blurs up: a tiny placeholder shows blurred, then the full image crossfades in. (~9.4k tokens)
-- [video-player](https://lantos1618.github.io/oneshot-ui/files/video-player.tsx): Video player with custom controls: big play button, title that fades while playing, seek bar with buffer, hover time and drag, back 5 s, mute + volume, time, speed cycle and fullscreen. (~21.4k tokens)
-- [voice-note](https://lantos1618.github.io/oneshot-ui/files/voice-note.tsx): Chat-style voice note bubble: play, a waveform you tap or drag to seek, elapsed / total time and a speed chip. (~10.4k tokens)
+- [video-player](https://lantos1618.github.io/oneshot-ui/files/video-player.tsx): Video player with custom controls: big play button, title that fades while playing, seek bar with buffer, hover time and drag, back 5 s, mute + volume, time, speed cycle and fullscreen. (~32.2k tokens)
+- [voice-note](https://lantos1618.github.io/oneshot-ui/files/voice-note.tsx): Chat-style voice note bubble: play, a waveform you tap or drag to seek, elapsed / total time and a speed chip. (~16.7k tokens)
 - [waveform](https://lantos1618.github.io/oneshot-ui/files/waveform.tsx): Waveform bars from `peaks` (0..1 each). (~1.2k tokens)
 
 ## Collaboration
@@ -209,7 +209,7 @@ and motion. Attach the ones you need plus ui-provider.tsx; they share one UIProv
 - [box-violin-chart](https://lantos1618.github.io/oneshot-ui/files/box-violin-chart.tsx): Distributions per group: box (median, quartiles, 1.5 × IQR whiskers), KDE violin, or both, with outliers as dots. (~13.2k tokens)
 - [bullet-chart](https://lantos1618.github.io/oneshot-ui/files/bullet-chart.tsx): Bullet chart: qualitative bands, the actual bar (green when it meets its target, neutral grey when not) and a target tick, one row per measure. (~10.9k tokens)
 - [calendar-heatmap](https://lantos1618.github.io/oneshot-ui/files/calendar-heatmap.tsx): GitHub-style contribution grid in 4 levels with a Less → More legend. (~11.3k tokens)
-- [chart](https://lantos1618.github.io/oneshot-ui/files/chart.tsx): The cartesian chart. (~17.1k tokens)
+- [chart](https://lantos1618.github.io/oneshot-ui/files/chart.tsx): The cartesian chart. (~25.6k tokens)
 - [density-histogram](https://lantos1618.github.io/oneshot-ui/files/density-histogram.tsx): Histogram with a kernel-density curve, mean (dashed), median and a ±1σ shaded band. (~12.7k tokens)
 - [donut-chart](https://lantos1618.github.io/oneshot-ui/files/donut-chart.tsx): Share of a total. (~12.0k tokens)
 - [forest-plot](https://lantos1618.github.io/oneshot-ui/files/forest-plot.tsx): Forest plot: effect sizes with 95% CI whiskers, squares sized by inverse-variance weight, a pooled diamond and a zero line. (~12.6k tokens)
@@ -225,15 +225,15 @@ and motion. Attach the ones you need plus ui-provider.tsx; they share one UIProv
 
 ## Diagrams
 
-- [data-flow](https://lantos1618.github.io/oneshot-ui/files/data-flow.tsx): Streaming pipeline: particles leave each source at its event rate, pass through the processing engine (its stage label cycles) and fan out to destinations by share. (~19.6k tokens)
-- [gantt](https://lantos1618.github.io/oneshot-ui/files/gantt.tsx): Project plan. (~24.1k tokens)
+- [data-flow](https://lantos1618.github.io/oneshot-ui/files/data-flow.tsx): Streaming pipeline: particles leave each source at its event rate, pass through the processing engine (its stage label cycles) and fan out to destinations by share. (~29.6k tokens)
+- [gantt](https://lantos1618.github.io/oneshot-ui/files/gantt.tsx): Project plan. (~30.3k tokens)
 - [network-graph](https://lantos1618.github.io/oneshot-ui/files/network-graph.tsx): Force-directed graph (repulsion, springs, centring) simulated in-file. (~12.3k tokens)
 - [process-flow](https://lantos1618.github.io/oneshot-ui/files/process-flow.tsx): Workflow canvas. (~16.6k tokens)
 - [sankey](https://lantos1618.github.io/oneshot-ui/files/sankey.tsx): Two-column Sankey: source nodes on the left, targets on the right, ribbons sized by value with % labels. (~8.1k tokens)
 - [state-diagram](https://lantos1618.github.io/oneshot-ui/files/state-diagram.tsx): Interactive UML state diagram. (~16.5k tokens)
 - [state-machine](https://lantos1618.github.io/oneshot-ui/files/state-machine.tsx): Live statechart of workflow machines, switchable with a segmented control. (~25.3k tokens)
 - [statechart](https://lantos1618.github.io/oneshot-ui/files/statechart.tsx): SVG statechart: composite states, states, pseudo states (initial, final, history), labelled transitions, and dots that travel along a transition (each dot calls onDone when it arrives). (~10.7k tokens)
-- [trace-waterfall](https://lantos1618.github.io/oneshot-ui/files/trace-waterfall.tsx): Nested spans on one streaming timeline (agent runs, API requests, jobs). (~18.2k tokens)
+- [trace-waterfall](https://lantos1618.github.io/oneshot-ui/files/trace-waterfall.tsx): Nested spans on one streaming timeline (agent runs, API requests, jobs). (~24.6k tokens)
 
 ## Maps
 
@@ -242,9 +242,9 @@ and motion. Attach the ones you need plus ui-provider.tsx; they share one UIProv
 
 ## AI
 
-- [agent-composer](https://lantos1618.github.io/oneshot-ui/files/agent-composer.tsx): Agent composer that doubles as a control panel. (~68.9k tokens)
+- [agent-composer](https://lantos1618.github.io/oneshot-ui/files/agent-composer.tsx): Agent composer that doubles as a control panel. (~78.7k tokens)
 - [agent-plan](https://lantos1618.github.io/oneshot-ui/files/agent-plan.tsx): Plan first, then live progress. (~9.9k tokens)
-- [agent-transit-map](https://lantos1618.github.io/oneshot-ui/files/agent-transit-map.tsx): Live multi-agent "transit map", driven by the same WorkflowEngine as StateMachine. (~35.0k tokens)
+- [agent-transit-map](https://lantos1618.github.io/oneshot-ui/files/agent-transit-map.tsx): Live multi-agent "transit map", driven by the same WorkflowEngine as StateMachine. (~45.0k tokens)
 - [ai-canvas](https://lantos1618.github.io/oneshot-ui/files/ai-canvas.tsx): Chat on the left, a living document on the right. (~27.8k tokens)
 - [ai-renderers-provider](https://lantos1618.github.io/oneshot-ui/files/ai-renderers-provider.tsx): Supplies AiRenderers to every MessageParts below it (props given to a component win). (~773 tokens)
 - [ai-stream](https://lantos1618.github.io/oneshot-ui/files/ai-stream.tsx): The AI message model with parts (text, reasoning, tools, sources, files, data) and useAiChat, which streams from a ReadableStream, an AsyncIterable or an AI SDK UI message stream, with stop via AbortSignal. (~8.9k tokens)
@@ -279,15 +279,26 @@ and motion. Attach the ones you need plus ui-provider.tsx; they share one UIProv
 
 ## Theming
 
-- [appearance-menu](https://lantos1618.github.io/oneshot-ui/files/appearance-menu.tsx): The appearance panel behind a gear button for your app header (the gear turns while it is open). (~27.1k tokens)
-- [appearance-panel](https://lantos1618.github.io/oneshot-ui/files/appearance-panel.tsx): Everything in the appearance panel, without the popover: mode, theme families with split previews, variant chips (Ayu Mirage / Dark, Tokyo Night / Storm), a Customise grid that creates a Custom theme, corner radius, font, Reset and Copy CSS. (~21.7k tokens)
+- [appearance-menu](https://lantos1618.github.io/oneshot-ui/files/appearance-menu.tsx): The appearance panel behind a gear button for your app header (the gear turns while it is open). (~39.0k tokens)
+- [appearance-panel](https://lantos1618.github.io/oneshot-ui/files/appearance-panel.tsx): Everything in the appearance panel, without the popover: mode, theme families with split previews, variant chips (Ayu Mirage / Dark, Tokyo Night / Storm), a Customise grid that creates a Custom theme, corner radius, font, Reset and Copy CSS. (~33.6k tokens)
 - [theme-preview](https://lantos1618.github.io/oneshot-ui/files/theme-preview.tsx): Theme thumbnail split diagonally: the light palette on the left, the chosen dark palette on the right. (~1.1k tokens)
 - [theme-toggle](https://lantos1618.github.io/oneshot-ui/files/theme-toggle.tsx): One-click light/dark switch for the header. (~6.8k tokens)
 
 ## Blocks (copy-in page sections)
 
-- [checkout](https://lantos1618.github.io/oneshot-ui/files/checkout.tsx): Checkout: Cart → Details → Payment with slide transitions, quantity steppers and an order summary whose subtotal, promo, VAT and total all roll. (~37.8k tokens)
+- [checkout](https://lantos1618.github.io/oneshot-ui/files/checkout.tsx): Checkout: Cart → Details → Payment with slide transitions, quantity steppers and an order summary whose subtotal, promo, VAT and total all roll. (~37.9k tokens)
 - [cookie-consent](https://lantos1618.github.io/oneshot-ui/files/cookie-consent.tsx): Cookie banner where rejecting is as easy as accepting. (~10.4k tokens)
 - [onboarding-checklist](https://lantos1618.github.io/oneshot-ui/files/onboarding-checklist.tsx): Onboarding checklist: a progress ring with the percentage, "n of 5 complete", rows you tick off (Space / Enter too) with time estimates that turn into "Done", and confetti plus a toast at 100%. (~14.5k tokens)
 - [pricing-table](https://lantos1618.github.io/oneshot-ui/files/pricing-table.tsx): Pricing table: monthly/yearly toggle (yearly saves `yearlyDiscount`), rolling prices, a billing line that spells out the yearly total and saving, a highlighted plan, and included vs missing features. (~14.8k tokens)
 - [profile-card](https://lantos1618.github.io/oneshot-ui/files/profile-card.tsx): Profile card: gradient cover, avatar overlapping it, Message and Follow / Following (the compact follower count rolls), a Pro badge, bio, stats and Posts / Projects / About tabs. (~17.8k tokens)
+
+## Other
+
+- [chart-with-journal](https://lantos1618.github.io/oneshot-ui/files/chart-with-journal.tsx): A chart and its journal side by side (pattern H), linked both ways: hovering, focusing or tapping a tag on either side lights it on the other, and the list scrolls the lit row into view without moving focus. (~23.1k tokens)
+- [magnet-bubble](https://lantos1618.github.io/oneshot-ui/files/magnet-bubble.tsx): The label bubble above a thumb (the shared tooltip look). (~653 tokens)
+- [magnet-marks](https://lantos1618.github.io/oneshot-ui/files/magnet-marks.tsx): The track decorations: a tick for each point (and each zone centre), a tinted band for each zone. (~1.7k tokens)
+- [state-ribbon](https://lantos1618.github.io/oneshot-ui/files/state-ribbon.tsx): What you were doing all day in one strip (pattern F: sleep stages, Toggl and RescueTime day bars): contiguous states coloured by kind, optional pins above for point tags (merged into counts when crowded) and bars below for spans. (~16.5k tokens)
+- [swimlanes](https://lantos1618.github.io/oneshot-ui/files/swimlanes.tsx): One lane per kind of tag on a shared time axis (pattern E: Dynatrace annotation tracks, LifeLines): dots for point tags, rounded pills for spans, an icon and label at the start of each lane, an optional chart on top (`top`) aligned to the same `start`–`end`. (~14.9k tokens)
+- [tag-glyph](https://lantos1618.github.io/oneshot-ui/files/tag-glyph.tsx): A tag's icon in a coloured ring; `active` grows it with a halo, `more` adds a "+N" badge on its end side (timeTagBadge wide). (~1.1k tokens)
+- [tag-journal](https://lantos1618.github.io/oneshot-ui/files/tag-journal.tsx): A time-ordered list of tags (pattern H: Oura and WHOOP journals): time, glyph, label and detail, optionally grouped by hour, virtualised so long days stay fast. (~22.5k tokens)
+- [tag-tooltip](https://lantos1618.github.io/oneshot-ui/files/tag-tooltip.tsx): Tooltip body for a tag: icon and label, the time (or from–to for a span) and the detail. (~2.7k tokens)
