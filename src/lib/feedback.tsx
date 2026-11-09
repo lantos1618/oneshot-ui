@@ -1,7 +1,7 @@
 import { createContext, useCallback, useContext, useEffect, useLayoutEffect, useRef, useState, type ReactNode } from 'react'
-import { AnimatePresence, type AnimationPlaybackControls, animate, motion, useAnimate, useInView, useMotionValue, useTransform } from 'motion/react'
+import { AnimatePresence, type AnimationPlaybackControls, animate, motion, useAnimate, useInView, useMotionValue, useTransform, type Transition } from 'motion/react'
 import { AnimatedNumber, Badge, Button, type ButtonProps, Icon, IconButton, type IconName, Spinner, TONE_SOFT, type Tone, cn, floatingSurface, prefersReducedMotion, sleep, spring, useControllable } from './core'
-import { CheckMark, Switch } from './forms'
+import { CheckMark } from './forms'
 
 /* ════════════════════════════════════════════════════════════════════════════
  * 8. FEEDBACK
@@ -146,28 +146,38 @@ export function EmptyState({ icon = 'inbox', title, description, action, bob = t
   )
 }
 
-/** Animates height between 0 and auto when `open` changes. Accordion, Banner, TreeView and ThinkingSteps use it. */
-export function Collapse({ open, children, className }: { open: boolean; children: ReactNode; className?: string }) {
+/**
+ * Animated height. `open` toggles the content between 0 and its height (it unmounts when closed): Accordion, Banner,
+ * TreeView and ThinkingSteps use it. While open, the height also follows the content with a spring, so state swaps
+ * inside never jump (permission cards, wizards, tabs of different heights). Leave `open` out for that alone (AutoHeight).
+ */
+export function Collapse({ open = true, children, className, transition = spring(0.1, 0.32) }:
+  { open?: boolean; children: ReactNode; className?: string; /** default spring(0.1, 0.32) */ transition?: Transition }) {
   return (
     <AnimatePresence initial={false}>
-      {open && (
-        <motion.div initial={{ height: 0, opacity: 0 }} animate={{ height: 'auto', opacity: 1 }} exit={{ height: 0, opacity: 0 }}
-          transition={spring(0.1, 0.32)} className={cn('overflow-hidden', className)}>{children}</motion.div>
-      )}
+      {open && <CollapsePanel className={className} transition={transition}>{children}</CollapsePanel>}
     </AnimatePresence>
   )
 }
-
-/** Height follows the content with a spring, so state swaps inside never jump (permission cards, wizards, tabs of different heights). */
-export function AutoHeight({ children, className }: { children: ReactNode; className?: string }) {
+function CollapsePanel({ children, className, transition }: { children: ReactNode; className?: string; transition: Transition }) {
   const inner = useRef<HTMLDivElement>(null)
+  // 'auto' until measured: the first frame (and the server render) is the natural height, so opening and hydrating never shift
   const [h, setH] = useState<number | 'auto'>('auto')
   useLayoutEffect(() => {
     const el = inner.current; if (!el) return
     const ro = new ResizeObserver(() => setH(el.offsetHeight)); ro.observe(el)
     return () => ro.disconnect()
   }, [])
-  return <motion.div initial={false} animate={{ height: h }} transition={spring(0.15, 0.4)} className={cn('overflow-hidden', className)}><div ref={inner}>{children}</div></motion.div>
+  return (
+    <motion.div initial={{ height: 0, opacity: 0 }} animate={{ height: h, opacity: 1 }} exit={{ height: 0, opacity: 0 }} transition={transition} className={cn('overflow-hidden', className)}>
+      <div ref={inner}>{children}</div>
+    </motion.div>
+  )
+}
+
+/** Height follows the content with a spring, so state swaps inside never jump. Collapse with no `open` (always shown), a little softer. */
+export function AutoHeight({ children, className }: { children: ReactNode; className?: string }) {
+  return <Collapse className={className} transition={spring(0.15, 0.4)}>{children}</Collapse>
 }
 
 /** Three bouncing dots: someone (the assistant, a teammate) is typing. The bounce pauses while off screen. `label` is announced. */
@@ -380,49 +390,7 @@ export function HoldToConfirm({ onConfirm, duration = 1200, children = 'Hold to 
   )
 }
 
-/* Consent and connection ───────────────────────────────────────────────────── */
-
-export type CookieCategory = { id: string; label: string; description: string; required?: boolean; defaultOn?: boolean }
-export type CookieChoice = { kind: 'accept' | 'reject' | 'custom'; allowed: Record<string, boolean> }
-
-/**
- * Cookie banner where rejecting is as easy as accepting. "Customise" expands the per-category
- * switches in place (required ones are locked on) and becomes "Save choices". Slides up when `open`.
- * Place it inside a relative container (it sits at the bottom edge) or pass `className` to position it.
- */
-export function CookieConsent({ categories, open, onDecision, title = 'We use cookies', description = 'Essential cookies keep the site working. Others help us improve it.', className }:
-  { categories: CookieCategory[]; open: boolean; onDecision: (c: CookieChoice) => void; title?: ReactNode; description?: ReactNode; className?: string }) {
-  const [custom, setCustom] = useState(false)
-  const [on, setOn] = useState<Record<string, boolean>>(() => Object.fromEntries(categories.map(c => [c.id, !!(c.required || c.defaultOn)])))
-  const all = (v: boolean) => Object.fromEntries(categories.map(c => [c.id, c.required ? true : v]))
-  const decide = (kind: CookieChoice['kind']) => { setCustom(false); onDecision({ kind, allowed: kind === 'custom' ? on : all(kind === 'accept') }) }
-  return (
-    <AnimatePresence>
-      {open && (
-        <motion.div role="dialog" aria-label="Cookie consent" initial={{ y: 40, opacity: 0 }} animate={{ y: 0, opacity: 1 }} exit={{ y: 30, opacity: 0, transition: { duration: 0.2 } }}
-          transition={spring(0.25, 0.4)} className={cn(floatingSurface, 'absolute inset-x-2 bottom-2 z-10 rounded-[var(--r-md)] p-3 text-[13px]', className)}>
-          <b className="font-semibold">{title}</b>
-          <p className="m-0 mt-0.5 mb-2.5 text-xs text-[var(--fg3)]">{description}</p>
-          <Collapse open={custom}>
-            <div className="mb-2">
-              {categories.map(c => (
-                <div key={c.id} className="border-b border-[var(--line)] py-2">
-                  <Switch checked={on[c.id]} disabled={c.required} onChange={v => setOn(o => ({ ...o, [c.id]: v }))}
-                    label={<span><b className="block text-[13px] font-medium">{c.label}{c.required && <Icon name="lock" size={11} className="ml-1 inline text-[var(--fg3)]" />}</b><span className="block text-xs text-[var(--fg3)]">{c.description}</span></span>} />
-                </div>
-              ))}
-            </div>
-          </Collapse>
-          <div className="flex flex-wrap justify-end gap-1.5">
-            <Button size="sm" variant="ghost" aria-expanded={custom} onClick={() => custom ? decide('custom') : setCustom(true)}>{custom ? 'Save choices' : 'Customise'}</Button>
-            <Button size="sm" onClick={() => decide('reject')}>Reject all</Button>
-            <Button size="sm" variant="primary" onClick={() => decide('accept')}>Accept all</Button>
-          </div>
-        </motion.div>
-      )}
-    </AnimatePresence>
-  )
-}
+/* Connection ───────────────────────────────────────────────────── */
 
 /**
  * Connection bar for the top of a view. When `online` turns false it slides down, explains that

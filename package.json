@@ -57,10 +57,6 @@
       "types": "./dist/virtual.d.ts",
       "default": "./dist/virtual.js"
     },
-    "./playground": {
-      "types": "./dist/playground.d.ts",
-      "default": "./dist/playground.js"
-    },
     "./overlay": {
       "types": "./dist/overlay.d.ts",
       "default": "./dist/overlay.js"
@@ -141,9 +137,33 @@
       "types": "./dist/diagrams.d.ts",
       "default": "./dist/diagrams.js"
     },
+    "./gantt": {
+      "types": "./dist/gantt.d.ts",
+      "default": "./dist/gantt.js"
+    },
+    "./statechart": {
+      "types": "./dist/statechart.d.ts",
+      "default": "./dist/statechart.js"
+    },
+    "./trace": {
+      "types": "./dist/trace.d.ts",
+      "default": "./dist/trace.js"
+    },
+    "./network": {
+      "types": "./dist/network.d.ts",
+      "default": "./dist/network.js"
+    },
     "./geo": {
       "types": "./dist/geo.d.ts",
       "default": "./dist/geo.js"
+    },
+    "./geoworld": {
+      "types": "./dist/geoworld.d.ts",
+      "default": "./dist/geoworld.js"
+    },
+    "./geoland": {
+      "types": "./dist/geoland.d.ts",
+      "default": "./dist/geoland.js"
     },
     "./appearance": {
       "types": "./dist/appearance.d.ts",
@@ -153,10 +173,18 @@
       "types": "./dist/provider.d.ts",
       "default": "./dist/provider.js"
     },
+    "./examples": {
+      "types": "./dist/examples.d.ts",
+      "default": "./dist/examples.js"
+    },
     "./styles.css": "./dist/styles.css",
     "./preflight.css": "./dist/preflight.css",
     "./tokens.css": "./dist/tokens.css",
+    "./registry.json": "./dist-registry/index.json",
     "./package.json": "./package.json"
+  },
+  "bin": {
+    "lyndon-ui": "./bin/lyndon-ui.mjs"
   },
   "files": [
     "dist/**/*.js",
@@ -168,29 +196,37 @@
     "dist-single/ui-ai.tsx",
     "dist-single/ui-all.tsx",
     "dist-single/SHA256SUMS",
+    "dist-registry/index.json",
+    "dist-registry/files/*.tsx",
+    "bin/lyndon-ui.mjs",
     "README.md",
     "SECURITY.md",
     "LICENSE"
   ],
   "scripts": {
     "dev": "vite",
-    "build": "pnpm build:lib && pnpm build:css && pnpm build:single",
+    "build": "pnpm build:lib && pnpm build:css && pnpm build:single && pnpm build:registry",
     "build:lib": "vite build --config vite.lib.config.ts && vite build --config vite.lib.config.ts --mode utils && tsc -p tsconfig.lib.json && node scripts/fix-dts.mjs",
     "build:css": "tailwindcss -i src/lib/styles.css -o dist/styles.css --minify && tailwindcss -i src/lib/preflight.css -o dist/preflight.css --minify && node scripts/build-tokens.mjs",
     "build:single": "node scripts/build-single.mjs && tsc -p tsconfig.single.json --noEmit",
+    "build:registry": "node scripts/build-registry.mjs",
     "build:demo": "tsc -b && vite build",
+    "docs:dev": "node scripts/build-docs-data.mjs && vite --config docs/vite.config.ts",
+    "docs:build": "node scripts/build-docs.mjs",
     "test:ssr": "node scripts/ssr-check.mjs",
     "test": "vitest run",
     "test:watch": "vitest",
     "test:e2e": "playwright test --trace off",
     "test:e2e:update-baseline": "node tests/e2e/update-baseline.mjs",
     "test:pack": "node tests/pack-check.mjs",
+    "test:registry": "node scripts/check-registry.mjs",
     "prepublishOnly": "pnpm build && pnpm test:ssr",
     "typecheck": "tsc -b",
     "typecheck:tests": "tsc -p tsconfig.test.json --noEmit",
+    "typecheck:docs": "tsc -p docs/tsconfig.json --noEmit",
     "lint": "oxlint",
     "preview": "vite preview",
-    "check": "tsc -b && pnpm typecheck:tests && pnpm build && pnpm test:ssr && pnpm test"
+    "check": "tsc -b && pnpm typecheck:tests && pnpm build && pnpm test:registry && pnpm test:ssr && pnpm test"
   },
   "peerDependencies": {
     "motion": "^13.0.0 || ^14.0.0",

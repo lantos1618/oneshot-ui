@@ -1,7 +1,7 @@
-import { useRef, useState } from 'react'
+import { useRef, useState, type AnchorHTMLAttributes, type Ref } from 'react'
 import { AnimatePresence, motion, useInView } from 'motion/react'
-import { Badge, Breadcrumbs, Button, CollapsibleSidebar, ContextMenu, type ContextMenuEntry, Icon, type IconName, MegaMenu, type MegaMenuItem, MobileTabBar, Pagination, PhoneFrame,
-  type SidebarEntry, type TabBarItem, Tabs, Wizard, cn, spring, useToast } from '../lib'
+import { Badge, Breadcrumbs, Button, CollapsibleSidebar, ContextMenu, type ContextMenuEntry, DropdownMenu, Icon, IconButton, type IconName, MegaMenu, type MegaMenuItem, MobileTabBar, Pagination, PhoneFrame,
+  type SidebarEntry, Switch, type TabBarItem, Tabs, Toggle, ToggleGroup, Toolbar, Wizard, cn, spring, useToast } from '../lib'
 import { Section, Spec } from './kit'
 
 const NAV_SIDEBAR: SidebarEntry[] = [
@@ -160,12 +160,142 @@ function NavContextDemo() {
   )
 }
 
+/* Tabs as parts: a vertical settings list with lazy panels, and a horizontal list too long for its card */
+const NAV_SETTINGS: [string, IconName, string][] = [
+  ['Profile', 'user', 'Name, photo and the email people see.'], ['Notifications', 'bell', 'Choose what reaches your inbox and your phone.'],
+  ['Billing', 'card', 'Pro plan · renews 1 Dec · Visa •••• 4242'], ['Security', 'shield', 'Two-factor on. 2 active sessions.'],
+]
+const NAV_PROJECT_TABS = ['Overview', 'Activity', 'Deployments', 'Logs', 'Analytics', 'Domains', 'Integrations', 'Storage', 'Settings']
+function NavTabsPartsDemo() {
+  return (
+    <>
+      <Tabs.Root defaultValue="Profile" orientation="vertical" lazy>
+        <Tabs.List aria-label="Settings" className="w-[150px] max-[400px]:w-[120px]">
+          {NAV_SETTINGS.map(([t, ic]) => <Tabs.Trigger key={t} value={t} className="gap-2"><Icon name={ic} size={14} className="text-[var(--fg3)]" />{t}</Tabs.Trigger>)}
+        </Tabs.List>
+        {NAV_SETTINGS.map(([t, , d]) => (
+          <Tabs.Content key={t} value={t} className="flex flex-col gap-2">
+            <b className="text-sm">{t}</b><span className="text-[var(--fg2)]">{d}</span>
+            {t === 'Notifications' && <Switch label="Weekly digest" defaultChecked />}
+          </Tabs.Content>
+        ))}
+      </Tabs.Root>
+      <Tabs defaultValue="Deployments" items={NAV_PROJECT_TABS.map(t => ({ value: t, label: t, content: `${t} for Website redesign.` }))} />
+    </>
+  )
+}
+
+/* Toolbar with toggle groups, plus a standalone ToggleGroup and Toggle */
+function NavToolbarDemo() {
+  const [marks, setMarks] = useState<string[]>(['bold'])
+  const [align, setAlign] = useState('left')
+  const [pinned, setPinned] = useState(true)
+  const alignCls = { left: 'text-left', center: 'text-center', right: 'text-right' }[align]
+  return (
+    <>
+      <Toolbar aria-label="Formatting">
+        <Toolbar.ToggleGroup type="multiple" size="icon-sm" value={marks} onValueChange={setMarks} aria-label="Text style">
+          <Toolbar.ToggleItem value="bold" aria-label="Bold"><b>B</b></Toolbar.ToggleItem>
+          <Toolbar.ToggleItem value="italic" aria-label="Italic"><i className="font-serif">I</i></Toolbar.ToggleItem>
+          <Toolbar.ToggleItem value="underline" aria-label="Underline"><u>U</u></Toolbar.ToggleItem>
+        </Toolbar.ToggleGroup>
+        <Toolbar.Separator />
+        <Toolbar.ToggleGroup type="single" size="icon-sm" value={align} onValueChange={setAlign} aria-label="Alignment">
+          {(['left', 'center', 'right'] as const).map(a => <Toolbar.ToggleItem key={a} value={a} aria-label={`Align ${a}`}><Icon name={a === 'left' ? 'alignLeft' : a === 'center' ? 'alignCenter' : 'alignRight'} size={15} /></Toolbar.ToggleItem>)}
+        </Toolbar.ToggleGroup>
+        <Toolbar.Separator />
+        <Toolbar.Toggle size="icon-sm" pressed={pinned} onPressedChange={setPinned} aria-label="Pin note"><Icon name="bookmark" size={15} /></Toolbar.Toggle>
+        <Toolbar.Button size="icon-sm" aria-label="Insert link"><Icon name="link" size={15} /></Toolbar.Button>
+      </Toolbar>
+      <p className={cn('m-0 rounded-[var(--r-md)] bg-[var(--bg)] px-3 py-2 text-[13px]', alignCls, marks.includes('bold') && 'font-semibold', marks.includes('italic') && 'italic', marks.includes('underline') && 'underline')}>
+        Ship the onboarding redesign by Friday.{pinned && <Badge tone="accent" size="sm" className="ml-1.5 align-middle not-italic">Pinned</Badge>}
+      </p>
+      <div className="flex flex-wrap items-center gap-2">
+        <ToggleGroup type="single" variant="outline" size="sm" defaultValue="week" aria-label="Range">
+          {['Day', 'Week', 'Month'].map(r => <ToggleGroup.Item key={r} value={r.toLowerCase()}>{r}</ToggleGroup.Item>)}
+        </ToggleGroup>
+        <Toggle variant="outline" size="sm" defaultPressed aria-label="Show weekends">Weekends</Toggle>
+      </div>
+    </>
+  )
+}
+
+/** A stand-in for a router's Link (Next.js, React Router): an <a> that navigates client-side on a plain left click. */
+function NavRouterLink({ href, onNavigate, onClick, ref, ...p }: AnchorHTMLAttributes<HTMLAnchorElement> & { href: string; onNavigate: (href: string) => void; ref?: Ref<HTMLAnchorElement> }) {
+  return <a ref={ref} href={href} {...p} onClick={e => {
+    onClick?.(e)
+    if (e.defaultPrevented || e.button !== 0 || e.metaKey || e.ctrlKey || e.shiftKey || e.altKey) return
+    e.preventDefault(); onNavigate(href)
+  }} />
+}
+function NavAsChildDemo() {
+  const [route, setRoute] = useState('')
+  const go = (href: string) => setRoute(`Navigated to ${href} without a page load`)
+  return (
+    <>
+      <div className="flex flex-wrap items-center gap-2">
+        <Button asChild variant="primary"><NavRouterLink href="#pages" onNavigate={go}>See pricing</NavRouterLink></Button>
+        <Button asChild><a href="#navigation">Docs <Icon name="arrowUp" size={13} className="rotate-45" /></a></Button>
+        <IconButton asChild icon="settings" label="Settings" variant="default" size="icon"><NavRouterLink href="#settings" onNavigate={go} /></IconButton>
+        <DropdownMenu.Root>
+          <DropdownMenu.Trigger variant="ghost">Go to <Icon name="chevronDown" size={14} /></DropdownMenu.Trigger>
+          <DropdownMenu.Content>
+            {['Inbox', 'Projects', 'Reports'].map(r => (
+              <DropdownMenu.Item key={r} asChild><NavRouterLink href={`#${r.toLowerCase()}`} onNavigate={go}>{r}</NavRouterLink></DropdownMenu.Item>
+            ))}
+          </DropdownMenu.Content>
+        </DropdownMenu.Root>
+      </div>
+      <span className="min-h-[18px] text-xs text-[var(--fg3)]" aria-live="polite">{route || 'Real links: open in a new tab, copy the address, middle-click.'}</span>
+    </>
+  )
+}
+
+/* Context menu as parts, with checkbox and radio items */
+function NavContextPartsDemo() {
+  const [avatars, setAvatars] = useState(true)
+  const [sort, setSort] = useState('due')
+  const [done, setDone] = useState(false)
+  return (
+    <ContextMenu.Root>
+      <ContextMenu.Trigger label="Board options" className="flex h-[120px] flex-col justify-center gap-1.5 rounded-[var(--r-lg)] border-[1.5px] border-dashed border-[var(--line2)] px-4">
+        <b className="text-[13px]">Sprint board</b>
+        <span className="text-xs text-[var(--fg3)]">Avatars {avatars ? 'on' : 'off'} · sorted by {sort === 'due' ? 'due date' : sort} · {done ? 'showing' : 'hiding'} done</span>
+        <span className="text-xs text-[var(--fg3)] [@media(hover:none)]:hidden">Right-click or Shift+F10</span>
+        <span className="hidden text-xs text-[var(--fg3)] [@media(hover:none)]:inline">Press and hold for options</span>
+      </ContextMenu.Trigger>
+      <ContextMenu.Content aria-label="Board options">
+        <ContextMenu.CheckboxItem checked={avatars} onCheckedChange={setAvatars}>Show avatars</ContextMenu.CheckboxItem>
+        <ContextMenu.CheckboxItem checked={done} onCheckedChange={setDone}>Show done</ContextMenu.CheckboxItem>
+        <ContextMenu.Separator />
+        <ContextMenu.Label inset>Sort by</ContextMenu.Label>
+        <ContextMenu.RadioGroup value={sort} onValueChange={setSort} aria-label="Sort by">
+          <ContextMenu.RadioItem value="due">Due date</ContextMenu.RadioItem>
+          <ContextMenu.RadioItem value="priority">Priority</ContextMenu.RadioItem>
+          <ContextMenu.RadioItem value="assignee">Assignee</ContextMenu.RadioItem>
+        </ContextMenu.RadioGroup>
+      </ContextMenu.Content>
+    </ContextMenu.Root>
+  )
+}
+
 export function NavigationSection() {
   const [page, setPage] = useState(5)
   return (
     <Section id="navigation" title="Navigation" desc="Indicators that travel to where you clicked so you never lose your place.">
-      <Spec title="Tabs" desc="Underline travels, panel cross-fades">
+      <Spec title="Tabs" desc="Underline travels, panel fades in">
         <Tabs items={[{ value: 'o', label: 'Overview', content: '12 projects, 4 active this week.' }, { value: 'a', label: 'Activity', content: 'Sam commented on “Homepage hero” 3 min ago.' }, { value: 's', label: 'Settings', content: 'Notifications on. Weekly digest off.' }]} />
+      </Spec>
+      <Spec title="Tabs · vertical and overflow" desc="Built from parts: a vertical list with lazy panels (↑ ↓), and a list too long for the card that scrolls with edge fades and keeps the selected tab in view."
+        keys={[[['↑', '↓'], 'Vertical'], [['←', '→'], 'Horizontal'], [['Home', 'End'], 'Ends']]}>
+        <NavTabsPartsDemo />
+      </Spec>
+      <Spec title="Toolbar and toggle group" desc="One Tab stop for the whole toolbar; arrows move across buttons and toggle groups. Single choice is a radio group, multiple choice uses pressed buttons."
+        keys={[[['←', '→'], 'Move'], [['Space'], 'Toggle']]}>
+        <NavToolbarDemo />
+      </Spec>
+      <Spec title="Links as buttons (asChild)" desc="asChild renders your element with the component's classes and behaviour: a plain <a>, or your router's Link (here a stand-in that navigates client-side). Works on Button, IconButton, menu items and every trigger.">
+        <NavAsChildDemo />
       </Spec>
       <Spec title="Wizard stepper" desc="Progress line fills between steps">
         <Wizard steps={[{ label: 'Account', description: 'Create your account.' }, { label: 'Details', description: 'Tell us about your team.' }, { label: 'Done', description: 'All set. Welcome aboard.' }]} />
@@ -186,6 +316,9 @@ export function NavigationSection() {
       </Spec>
       <Spec title="Context menu" desc="Right-click, or long-press on touch. Submenus, shortcuts, keyboard." keys={[[['⇧', 'F10'], 'Open menu'], [['↑', '↓'], 'Move'], [['→'], 'Submenu']]}>
         <NavContextDemo />
+      </Spec>
+      <Spec title="Context menu · composable" desc="The same menu from parts, with checkbox and radio items that stay open while you toggle them." keys={[[['⇧', 'F10'], 'Open menu'], [['Space'], 'Toggle']]}>
+        <NavContextPartsDemo />
       </Spec>
     </Section>
   )

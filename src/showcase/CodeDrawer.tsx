@@ -254,9 +254,9 @@ export function codeExampleFor(title: string): { code: string; file: string; com
 
 /* Props, read from the library's own source ─────────────────────────────────── */
 
-/** The library modules as raw text, loaded on demand the first time the Props tab opens (not bundled up front). */
+/** The library modules (and the copy-in blocks and examples) as raw text, loaded on demand the first time the Props tab opens (not bundled up front). */
 const codeLibLoaders: Record<string, () => Promise<string>> = (() => {
-  try { return import.meta.glob('../lib/*.tsx', { query: '?raw', import: 'default' }) as Record<string, () => Promise<string>> } catch { return {} }
+  try { return import.meta.glob(['../lib/*.tsx', '../blocks/*.tsx', '../examples/*.tsx'], { query: '?raw', import: 'default' }) as Record<string, () => Promise<string>> } catch { return {} }
 })()
 let codeLibText: Promise<string[]> | null = null
 const codeLib = () => (codeLibText ??= Promise.all(Object.values(codeLibLoaders).map(l => l())))

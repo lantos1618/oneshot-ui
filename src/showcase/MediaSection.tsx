@@ -1,9 +1,9 @@
 import { useEffect, useRef, useState } from 'react'
 import { useInView } from 'motion/react'
 import {
-  AudioPlayer, AvatarCropper, Button, Carousel, ImageCompare, MasonryGallery, MediaCard, MiniAudioPlayer, ProgressiveImage, Skeleton, VideoPlayer, VoiceNote,
-  createAudioTrack, mediaArt, mediaImage, mediaRecordVideo, mediaSynthTrack, type GalleryItem, type MediaArtKind,
+  AudioPlayer, AvatarCropper, Button, Carousel, ImageCompare, MasonryGallery, MediaCard, MiniAudioPlayer, ProgressiveImage, Skeleton, VideoPlayer, VoiceNote, createAudioTrack, type GalleryItem,
 } from '../lib'
+import { mediaArt, mediaImage, mediaRecordVideo, mediaSynthTrack, type MediaArtKind } from '../examples'
 import { Section, Spec } from './kit'
 
 /* Everything below is generated in the page (canvas art, a synthesised WAV, a canvas recording), so it works offline.

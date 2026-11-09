@@ -1,5 +1,5 @@
 import { useState, type ReactNode } from 'react'
-import { AnimatedNumber, Checkbox, ColorPicker, Combobox, CurrencyInput, DatePicker, DateRangePicker, type DateRange, Field, FileUpload, Input, Label, MultiSelect, NumberStepper, OTPInput, type Option, PasswordInput, PhoneInput, RadioGroup, RangeSlider, Rating, SegmentedControl, Select, Slider, Switch, TagInput, Textarea, TimePicker, cn } from '../lib'
+import { AnimatedNumber, Calendar, Checkbox, ColorPicker, Combobox, CurrencyInput, DateField, DatePicker, DateRangePicker, type DateRange, DateTimePicker, Field, FileUpload, Input, Label, LocaleProvider, MonthPicker, MultiSelect, NumberStepper, OTPInput, type Option, PasswordInput, PhoneInput, RadioGroup, RangeSlider, Rating, SegmentedControl, Select, Slider, Switch, TagInput, Textarea, TimeField, TimePicker, YearPicker, cn, formDate, localeDir, localeHourCycle, localeWeekStart } from '../lib'
 import { Row, Section, Spec } from './kit'
 
 const COUNTRIES: Option[] = ([['🇦🇺', 'Australia'], ['🇦🇹', 'Austria'], ['🇧🇪', 'Belgium'], ['🇨🇦', 'Canada'], ['🇩🇰', 'Denmark'], ['🇫🇮', 'Finland'], ['🇫🇷', 'France'], ['🇩🇪', 'Germany'], ['🇮🇪', 'Ireland'], ['🇮🇹', 'Italy'], ['🇯🇵', 'Japan'], ['🇳🇱', 'Netherlands'], ['🇳🇿', 'New Zealand'], ['🇳🇴', 'Norway'], ['🇵🇹', 'Portugal'], ['🇸🇬', 'Singapore'], ['🇪🇸', 'Spain'], ['🇸🇪', 'Sweden'], ['🇨🇭', 'Switzerland'], ['🇬🇧', 'United Kingdom'], ['🇺🇸', 'United States']] as const)
@@ -30,6 +30,70 @@ const InGrid = ({ children, min = 120 }: { children: ReactNode; min?: number }) 
 const InState = ({ label, children }: { label: string; children: ReactNode }) => (
   <div className="flex min-w-0 flex-col gap-1"><span className="text-[11px] text-[var(--fg3)]">{label}</span>{children}</div>
 )
+
+const IN_MIN = new Date(2026, 10, 9), IN_MAX = new Date(2027, 1, 26)
+const inWeekend = (d: Date) => d.getDay() === 0 || d.getDay() === 6
+
+/** An inline calendar with bounds and unavailable weekends, plus a DatePicker with the same rules. */
+function ConstraintsDemo() {
+  const [day, setDay] = useState<Date | null>(new Date(2026, 10, 12))
+  return (
+    <div className="flex flex-col gap-3">
+      <Calendar selected={day} onSelect={setDay} month={new Date(2026, 10, 1)} min={IN_MIN} max={IN_MAX} isDateUnavailable={inWeekend} className="self-center" />
+      <span aria-live="polite" className="text-xs text-[var(--fg3)]">{day ? `Delivery on ${day.toLocaleDateString('en-GB', { weekday: 'long', day: 'numeric', month: 'long' })}` : 'Pick a weekday'} · 9 Nov 2026 to 26 Feb 2027</span>
+      <Field label="Delivery (same rules)" htmlFor="in-delivery"><DatePicker id="in-delivery" min={IN_MIN} max={IN_MAX} isDateUnavailable={inWeekend} defaultValue={new Date(2026, 10, 16)} /></Field>
+    </div>
+  )
+}
+
+const IN_LOCALES = ['en-GB', 'en-US', 'de-DE', 'ja-JP', 'ar-EG']
+const IN_WEEKDAY = (l: string, d: number) => new Intl.DateTimeFormat(l, { weekday: 'long', timeZone: 'UTC' }).format(Date.UTC(2024, 0, 7 + d))
+
+/** DateField, TimeField and a Calendar under a LocaleProvider: switch locale to see order, digits, clock and week start change. */
+function LocaleDemo() {
+  const [locale, setLocale] = useState('en-GB')
+  const [date, setDate] = useState<Date | null>(new Date(2026, 10, 8))
+  const [time, setTime] = useState('21:05')
+  const h12 = /h1[12]/.test(localeHourCycle(locale))
+  return (
+    <div className="flex flex-col gap-3">
+      <SegmentedControl aria-label="Locale" size="sm" options={IN_LOCALES} value={locale} onChange={setLocale} className="self-start" />
+      <LocaleProvider locale={locale}>
+        <div dir={localeDir(locale)} lang={locale} className="grid gap-4 md:grid-cols-[1fr_auto]">
+          <div className="flex min-w-0 flex-col gap-3">
+            <Field label="Date" htmlFor="in-loc-date"><DateField id="in-loc-date" value={date} onChange={setDate} /></Field>
+            <Field label="Time" htmlFor="in-loc-time"><TimeField id="in-loc-time" value={time} onChange={setTime} /></Field>
+            <dl className="m-0 grid grid-cols-[auto_1fr] gap-x-3 gap-y-1 text-xs" dir="ltr">
+              <dt className="text-[var(--fg3)]">Value</dt><dd className="m-0 font-[family-name:var(--mono)]">{formDate(date) || '""'} {time || '""'}</dd>
+              <dt className="text-[var(--fg3)]">Week starts</dt><dd className="m-0">{IN_WEEKDAY('en-GB', localeWeekStart(locale))}</dd>
+              <dt className="text-[var(--fg3)]">Clock</dt><dd className="m-0">{h12 ? '12-hour' : '24-hour'}</dd>
+            </dl>
+          </div>
+          <Calendar key={locale} selected={date} onSelect={setDate} month={date ?? undefined} className="justify-self-center" />
+        </div>
+      </LocaleProvider>
+    </div>
+  )
+}
+
+/** DateTimePicker with a zone picker; shows the emitted ISO value and the same instant elsewhere. */
+function ZonedDemo() {
+  const [iso, setIso] = useState<string | null>('2026-11-12T09:30:00+01:00')
+  const [zone, setZone] = useState('Europe/Zurich')
+  const at = iso ? new Date(iso) : null
+  const elsewhere = (tz: string) => at ? at.toLocaleString('en-GB', { timeZone: tz, weekday: 'short', hour: '2-digit', minute: '2-digit', timeZoneName: 'short' }) : '–'
+  return (
+    <div className="flex flex-col gap-3">
+      <Field label="Kick-off call" htmlFor="in-kickoff"><DateTimePicker id="in-kickoff" value={iso} onChange={setIso} timeZone={zone} onTimeZoneChange={setZone} timeZonePicker /></Field>
+      <dl className="m-0 grid grid-cols-[auto_1fr] gap-x-3 gap-y-1 text-xs">
+        <dt className="text-[var(--fg3)]">Value</dt><dd className="m-0 font-[family-name:var(--mono)] break-all">{iso ?? 'null'}</dd>
+        <dt className="text-[var(--fg3)]">London</dt><dd className="m-0">{elsewhere('Europe/London')}</dd>
+        <dt className="text-[var(--fg3)]">New York</dt><dd className="m-0">{elsewhere('America/New_York')}</dd>
+        <dt className="text-[var(--fg3)]">Tokyo</dt><dd className="m-0">{elsewhere('Asia/Tokyo')}</dd>
+      </dl>
+    </div>
+  )
+}
 
 export function InputsSection() {
   const [email, setEmail] = useState('')
@@ -93,18 +157,34 @@ export function InputsSection() {
       <Spec title="Tag input" desc="Enter adds, backspace removes"><TagInput defaultValue={['design', 'research']} placeholder="Add tag" />
         <InStates><InGrid min={140}><InState label="Disabled"><TagInput aria-label="Disabled tags" defaultValue={['design']} placeholder="Disabled tags" disabled /></InState>
           <InState label="Read-only"><TagInput defaultValue={['research']} placeholder="Read-only tags" readOnly /></InState><InState label="Invalid"><TagInput placeholder="Add at least one" invalid /></InState></InGrid></InStates></Spec>
-      <Spec title="Date picker dropdown" desc="Calendar pops from the field, months slide">
+      <Spec title="Date picker dropdown" desc="Calendar pops from the field, months slide. Click the month for a month and year grid">
         <Field label="Due date" htmlFor="in-due"><DatePicker id="in-due" /></Field>
         <InStates><InGrid min={150}><Field label="Disabled"><DatePicker disabled defaultValue={DUE} /></Field><Field label="Read-only"><DatePicker readOnly defaultValue={DUE} /></Field>
           <Field label="Invalid" error="Pick a weekday"><DatePicker /></Field></InGrid></InStates>
       </Spec>
-      <Spec title="Date range picker" desc="Presets plus start to end selection">
-        <Field label="Period" htmlFor="in-period"><DateRangePicker id="in-period" defaultValue={range} /></Field>
+      <Spec title="Calendar constraints" desc="min and max, weekends unavailable (struck through, still focusable and announced), today marked" keys={[[['←', '↑', '↓', '→'], 'Day, week'], [['PgUp', 'PgDn'], 'Month'], [['⇧', 'PgUp'], 'Year'], [['Home', 'End'], 'Week start, end']]}>
+        <ConstraintsDemo />
+      </Spec>
+      <Spec title="Date range picker" desc="Presets, two months side by side (stacked on phones), drag either end">
+        <Field label="Period" htmlFor="in-period"><DateRangePicker id="in-period" defaultValue={range} numberOfMonths={2} /></Field>
         <InStates><InGrid min={150}><Field label="Disabled"><DateRangePicker disabled defaultValue={range} /></Field><Field label="Invalid" error="Choose an end date"><DateRangePicker defaultValue={[range[0], null]} /></Field></InGrid></InStates>
       </Spec>
-      <Spec title="Time picker" desc="15-minute slots, scrolls to selection">
+      <Spec title="Typed dates in any locale" desc="Segment order, separators, digits, 12/24-hour clock and the first day of the week all come from the locale" span={2}
+        keys={[[['0–9'], 'Type, moves on'], [['↑', '↓'], 'Step'], [['←', '→'], 'Segment'], [['⌫'], 'Clear'], [['⌘', 'V'], 'Paste 2026-11-08']]}>
+        <LocaleDemo />
+      </Spec>
+      <Spec title="Time picker" desc="Type the time, or pick from 15-minute slots behind the clock">
         <Field label="Start time" htmlFor="in-time"><TimePicker id="in-time" defaultValue="09:30" /></Field>
-        <InStates><InGrid min={110}><Field label="Disabled"><TimePicker disabled defaultValue="10:00" /></Field><Field label="Read-only"><TimePicker readOnly defaultValue="14:15" /></Field></InGrid></InStates>
+        <InStates><InGrid min={130}><Field label="12-hour"><TimePicker hourCycle={12} defaultValue="14:15" /></Field><Field label="Disabled"><TimePicker disabled defaultValue="10:00" /></Field>
+          <Field label="Read-only"><TimePicker readOnly defaultValue="14:15" /></Field><Field label="Out of hours" error="Choose 08:00 to 18:00"><TimeField min="08:00" max="18:00" defaultValue="19:30" /></Field></InGrid></InStates>
+      </Spec>
+      <Spec title="Date and time with a time zone" desc="Calendar, time and a searchable zone list. The value is ISO 8601 with the zone’s offset; a new zone keeps the wall time" span={2}>
+        <ZonedDemo />
+      </Spec>
+      <Spec title="Month and year" desc="The calendar’s quick picker on its own">
+        <InGrid min={150}><Field label="Billing month" htmlFor="in-month"><MonthPicker id="in-month" defaultValue={new Date(2026, 10, 1)} max={new Date(2027, 11, 31)} /></Field>
+          <Field label="Graduation year" htmlFor="in-year"><YearPicker id="in-year" defaultValue={2024} max={new Date(2030, 0, 1)} /></Field></InGrid>
+        <InStates><InGrid min={150}><Field label="Disabled"><MonthPicker disabled defaultValue={new Date(2026, 0, 1)} /></Field><Field label="Empty"><YearPicker /></Field></InGrid></InStates>
       </Spec>
       <Spec title="Combobox" desc="Type to filter, match highlighted">
         <Field label="Country" htmlFor="in-country"><Combobox id="in-country" options={COUNTRIES} placeholder="Search countries" empty={q => <>No country matches “{q}”</>} /></Field>

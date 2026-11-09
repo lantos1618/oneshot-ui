@@ -1,8 +1,8 @@
 import { useEffect, useMemo, useState } from 'react'
 import {
-  BarList, BoxViolinChart, BulletChart, Button, CalendarHeatmap, Chart, DensityHistogram, DonutChart, ForestPlot, FunnelChart, Gauge, Heatmap, LOCALE, RadarChart,
-  RegressionChart, ScatterChart, SegmentedControl, Slider, SparkChart, SparkTile, Switch, TOUCH, TickerTable, Treemap, dayKey, describeSample, useViewport, type ChartDatum, type TickerRow,
+  BarList, BoxViolinChart, BulletChart, Button, CalendarHeatmap, Chart, DensityHistogram, DonutChart, ForestPlot, FunnelChart, Gauge, Heatmap, LOCALE, RadarChart, RegressionChart, ScatterChart, SegmentedControl, Slider, SparkChart, SparkTile, Switch, TOUCH, TickerTable, Treemap, dayKey, useViewport, type ChartDatum, type TickerRow,
 } from '../lib'
+import { describeSample } from '../examples'
 import { Row, Section, Spec, SpecAction } from './kit'
 
 /* Demo data mirrors the original page: same generators and seeds, so the shapes match. */

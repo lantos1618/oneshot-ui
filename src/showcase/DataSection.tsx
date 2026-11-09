@@ -195,6 +195,22 @@ export function DataSection() {
           { title: 'How do I theme it?', content: 'Change the CSS variables, or pick a theme in the appearance menu.' },
         ]} />
       </Spec>
+      <Spec title="Accordion · composable" desc="Built from parts: single choice that can close again (collapsible), a disabled item, and a panel kept mounted while closed (forceMount) so its switch keeps its state.">
+        <Accordion.Root type="single" collapsible defaultValue="shipping">
+          <Accordion.Item value="shipping">
+            <Accordion.Trigger>Shipping</Accordion.Trigger>
+            <Accordion.Content>Free over €50. Arrives in 2–4 working days across the EU.</Accordion.Content>
+          </Accordion.Item>
+          <Accordion.Item value="returns">
+            <Accordion.Trigger>Returns</Accordion.Trigger>
+            <Accordion.Content forceMount><span className="mb-2 block">30 days, no questions asked.</span><Switch label="Email me a return label" /></Accordion.Content>
+          </Accordion.Item>
+          <Accordion.Item value="warranty" disabled>
+            <Accordion.Trigger>Warranty <Badge size="sm" className="ml-auto mr-1">Soon</Badge></Accordion.Trigger>
+            <Accordion.Content>Two years on every product.</Accordion.Content>
+          </Accordion.Item>
+        </Accordion.Root>
+      </Spec>
       <Spec title="Animated list" desc="Type and press Enter. Tick items off; ✕ removes them smoothly.">
         <TaskList defaultValue={[{ id: 'a', text: 'Review pull request' }, { id: 'b', text: 'Book design critique' }, { id: 'c', text: 'Send weekly update' }]} />
       </Spec>

@@ -7,6 +7,12 @@ import { openCodeDrawer } from './CodeDrawer'
 
 /** Use-case tags per card title, copied from the original page. The filter and ⌘K match on them. */
 export const SPEC_TAGS: Record<string, string> = {
+  'Accordion · composable': 'data, disclosure, composable, FAQ', 'Composable overlays': 'overlay, dialog, popover, tooltip, composable, asChild',
+  'Context menu · composable': 'navigation, menu, right click, composable, keyboard', 'Links as buttons (asChild)': 'navigation, links, routing, asChild, buttons',
+  'Tabs · vertical and overflow': 'navigation, tabs, composable, keyboard', 'Toolbar and toggle group': 'navigation, toolbar, toggle, formatting, keyboard',
+  'Async multi-select': 'user input, selection, async, search, labels', 'Calendar constraints': 'user input, date, booking, availability',
+  'Date and time with a time zone': 'user input, date, time, time zone, scheduling', 'Month and year': 'user input, date, billing, reports',
+  'Typed dates in any locale': 'user input, date, i18n, locale, keyboard',
   'Alert dialog': 'overlay, confirmation, destructive, async, dialog', 'Async combobox': 'user input, search, autocomplete, async, loading',
   'Command palette · pages and async': 'navigation, search, keyboard, async, command menu', 'Data grid · 50k rows': 'data, table, virtualisation, performance, spreadsheet',
   'Data grid · server mode': 'data, table, server, pagination, async, selection', 'Form submission': 'forms, validation, user input, server actions, FormData',

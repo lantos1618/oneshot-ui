@@ -10,8 +10,10 @@ diagrams and maps, collaboration widgets and AI chat patterns, all themed by CSS
 - **No runtime CSS-in-JS**: components are Tailwind class strings plus a small token stylesheet.
 - **SSR-ready**: every component module is marked `"use client"`, the theme renders deterministically on the server, and
   `ThemeScript` applies the saved theme before the first paint.
-- **One file for AI tools**: the whole kit also ships as plain `.tsx` files you can paste into a chat or copy
-  into a project (see [Single-file usage](#single-file-usage-for-ai-tools)).
+- **Drop-in files for AI tools and copy-paste**: every component is also one self-contained `.tsx` file with exactly
+  the helpers it needs (`npx @lyndon/ui add data-grid`, or `npx shadcn add …/r/data-grid.json`), sized in tokens in
+  [`llms.txt`](./llms.txt) (see [Drop-in files, registry and CLI](#drop-in-files-registry-and-cli)). Docs with props
+  tables: [docs site](#docs-site).
 
 ## Install
 
@@ -108,6 +110,12 @@ What it does:
 | `nonce` | | CSP nonce for the `<style>` elements UIProvider renders (and motion's layout styles). See [Content Security Policy](#content-security-policy). |
 | `injectStyles` | `true` | `false` renders no `<style>`: link `@lyndon/ui/tokens.css` instead (for a CSP without nonces). |
 | `className` | | Classes for the `.ui-root` wrapper. |
+| `locale` | `'en-GB'` | BCP 47 locale for built-in strings, numbers, dates and the week start. See [Internationalisation and RTL](#internationalisation-and-rtl). |
+| `dir` | `'auto'` | `'ltr'`, `'rtl'`, or `'auto'` (from the locale: Arabic, Hebrew, Persian, Urdu… are right to left). |
+| `timeZone` | the runtime's | IANA zone for formatted dates and times. Set it when you server-render dates. |
+| `weekStartsOn` | from the locale | `0` = Sunday … `6` = Saturday. en-GB → 1, en-US → 0, ar-EG → 6. |
+| `hourCycle` | from the locale | Force `'h12'` or `'h23'`. |
+| `messages` | | A (partial) message catalog: `UI_MESSAGES_DE`, `UI_MESSAGES_AR`, or your own keys. Missing keys fall back to English. |
 
 Changed: `fonts` used to default to `true`. Pass `<UIProvider fonts>` to keep loading Geist from Google
 Fonts.
@@ -165,6 +173,86 @@ same `storageKey`, `defaultTheme` and `persist` as `UIProvider`, and add `suppre
 default). For a strict CSP, pass `nonce`, or hash the string from `themeScriptSource()`. The script applies the
 saved CSS variables only when every name is a theme token and every value matches what `themeTokens` produces (hex,
 `rgba()`, numbers and px, the two shadows, the font stack); otherwise it applies the defaults.
+
+## Internationalisation and RTL
+
+New in 0.4. `UIProvider` takes a locale, and everything that reads `useLocale()` formats and words itself for it:
+
+```tsx
+import { UIProvider, UI_MESSAGES_AR, UI_MESSAGES_DE } from '@lyndon/ui'
+
+<UIProvider locale="de-DE" messages={UI_MESSAGES_DE}>…</UIProvider>   // German strings, 1.234,50 €, Monday weeks
+<UIProvider locale="ar-EG" messages={UI_MESSAGES_AR}>…</UIProvider>   // Arabic, right to left, Saturday weeks
+<UIProvider locale="en-US" timeZone="America/New_York">…</UIProvider> // English strings, Nov 8, 2026, 2:05 PM
+```
+
+The default is `en-GB`, not `navigator.language`, so the server and the first client render agree. To follow
+the browser, pass its language after mount (`useEffect(() => setLocale(navigator.language), [])`), or read
+`Accept-Language` on the server and pass that.
+
+**In a component**, `useLocale()` returns `{ locale, dir, timeZone, weekStartsOn, hourCycle, t, fmt }`:
+
+```tsx
+const { t, fmt, dir, weekStartsOn } = useLocale()
+t('common.removeItem', { name: file.name })                // "Remove report.pdf" · "report.pdf entfernen"
+t('status.resultsCount', { count: n })                     // "No results" · "1 result" · "1,204 results"
+fmt.money(1234.5, 'EUR')                                   // "€1,234.50" · "1.234,50 €" · "‏١٬٢٣٤٫٥٠ €"
+fmt.date(d) · fmt.time(d) · fmt.relative(d)                // "8 Nov 2026" · "14:05" · "3 hours ago"
+fmt.weekdays('short')                                      // from the locale's first day: ['Mon', … 'Sun']
+fmt.number(n) · fmt.percent(0.125) · fmt.list(names) · fmt.compact(12400) · fmt.bytes(2.4e6)
+```
+
+`fmt` caches its `Intl` formatters per locale and options, so calling it in render is cheap. The module-level
+`fmt`, `fmtDate` and `LOCALE` still exist and stay en-GB (for code outside React and for backwards
+compatibility); `fmtFor(locale, { timeZone })` gives the same API for any locale, and `LocaleProvider` scopes a
+locale to one subtree.
+
+**Messages.** `UI_MESSAGES_EN` lists every built-in string under a stable key (`common.close`,
+`status.noResults`, `paging.rangeOf`, `theme.appearance`…). Values use a small ICU subset: `{name}`,
+`{n, number}`, `{count, plural, =0 {…} one {# item} other {# items}}` (plural categories from
+`Intl.PluralRules`, so Arabic's zero/one/two/few/many/other work) and `{x, select, a {…} other {…}}`. Override
+a few strings, or add your own keys and call `t('myApp.key')`:
+
+```tsx
+<UIProvider messages={{ 'common.close': 'Dismiss', 'myApp.greeting': 'Hi {name}' }}>
+```
+
+A key missing from your catalog falls back to English (development builds warn once per key); an unknown key
+renders as the key itself. `formatMessage(pattern, vars, locale)` and `createTranslator(locale, messages)` are
+exported for use outside components.
+
+**Adding a locale.** Copy `UI_MESSAGES_EN` (typed as `UIMessages`, so TypeScript lists any key you missed),
+translate the values, and pass it as `messages` with the matching `locale`. `UI_MESSAGES_DE` and
+`UI_MESSAGES_AR` are machine-drafted examples: have a native speaker review them before shipping. Numbers,
+dates, weekday and month names, plural rules, the week start and the clock come from `Intl`, so they need no
+catalog.
+
+**Right to left.** `dir` and `lang` go on the `.ui-root` wrapper (in the server HTML too), and with
+`target="html"` on `<html>` after hydration. When you server-render, also put them on your own `<html>` tag so
+the first paint is already mirrored: `<html lang={locale} dir={localeDir(locale)}>`. Inside components:
+
+- Use logical utilities: `ms-*`/`me-*`, `ps-*`/`pe-*`, `start-*`/`end-*`, `border-s`/`border-e`,
+  `rounded-s`/`rounded-e`, `text-start`/`text-end` (Tailwind v3.3+ or v4). `rtl:` variants for anything else.
+- Keep safe-area padding physical (`pl-[max(16px,env(safe-area-inset-left))]`): the inset belongs to that side
+  of the screen in both directions.
+- Arrow keys: `switch (logicalArrow(e.key, dir))` treats ArrowLeft as "forward" in RTL.
+- Motion offsets: `initial={{ x: dirX(12, dir) }}` slides in from the same logical side.
+- Directional icons (chevrons, undo, list icons): add `className="ui-flip"`; UIProvider injects
+  `[dir=rtl] .ui-flip { transform: scaleX(-1) }` (`UI_DIR_CSS`). With `injectStyles={false}`, add that rule to
+  your CSS.
+- `useDir()` returns `'ltr'` or `'rtl'`.
+
+**What is translated in 0.4.** The infrastructure, the appearance panel (`AppearancePanel`, `AppearanceMenu`,
+`ThemeToggle`), the page shell of the showcase, and the catalog keys for the strings that recur across modules.
+The remaining components still render English literals and some physical classes; the 0.4 sweep routes them
+through `t()`/`fmt` and logical utilities module by module. Two scripts track it:
+
+```sh
+node scripts/i18n-extract.mjs [files] [--summary] [--check]   # user-facing strings that bypass t()
+node scripts/rtl-lint.mjs [files] [--all] [--summary]         # physical utilities, arrow keys, icons, inline styles
+node scripts/rtl-lint.mjs --fix [files]                       # dry run: diff of the mechanical replacements
+node scripts/rtl-lint.mjs --fix --write [files]               # apply them
+```
 
 ## Content Security Policy
 
@@ -361,16 +449,101 @@ import { WorldMap } from '@lyndon/ui/geo'
 import { cn, mix } from '@lyndon/ui/utils'
 ```
 
-Entries: `core`, `motion`, `overlay`, `forms`, `navigation`, `feedback`, `data`, `datagrid`, `layout`,
-`editor`, `scheduler`, `code`, `media`, `collab`, `pages`, `charts`, `diagrams`, `geo`, `aistream`, `ai`, `aichat`,
-`aiagent`, `playground`, `appearance`, `provider`, `utils`, plus `styles.css`, `preflight.css` and `tokens.css`
-(the token CSS UIProvider injects, for `injectStyles={false}`).
+Entries: `core`, `motion`, `virtual`, `overlay`, `forms`, `navigation`, `feedback`, `data`, `datagrid`, `layout`,
+`editor`, `scheduler`, `code`, `markdown`, `media`, `collab`, `pages`, `charts`, `diagrams` (re-exports `gantt`,
+`statechart`, `trace` and `network`, each also an entry), `geo` (its map data, `geoworld` and `geoland`, loads lazily),
+`aistream`, `ai`, `aichat`, `aiagent`, `appearance`, `provider`, `utils`, plus `styles.css`, `preflight.css` and
+`tokens.css` (the token CSS UIProvider injects, for `injectStyles={false}`). Sample data and demo helpers (the
+showcase's documents, workflows, generated media, MotionPlayground) are in `@lyndon/ui/examples`, outside the stable API.
 Tree-shaking works with either style: a bundler only keeps the components you import.
 
-## Single-file usage for AI tools
+## Drop-in files, registry and CLI
 
-The package also contains the kit as plain TypeScript files in `node_modules/@lyndon/ui/dist-single/` (not
-importable through `exports`; copy them). They need only `react`, `react-dom`, `motion` and Tailwind:
+Every component is also published as one **self-contained `.tsx` file**: the component (or a small family, such as
+`dialog` with `DialogRoot`/`DialogContent`/…, or `dropdown-menu` with the menu items) plus exactly the library
+helpers it uses, importing only `react`, `react-dom` and `motion`. A build script walks the dependency graph of the
+library's top-level declarations with the TypeScript compiler and keeps the transitive closure, so `button.tsx` is
+about 20 KB (~6k tokens) instead of the ~700 KB `ui.tsx`. There are about 200 of them; the median is ~8k tokens.
+
+| Item | Size | ≈ tokens | | Item | Size | ≈ tokens |
+| --- | ---: | ---: | --- | --- | ---: | ---: |
+| `button` | 20 KB | 5.8k | | `chart` | 47 KB | 13k |
+| `tabs` | 30 KB | 8.7k | | `select` | 68 KB | 19k |
+| `dialog` | 38 KB | 11k | | `data-grid` | 199 KB | 57k |
+| `ui-provider` | 91 KB | 26k | | `assistant-chat` | 225 KB | 64k |
+
+`npx @lyndon/ui list` prints all of them with their sizes; `dist-registry/index.json` in the package (also
+`@lyndon/ui/registry.json`) lists name, description, exports, the components each file embeds, npm dependencies,
+bytes and approximate tokens (bytes ÷ 3.6).
+
+### CLI
+
+The package has a small CLI that copies drop-ins out of the installed package (no network, no dependencies, Node 20+):
+
+```sh
+npx @lyndon/ui add button dialog data-grid             # → src/components/ui/{button,dialog,data-grid,ui-provider}.tsx
+npx @lyndon/ui add select --dir app/ui --dry-run        # show what would be written
+npx @lyndon/ui add pricing-table                        # a block (see below)
+npx @lyndon/ui list                                     # every item with size and tokens
+npx @lyndon/ui info data-grid                           # exports, embedded components, dependencies
+```
+
+`add` also adds what an item requires (`ui-provider`, unless `--no-deps`), skips files that exist (exit code 2;
+`--overwrite` replaces them), never writes outside `--dir` and refuses names that aren't registry names (no paths).
+It prints the npm packages your `package.json` is missing (usually `motion`).
+
+Wrap the app once in `<UIProvider>` from `ui-provider.tsx`. The files share it: each file keeps its React contexts
+(theme, toasts, forms) on `globalThis` under a versioned key, so the provider from one file reaches the components in
+another. Module state that is not a context is per file: the scroll lock and the modal stack (Escape and `inert` for
+nested modals) are shared by the overlays inside one file, so nest modals from the same file (`dialog` has
+`Dialog`, `ModalLayer` and the composable parts).
+
+### Blocks
+
+Page sections that you are meant to edit (`pricing-table`, `checkout`, `onboarding-checklist`, `profile-card`,
+`cookie-consent`) are `registry:block` items, not part of the npm API. `npx @lyndon/ui add pricing-table` writes the
+block importing from `'@lyndon/ui'` when your `package.json` depends on it (a few KB), or a self-contained file
+otherwise; `--package` / `--standalone` choose explicitly.
+
+### shadcn CLI
+
+The same items are a [shadcn registry](https://ui.shadcn.com/docs/registry): `dist-registry/r/<name>.json`
+(`registry-item` schema: `name`, `type`, `files[].content`, `dependencies`, `registryDependencies`, `docs`, `meta`)
+plus `r/registry.json`. Each UI item lists `ui-provider` in `registryDependencies`, so it comes along:
+
+```sh
+npx shadcn add https://lantos1618.github.io/oneshot-ui/r/data-grid.json
+```
+
+`r/tokens.json` carries the token CSS (`@lyndon/ui/tokens.css`) as a `css` block, for `<UIProvider injectStyles={false}>`
+under a strict CSP. Its variables include `--card`, `--primary`, `--muted` and `--accent` at `:root`, which a shadcn
+theme also defines; in a shadcn project prefer `<UIProvider target="self">`, which scopes the tokens to its wrapper.
+
+**Hosting.** `.github/workflows/pages.yml` builds the registry with the Pages URL baked into `registryDependencies`
+and deploys it with the docs to GitHub Pages (`/r/*.json`, `/files/*.tsx`, `/index.json`, `/llms.txt`). To host it
+elsewhere, run `REGISTRY_BASE_URL=https://example.com/ui pnpm build:registry` and serve `dist-registry/` at that URL.
+After a release the files are also on any npm CDN, e.g.
+`https://unpkg.com/@lyndon/ui@<version>/dist-registry/files/button.tsx` (the `r/` JSON is not in the npm package).
+
+### For AI tools
+
+Attach the drop-ins the task needs plus `ui-provider.tsx` rather than a whole-library file. [`llms.txt`](./llms.txt)
+is an index for AI tools (what the library is, install, theming, the CLI and registry, and every item with a one-line
+description, its size in tokens and a link to its file); [`llms-full.txt`](./llms-full.txt) adds each item's exports
+and embedded components. Both are generated by `pnpm build:registry`. A prompt that works well:
+
+```text
+Build the UI with the attached files (React 19 + Tailwind + motion): ui-provider.tsx, button.tsx, dialog.tsx, …
+Import each component from its file. Wrap the app in <UIProvider>. Use only what the files export and the colour
+tokens (bg-[var(--card)], text-[var(--fg2)], border-[var(--line)], var(--accent)) instead of raw colours, so
+light/dark and every theme keep working. Override a component's own classes with Tailwind's ! prefix (className="!h-8").
+```
+
+### Whole library in one file
+
+For tools with a large context only, the package also has the kit as a few big files in
+`node_modules/@lyndon/ui/dist-single/` (not importable through `exports`; copy them). They are too large for most
+chats (`ui-all.tsx` is about 1.7 MB, ~490k tokens); prefer the drop-ins above.
 
 | File | Contents | Needs |
 | --- | --- | --- |
@@ -380,24 +553,25 @@ importable through `exports`; copy them). They need only `react`, `react-dom`, `
 | `ui-ai.tsx` | AI message model and streams (`useAiChat`), chat parts, composer, agents | `ui.tsx`, `ui-content.tsx` |
 | `ui-all.tsx` | Everything in one file | |
 
-Copy `ui.tsx` (plus any add-ons, side by side in the same folder) into your project, or attach it to a chat
-with an AI assistant as the design system. Each file starts with `'use client'` and a stamp line with the package
-version, the git commit it was built from and the sha256 of the rest of the file; `dist-single/SHA256SUMS` lists the
-sha256 of each whole file (`cd node_modules/@lyndon/ui/dist-single && sha256sum -c SHA256SUMS`). A copied file
-doesn't update itself: re-copy it whenever a release fixes a security issue (see [SECURITY.md](./SECURITY.md)).
-A prompt that works well:
+**Integrity.** Every drop-in and whole-library file starts with `'use client'` and a stamp line with the package
+version, the git commit it was built from and the sha256 of the rest of the file. `dist-single/SHA256SUMS` lists the
+sha256 of each whole-library file (`cd node_modules/@lyndon/ui/dist-single && sha256sum -c SHA256SUMS`) and
+`dist-registry/index.json` the sha256 of each drop-in. A copied file doesn't update itself: re-copy it whenever a
+release fixes a security issue (see [SECURITY.md](./SECURITY.md)).
 
-```text
-Build the UI with the attached ui.tsx (React 19 + Tailwind + motion). Import components from './ui'.
-Wrap the app in <UIProvider>. Use only the components and hooks it exports (Button, Card, Input, Select,
-Dialog, Tabs, DataTable, useToast, …) and its colour tokens (bg-[var(--card)], text-[var(--fg2)],
-border-[var(--line)], var(--accent)) instead of raw colours, so light/dark and every theme keep working.
-Override a component's own classes with Tailwind's ! prefix (className="!h-8").
-```
+## Docs site
+
+`docs/` is a Vite + React app built with the library itself: one page per registry item with its description, the
+showcase cards that use it (mounted live), props tables generated from the TypeScript types at build time (name, type,
+default from the destructuring, JSDoc), the drop-in's size and install commands for npm, the CLI and shadcn. It has
+search (⌘K), the theme toggle and a phone layout. `pnpm docs:dev` runs it; `pnpm docs:build` (after `pnpm build`)
+writes `docs-dist/` with the docs, the showcase under `showcase/`, the registry and `llms.txt`, and
+`.github/workflows/pages.yml` deploys that to GitHub Pages.
 
 ## Forms
 
-Every value-holding control (Select, Combobox, MultiSelect, DatePicker, DateRangePicker, TimePicker, TagInput, Slider,
+Every value-holding control (Select, Combobox, MultiSelect, DatePicker, DateRangePicker, DateField, TimeField, TimePicker,
+DateTimeField, DateTimePicker, MonthPicker, YearPicker, TimeZonePicker, TagInput, Slider,
 RangeSlider, OTPInput, PhoneInput, CurrencyInput, Rating, ColorPicker, NumberStepper, SegmentedControl, RadioGroup,
 Switch, Checkbox, FileUpload) behaves like a native field: `name`, `required`, `disabled`, `readOnly`, `invalid`
 (aria-invalid plus the error look), `onBlur`, `form`, and a `ref` that reaches the focusable element (so
@@ -408,9 +582,12 @@ User edits fire bubbling `input` and `change` events on the form, like native fi
 | Control | Submitted as |
 |---|---|
 | Select, Combobox, SegmentedControl, RadioGroup | the option `value`; `''` when nothing is chosen (Combobox sends the value, not the typed text) |
-| TimePicker | `"09:30"` (24-hour, like `<input type="time">`) |
+| TimePicker, TimeField | `"09:30"` (24-hour wall time, like `<input type="time">`; `"09:30:15"` with `granularity="second"`); `''` while empty or half-typed |
 | MultiSelect, TagInput | one field per item: `labels=bug&labels=docs` (never comma-joined; read with `formData.getAll`); nothing when empty |
-| DatePicker | local date `"2026-11-08"` (like `<input type="date">`); `''` when empty |
+| DatePicker, DateField | local date `"2026-11-08"` (like `<input type="date">`); `''` when empty or half-typed |
+| DateTimeField, DateTimePicker | ISO 8601 with the offset of `timeZone` at that instant: `"2026-11-08T09:30:00+01:00"`; `''` when empty. `timeZoneName="tz"` adds the zone (`"Europe/Zurich"`) |
+| MonthPicker, YearPicker | `"2026-11"` (like `<input type="month">`), `"2026"`; `''` when empty |
+| TimeZonePicker | the IANA name, `"Europe/Zurich"` |
 | DateRangePicker | two fields, start then end: `period=2026-11-01&period=2026-11-07`; `''` for a missing side |
 | Slider, NumberStepper, Rating | the number as a plain string: `"40"`; Rating sends `''` while unrated |
 | RangeSlider | two fields, low then high: `price=200&price=750` |
@@ -422,7 +599,8 @@ User edits fire bubbling `input` and `change` events on the form, like native fi
 | FileUpload | a native file field with the picked or dropped files (use `multipart/form-data`) |
 
 `required` means something is chosen (MultiSelect and TagInput: at least one item; DateRangePicker: both ends; OTPInput:
-every box; Checkbox and Switch: ticked). The browser validates it like a native field and, when it focuses the field,
+every box; Checkbox and Switch: ticked). The date controls also stop a submit, with a message, when a date is half-typed,
+outside `min`/`max` or `isDateUnavailable`. The browser validates it like a native field and, when it focuses the field,
 focus lands on the real control. Disabled controls submit nothing; read-only ones submit but can't be changed.
 
 **Form and FormField** need no form library. `FormField` wires a label (`htmlFor`, or `aria-labelledby` for controls
@@ -504,17 +682,188 @@ function JoinForm() {
 }
 ```
 
-**Async Combobox.** `loadOptions(query, { signal })` replaces (or adds to) `options`. It runs `debounce` ms (200) after
+**Dates and times.** The date controls read `locale`, `weekStartsOn`, the hour cycle and `timeZone` from `UIProvider`
+(or `LocaleProvider`), and each takes them as props too. Month and weekday names, digits, the order of the typed segments
+(en-GB `dd/mm/yyyy`, en-US `mm/dd/yyyy`, ja-JP `yyyy/mm/dd`) and the 12/24-hour clock all come from `Intl`.
+
+- `Calendar`, `DatePicker`, `DateRangePicker`: `min`, `max`, `isDateUnavailable(date)` (disabled days stay focusable and
+  are announced), `numberOfMonths` (1–3, stacked on phones), the caption opens a month grid and then a year grid, and
+  the grid follows the ARIA date-grid keys (arrows, PageUp/PageDown for months, Shift for years, Home/End for the week).
+  `presets` (default `RANGE_PRESETS`: Today, Yesterday, Last 7 days, Last 30 days, This month, Last month) are
+  `[label, () => range]` pairs.
+- `DateField`, `TimeField`, `DateTimeField`: typed segments with auto-advance, ↑/↓ to step, Backspace, and paste of ISO
+  or locale-formatted text. `granularity` is `'day' | 'hour' | 'minute' | 'second'`; `hourCycle={12 | 24}` overrides the locale.
+- `DateTimePicker` is a DateTimeField with a calendar popover and a time field, plus `timeZonePicker` for a searchable
+  list of every IANA zone. `TimePicker` is a TimeField with suggested times every `step` minutes (its 0.3 props still work).
+- **Time zones.** The value of DateTimeField and DateTimePicker is an ISO string with the offset of `timeZone` at that
+  instant, so `new Date(value)` is the instant and the wall time stays readable. A wall time the clocks skip moves forward
+  (01:30 on 29 March 2026 in London is `02:30+01:00`), and a repeated one takes the first (`01:30+01:00` on 25 October). A
+  new zone in the picker keeps the wall time and changes the offset. `zonedParts`, `zonedDate`, `zoneOffset` and
+  `toZonedISO` do the same conversions in your own code.
+
+```tsx
+<FormField label="Kick-off" name="kickoff"><DateTimePicker timeZone="Europe/Zurich" timeZonePicker timeZoneName="kickoff_tz" /></FormField>
+<FormField label="Delivery" name="delivery"><DatePicker min={today} isDateUnavailable={d => d.getDay() % 6 === 0} /></FormField>
+```
+
+**Async Combobox and MultiSelect.** `loadOptions(query, { signal })` replaces (or adds to) `options`. It runs `debounce` ms (200) after
 typing stops, once the query has `minChars`; a newer query aborts the older request (pass `signal` to `fetch`) and late
 results are dropped. The list shows loading, empty and error states (Retry, or Enter in the field). `creatable` adds
 “Create “x”” (`onCreate(text)` may return the Option to use), options can carry a `group`, `defaultOptions` show before
-the first load, and `onInputChange` reports typing. Option lists past 100 items (Select, Combobox, MultiSelect) render
+the first load, and `onInputChange` reports typing. MultiSelect takes the same props; with `loadOptions` it gets a search
+box after the chips, stays open while you tick several results, and keeps the chips labelled across searches. Option lists past 100 items (Select, Combobox, MultiSelect) render
 only the visible rows.
 
 ```tsx
 <Combobox name="city" creatable loadOptions={(q, { signal }) =>
   fetch(`/api/cities?q=${encodeURIComponent(q)}`, { signal }).then(r => r.json())} />
 ```
+
+## Composable parts
+
+Every interactive family has two APIs that render the same thing. The **config props** are a quick, one-line form
+(`<Tabs items={[…]} />`, `<Dialog title footer>`), and the **parts** are a shadcn/Radix-style form for when you need
+your own markup. The config components are now built on the parts, so they look and behave the same. Each family is an
+object: `Tabs.Root`, `Tabs.List` and so on. The parts are also exported by name (`TabsRoot`, `DialogTitle`,
+`MenuCheckboxItem` …).
+
+Every Root is controlled (`value`/`open` with `onValueChange`/`onOpenChange`) or uncontrolled
+(`defaultValue`/`defaultOpen`). Keyboard support and ARIA work as in the config form.
+
+| Family | Parts | Notes |
+|---|---|---|
+| Tabs | `Root` `List` `Trigger` `Content` | `orientation="vertical"`, `activationMode="manual"`, `lazy`, `keepMounted`; `Content forceMount`. A horizontal list that overflows scrolls with edge fades and keeps the selected tab in view |
+| Dialog | `Root` `Trigger` `Content` `Title` `Description` `Close` `Footer` | `Close` with no children is the ✕ icon button |
+| Sheet | `Root` `Trigger` `Content` `Header` `Title` `Description` `Close` `Footer` | `Content side responsive`; `Header` is the drag handle on a bottom sheet |
+| AlertDialog | `Root` `Trigger` `Content` `Title` `Description` `Footer` `Cancel` (= `Close`) `Action` | `Action onConfirm` may return a promise: the button spins, and a rejection shows its message |
+| Popover | `Root` `Trigger` `Content` `Close` | `Content side align sideOffset arrow` |
+| Tooltip | `Root` `Trigger` `Content` | `Root delay disabled`; `Content side align sideOffset arrow portal` |
+| HoverCard | `Root` `Trigger` `Content` | `Root openDelay closeDelay pinOnClick` |
+| DropdownMenu | `Root` `Trigger` `Content` `Item` `CheckboxItem` `RadioGroup` `RadioItem` `Label` `Separator` `Group` `Sub` `SubTrigger` `SubContent` `Shortcut` | Typeahead, ↑/↓/Home/End, →/← for submenus |
+| ContextMenu | `Root` `Trigger` `Content` plus the same item parts | Right-click, long-press, Shift+F10 |
+| Accordion | `Root` `Item` `Trigger` `Content` | `Root type="single" \| "multiple"`, `collapsible`; `Item disabled`; `Content forceMount` |
+| ToggleGroup | `Root` (= `ToggleGroup`) `Item` | `type="single"` is a radio group, `"multiple"` uses pressed buttons |
+| Toolbar | `Root` (= `Toolbar`) `Button` `Link` `Toggle` `ToggleGroup` `ToggleItem` `Separator` | One Tab stop; arrows move across all items |
+| Toggle | (one component) | `pressed`/`defaultPressed`/`onPressedChange`, `variant="ghost" \| "outline"`, `size` |
+
+```tsx
+import { Accordion, AlertDialog, Dialog, DropdownMenu, Tabs, Toolbar, Tooltip } from '@lyndon/ui'
+
+<Tabs.Root defaultValue="profile" orientation="vertical" lazy>
+  <Tabs.List aria-label="Settings">
+    <Tabs.Trigger value="profile">Profile</Tabs.Trigger>
+    <Tabs.Trigger value="billing">Billing</Tabs.Trigger>
+  </Tabs.List>
+  <Tabs.Content value="profile">…</Tabs.Content>
+  <Tabs.Content value="billing">…</Tabs.Content>
+</Tabs.Root>
+
+<Dialog.Root>
+  <Dialog.Trigger>Rename</Dialog.Trigger>
+  <Dialog.Content>
+    <Dialog.Title>Rename project</Dialog.Title>
+    <Dialog.Description>Shown in the sidebar and in shared links.</Dialog.Description>
+    <Input defaultValue="Website redesign" />
+    <Dialog.Footer>
+      <Dialog.Close>Cancel</Dialog.Close>
+      <Dialog.Close variant="primary" onClick={save}>Save</Dialog.Close>
+    </Dialog.Footer>
+  </Dialog.Content>
+</Dialog.Root>
+
+<AlertDialog.Root open={open} onOpenChange={setOpen}>
+  <AlertDialog.Content>
+    <AlertDialog.Title>Revoke the API key?</AlertDialog.Title>
+    <AlertDialog.Description>Apps using it stop working immediately.</AlertDialog.Description>
+    <AlertDialog.Footer>
+      <AlertDialog.Cancel />
+      <AlertDialog.Action onConfirm={() => api.revoke(id)}>Revoke key</AlertDialog.Action>
+    </AlertDialog.Footer>
+  </AlertDialog.Content>
+</AlertDialog.Root>
+
+<DropdownMenu.Root>
+  <DropdownMenu.Trigger>View</DropdownMenu.Trigger>
+  <DropdownMenu.Content align="end">
+    <DropdownMenu.Label>Show</DropdownMenu.Label>
+    <DropdownMenu.CheckboxItem checked={grid} onCheckedChange={setGrid}>Grid</DropdownMenu.CheckboxItem>
+    <DropdownMenu.RadioGroup value={density} onValueChange={setDensity} aria-label="Density">
+      <DropdownMenu.RadioItem value="compact">Compact</DropdownMenu.RadioItem>
+      <DropdownMenu.RadioItem value="comfortable">Comfortable</DropdownMenu.RadioItem>
+    </DropdownMenu.RadioGroup>
+    <DropdownMenu.Separator />
+    <DropdownMenu.Sub>
+      <DropdownMenu.SubTrigger icon="upload">Export</DropdownMenu.SubTrigger>
+      <DropdownMenu.SubContent>
+        <DropdownMenu.Item onSelect={() => exportAs('png')}>PNG</DropdownMenu.Item>
+      </DropdownMenu.SubContent>
+    </DropdownMenu.Sub>
+    <DropdownMenu.Item onSelect={copy}>Copy link<DropdownMenu.Shortcut>⌘L</DropdownMenu.Shortcut></DropdownMenu.Item>
+  </DropdownMenu.Content>
+</DropdownMenu.Root>
+
+<Accordion.Root type="single" collapsible defaultValue="shipping">
+  <Accordion.Item value="shipping">
+    <Accordion.Trigger>Shipping</Accordion.Trigger>
+    <Accordion.Content>Free over €50.</Accordion.Content>
+  </Accordion.Item>
+</Accordion.Root>
+
+<Toolbar aria-label="Formatting">
+  <Toolbar.ToggleGroup type="multiple" value={marks} onValueChange={setMarks} aria-label="Text style">
+    <Toolbar.ToggleItem value="bold" aria-label="Bold"><b>B</b></Toolbar.ToggleItem>
+    <Toolbar.ToggleItem value="italic" aria-label="Italic"><i>I</i></Toolbar.ToggleItem>
+  </Toolbar.ToggleGroup>
+  <Toolbar.Separator />
+  <Toolbar.Button>Link</Toolbar.Button>
+</Toolbar>
+
+<Tooltip.Root>
+  <Tooltip.Trigger asChild><IconButton icon="info" label="Help" /></Tooltip.Trigger>
+  <Tooltip.Content side="bottom" arrow>Opens the docs</Tooltip.Content>
+</Tooltip.Root>
+```
+
+Menu items close the menu when chosen. Checkbox and radio items stay open so you can toggle several. Change this with
+`closeOnSelect`, or call `e.preventDefault()` in `onSelect` to keep the menu open. Menu content positions its
+submenus itself, so don't give it `overflow-hidden` or `overflow-auto`.
+
+### asChild and links
+
+`asChild` renders your single child element instead of the part's own element, with the part's props merged in. It
+works on `Button`, `IconButton`, every `Trigger` and `Close`, `DropdownMenu.Item` and `ContextMenu.Item`,
+`Tabs.Trigger`, `Accordion.Trigger`, `Toggle` and `ToggleGroup.Item`. Use it for links: the library has no router of
+its own, so links work with any router.
+
+```tsx
+import Link from 'next/link' // or react-router's Link, TanStack's Link, or a plain <a>
+
+<Button asChild variant="primary"><Link href="/pricing">See pricing</Link></Button>
+<IconButton asChild icon="settings" label="Settings"><Link href="/settings" /></IconButton>
+<DropdownMenu.Item asChild><Link href="/inbox">Inbox</Link></DropdownMenu.Item>
+<Dialog.Trigger asChild><MyFancyButton>Open</MyFancyButton></Dialog.Trigger>
+```
+
+The contract (implemented by `Slot`, which is exported along with `mergeSlotProps`, `composeRefs` and
+`useComposedRefs`):
+
+- **One child.** The child must be exactly one React element: no text, array or fragment. Anything else throws an
+  error that says so.
+- **Props pass through.** The child must spread the props it receives onto a DOM element and accept `ref`. React 19
+  function components that pass `...props` and `ref` through do, and so do router `Link`s.
+- **className.** Both are kept: the part's classes first, then yours.
+- **style.** The two are merged, and yours win on conflicts.
+- **Event handlers.** Both run, yours first. Call `event.preventDefault()` in yours to skip the part's handler (for
+  example, to stop a trigger from opening).
+- **ID lists.** `aria-describedby` and `aria-labelledby` are joined, so a tooltip's description adds to yours.
+- **ref.** The refs are composed, so the part and you both get the node.
+- **Other props.** Yours win.
+- **`Button asChild` with `disabled` or `loading`.** The child gets `aria-disabled` (and `aria-busy`), and clicks are
+  blocked. The spinner only renders inside a real `<button>`.
+- **`IconButton asChild`.** The icon goes inside your element, and `label` becomes its accessible name.
+
+Nested `asChild`s compose. For example, one button can be both a tooltip trigger and a popover trigger:
+`<Tooltip.Trigger asChild><Popover.Trigger asChild><IconButton … /></Popover.Trigger></Tooltip.Trigger>`.
 
 ## Overriding classes
 
@@ -596,7 +945,14 @@ and zizmor.
   `tsc -b` plus the tests' own type-check, `pnpm build`, the single-file bundles type-checked on their own,
   `pnpm test:ssr`, `pnpm test` (Vitest), and `pnpm test:pack`: what `npm pack` would publish has every entry
   point, no source maps, `sourceMappingURL` comments, local paths or secret-shaped strings, and
-  `dist-single/SHA256SUMS` matches the bundles.
+  `dist-single/SHA256SUMS` matches the bundles, and the CLI and every drop-in listed in `dist-registry/index.json` are
+  in the tarball with matching sha256.
+- **`ci.yml` → check (registry and docs):** `pnpm test:registry` (every drop-in type-checks on its own under the
+  app's strict settings, imports only react/react-dom/motion, loads on the server, and a sample renders inside the
+  `UIProvider` of `ui-provider.tsx`), a CLI smoke test into a temporary project, and `pnpm typecheck:docs && pnpm docs:build`.
+- **`pages.yml`:** on pushes to `main` and by hand, builds the docs, the showcase and the registry (with the Pages
+  URL in `registryDependencies`) and deploys them to GitHub Pages (`pages: write` and `id-token: write` only in the
+  deploy job).
 - **`ci.yml` → e2e:** Playwright (Chromium) against the built showcase served by `vite preview`, on desktop light,
   desktop dark and iPhone 13: no console errors, no axe violations beyond `tests/e2e/axe-baseline.json`,
   layout-shift budgets per section, no sideways page scroll on the phone. The report is uploaded when it fails.

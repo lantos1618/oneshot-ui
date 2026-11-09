@@ -1,4 +1,6 @@
-import { AGENT_WORKFLOWS, AGENT_WORKFLOW_ORDER, DataFlow, type DiagramState, type DiagramTransition, Gantt, type GanttPhase, Globe, type GlobeHub, type GlobeRoute, NetworkGraph, ProcessFlow, Sankey, StateDiagram, StateMachine, TraceWaterfall, type TraceSpan, WORLD_MAP, WorldMap, useToast } from '../lib'
+import { useMemo } from 'react'
+import { DataFlow, type DiagramState, type DiagramTransition, Gantt, type GanttPhase, Globe, type GlobeHub, type GlobeRoute, NetworkGraph, ProcessFlow, Sankey, StateDiagram, StateMachine, TraceWaterfall, type TraceSpan, type WorldMapData, WorldMap, useToast, useWorldMap } from '../lib'
+import { AGENT_WORKFLOWS, AGENT_WORKFLOW_ORDER } from '../examples'
 import { Section, Spec } from './kit'
 
 /* Gantt: a six-week launch plan ─────────────────────────────────────────── */
@@ -34,7 +36,7 @@ const SD_TRANSITIONS: DiagramTransition[] = [
 ]
 const SD_HISTORY = { of: 'active', at: [282, 262] as [number, number], default: 'paying', d: 'M288,253 C300,210 300,150 300,136' }
 
-/* State machine: the agent workflows are AGENT_WORKFLOWS from the library (the transit map in the AI section runs the same ones) */
+/* State machine: the agent workflows are AGENT_WORKFLOWS from the examples (the transit map in the AI section runs the same ones) */
 
 /* Trace: an agent run ───────────────────────────────────────────────────── */
 const TRACE: TraceSpan[] = ([
@@ -57,16 +59,18 @@ const TRACE: TraceSpan[] = ([
 
 /* Map: seeded demo metrics per country ──────────────────────────────────── */
 const MAP_KEY: Record<string, number> = { 'United States of America': 98, 'United Kingdom': 88, Germany: 84, Switzerland: 80, France: 74, Canada: 70, Netherlands: 68, Australia: 66, Japan: 62, Sweden: 58, Spain: 52, Italy: 50, Ireland: 49, Singapore: 47, Brazil: 44, India: 42, 'South Korea': 40, Norway: 38, Denmark: 37, Austria: 36, Belgium: 35, Poland: 33, Mexico: 30, 'New Zealand': 29, Finland: 28, Portugal: 26, 'United Arab Emirates': 25, Israel: 24, China: 22, Nigeria: 18, 'South Africa': 20, Argentina: 17, Indonesia: 15, Turkey: 16, Chile: 14 }
-const MAP_DATA = (() => {
-  let sd = 17
-  const R = () => (sd = (sd * 9301 + 49297) % 233280) / 233280
+/** The key markets right away; once the map's outlines have loaded (lazily), a seeded sprinkle of small ones too. */
+const mapDemoData = (world: WorldMapData | null) => {
   const out: Record<string, Record<string, number> | null> = {}
-  WORLD_MAP.countries.forEach(([, n]) => {
+  ;(world?.countries.map(c => c[1]) ?? Object.keys(MAP_KEY)).forEach(n => {
+    // seeded per country, so a market's numbers are the same before and after the outlines arrive
+    let sd = [...n].reduce((h, c) => (h * 31 + c.charCodeAt(0)) % 233280, 17)
+    const R = () => (sd = (sd * 9301 + 49297) % 233280) / 233280
     const base = MAP_KEY[n] ?? (R() < 0.55 ? Math.round(R() * 12) : null)
     out[n] = base == null ? null : { users: base, rev: Math.max(1, Math.round(base * (0.6 + R() * 0.8))), growth: Math.round((MAP_KEY[n] ? 30 : 60) - base * 0.25 + R() * 25) }
   })
   return out
-})()
+}
 const MAP_METRICS = [
   { key: 'users', label: 'Users', format: (v: number) => `${(v * 1.3).toFixed(1)}k users`, short: (v: number) => `${(v * 1.3).toFixed(1)}k` },
   { key: 'rev', label: 'Revenue', format: (v: number) => `€${(v * 4.2).toFixed(0)}k` },
@@ -108,6 +112,12 @@ const PF_STEPS = [
 const DF_SOURCES = [{ label: 'Postgres', icon: 'database' as const, color: 'var(--c2)', rate: 120 }, { label: 'Stripe', icon: 'card' as const, color: 'var(--c3)', rate: 64 }, { label: 'S3 bucket', icon: 'cloud' as const, color: 'var(--c4)', rate: 90 }, { label: 'Webhooks', icon: 'webhook' as const, color: 'var(--fg2)', rate: 40 }, { label: 'Kafka', icon: 'stream' as const, color: 'var(--c2)', rate: 150 }]
 const DF_TARGETS = [{ label: 'Warehouse', icon: 'warehouse' as const, color: 'var(--c2)', share: 0.45 }, { label: 'Dashboards', icon: 'chart' as const, color: 'var(--c4)', share: 0.3 }, { label: 'Alerts', icon: 'bell' as const, color: 'var(--warn)', share: 0.1 }, { label: 'Public API', icon: 'code' as const, color: 'var(--c3)', share: 0.15 }]
 
+function DgWorldMapDemo(p: Omit<Parameters<typeof WorldMap>[0], 'data'>) {
+  const world = useWorldMap()
+  const data = useMemo(() => mapDemoData(world), [world])
+  return <WorldMap data={data} {...p} />
+}
+
 export function DiagramsSection() {
   const toast = useToast()
   return (
@@ -139,7 +149,7 @@ export function DiagramsSection() {
         <DataFlow sources={DF_SOURCES} targets={DF_TARGETS} />
       </Spec>
       <Spec span={3} title="Map" desc="Choropleth by country, hubs pulse. Hover or tap a country, or a row in the list.">
-        <WorldMap data={MAP_DATA} metrics={MAP_METRICS} hubs={MAP_HUBS} names={MAP_NAMES} />
+        <DgWorldMapDemo metrics={MAP_METRICS} hubs={MAP_HUBS} names={MAP_NAMES} />
       </Spec>
       <Spec span={3} title="Globe" desc="3D dot globe with live routes between hubs. Drag to spin (sideways on touch), it keeps its momentum.">
         <Globe hubs={GLOBE_HUBS} routes={GLOBE_ROUTES} />

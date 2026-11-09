@@ -1,10 +1,10 @@
 import { Children, isValidElement, useCallback, useEffect, useId, useLayoutEffect, useRef, useState, type KeyboardEvent as RKeyboardEvent, type ReactNode } from 'react'
 import { AnimatePresence, motion, useReducedMotion } from 'motion/react'
-import { Badge, Button, Chip, Icon, IconButton, Spinner, TOUCH, cn, floatingSurface, inputClass, menuItemClass, safeColor, safeUrl, sleep, spring, surface, useCoarsePointer, useControllable, useMediaQuery, useOutside, useRoving, type IconName, type Tone } from './core'
+import { Badge, Button, Chip, Icon, IconButton, Spinner, TOUCH, cn, floatingSurface, inputClass, menuItemClass, safeColor, sleep, spring, surface, useCoarsePointer, useControllable, useMediaQuery, useOutside, useRoving, type IconName, type Tone } from './core'
 import { Collapse, CopyButton, TypingDots, confetti, useToast } from './feedback'
 import { Checkbox, OptionList, Select, Slider, Switch } from './forms'
 import { Dialog, FloatingPanel, MenuItem, MenuLabel } from './overlay'
-import { AttachmentChip, Citation, SendButton, ShimmerText, StreamingText, ToolCall, useAttachments, useAutoGrow, type Attachment } from './ai'
+import { AttachmentChip, Citation, PromptInput, SendButton, SourceList, sourceDomain, ShimmerText, StreamingText, ToolCall, useAttachments, type Attachment } from './ai'
 import { JsonViewer } from './data'
 import { useVirtual } from './virtual'
 import { Markdown } from './markdown'
@@ -26,19 +26,9 @@ export function ChatCard({ title, sub, badge, children, className }: { title?: R
   )
 }
 
-/** Source chips under an answer: favicon letter, name and what was read, numbered. `href` must be http(s), mailto or relative (others become #); `color` must be a plain CSS colour. */
+/** @deprecated Use `SourceList` with `Source` items (`name` → `title`, `desc` → `domain`, `href` → `url`). Removed in 0.5. */
 export function ChatSources({ items, className }: { items: { name: string; desc: string; color?: string; href?: string }[]; className?: string }) {
-  return (
-    <div className={cn('flex flex-wrap gap-1.5', className)}>
-      {items.map((s, i) => (
-        <a key={i + s.name} href={safeUrl(s.href ?? '#ai')} target={s.href && /^https?:/i.test(safeUrl(s.href)) ? '_blank' : undefined} rel="noopener noreferrer" className={cn(surface.md, 'flex items-center gap-2 py-1.5 pr-2.5 pl-1.5 text-xs text-[var(--fg)] no-underline hover:border-[var(--fg3)]')}>
-          <span className="grid h-[22px] w-[22px] flex-none place-items-center rounded-[var(--r-md)] text-[11px] font-bold text-white" style={{ background: `color-mix(in srgb, ${safeColor(s.color, 'var(--accent)')} 80%, #000)` }}>{s.name[0]}</span>
-          <span><b className="block font-medium">{s.name}</b><span className="text-[var(--fg3)]">{s.desc}</span></span>
-          <span className="ml-1 font-[family-name:var(--mono)] text-[11px] font-semibold text-[var(--fg3)] [@media(pointer:coarse)]:text-[11px]">{i + 1}</span>
-        </a>
-      ))}
-    </div>
-  )
+  return <SourceList className={className} sources={items.map(s => ({ title: s.name, domain: s.desc, color: s.color, url: s.href }))} />
 }
 
 /** Checklist answer: tick items off; the count updates and confetti fires when everything is done. */
@@ -333,9 +323,8 @@ export function ToolCard({ part, onDecide, defaultOpen = false, className }: { p
 
 /** The numbered source chips under an answer (the same numbers as its [n] citations). */
 function AiMessageSources({ sources }: { sources: AiSourcePart[] }) {
-  return <ChatSources className="mt-1" items={sources.map(s => { const host = aiSourceHost(s.url); return { name: s.title || host, desc: host, href: s.url } })} />
+  return <SourceList className="mt-1" sources={sources.map(s => ({ title: s.title || sourceDomain({ title: '', url: s.url }), url: s.url }))} />
 }
-const aiSourceHost = (url: string) => { try { return new URL(url).hostname || url } catch { return url } }
 
 /**
  * Renders a message's parts in order: text as Markdown (links through safeUrl, `[n]` as a Citation of the message's
@@ -349,7 +338,7 @@ export function MessageParts({ message, onDecideTool, onRetry, renderData, onLin
   const streaming = message.status === 'streaming'
   const sources = message.parts.filter((p): p is AiSourcePart => p.type === 'source')
   const lastText = message.parts.reduce((k, p, i) => p.type === 'text' ? i : k, -1)
-  const cite = (n: number) => { const s = sources[n - 1]; return s ? <Citation n={n} source={{ title: s.title || aiSourceHost(s.url), url: s.url, snippet: s.snippet }} /> : <>[{n}]</> }
+  const cite = (n: number) => { const s = sources[n - 1]; return s ? <Citation n={n} source={{ title: s.title || sourceDomain({ title: '', url: s.url }), url: s.url, snippet: s.snippet }} /> : <>[{n}]</> }
   const visible = message.parts.some(p => p.type !== 'source' && p.type !== 'data')
   return (
     <div className={cn('flex min-w-0 flex-col gap-2', className)}>
@@ -765,13 +754,12 @@ export function AgentComposer({ chat: live, onSend, onApprovalRequest, items = [
   const [msgs, setMsgs] = useState<AcMsg[]>([])
   const [queue, setQueue] = useState<AcDraft[]>([])
   const [submitting, setSubmitting] = useState(false)
-  const [over, setOver] = useState(false)
   const [said, setSaid] = useState('') // short summaries for screen readers
   const [sel, setSel] = useState<{ x: number; y: number; bottom: number; text: string } | null>(null)
   const narrow = useMediaQuery('(max-width: 639px)'), coarse = useCoarsePointer()
   const [wsOpen, setWsOpen] = useState(false) // phones: the workspace folds into a toggle above the composer
-  const boxRef = useRef<HTMLDivElement>(null), inp = useRef<HTMLTextAreaElement>(null), fileRef = useRef<HTMLInputElement>(null), docRef = useRef<HTMLParagraphElement>(null), logRef = useRef<HTMLDivElement>(null)
-  const barRef = useRef<HTMLDivElement>(null), depth = useRef(0), mid = useRef(0), alive = useRef(true)
+  const inp = useRef<HTMLTextAreaElement>(null), docRef = useRef<HTMLParagraphElement>(null), logRef = useRef<HTMLDivElement>(null)
+  const barRef = useRef<HTMLDivElement>(null), mid = useRef(0), alive = useRef(true)
   const pid = useId(), panelId = (k: string) => `${pid}-${k}`
   const liveWaiting = !!live && live.messages.some(m => m.parts.some(p => p.type === 'tool' && p.state === 'awaiting-approval'))
   const busy = live ? live.busy || liveWaiting : msgs.some(m => m.role === 'a' && m.phase !== 'done')
@@ -786,7 +774,6 @@ export function AgentComposer({ chat: live, onSend, onApprovalRequest, items = [
   const workspace = items.length > 0 || !!doc
 
   useOutside([barRef], () => setPop(null), !!pop)
-  useAutoGrow(inp, text, 168)
   useEffect(() => { const el = logRef.current; if (el && !live) el.scrollTo({ top: el.scrollHeight, behavior: reduce ? 'auto' : 'smooth' }) }, [msgs, reduce, live])
   useEffect(() => { alive.current = true; return () => { alive.current = false } }, [])
   useEffect(() => { if (live && !busy) next() }, [live, busy]) // eslint-disable-line react-hooks/exhaustive-deps -- a live reply finished: send the next queued follow-up
@@ -874,7 +861,6 @@ export function AgentComposer({ chat: live, onSend, onApprovalRequest, items = [
   const placeholder = status === 'input' ? 'Approve or deny above to continue' : busy ? 'Working… type to queue a follow-up' : files.length || ctx.length ? 'Add a message, or just send' : 'Ask anything, or drop files here'
   const setModel = (name: string) => { const prev = model, m = models.find(x => x.name === name)!; setS(s => ({ ...s, model: name, speed: acNearest(m.speeds, s.speed, prev.speeds), effort: acNearest(m.efforts, s.effort, prev.efforts) })) }
   const shownCons = cons.filter(c => !conQ || (c.name + ' ' + c.desc).toLowerCase().includes(conQ.toLowerCase()))
-  const pick = (accept: string) => { close(); if (fileRef.current) { fileRef.current.accept = accept; fileRef.current.click() } }
 
   return (
     <div className={cn('grid gap-4 sm:min-h-[440px]', workspace && 'md:grid-cols-[240px_minmax(0,1fr)]', className)}>
@@ -942,96 +928,81 @@ export function AgentComposer({ chat: live, onSend, onApprovalRequest, items = [
             </motion.div>))}</AnimatePresence>
         </div>}
 
-        <motion.div ref={boxRef} layout transition={spring(0.15, 0.6)}
-          onMouseDown={e => { if (e.target === e.currentTarget) { e.preventDefault(); inp.current?.focus() } }}
-          onDragEnter={e => { if (!e.dataTransfer.types.includes('Files')) return; e.preventDefault(); depth.current++; setOver(true) }}
-          onDragOver={e => { if (e.dataTransfer.types.includes('Files')) e.preventDefault() }}
-          onDragLeave={() => { depth.current = Math.max(0, depth.current - 1); if (!depth.current) setOver(false) }}
-          onDrop={e => { e.preventDefault(); depth.current = 0; setOver(false); if (e.dataTransfer.files.length) addFiles(e.dataTransfer.files) }}
-          className={cn('relative w-full cursor-text rounded-[var(--r-lg)] border bg-[var(--card)] px-3 pt-3 pb-2 transition-[border-color,box-shadow]',
-            !chat && 'max-w-[600px]', over ? 'border-[var(--accent)] shadow-[0_0_0_4px_var(--accent-soft)]' : 'border-[var(--line)] shadow-[0_1px_2px_rgba(0,0,0,.04),0_4px_16px_rgba(0,0,0,.04)] focus-within:border-[var(--line2)] focus-within:shadow-[0_0_0_4px_var(--muted)]')}>
-          <div aria-hidden className={cn('pointer-events-none absolute inset-1 z-[4] flex flex-col items-center justify-center gap-1 rounded-[var(--r-lg)] border-2 border-dashed border-[var(--accent)] bg-[color-mix(in_srgb,var(--accent-soft)_92%,transparent)] text-[var(--accent)] transition-opacity', over ? 'opacity-100' : 'opacity-0')}>
-            <Icon name="upload" size={22} /><b className="text-[13px]">Drop files to attach</b><span className="text-xs">Images, PDFs, code, anything</span>
-          </div>
-          <motion.div layout="position">
-            {ctx.length > 0 && <div className="mb-2 flex flex-wrap gap-1.5">
-              {ctx.map(c => (
-                <motion.span key={c} initial={{ opacity: 0, scale: 0.8, y: 4 }} animate={{ opacity: 1, scale: 1, y: 0 }} transition={spring(0.4, 0.3)}
-                  className="inline-flex h-6 max-w-full items-center gap-1.5 rounded-full bg-[var(--accent-soft)] pr-1 pl-2 text-xs font-medium text-[var(--accent)] [@media(pointer:coarse)]:h-8 [@media(pointer:coarse)]:pr-1.5">
-                  <span className="min-w-0 truncate">{c.length > 38 ? c.slice(0, 36) + '…' : c}</span>
-                  <button type="button" aria-label={`Remove ${c}`} onClick={() => { setCtx(x => x.filter(y => y !== c)); inp.current?.focus() }} className={cn('grid h-[18px] w-[18px] flex-none cursor-pointer place-items-center rounded-full border-0 bg-transparent text-current opacity-70 hover:opacity-100', TOUCH.hit)}><Icon name="x" size={10} strokeWidth={3} /></button>
-                </motion.span>))}
-              {ctx.length > 1 && <Button size="sm" variant="ghost" onClick={() => setCtx([])} className="!h-6 !px-1 text-[var(--fg3)] hover:text-[var(--fg)] [@media(pointer:coarse)]:!h-8 [@media(pointer:coarse)]:!px-2">Clear</Button>}
-            </div>}
-            {files.length > 0 && <div className="mb-2 flex flex-wrap gap-1.5">
-              <AnimatePresence initial={false}>{files.map(f => <AttachmentChip key={f.id} name={f.file.name} size={f.file.size} url={f.url} uploading={f.id} onRemove={() => { att.remove(f.id); inp.current?.focus() }} />)}</AnimatePresence>
-            </div>}
-            <textarea ref={inp} rows={1} value={text} placeholder={placeholder} aria-label="Message" onChange={e => setText(e.target.value)}
-              onKeyDown={e => { if (e.key === 'Enter' && !e.shiftKey && !e.nativeEvent.isComposing) { e.preventDefault(); submit() } }}
-              onPaste={e => { const f = Array.from(e.clipboardData.files); if (f.length) { e.preventDefault(); addFiles(f) } }}
-              className={cn('block max-h-[168px] min-h-6 w-full resize-none border-0 bg-transparent p-1 text-sm leading-normal text-[var(--fg)] outline-none placeholder:text-[var(--fg3)]', TOUCH.input)} />
-            <div ref={barRef} className="relative mt-1 flex cursor-default items-center gap-1 max-sm:gap-0.5">
-              <input ref={fileRef} type="file" multiple hidden onChange={e => { if (e.target.files) addFiles(e.target.files); e.target.value = '' }} />
-              <span className="sm:relative">
-                <AcBarButton compact={narrow} controls={panelId('add')} icon={<Icon name="plus" size={16} strokeWidth={2.2} />} label="Add files" expanded={pop === 'add'} onClick={() => toggle('add')}>Add files</AcBarButton>
-                <AcPanel id={panelId('add')} open={pop === 'add'} narrow={narrow} label="Add files" menu={2 + samples.length} onClose={close}>
-                  <MenuItem className={AC_ITEM} onSelect={() => pick('')}><AcRowBody icon="upload" title="Upload files" desc="From your computer" /></MenuItem>
-                  <MenuItem className={AC_ITEM} onSelect={() => pick('image/*')}><AcRowBody icon="image" title="Add photos" desc="Images and screenshots" /></MenuItem>
-                  {samples.map(x => <MenuItem key={x.title} className={AC_ITEM} onSelect={() => { close(); addFiles(x.files()) }}><AcRowBody icon="file" title={x.title} desc={x.desc} /></MenuItem>)}
-                </AcPanel>
-              </span>
-              <span className="sm:relative">
-                <AcBarButton compact={narrow} controls={panelId('mode')} icon={<motion.span key={mode} initial={reduce ? false : { opacity: 0, scale: 0.6, rotate: -18 }} animate={{ opacity: 1, scale: [0.6, 1.12, 1], rotate: 0 }} transition={{ duration: 0.45, ease: [0.2, 0.8, 0.2, 1] }} className="grid"><Icon name={curMode.icon} size={16} /></motion.span>}
-                  label={`Permission mode: ${curMode.label}`} expanded={pop === 'mode'} onClick={() => toggle('mode')} className={curMode.tone === 'warn' ? '!text-[var(--warn)]' : ''}>{curMode.label}</AcBarButton>
-                <AcPanel id={panelId('mode')} open={pop === 'mode'} narrow={narrow} label="Permission mode" menu={modes.length} onClose={close}>
-                  {modes.map(m => <AcModeRow key={m.id} mode={m} checked={m.id === mode} onPick={() => { setMode(m.id); close(); inp.current?.focus() }} />)}
-                </AcPanel>
-              </span>
-              {cons.length > 0 && <span className="sm:relative">
-                <AcBarButton compact={narrow} controls={panelId('con')} haspopup="dialog" icon={<Icon name="plug" size={16} />} label="Connectors" expanded={pop === 'con'} onClick={() => toggle('con')} className={onCount ? '!text-[var(--accent)]' : ''}>
-                  Connectors{onCount > 0 && <Badge size="sm" className="ml-1 min-w-[18px] justify-center !bg-[var(--accent)] font-semibold tabular-nums !text-[var(--card)]">{onCount}</Badge>}
-                </AcBarButton>
-                <AcPanel id={panelId('con')} open={pop === 'con'} wide narrow={narrow} label="Connectors" onClose={close}>
-                  <div className="p-1"><input autoFocus={!coarse} value={conQ} onChange={e => setConQ(e.target.value)} placeholder="Search connectors and MCP servers" aria-label="Search connectors" className={cn(inputClass, '!h-8 text-xs [@media(pointer:coarse)]:!h-10', TOUCH.input)} /></div>
-                  <div className="flex max-h-[240px] flex-col overflow-auto overscroll-contain p-1">
-                    {shownCons.length ? shownCons.map(c => (
-                      <div key={c.name} onClick={e => { if (!(e.target as Element).closest('[role=switch]')) setCons(cs => cs.map(x => x.name === c.name ? { ...x, on: !x.on } : x)) }}
-                        className={cn('flex cursor-pointer items-center gap-2.5 rounded-[var(--r-md)] px-1.5 py-1.5 hover:bg-[var(--muted)] [@media(pointer:coarse)]:min-h-12')}>
-                        <span className="grid h-7 w-7 flex-none place-items-center rounded-[var(--r-md)] text-[11px] font-bold text-white [@media(pointer:coarse)]:text-[11px]" style={{ background: safeColor(c.color, 'var(--fg3)') }}>{c.name.slice(0, 2)}</span>
-                        <span className="flex min-w-0 flex-1 flex-col"><b className="text-[13px] font-medium">{c.name}</b><span className="truncate text-[11px] text-[var(--fg3)]">{c.desc}</span></span>
-                        <Switch checked={c.on} onChange={v => setCons(cs => cs.map(x => x.name === c.name ? { ...x, on: v } : x))} label={<span className="sr-only">{c.name}</span>} />
-                      </div>)) : <span className="p-2 text-xs text-[var(--fg3)]">No connectors match</span>}
-                  </div>
-                  <div className="flex items-center justify-between border-t border-[var(--line)] px-2 pt-1.5 pb-1"><span className="text-xs text-[var(--fg3)]">{onCount} of {cons.length} on</span>
-                    <Button size="sm" variant="ghost" onClick={() => toast({ title: 'Connector directory', description: 'This would open the MCP / connector directory' })}>+ Add connector</Button></div>
-                </AcPanel>
-              </span>}
-              <span className="sm:relative">
-                <AcBarButton compact={narrow} controls={panelId('set')} haspopup="dialog" icon={<Icon name="sliders" size={16} />} label="Model settings" expanded={pop === 'set'} onClick={() => toggle('set')}>{S.model} · {S.speed} · {S.effort}</AcBarButton>
-                <AcPanel id={panelId('set')} open={pop === 'set'} wide narrow={narrow} label="Model settings" onClose={close}>
-                  <div className="flex flex-col gap-3.5 p-2.5">
-                    <div className="flex flex-col gap-1.5 text-[13px]"><span>Model</span>
-                      <Select aria-label="Model" value={S.model} onChange={setModel} options={models.map(m => ({ value: m.name, label: `${m.name} · ${m.vendor}` }))} /></div>
-                    <motion.div key={S.model} initial={reduce ? false : { opacity: 0.4, y: 4 }} animate={{ opacity: 1, y: 0 }} transition={{ duration: 0.2 }} className="flex flex-col gap-3.5">
-                      <AcStepSlider title="Speed" list={model.speeds} value={S.speed} model={model.name} onChange={v => setS(s => ({ ...s, speed: v }))} />
-                      <AcStepSlider title="Effort" list={model.efforts} value={S.effort} model={model.name} onChange={v => setS(s => ({ ...s, effort: v }))} />
-                      <span className="text-[11px] text-[var(--fg3)]">{model.vendor} options for {model.name}</span>
-                    </motion.div>
-                    {cons.length > 0 && <div className="flex items-center justify-between text-[13px]"><span>Tools: {onCount} connected</span><Button size="sm" variant="ghost" onClick={() => setPop('con')}>Manage</Button></div>}
-                    <Button size="sm" className="w-full" onClick={() => { close(); setAdv({ ...S }) }}>Advanced settings…</Button>
-                  </div>
-                </AcPanel>
-              </span>
-              <span className="flex-1" />
-              {status !== 'idle' && <span role="status" className="mr-2 inline-flex min-w-0 max-sm:mr-1 items-center gap-1.5 text-xs whitespace-nowrap text-[var(--fg3)]">
+        <PromptInput layout value={text} onChange={setText} placeholder={placeholder} attachmentState={att} maxFiles={AC_MAX_FILES} uploadProgress
+          inputRef={inp} barRef={barRef} canSubmit={canSend} onSubmit={() => { submit(); return false }}
+          sendButton={{ state: submitting ? 'sending' : canStop ? 'stop' : busy ? 'queue' : 'send', disabled: !canSend && !canStop, onClick: canStop ? live!.stop : submit }}
+          className={cn('w-full cursor-text !px-3 !pt-3', !chat && 'max-w-[600px]')}
+          classNames={{ input: '!p-1', bar: 'relative !mt-1 cursor-default max-sm:!gap-0.5', send: 'transition-[opacity,transform] enabled:hover:scale-105 disabled:!opacity-25' }}
+          dropHint={<span className="flex flex-col items-center gap-1"><Icon name="upload" size={22} /><b className="text-[13px]">Drop files to attach</b><span className="text-xs font-normal">Images, PDFs, code, anything</span></span>}
+          header={<>
+              {ctx.length > 0 && <div className="mb-2 flex flex-wrap gap-1.5">
+                {ctx.map(c => (
+                  <motion.span key={c} initial={{ opacity: 0, scale: 0.8, y: 4 }} animate={{ opacity: 1, scale: 1, y: 0 }} transition={spring(0.4, 0.3)}
+                    className="inline-flex h-6 max-w-full items-center gap-1.5 rounded-full bg-[var(--accent-soft)] pr-1 pl-2 text-xs font-medium text-[var(--accent)] [@media(pointer:coarse)]:h-8 [@media(pointer:coarse)]:pr-1.5">
+                    <span className="min-w-0 truncate">{c.length > 38 ? c.slice(0, 36) + '…' : c}</span>
+                    <button type="button" aria-label={`Remove ${c}`} onClick={() => { setCtx(x => x.filter(y => y !== c)); inp.current?.focus() }} className={cn('grid h-[18px] w-[18px] flex-none cursor-pointer place-items-center rounded-full border-0 bg-transparent text-current opacity-70 hover:opacity-100', TOUCH.hit)}><Icon name="x" size={10} strokeWidth={3} /></button>
+                  </motion.span>))}
+                {ctx.length > 1 && <Button size="sm" variant="ghost" onClick={() => setCtx([])} className="!h-6 !px-1 text-[var(--fg3)] hover:text-[var(--fg)] [@media(pointer:coarse)]:!h-8 [@media(pointer:coarse)]:!px-2">Clear</Button>}
+              </div>}
+          </>}
+          addButton={pick => (
+                <span className="sm:relative">
+                  <AcBarButton compact={narrow} controls={panelId('add')} icon={<Icon name="plus" size={16} strokeWidth={2.2} />} label="Add files" expanded={pop === 'add'} onClick={() => toggle('add')}>Add files</AcBarButton>
+                  <AcPanel id={panelId('add')} open={pop === 'add'} narrow={narrow} label="Add files" menu={2 + samples.length} onClose={close}>
+                    <MenuItem className={AC_ITEM} onSelect={() => { close(); pick('') }}><AcRowBody icon="upload" title="Upload files" desc="From your computer" /></MenuItem>
+                    <MenuItem className={AC_ITEM} onSelect={() => { close(); pick('image/*') }}><AcRowBody icon="image" title="Add photos" desc="Images and screenshots" /></MenuItem>
+                    {samples.map(x => <MenuItem key={x.title} className={AC_ITEM} onSelect={() => { close(); addFiles(x.files()) }}><AcRowBody icon="file" title={x.title} desc={x.desc} /></MenuItem>)}
+                  </AcPanel>
+                </span>
+          )}
+          tools={<>
+                <span className="sm:relative">
+                  <AcBarButton compact={narrow} controls={panelId('mode')} icon={<motion.span key={mode} initial={reduce ? false : { opacity: 0, scale: 0.6, rotate: -18 }} animate={{ opacity: 1, scale: [0.6, 1.12, 1], rotate: 0 }} transition={{ duration: 0.45, ease: [0.2, 0.8, 0.2, 1] }} className="grid"><Icon name={curMode.icon} size={16} /></motion.span>}
+                    label={`Permission mode: ${curMode.label}`} expanded={pop === 'mode'} onClick={() => toggle('mode')} className={curMode.tone === 'warn' ? '!text-[var(--warn)]' : ''}>{curMode.label}</AcBarButton>
+                  <AcPanel id={panelId('mode')} open={pop === 'mode'} narrow={narrow} label="Permission mode" menu={modes.length} onClose={close}>
+                    {modes.map(m => <AcModeRow key={m.id} mode={m} checked={m.id === mode} onPick={() => { setMode(m.id); close(); inp.current?.focus() }} />)}
+                  </AcPanel>
+                </span>
+                {cons.length > 0 && <span className="sm:relative">
+                  <AcBarButton compact={narrow} controls={panelId('con')} haspopup="dialog" icon={<Icon name="plug" size={16} />} label="Connectors" expanded={pop === 'con'} onClick={() => toggle('con')} className={onCount ? '!text-[var(--accent)]' : ''}>
+                    Connectors{onCount > 0 && <Badge size="sm" className="ml-1 min-w-[18px] justify-center !bg-[var(--accent)] font-semibold tabular-nums !text-[var(--card)]">{onCount}</Badge>}
+                  </AcBarButton>
+                  <AcPanel id={panelId('con')} open={pop === 'con'} wide narrow={narrow} label="Connectors" onClose={close}>
+                    <div className="p-1"><input autoFocus={!coarse} value={conQ} onChange={e => setConQ(e.target.value)} placeholder="Search connectors and MCP servers" aria-label="Search connectors" className={cn(inputClass, '!h-8 text-xs [@media(pointer:coarse)]:!h-10', TOUCH.input)} /></div>
+                    <div className="flex max-h-[240px] flex-col overflow-auto overscroll-contain p-1">
+                      {shownCons.length ? shownCons.map(c => (
+                        <div key={c.name} onClick={e => { if (!(e.target as Element).closest('[role=switch]')) setCons(cs => cs.map(x => x.name === c.name ? { ...x, on: !x.on } : x)) }}
+                          className={cn('flex cursor-pointer items-center gap-2.5 rounded-[var(--r-md)] px-1.5 py-1.5 hover:bg-[var(--muted)] [@media(pointer:coarse)]:min-h-12')}>
+                          <span className="grid h-7 w-7 flex-none place-items-center rounded-[var(--r-md)] text-[11px] font-bold text-white [@media(pointer:coarse)]:text-[11px]" style={{ background: safeColor(c.color, 'var(--fg3)') }}>{c.name.slice(0, 2)}</span>
+                          <span className="flex min-w-0 flex-1 flex-col"><b className="text-[13px] font-medium">{c.name}</b><span className="truncate text-[11px] text-[var(--fg3)]">{c.desc}</span></span>
+                          <Switch checked={c.on} onChange={v => setCons(cs => cs.map(x => x.name === c.name ? { ...x, on: v } : x))} label={<span className="sr-only">{c.name}</span>} />
+                        </div>)) : <span className="p-2 text-xs text-[var(--fg3)]">No connectors match</span>}
+                    </div>
+                    <div className="flex items-center justify-between border-t border-[var(--line)] px-2 pt-1.5 pb-1"><span className="text-xs text-[var(--fg3)]">{onCount} of {cons.length} on</span>
+                      <Button size="sm" variant="ghost" onClick={() => toast({ title: 'Connector directory', description: 'This would open the MCP / connector directory' })}>+ Add connector</Button></div>
+                  </AcPanel>
+                </span>}
+                <span className="sm:relative">
+                  <AcBarButton compact={narrow} controls={panelId('set')} haspopup="dialog" icon={<Icon name="sliders" size={16} />} label="Model settings" expanded={pop === 'set'} onClick={() => toggle('set')}>{S.model} · {S.speed} · {S.effort}</AcBarButton>
+                  <AcPanel id={panelId('set')} open={pop === 'set'} wide narrow={narrow} label="Model settings" onClose={close}>
+                    <div className="flex flex-col gap-3.5 p-2.5">
+                      <div className="flex flex-col gap-1.5 text-[13px]"><span>Model</span>
+                        <Select aria-label="Model" value={S.model} onChange={setModel} options={models.map(m => ({ value: m.name, label: `${m.name} · ${m.vendor}` }))} /></div>
+                      <motion.div key={S.model} initial={reduce ? false : { opacity: 0.4, y: 4 }} animate={{ opacity: 1, y: 0 }} transition={{ duration: 0.2 }} className="flex flex-col gap-3.5">
+                        <AcStepSlider title="Speed" list={model.speeds} value={S.speed} model={model.name} onChange={v => setS(s => ({ ...s, speed: v }))} />
+                        <AcStepSlider title="Effort" list={model.efforts} value={S.effort} model={model.name} onChange={v => setS(s => ({ ...s, effort: v }))} />
+                        <span className="text-[11px] text-[var(--fg3)]">{model.vendor} options for {model.name}</span>
+                      </motion.div>
+                      {cons.length > 0 && <div className="flex items-center justify-between text-[13px]"><span>Tools: {onCount} connected</span><Button size="sm" variant="ghost" onClick={() => setPop('con')}>Manage</Button></div>}
+                      <Button size="sm" className="w-full" onClick={() => { close(); setAdv({ ...S }) }}>Advanced settings…</Button>
+                    </div>
+                  </AcPanel>
+                </span>
+          </>}
+          aside={status !== 'idle' && <span role="status" className="mr-2 inline-flex min-w-0 max-sm:mr-1 items-center gap-1.5 text-xs whitespace-nowrap text-[var(--fg3)]">
                 <motion.i className={cn('h-[7px] w-[7px] rounded-full', status === 'working' ? 'bg-[var(--warn)]' : status === 'queued' ? 'bg-[var(--accent)]' : 'bg-[var(--bad)]')}
                   animate={status === 'working' ? { opacity: [1, 0.35, 1], scale: [1, 0.8, 1] } : { opacity: 1, scale: 1 }} transition={status === 'working' ? { duration: 1.2, repeat: Infinity } : undefined} />
-                {status === 'working' ? 'Working' : status === 'queued' ? `${queue.length} queued` : 'Needs your input'}</span>}
-              <SendButton state={submitting ? 'sending' : canStop ? 'stop' : busy ? 'queue' : 'send'} disabled={!canSend && !canStop} onClick={canStop ? live!.stop : submit}
-                className="transition-[opacity,transform] enabled:hover:scale-105 disabled:!opacity-25 [@media(pointer:coarse)]:h-10 [@media(pointer:coarse)]:w-10" />
-            </div>
-          </motion.div>
-        </motion.div>
+                {status === 'working' ? 'Working' : status === 'queued' ? `${queue.length} queued` : 'Needs your input'}</span>} />
       </div>
 
       <AnimatePresence>{sel && (

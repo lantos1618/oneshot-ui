@@ -1,5 +1,6 @@
-# Checks on every push and pull request: types, library and single-file builds, SSR, unit tests, the e2e suite
-# against the built showcase, dependency audit and a pack check. Actions are pinned to full commit SHAs (the tag is
+# Checks on every push and pull request: types, library and single-file builds, the registry drop-ins (standalone
+# type-check, SSR, CLI), the docs build, SSR, unit tests, the e2e suite against the built showcase, dependency audit
+# and a pack check. Actions are pinned to full commit SHAs (the tag is
 # in the comment; Dependabot keeps both up to date).
 name: CI
 
@@ -21,7 +22,7 @@ env:
 
 jobs:
   check:
-    name: Types, build, SSR, unit tests, audit, pack
+    name: Types, build, registry, docs, SSR, unit tests, audit, pack
     runs-on: ubuntu-latest
     timeout-minutes: 20
     steps:
@@ -45,6 +46,18 @@ jobs:
         run: pnpm build
       - name: Single-file bundles type-check on their own
         run: node scripts/build-single.mjs && npx tsc -p tsconfig.single.json --noEmit
+      - name: Registry drop-ins type-check on their own and render on the server
+        run: pnpm test:registry
+      - name: CLI copies drop-ins into a project
+        run: |
+          app="$RUNNER_TEMP/cli-smoke"
+          mkdir -p "$app" && cd "$app"
+          node "$GITHUB_WORKSPACE/bin/lyndon-ui.mjs" list > /dev/null
+          node "$GITHUB_WORKSPACE/bin/lyndon-ui.mjs" add button dialog data-grid --dir src/ui
+          test -f src/ui/button.tsx && test -f src/ui/data-grid.tsx && test -f src/ui/ui-provider.tsx
+          if node "$GITHUB_WORKSPACE/bin/lyndon-ui.mjs" add ../escape; then echo "a path-like name was accepted"; exit 1; fi
+      - name: Docs type-check and build (docs, showcase, registry, llms.txt)
+        run: pnpm typecheck:docs && pnpm docs:build
       - name: Server rendering
         run: pnpm test:ssr
       - name: Unit and interaction tests

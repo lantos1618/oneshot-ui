@@ -1,4 +1,5 @@
-import { Badge, Checkout, OnboardingChecklist, PricingTable, ProfileCard, type SettingsSection, SettingsPage, useTheme, useToast } from '../lib'
+import { Badge, type SettingsSection, SettingsPage, useTheme, useToast } from '../lib'
+import { Checkout, OnboardingChecklist, PricingTable, ProfileCard } from '../blocks'
 import { Section, Spec } from './kit'
 
 const PAGES_POSTS: [string, string, string][] = [['Designing calm dashboards', '2 days ago', 'var(--accent)'], ['Motion as feedback, not decoration', '1 week ago', 'var(--c3)']]

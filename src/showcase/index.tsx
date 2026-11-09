@@ -1,6 +1,6 @@
-import { memo, useCallback, useEffect, useId, useMemo, useRef, useState, type RefObject } from 'react'
+import { createContext, memo, useCallback, useContext, useEffect, useId, useMemo, useRef, useState, type RefObject } from 'react'
 import { AnimatePresence, motion } from 'motion/react'
-import { ActiveIndicator, AppearanceMenu, Button, type Command, CommandPalette, Dialog, Icon, type IconName, Kbd, THEMES, ThemeToggle, UIProvider, cn, useHotkey, useTheme, useToast } from '../lib'
+import { ActiveIndicator, AppearanceMenu, Button, type Command, CommandPalette, Dialog, DropdownMenu, Icon, type IconName, Kbd, MenuItem, THEMES, ThemeToggle, UIProvider, type UIDir, UI_MESSAGES_AR, UI_MESSAGES_DE, type UIMessages, cn, fmtFor, useHotkey, useLocale, useTheme, useToast } from '../lib'
 import { AISection } from './AISection'
 import { ButtonsSection } from './ButtonsSection'
 import { ChartsSection } from './ChartsSection'
@@ -121,11 +121,11 @@ const ShellSideNav = memo(function ShellSideNav({ ordered, query, setQuery, tota
     <nav ref={sideRef} aria-label="Sections"
       className="sticky top-[calc(env(safe-area-inset-top,0px)+76px)] hidden max-h-[calc(100vh-env(safe-area-inset-top,0px)-96px)] flex-col self-start overflow-auto pb-5 [scrollbar-width:thin] min-[900px]:flex">
       <div className="relative mb-2.5 flex-none">
-        <Icon name="search" size={13} strokeWidth={2.2} className="pointer-events-none absolute top-[9.5px] left-[9px] text-[var(--fg3)]" />
+        <Icon name="search" size={13} strokeWidth={2.2} className="pointer-events-none absolute top-[9.5px] start-[9px] text-[var(--fg3)]" />
         <input ref={filterRef} value={query} onChange={e => setQuery(e.target.value)} placeholder="Search by name or use case" aria-label="Filter components by name or use case"
           onKeyDown={e => { if (e.key === 'Escape') { setQuery(''); e.currentTarget.blur() } }}
-          className="h-8 w-full rounded-[var(--r-md)] border border-[var(--line)] bg-[var(--card)] pr-8 pl-7 text-[13px] text-[var(--fg)] outline-none placeholder:text-xs placeholder:text-[var(--fg3)] focus:border-[var(--fg3)] focus:shadow-[0_0_0_3px_var(--muted)]" />
-        <Kbd className="ui-num pointer-events-none absolute top-[7px] right-1.5" aria-live="polite">{q ? total : '/'}</Kbd>
+          className="h-8 w-full rounded-[var(--r-md)] border border-[var(--line)] bg-[var(--card)] pe-8 ps-7 text-[13px] text-[var(--fg)] outline-none placeholder:text-xs placeholder:text-[var(--fg3)] focus:border-[var(--fg3)] focus:shadow-[0_0_0_3px_var(--muted)]" />
+        <Kbd className="ui-num pointer-events-none absolute top-[7px] end-1.5" aria-live="polite">{q ? total : '/'}</Kbd>
       </div>
       <div className="flex flex-none flex-col gap-0.5">
         {SECTIONS.map(([id, label]) => {
@@ -135,7 +135,7 @@ const ShellSideNav = memo(function ShellSideNav({ ordered, query, setQuery, tota
       </div>
       <div className="mt-3 flex min-h-[120px] flex-1 flex-col border-t border-[var(--line)] pt-2.5">
         <h2 id={subId} className="m-0 mb-1 flex flex-none items-baseline justify-between px-2.5 text-[11px] font-medium tracking-wide text-[var(--fg3)] uppercase">
-          <span className="truncate">{q ? 'Matches' : sectionLabel[active]}</span><span className="ui-num w-8 flex-none text-right normal-case">{subs.length}</span>
+          <span className="truncate">{q ? 'Matches' : sectionLabel[active]}</span><span className="ui-num w-8 flex-none text-end normal-case">{subs.length}</span>
         </h2>
         <div ref={subRef} role="list" aria-labelledby={subId} className="relative min-h-0 flex-1 overflow-auto overscroll-contain [scrollbar-width:thin]">
           {subs.map((s, i) => (
@@ -175,11 +175,11 @@ const ShellChipNav = memo(function ShellChipNav({ query, setQuery, total, search
       {filtering ? (
         <div role="search" className="flex items-center gap-2">
           <div className="relative min-w-0 flex-1">
-            <Icon name="search" size={14} className="pointer-events-none absolute top-1/2 left-2.5 -translate-y-1/2 text-[var(--fg3)]" />
+            <Icon name="search" size={14} className="pointer-events-none absolute top-1/2 start-2.5 -translate-y-1/2 text-[var(--fg3)]" />
             <input ref={filterRef} value={query} onChange={e => setQuery(e.target.value)} placeholder="Name or use case" aria-label="Filter components by name or use case" enterKeyHint="search"
               onKeyDown={e => { if (e.key === 'Escape') { done() } else if (e.key === 'Enter') e.currentTarget.blur() }}
-              className="h-9 w-full rounded-[var(--r-md)] border border-[var(--line)] bg-[var(--card)] pr-12 pl-8 text-[13px] text-[var(--fg)] outline-none placeholder:text-[var(--fg3)] focus:border-[var(--fg3)] focus:shadow-[0_0_0_3px_var(--muted)]" />
-            <span className="ui-num pointer-events-none absolute top-1/2 right-2.5 -translate-y-1/2 text-xs text-[var(--fg3)]" aria-live="polite">{q ? `${total} found` : ''}</span>
+              className="h-9 w-full rounded-[var(--r-md)] border border-[var(--line)] bg-[var(--card)] pe-12 ps-8 text-[13px] text-[var(--fg)] outline-none placeholder:text-[var(--fg3)] focus:border-[var(--fg3)] focus:shadow-[0_0_0_3px_var(--muted)]" />
+            <span className="ui-num pointer-events-none absolute top-1/2 end-2.5 -translate-y-1/2 text-xs text-[var(--fg3)]" aria-live="polite">{q ? `${total} found` : ''}</span>
           </div>
           <Button variant="ghost" onClick={done} className="flex-none !px-2.5">Cancel</Button>
         </div>
@@ -206,6 +206,48 @@ const shellAfterPalette = (fn: () => void) => () => {
 
 /** Ask the Overlays section to open its demo dialog or sheet (⌘K "Open modal" / "Open drawer"). */
 const shellOverlayDemo = (which: OverlayDemo) => dispatchEvent(new CustomEvent<OverlayDemo>(OVERLAY_DEMO_EVENT, { detail: which }))
+
+/* Locale and direction (0.4) ─────────────────────────────────────────────── */
+
+/** The locales the switcher offers, with the example catalog each one uses (en-US and ja-JP fall back to English). */
+const SHELL_LOCALES: [string, Partial<UIMessages> | undefined][] = [['en-GB', undefined], ['en-US', undefined], ['de-DE', UI_MESSAGES_DE], ['ar-EG', UI_MESSAGES_AR], ['ja-JP', undefined]]
+type ShellLocale = { locale: string; dir: UIDir | 'auto' }
+const SHELL_LOCALE_KEY = 'ui-showcase-locale'
+const SHELL_LOCALE_DEFAULT: ShellLocale = { locale: 'en-GB', dir: 'auto' }
+/** The saved choice, validated (falls back to en-GB / auto). */
+function shellLocaleRead(): ShellLocale {
+  try {
+    const v: unknown = JSON.parse(localStorage.getItem(SHELL_LOCALE_KEY) ?? 'null')
+    if (!v || typeof v !== 'object') return SHELL_LOCALE_DEFAULT
+    const { locale, dir } = v as Record<string, unknown>
+    return { locale: SHELL_LOCALES.some(([l]) => l === locale) ? locale as string : 'en-GB', dir: dir === 'ltr' || dir === 'rtl' ? dir : 'auto' }
+  } catch { return SHELL_LOCALE_DEFAULT }
+}
+const ShellLocaleContext = createContext<{ value: ShellLocale; set: (v: Partial<ShellLocale>) => void }>({ value: SHELL_LOCALE_DEFAULT, set: () => {} })
+
+/** Header menu: pick the provider's locale (each shown in its own language) and force a direction. Saved per viewer. */
+function ShellLocaleMenu() {
+  const { value, set } = useContext(ShellLocaleContext)
+  const { t, dir } = useLocale()
+  const own = (l: string) => fmtFor(l).displayName(l, 'language')
+  return (
+    <DropdownMenu placement={dir === 'rtl' ? 'bottom-start' : 'bottom-end'} className="max-sm:[&>button]:!w-9 max-sm:[&>button]:!px-0" trigger={
+      <span className="flex items-center gap-1.5 font-normal"><Icon name="globe" size={15} /><span className="sr-only">{t('locale.language')}: </span><span className="text-xs text-[var(--fg2)] max-sm:sr-only">{value.locale}</span></span>}>
+      <div aria-hidden className="px-2 pt-1 pb-0.5 text-[11px] font-medium text-[var(--fg3)]">{t('locale.language')}</div>
+      {SHELL_LOCALES.map(([l]) => (
+        <MenuItem key={l} icon={value.locale === l ? 'check' : undefined} onSelect={() => set({ locale: l })} className={value.locale === l ? '' : '!ps-8'}>
+          <span lang={l} className="whitespace-nowrap">{own(l)}</span><span className="ui-num text-[11px] whitespace-nowrap text-[var(--fg3)]">{l}</span>
+        </MenuItem>
+      ))}
+      <div aria-hidden className="mt-1 border-t border-[var(--line)] px-2 pt-2 pb-0.5 text-[11px] font-medium text-[var(--fg3)]">{t('locale.direction')}</div>
+      {(['auto', 'ltr', 'rtl'] as const).map(d => (
+        <MenuItem key={d} icon={value.dir === d ? 'check' : undefined} onSelect={() => set({ dir: d })} className={value.dir === d ? '' : '!ps-8'}>
+          <span className="whitespace-nowrap">{d === 'auto' ? `Auto (${t(dir === 'rtl' ? 'locale.rtl' : 'locale.ltr')})` : t(d === 'rtl' ? 'locale.rtl' : 'locale.ltr')}</span>
+        </MenuItem>
+      ))}
+    </DropdownMenu>
+  )
+}
 
 function ShowcaseBody() {
   const { set, toggle, settings } = useTheme()
@@ -302,6 +344,7 @@ function ShowcaseBody() {
             <span aria-hidden className="max-[900px]:hidden"><Kbd>⌘K</Kbd></span>
           </Button>
           <DesignQAButton />
+          <ShellLocaleMenu />
           <AppearanceMenu open={appearance} onOpenChange={setAppearance} />
           <ThemeToggle />
         </div>
@@ -315,7 +358,7 @@ function ShowcaseBody() {
             {q && total === 0 && (
               <motion.div initial={{ opacity: 0, y: 8 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0 }} transition={{ duration: 0.2 }}
                 className="rounded-[var(--r-lg)] border border-dashed border-[var(--line2)] p-10 text-center text-[var(--fg3)]">
-                No components match “{q}”.<Button size="sm" className="ml-2" onClick={() => { setQuery(''); openFilter(!matchMedia('(pointer: coarse)').matches) }}>Clear filter</Button>
+                No components match “{q}”.<Button size="sm" className="ms-2" onClick={() => { setQuery(''); openFilter(!matchMedia('(pointer: coarse)').matches) }}>Clear filter</Button>
               </motion.div>
             )}
           </AnimatePresence>
@@ -334,5 +377,21 @@ function ShowcaseBody() {
 const showcaseNonce = () => (typeof document === 'undefined' ? undefined : document.querySelector<HTMLMetaElement>('meta[property="csp-nonce"]')?.nonce || undefined)
 
 export default function Showcase() {
-  return <UIProvider fonts nonce={showcaseNonce()}><ShowcaseBody /></UIProvider>
+  // en-GB on the server and the first client render (no mismatch); the viewer's saved choice applies after mount
+  const [loc, setLoc] = useState<ShellLocale>(SHELL_LOCALE_DEFAULT)
+  useEffect(() => { setLoc(shellLocaleRead()) }, [])
+  const shellLocale = useMemo(() => ({
+    value: loc,
+    set: (v: Partial<ShellLocale>) => setLoc(cur => {
+      const next = { ...cur, ...v }
+      try { localStorage.setItem(SHELL_LOCALE_KEY, JSON.stringify(next)) } catch { /* storage blocked */ }
+      return next
+    }),
+  }), [loc])
+  const messages = SHELL_LOCALES.find(([l]) => l === loc.locale)?.[1]
+  return (
+    <ShellLocaleContext.Provider value={shellLocale}>
+      <UIProvider fonts nonce={showcaseNonce()} locale={loc.locale} dir={loc.dir} messages={messages}><ShowcaseBody /></UIProvider>
+    </ShellLocaleContext.Provider>
+  )
 }

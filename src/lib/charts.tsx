@@ -1026,8 +1026,6 @@ const statQuantile = (a: number[], p: number) => { const s = [...a].sort((x, y) 
 const statKde = (a: number[], xs: number[], bw: number) => xs.map(x => a.reduce((s, v) => s + Math.exp(-0.5 * ((x - v) / bw) ** 2), 0) / (a.length * bw * 2.5066))
 const statBandwidth = (a: number[]) => 1.06 * statSd(a) * a.length ** -0.2 || 1
 const chartFixed = (v: number, d = 1) => (Math.round(v * 10 ** d) / 10 ** d).toFixed(d)
-/** Mean, standard deviation and standard error of a sample. */
-export const describeSample = (a: number[]) => { const sd = statSd(a); return { n: a.length, mean: statMean(a), sd, se: sd / Math.sqrt(a.length) } }
 
 function StatGridY({ ticks, Y, x1, x2, format = (v: number) => chartFixed(v, 0) }: { ticks: number[]; Y: (v: number) => number; x1: number; x2: number; format?: (v: number) => string }) {
   return <>{ticks.map(t => <g key={t}><line x1={x1} x2={x2} y1={Y(t)} y2={Y(t)} stroke="var(--line)" strokeDasharray="2 3" /><text x={x1 - 6} y={Y(t)} dy="0.32em" textAnchor="end" fill="var(--fg3)">{format(t)}</text></g>)}</>

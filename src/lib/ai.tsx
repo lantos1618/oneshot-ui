@@ -1,6 +1,6 @@
 import { useEffect, useId, useLayoutEffect, useMemo, useRef, useState, type ReactNode, type RefObject } from 'react'
 import { AnimatePresence, motion, useAnimate, useInView, useReducedMotion } from 'motion/react'
-import { AnimatedNumber, Avatar, Badge, Button, Icon, IconButton, Kbd, Spinner, StatusIcon, TOUCH, cn, cssUrl, floatingSurface, fmt, inputClass, safeColor, sleep, spring, surface, useControllable, useOutside, useRoving, useStreamedText, type IconName } from './core'
+import { AnimatedNumber, Avatar, Badge, Button, Icon, IconButton, Kbd, Spinner, StatusIcon, TOUCH, cn, cssUrl, floatingSurface, fmt, inputClass, safeColor, safeUrl, sleep, spring, surface, useControllable, useOutside, useRoving, useStreamedText, type IconName } from './core'
 import { AutoHeight, Collapse, Progress, TypingDots, useToast } from './feedback'
 import { CheckMark, Checkbox, OptionList, Select, fileAccepts, type Option } from './forms'
 import { FloatingPanel, MenuLabel, Tooltip, useHoverIntent } from './overlay'
@@ -132,6 +132,8 @@ export function useAttachments({ max = 10, maxSize = 20 * 1024 * 1024, accept, o
   const take = () => { const out = cur.current.map(f => f.file); clear(); return out }
   return { files, add, remove, clear, take }
 }
+/** What useAttachments returns: pass it to PromptInput's `attachmentState` to own the files yourself. */
+export type AttachmentState = ReturnType<typeof useAttachments>
 
 /**
  * An attachment tile: image preview (only `blob:`, `data:image/` or http(s) URLs, through `cssUrl`) or the file
@@ -157,27 +159,56 @@ export function AttachmentChip({ name, size, url, onRemove, uploading, className
 /** Chat status as PromptInput sees it (the same names as useAiChat's `status`). */
 export type PromptStatus = 'ready' | 'submitted' | 'streaming' | 'error'
 
+/** PromptInput's send button when you drive it yourself (e.g. queueing while a reply streams). */
+export type PromptSendButton = { state: SendButtonState; disabled: boolean; onClick: () => void }
 /**
  * The prompt box for chats. Grows with its text up to `maxHeight`, then scrolls. Enter sends (never mid IME
  * composition), Shift+Enter adds a line. Attach with +, paste or drag and drop; images preview through object URLs
  * that are revoked when removed or sent. Optional model picker (`models`, `model`, `onModelChange`) and your own
  * buttons (`tools`). While `status` is submitted or streaming, Send turns into Stop (`onStop`). `onSubmit(text, files)`
  * may return false to keep the draft. Text is controlled (`value`/`onChange`, e.g. useAiChat's input) or not.
+ *
+ * Composers built on it (AgentComposer, ChatComposer) can also own the files (`attachmentState` from useAttachments),
+ * add chips above them (`header`), replace the + button (`addButton`, given a file-picker opener), add a status before
+ * Send (`aside`), drive Send themselves (`sendButton` + `canSubmit`) and reach the textarea and bar (`inputRef`, `barRef`).
  */
 export function PromptInput({ onSubmit, onStop, status = 'ready', value, defaultValue = '', onChange, placeholder = 'Ask anything…', attachments = true, accept, maxFiles = 10, maxFileSize = 20 * 1024 * 1024,
-  onReject, models, model, onModelChange, tools, disabled, autoFocus, maxHeight = 168, label = 'Message', className }:
+  onReject, models, model, onModelChange, tools, disabled, autoFocus, maxHeight = 168, label = 'Message', className,
+  attachmentState, header, addButton, aside, sendButton, canSubmit, inputRef, barRef, dropHint, uploadProgress, layout, classNames }:
   { onSubmit: (text: string, files: File[]) => boolean | void; onStop?: () => void; status?: PromptStatus; value?: string; defaultValue?: string; onChange?: (v: string) => void
     placeholder?: string; attachments?: boolean; accept?: string; maxFiles?: number; maxFileSize?: number; onReject?: (files: File[], reason: 'type' | 'size' | 'count') => void
-    models?: Option[]; model?: string; onModelChange?: (m: string) => void; tools?: ReactNode; disabled?: boolean; autoFocus?: boolean; maxHeight?: number; label?: string; className?: string }) {
+    models?: Option[]; model?: string; onModelChange?: (m: string) => void; tools?: ReactNode; disabled?: boolean; autoFocus?: boolean; maxHeight?: number; label?: string; className?: string
+    /** the files, when you own them (useAttachments); default: PromptInput keeps its own */
+    attachmentState?: AttachmentState
+    /** shown above the file chips (context chips, quoted text…) */
+    header?: ReactNode
+    /** replaces the + button; `pick(accept?)` opens the file picker */
+    addButton?: (pick: (accept?: string) => void) => ReactNode
+    /** shown just before the send button */
+    aside?: ReactNode
+    /** the send button's state and action (default: from `status`, `onStop` and the draft) */
+    sendButton?: PromptSendButton
+    /** whether Enter submits (default: there is text or a file and no reply is running) */
+    canSubmit?: boolean
+    inputRef?: RefObject<HTMLTextAreaElement | null>; barRef?: RefObject<HTMLDivElement | null>
+    /** what the drop overlay says (default: an upload icon and "Drop files to attach") */
+    dropHint?: ReactNode
+    /** play an upload bar on each new file chip */
+    uploadProgress?: boolean
+    /** animate the box's size and position (motion layout), e.g. when it moves from a hero into a conversation */
+    layout?: boolean
+    classNames?: { input?: string; bar?: string; send?: string } }) {
   const [text, setText] = useControllable(value, defaultValue, onChange)
   const [note, setNote] = useState('')
-  const att = useAttachments({ max: maxFiles, maxSize: maxFileSize, accept, onReject: (f, why) => { setNote(why === 'type' ? `${f.length === 1 ? `“${f[0].name}” isn’t` : `${f.length} files aren’t`} an accepted type` : why === 'size' ? `${f.length === 1 ? `“${f[0].name}” is` : `${f.length} files are`} over ${fmt.bytes(maxFileSize)}` : `Up to ${maxFiles} files`); onReject?.(f, why) } })
+  const own = useAttachments({ max: maxFiles, maxSize: maxFileSize, accept, onReject: (f, why) => { setNote(why === 'type' ? `${f.length === 1 ? `“${f[0].name}” isn’t` : `${f.length} files aren’t`} an accepted type` : why === 'size' ? `${f.length === 1 ? `“${f[0].name}” is` : `${f.length} files are`} over ${fmt.bytes(maxFileSize)}` : `Up to ${maxFiles} files`); onReject?.(f, why) } })
+  const att = attachmentState ?? own
   const [over, setOver] = useState(false)
-  const ref = useRef<HTMLTextAreaElement>(null), fileRef = useRef<HTMLInputElement>(null), depth = useRef(0)
+  const ownRef = useRef<HTMLTextAreaElement>(null), fileRef = useRef<HTMLInputElement>(null), depth = useRef(0)
+  const ref = inputRef ?? ownRef
   useAutoGrow(ref, text, maxHeight)
   useEffect(() => { if (!note) return; const t = setTimeout(() => setNote(''), 4000); return () => clearTimeout(t) }, [note])
   const busy = status === 'submitted' || status === 'streaming'
-  const canSend = !disabled && !busy && (!!text.trim() || att.files.length > 0)
+  const canSend = canSubmit ?? (!disabled && !busy && (!!text.trim() || att.files.length > 0))
   const send = () => {
     if (!canSend) return
     const files = att.files.map(f => f.file)
@@ -185,34 +216,43 @@ export function PromptInput({ onSubmit, onStop, status = 'ready', value, default
     att.clear(); setText('')
   }
   const addFiles = (l: FileList | File[]) => { if (attachments) { att.add(l); ref.current?.focus() } }
+  const pick = (a?: string) => { const el = fileRef.current; if (!el) return; el.accept = a ?? accept ?? ''; el.click() }
+  const btn = sendButton ?? { state: busy ? (onStop ? 'stop' : 'sending') : 'send', onClick: busy ? onStop ?? (() => {}) : send, disabled: busy ? !onStop : !canSend }
   return (
-    <div className={cn('relative rounded-[var(--r-lg)] border bg-[var(--card)] px-2.5 pt-2.5 pb-2 transition-[border-color,box-shadow]',
+    <motion.div layout={layout} transition={layout ? spring(0.15, 0.6) : undefined}
+      onMouseDown={e => { if (e.target === e.currentTarget) { e.preventDefault(); ref.current?.focus() } }}
+      className={cn('relative rounded-[var(--r-lg)] border bg-[var(--card)] px-2.5 pt-2.5 pb-2 transition-[border-color,box-shadow]',
       over ? 'border-[var(--accent)] shadow-[0_0_0_4px_var(--accent-soft)]' : 'border-[var(--line)] shadow-[0_1px_2px_rgba(0,0,0,.04)] focus-within:border-[var(--line2)] focus-within:shadow-[0_0_0_4px_var(--muted)]', className)}
       onDragEnter={e => { if (!attachments || !e.dataTransfer.types.includes('Files')) return; e.preventDefault(); depth.current++; setOver(true) }}
       onDragOver={e => { if (attachments && e.dataTransfer.types.includes('Files')) e.preventDefault() }}
       onDragLeave={() => { depth.current = Math.max(0, depth.current - 1); if (!depth.current) setOver(false) }}
       onDrop={e => { if (!attachments) return; e.preventDefault(); depth.current = 0; setOver(false); if (e.dataTransfer.files.length) addFiles(e.dataTransfer.files) }}>
       {attachments && <div aria-hidden className={cn('pointer-events-none absolute inset-1 z-[4] flex items-center justify-center gap-2 rounded-[var(--r-lg)] border-2 border-dashed border-[var(--accent)] bg-[color-mix(in_srgb,var(--accent-soft)_92%,transparent)] text-[13px] font-semibold text-[var(--accent)] transition-opacity', over ? 'opacity-100' : 'opacity-0')}>
-        <Icon name="upload" size={16} />Drop files to attach</div>}
-      {att.files.length > 0 && <div className="mb-2 flex flex-wrap gap-1.5">
-        <AnimatePresence initial={false}>{att.files.map(f => <AttachmentChip key={f.id} name={f.file.name} size={f.file.size} url={f.url} onRemove={() => { att.remove(f.id); ref.current?.focus() }} />)}</AnimatePresence>
-      </div>}
-      <textarea ref={ref} rows={1} value={text} placeholder={placeholder} aria-label={label} disabled={disabled} autoFocus={autoFocus} onChange={e => setText(e.target.value)}
-        onKeyDown={e => { if (e.key === 'Enter' && !e.shiftKey && !e.nativeEvent.isComposing) { e.preventDefault(); send() } }}
-        onPaste={e => { if (!attachments) return; const f = Array.from(e.clipboardData.files); if (f.length) { e.preventDefault(); addFiles(f) } }}
-        className={cn('block min-h-6 w-full resize-none border-0 bg-transparent px-1 py-0.5 text-sm leading-normal text-[var(--fg)] outline-none placeholder:text-[var(--fg3)] disabled:opacity-60', TOUCH.input)} />
-      <div className="mt-1.5 flex min-w-0 items-center gap-1">
-        {attachments && <>
-          <input ref={fileRef} type="file" multiple hidden accept={accept} onChange={e => { if (e.target.files) addFiles(e.target.files); e.target.value = '' }} />
-          <IconButton icon="plus" label="Add files" size="icon-sm" disabled={disabled} onClick={() => fileRef.current?.click()} className="[@media(pointer:coarse)]:!h-10 [@media(pointer:coarse)]:!w-10" />
-        </>}
-        {models && models.length > 0 && <Select aria-label="Model" options={models} value={model} onChange={onModelChange} className="!h-8 !w-auto max-w-[min(200px,45vw)] !border-transparent text-xs hover:!bg-[var(--muted)] [@media(pointer:coarse)]:!h-10" />}
-        {tools}
-        <span className="min-w-0 flex-1 truncate px-1 text-[11px] text-[var(--fg3)]" role="status">{note}</span>
-        <SendButton state={busy ? (onStop ? 'stop' : 'sending') : 'send'} onClick={busy ? onStop : send} disabled={busy ? !onStop : !canSend}
-          className="[@media(pointer:coarse)]:h-10 [@media(pointer:coarse)]:w-10" />
-      </div>
-    </div>
+        {dropHint ?? <><Icon name="upload" size={16} />Drop files to attach</>}</div>}
+      <motion.div layout={layout ? 'position' : undefined}>
+        {header}
+        {att.files.length > 0 && <div className="mb-2 flex flex-wrap gap-1.5">
+          <AnimatePresence initial={false}>{att.files.map(f => <AttachmentChip key={f.id} name={f.file.name} size={f.file.size} url={f.url} uploading={uploadProgress ? f.id : undefined} onRemove={() => { att.remove(f.id); ref.current?.focus() }} />)}</AnimatePresence>
+        </div>}
+        <textarea ref={ref} rows={1} value={text} placeholder={placeholder} aria-label={label} disabled={disabled} autoFocus={autoFocus} onChange={e => setText(e.target.value)}
+          onKeyDown={e => { if (e.key === 'Enter' && !e.shiftKey && !e.nativeEvent.isComposing) { e.preventDefault(); send() } }}
+          onPaste={e => { if (!attachments) return; const f = Array.from(e.clipboardData.files); if (f.length) { e.preventDefault(); addFiles(f) } }}
+          className={cn('block min-h-6 w-full resize-none border-0 bg-transparent px-1 py-0.5 text-sm leading-normal text-[var(--fg)] outline-none placeholder:text-[var(--fg3)] disabled:opacity-60', TOUCH.input, classNames?.input)} />
+        <div ref={barRef} className={cn('mt-1.5 flex min-w-0 items-center gap-1', classNames?.bar)}>
+          {attachments && <>
+            <input ref={fileRef} type="file" multiple hidden accept={accept} onChange={e => { if (e.target.files) addFiles(e.target.files); e.target.value = '' }} />
+            {addButton ? addButton(pick)
+              : <IconButton icon="plus" label="Add files" size="icon-sm" disabled={disabled} onClick={() => pick()} className="[@media(pointer:coarse)]:!h-10 [@media(pointer:coarse)]:!w-10" />}
+          </>}
+          {models && models.length > 0 && <Select aria-label="Model" options={models} value={model} onChange={onModelChange} className="!h-8 !w-auto max-w-[min(200px,45vw)] !border-transparent text-xs hover:!bg-[var(--muted)] [@media(pointer:coarse)]:!h-10" />}
+          {tools}
+          <span className="min-w-0 flex-1 truncate px-1 text-[11px] text-[var(--fg3)]" role="status">{note}</span>
+          {aside}
+          <SendButton state={btn.state} onClick={btn.onClick} disabled={btn.disabled}
+            className={cn('[@media(pointer:coarse)]:h-10 [@media(pointer:coarse)]:w-10', classNames?.send)} />
+        </div>
+      </motion.div>
+    </motion.div>
   )
 }
 
@@ -568,9 +608,37 @@ export function PermissionRequest({ title = 'Send an email to 12 people', app = 
 
 /* Citations, ghost text, suggested edit, confidence, voice ─────────────────── */
 
-export type Source = { title: string; url: string; snippet?: string }
+/**
+ * A source an answer used: one model for inline citations (Citation), source chips (SourceList) and the sources panel
+ * (SourcesPanel). `url` links it (http(s), mailto or relative; anything else becomes #). `domain` is the short label
+ * under the title (a site, an app, a channel; default: the URL's host). `snippet` is what was read (previews and
+ * expanded cards). `letter` and `color` style its tile (default: the title's first letter on the accent).
+ */
+export type Source = { title: string; url?: string; domain?: string; snippet?: string; letter?: string; color?: string }
 /** Host name of a source link; relative or malformed URLs show as written instead of throwing. */
 const aiHost = (url: string) => { try { return new URL(url).hostname || url } catch { return url } }
+/** A source's short label: its `domain`, else its URL's host. */
+export const sourceDomain = (s: Source) => s.domain ?? (s.url ? aiHost(s.url) : '')
+/** A source's tile: its letter on its colour, darkened by `shade` % black so white text reads on any colour. */
+function AiSourceTile({ s, shade, className }: { s: Source; shade: number; className: string }) {
+  return <span className={cn('grid flex-none place-items-center text-[11px] font-bold text-white [@media(pointer:coarse)]:text-[11px]', className)}
+    style={{ background: `color-mix(in srgb, ${safeColor(s.color, 'var(--accent)')} ${shade}%, #000)` }}>{s.letter ?? s.title[0]}</span>
+}
+
+/** Source chips under an answer: tile, title and domain, numbered, each a link when it has a `url`. */
+export function SourceList({ sources, className }: { sources: Source[]; className?: string }) {
+  return (
+    <div className={cn('flex flex-wrap gap-1.5', className)}>
+      {sources.map((s, i) => (
+        <a key={i + s.title} href={safeUrl(s.url ?? '#ai')} target={s.url && /^https?:/i.test(safeUrl(s.url)) ? '_blank' : undefined} rel="noopener noreferrer" className={cn(surface.md, 'flex items-center gap-2 py-1.5 pr-2.5 pl-1.5 text-xs text-[var(--fg)] no-underline hover:border-[var(--fg3)]')}>
+          <AiSourceTile s={s} shade={80} className="h-[22px] w-[22px] rounded-[var(--r-md)]" />
+          <span><b className="block font-medium">{s.title}</b><span className="text-[var(--fg3)]">{sourceDomain(s)}</span></span>
+          <span className="ml-1 font-[family-name:var(--mono)] text-[11px] font-semibold text-[var(--fg3)] [@media(pointer:coarse)]:text-[11px]">{i + 1}</span>
+        </a>
+      ))}
+    </div>
+  )
+}
 /**
  * Inline [n] citation. Hover or focus previews the source; a tap or click pins it open (tap again, Esc or tap
  * outside to close). The card clamps to the screen edges and flips below when there's no room above.
@@ -602,7 +670,7 @@ export function Citation({ n, source, className }: { n: number; source: Source; 
         {shown && (
           <motion.span ref={panel} id={id} role="tooltip" initial={{ opacity: 0, y: pos.up ? 4 : -4, scale: 0.97 }} animate={{ opacity: 1, y: 0, scale: 1 }} exit={{ opacity: 0, scale: 0.97, transition: { duration: 0.12 } }} transition={spring(0.25, 0.3)}
             style={{ left: pos.dx, width: pos.w }} className={cn(floatingSurface, 'absolute z-50 block p-3 text-left text-[13px] leading-snug', pos.up ? 'bottom-[calc(100%+6px)]' : 'top-[calc(100%+6px)]')}>
-            <span className="mb-1 flex min-w-0 items-center gap-1.5 text-xs text-[var(--fg3)]"><Icon name="globe" size={12} /><span className="truncate">{aiHost(source.url)}</span></span>
+            <span className="mb-1 flex min-w-0 items-center gap-1.5 text-xs text-[var(--fg3)]"><Icon name="globe" size={12} /><span className="truncate">{sourceDomain(source)}</span></span>
             <b className="block font-medium">{source.title}</b>
             {source.snippet && <span className="mt-1 block text-xs text-[var(--fg2)]">{source.snippet}</span>}
           </motion.span>
@@ -798,13 +866,14 @@ export function VoiceInput({ transcript = '', listening: lc, onListeningChange, 
 
 /* Sources panel ──────────────────────────────────────────────────────────── */
 
-export type SourceCard = { title: string; domain: string; snippet: string; /** favicon letter */ letter?: string; /** favicon colour (any CSS colour or token) */ color?: string }
+/** @deprecated Use `Source` (the same fields, all but `title` optional). Removed in 0.5. */
+export type SourceCard = Source
 /**
  * Answer with numbered citations next to their source cards (stacked below on phones). Hovering or focusing either
  * side highlights both; tapping or clicking a citation opens its card with a nudge (scrolling it into view) and keeps
  * the pair highlighted; tapping a card expands it. Write `[1]` in `answer` for citation 1.
  */
-export function SourcesPanel({ answer, sources, className }: { answer: string; sources: SourceCard[]; className?: string }) {
+export function SourcesPanel({ answer, sources, className }: { answer: string; sources: Source[]; className?: string }) {
   const [hov, setHot] = useState(-1), [pin, setPin] = useState(-1) // hover/focus highlight, and the last tapped pair
   const hot = hov >= 0 ? hov : pin
   const [open, setOpen] = useState<Set<number>>(new Set())
@@ -831,7 +900,7 @@ export function SourcesPanel({ answer, sources, className }: { answer: string; s
 }
 
 function AiSourceCardView({ s, n, hot, open, nudge, bind, onToggle }:
-  { s: SourceCard; n: number; hot: boolean; open: boolean; nudge: number; bind: Record<string, (e: React.PointerEvent) => void>; onToggle: () => void }) {
+  { s: Source; n: number; hot: boolean; open: boolean; nudge: number; bind: Record<string, (e: React.PointerEvent) => void>; onToggle: () => void }) {
   const [scope, animate] = useAnimate<HTMLDivElement>()
   useEffect(() => {
     if (!nudge) return
@@ -844,11 +913,11 @@ function AiSourceCardView({ s, n, hot, open, nudge, bind, onToggle }:
       className={cn('cursor-pointer rounded-[var(--r-md)] border bg-[var(--card)] px-3 py-2.5 transition-[border-color,box-shadow] outline-none',
         hot ? 'border-[var(--accent)] shadow-[0_0_0_3px_var(--accent-soft)]' : 'border-[var(--line)]')}>
       <div className="flex items-center gap-2">
-        <span className="grid h-5 w-5 flex-none place-items-center rounded-[var(--r-sm)] text-[11px] font-bold text-white [@media(pointer:coarse)]:text-[11px]" style={{ background: `color-mix(in srgb, ${safeColor(s.color, 'var(--accent)')} 58%, #000)` }}>{s.letter ?? s.title[0]}</span>
-        <div className="min-w-0"><b className="block truncate text-[13px] font-medium">{s.title}</b><div className="text-[11px] text-[var(--fg3)]">{s.domain}</div></div>
+        <AiSourceTile s={s} shade={58} className="h-5 w-5 rounded-[var(--r-sm)]" />
+        <div className="min-w-0"><b className="block truncate text-[13px] font-medium">{s.title}</b><div className="text-[11px] text-[var(--fg3)]">{sourceDomain(s)}</div></div>
         <span className="ml-auto font-[family-name:var(--mono)] text-[11px] font-semibold text-[var(--fg3)]">{n}</span>
       </div>
-      <Collapse open={open}><p className="m-0 pt-1.5 text-xs leading-normal text-[var(--fg2)]">{s.snippet}</p></Collapse>
+      <Collapse open={open && !!s.snippet}><p className="m-0 pt-1.5 text-xs leading-normal text-[var(--fg2)]">{s.snippet}</p></Collapse>
     </div>
   )
 }

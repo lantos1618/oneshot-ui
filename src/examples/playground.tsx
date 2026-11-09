@@ -1,10 +1,10 @@
-import { MOTION_PRESETS, type MotionPreset, motionTransition, useViewport } from './motion'
+import { MOTION_PRESETS, type MotionPreset, motionTransition, useViewport } from '../lib/motion'
 import { useState, useRef, useLayoutEffect, useEffect } from 'react'
 import { useAnimate, useReducedMotion, motion, type Transition } from 'motion/react'
-import { cn, Badge, Button, Chip, isCoarsePointer } from './core'
-import { SegmentedControl, Slider } from './forms'
-import { CodeBlock } from './code'
-/* Motion playground: tune a spring or ease and copy the call. Lives in the content add-on because it uses CodeBlock. */
+import { cn, Badge, Button, Chip, isCoarsePointer } from '../lib/core'
+import { SegmentedControl, Slider } from '../lib/forms'
+import { CodeBlock } from '../lib/code'
+/* Motion playground (an example, not part of the stable API): tune a spring or ease and copy the call. */
 
 /** The code the playground shows for a set of values. */
 const playgroundSnippet = (type: 'spring' | 'ease', bounce: number, duration: number) => {

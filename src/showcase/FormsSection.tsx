@@ -1,5 +1,5 @@
 import { useMemo, useRef, useState } from 'react'
-import { AddressAutocomplete, type AddressRecord, Button, Checkbox, Combobox, DatePicker, EmojiInput, Field, Form, FormField, Input, MultiSelect, type Option, PhoneInput, RangeSlider, Rating, SegmentedControl, TagInput, MENTION_COMMANDS, MENTION_PEOPLE, MentionsInput, RTE_SAMPLE, RichTextEditor, Select, SignaturePad, Switch, Textarea, UnsavedChangesBar, sleep, useFormDraft, useToast } from '../lib'
+import { AddressAutocomplete, type AddressRecord, Button, Checkbox, Combobox, DatePicker, DateTimePicker, EmojiInput, Field, Form, FormField, Input, MultiSelect, type Option, PhoneInput, RangeSlider, Rating, SegmentedControl, TagInput, MENTION_COMMANDS, MENTION_PEOPLE, MentionsInput, RTE_SAMPLE, RichTextEditor, Select, SignaturePad, Switch, Textarea, UnsavedChangesBar, sleep, useFormDraft, useToast } from '../lib'
 import { Section, Spec } from './kit'
 
 const ROLE_OPTS = ['Admin', 'Editor', 'Viewer'].map(v => ({ value: v, label: v }))
@@ -62,6 +62,7 @@ function FormSubmissionDemo() {
         <FormField label="Team" name="team" required description="Grouped by department"><Combobox options={FS_TEAMS} placeholder="Search teams" /></FormField>
         <FormField label="Office" name="office" required description="Where you’ll sit most days"><Combobox options={FS_OFFICES} placeholder="Choose an office" /></FormField>
         <FormField label="Start date" name="start" required description="Sent as 2026-11-08"><DatePicker /></FormField>
+        <FormField label="Kick-off" name="kickoff" description="ISO with offset; the zone as kickoff_tz"><DateTimePicker timeZone="Europe/Zurich" timeZoneName="kickoff_tz" /></FormField>
         <FormField label="Skills" name="skills" description="Each one is its own field"><MultiSelect options={FS_SKILLS} defaultValue={['react']} placeholder="Pick skills" /></FormField>
         <FormField label="Mobile" name="phone" description="Sent in E.164"><PhoneInput /></FormField>
         <FormField label="Hours a week" name="hours" description="Low and high, as two fields"><RangeSlider defaultValue={[24, 40]} min={8} max={48} step={4} valueText={v => `${v} hours`} /></FormField>
@@ -118,6 +119,37 @@ function AsyncComboDemo() {
   )
 }
 
+const FS_PEOPLE: Option[] = [
+  ['Ada Lovelace', 'Engineering'], ['Alan Turing', 'Engineering'], ['Grace Hopper', 'Engineering'], ['Linus Torvalds', 'Engineering'], ['Margaret Hamilton', 'Engineering'],
+  ['Dieter Rams', 'Design'], ['Susan Kare', 'Design'], ['Paula Scher', 'Design'], ['Massimo Vignelli', 'Design'],
+  ['Katherine Johnson', 'Research'], ['Marie Curie', 'Research'], ['Rosalind Franklin', 'Research'], ['Richard Feynman', 'Research'],
+  ['Mary Barra', 'Operations'], ['Satya Nadella', 'Operations'], ['Indra Nooyi', 'Operations'],
+].map(([name, group]) => ({ value: name.toLowerCase().replace(/\W+/g, '-'), label: name, group }))
+
+/** MultiSelect with loadOptions against a fake people API: debounce, abort, loading/error/retry, create, groups. */
+function AsyncMultiDemo() {
+  const [fail, setFail] = useState(false), [picked, setPicked] = useState<string[]>(['grace-hopper', 'dieter-rams'])
+  const failRef = useRef(fail); failRef.current = fail
+  const load = useMemo(() => (q: string, { signal }: { signal: AbortSignal }) => new Promise<Option[]>((resolve, reject) => {
+    const t = setTimeout(() => failRef.current ? reject(new Error('Network error')) : resolve(FS_PEOPLE.filter(p => p.label.toLowerCase().includes(q.toLowerCase()))), 350 + Math.random() * 350)
+    signal.addEventListener('abort', () => { clearTimeout(t); reject(signal.reason) })
+  }), [])
+  return (
+    <div className="grid gap-4 md:grid-cols-[1fr_minmax(200px,0.6fr)]">
+      <div className="flex flex-col gap-3">
+        <FormField label="Reviewers" description="Fake API, 350–700 ms, grouped by team. Type a name, or create someone new.">
+          <MultiSelect loadOptions={load} defaultOptions={FS_PEOPLE.slice(0, 6)} creatable value={picked} onChange={setPicked} placeholder="Search people" />
+        </FormField>
+        <Switch label={<span className="text-xs text-[var(--fg2)]">Fail requests</span>} checked={fail} onChange={setFail} />
+      </div>
+      <div className="rounded-[var(--r-md)] border border-[var(--line)] bg-[var(--bg)] p-3">
+        <span className="mb-2 block text-[11px] font-medium tracking-wide text-[var(--fg3)] uppercase">Value</span>
+        <div role="status" aria-live="polite" className="font-[family-name:var(--mono)] text-xs leading-relaxed break-all">{picked.length ? JSON.stringify(picked) : '[]'}</div>
+      </div>
+    </div>
+  )
+}
+
 function SignatureDemo() {
   const toast = useToast()
   return <SignaturePad onConfirm={(_, n) => toast({ title: 'Signature captured', description: `${n} stroke${n === 1 ? '' : 's'}`, tone: 'ok' })} />
@@ -136,6 +168,7 @@ export function FormsSection() {
       <Spec title="Emoji picker" desc="Categories, search, recently used"><EmojiInput /></Spec>
       <Spec title="Form submission" desc="A real form: custom controls submit like native fields. Required fields stop the submit and focus the first error; Reset restores the defaults." span={3}><FormSubmissionDemo /></Spec>
       <Spec title="Async combobox" desc="Debounced loader with abort, loading and error states, retry, create, groups; plus a virtualised 10,000-option list" span={3}><AsyncComboDemo /></Spec>
+      <Spec title="Async multi-select" desc="loadOptions like the async combobox: debounced, aborted when superseded, loading, error with retry, groups, create. Picks stay labelled across searches" span={3}><AsyncMultiDemo /></Spec>
       <Spec title="Form with unsaved changes" desc="Edit anything and a save bar slides up. Reset restores, Save validates first." span={3}><ProfileForm /></Spec>
     </Section>
   )

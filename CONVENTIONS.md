@@ -41,6 +41,33 @@
 2. The dev server is already running at http://localhost:5173 with hot reload. Use Playwright (`require('playwright')`, `chromium.launch()`) to load it, scroll to your section (`#id`), screenshot it in light and dark (`document.documentElement` gets `data-theme` from the theme menu, or set `localStorage['ui-theme']='{"mode":"dark"}'` then reload), and exercise the interactions you built. Check there are no console errors from your code. Put screenshots in `/tmp/claude-0/-home-user/1f4f4ae9-b860-5799-9be6-05073139d048/scratchpad/` (make a subfolder for your area).
 3. Report: what you built or fixed (by GAPS.md row), what you left and why, the files you touched, and anything you needed in a file you don't own.
 
+## i18n and RTL (0.4)
+
+- **Strings.** Every word a user reads or hears (JSX text, `aria-label`, `title`, `placeholder`, `alt`, label-like
+  prop defaults, toast titles) goes through `const { t } = useLocale()`. Reuse a key from `UI_MESSAGES_EN` in
+  `src/lib/core.tsx` (`common.*`, `status.*`, `date.*`, `paging.*`, `field.*`…); add new keys under a prefix named
+  after your module (`grid.groupBy`, `chat.stop`) and add the same key to `UI_MESSAGES_DE` and `UI_MESSAGES_AR` in
+  `provider.tsx` (TypeScript fails the build until you do). Interpolate (`t('common.removeItem', { name })`) rather
+  than concatenating, and use plural messages (`{count, plural, one {# row} other {# rows}}`) rather than
+  `` `${n} row${n === 1 ? '' : 's'}` ``. A label prop's default becomes `label?: string` with
+  `label ?? t('…')` in the body. Sample/demo content (chat transcripts, table rows) is data, not UI: leave it.
+- **Numbers and dates.** `useLocale().fmt` (`number`, `money`, `percent`, `compact`, `date`, `time`, `relative`,
+  `weekdays`, `months`, `list`) instead of `toLocaleString(LOCALE)`, `new Intl.*(LOCALE)` or the module-level
+  `fmt`/`fmtDate` (those stay en-GB). Weeks start on `useLocale().weekStartsOn`, never a hardcoded Monday or
+  `['Mo', 'Tu', …]`. A deliberately fixed format (an input mask) passes its locale explicitly and says why.
+- **Direction.** Logical utilities only: `ms/me`, `ps/pe`, `start/end`, `border-s/e`, `rounded-s/e`,
+  `rounded-ss/se/es/ee`, `text-start/end`. Exceptions stay physical on purpose: safe-area padding
+  (`env(safe-area-inset-left)`), `left-1/2 -translate-x-1/2` centring, and geometry that is physical by nature
+  (chart axes, maps, a pointer's clientX). For those add `rtl:` twins where they must mirror.
+  `node scripts/rtl-lint.mjs <your files>` lists what is left; `--fix` prints the mechanical rewrite, `--fix --write`
+  applies it. Review `manual` findings by hand (space-x → gap, translate-x, origin-*, popover placements).
+- **Keys, motion, icons.** Horizontal arrow handling goes through `logicalArrow(e.key, dir)`; horizontal motion
+  offsets through `dirX(n, dir)`; icons that point along the reading direction (chevronLeft/Right, undo, list
+  icons: `UI_FLIP_ICONS`) get `className="ui-flip"`. Pointer-driven positions (sliders, splitters, drag) compute
+  from the start edge in RTL (`dir === 'rtl' ? rect.right - x : x - rect.left`).
+- **Check.** `node scripts/i18n-extract.mjs <your files>` should list nothing you own but data; test RTL by setting
+  the showcase's language menu (globe button) to العربية, or `<UIProvider locale="ar-EG">` in a unit test.
+
 ## Mobile (phones and touch)
 
 Test with Playwright device emulation: `devices['iPhone 13']` (390px, touch) and a 360px-wide touch context

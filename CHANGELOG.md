@@ -3,6 +3,60 @@
 All notable changes to `@lyndon/ui`. The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/);
 versions follow [semver](https://semver.org/) (while on 0.x, a minor version may break APIs).
 
+## [Unreleased] (0.4.0)
+
+### Breaking
+
+Sample data, demo helpers and page blocks left the stable API (GAP-ANALYSIS "Cut or simplify"). Sample data and demo
+helpers moved to a new entry, `@lyndon/ui/examples` (not covered by semver: it may change in any release). Page blocks
+became copy-in registry blocks (`registry:block`), no longer exported by the package. Migration:
+
+| Before (0.3) | Now (0.4) |
+| --- | --- |
+| `import { AI_CANVAS_SAMPLE } from '@lyndon/ui'` (or `/aiagent`) | `import { AI_CANVAS_SAMPLE } from '@lyndon/ui/examples'` |
+| `import { AGENT_WORKFLOWS, AGENT_WORKFLOW_ORDER } from '@lyndon/ui'` (or `/diagrams`) | `… from '@lyndon/ui/examples'` |
+| `<StateMachine />`, `<AgentTransitMap />` ran the sample workflows by default | pass them: `<StateMachine machines={AGENT_WORKFLOWS} order={AGENT_WORKFLOW_ORDER} />` (without `machines` both render empty, at full size) |
+| `import { mediaArt, mediaImage, mediaSynthTrack, mediaRecordVideo, type MediaArtKind } from '@lyndon/ui'` (or `/media`) | `… from '@lyndon/ui/examples'` |
+| `import { describeSample } from '@lyndon/ui'` (or `/charts`) | `import { describeSample } from '@lyndon/ui/examples'` |
+| `import { MotionPlayground } from '@lyndon/ui'` or `'@lyndon/ui/playground'` | `import { MotionPlayground } from '@lyndon/ui/examples'` (the `./playground` subpath is gone) |
+| `import { WORLD_MAP } from '@lyndon/ui'` (or `/geo`) | `import { WORLD_MAP } from '@lyndon/ui/geoworld'`, or `await loadWorldMap()` / `useWorldMap()` from `@lyndon/ui` |
+| `import { GLOBE_LAND } from '@lyndon/ui'` (or `/geo`) | `import { GLOBE_LAND } from '@lyndon/ui/geoland'`, or `await loadGlobeLand()` |
+| `import { PricingTable, type Plan } from '@lyndon/ui'` (or `/pages`) | registry block `pricing-table` (copy it in from the registry, then import it from your copy) |
+| `import { Checkout, type CheckoutItem, type CheckoutDetails } from '@lyndon/ui'` | registry block `checkout` |
+| `import { ProfileCard } from '@lyndon/ui'` | registry block `profile-card` |
+| `import { OnboardingChecklist, type OnboardingTask } from '@lyndon/ui'` | registry block `onboarding-checklist` |
+| `import { CookieConsent, type CookieCategory, type CookieChoice } from '@lyndon/ui'` (or `/feedback`) | registry block `cookie-consent` |
+
+Deprecated (still exported, removed in 0.5):
+
+| Deprecated | Use |
+| --- | --- |
+| `RTE_SAMPLE`, `MENTION_PEOPLE`, `MENTION_COMMANDS` from `@lyndon/ui` / `/editor` | the same names from `@lyndon/ui/examples` |
+| `ChatSources({ items: [{ name, desc, color, href }] })` | `SourceList({ sources: [{ title, domain, color, url }] })` |
+| `type SourceCard` | `type Source` (one model for Citation, SourceList and SourcesPanel) |
+
+### Changed
+- **Diagrams split** into `@lyndon/ui/gantt` (Gantt), `/statechart` (Statechart, StateDiagram, WorkflowEngine,
+  StateMachine, `useStatechart`), `/trace` (TraceWaterfall) and `/network` (Sankey, NetworkGraph, ProcessFlow,
+  DataFlow). `@lyndon/ui/diagrams` still re-exports all four.
+- **Statecharts:** one renderer (`Statechart`) and one hook (`useStatechart`: travelling dots, on-screen state, reduced
+  motion, repaint) under both presets; `StateDiagram` (UML) and `StateMachine` (live WorkflowEngine) are thin layers
+  over them, with the same visuals, keyboard and ARIA.
+- **Geo map data loads lazily:** WorldMap's country outlines (67 KB) and Globe's land points (24 KB) are separate
+  modules inside the package, loaded with `import()` on first render (no network fetch). Until then WorldMap shows a
+  placeholder of the map's exact size (also what the server renders), so nothing shifts. `WorldMap` takes `map`
+  and `Globe` takes `land` to supply the data yourself. New: `loadWorldMap`, `loadGlobeLand`, `useWorldMap`,
+  `type WorldMapData`.
+- **Sources:** one `Source` model (`title`, `url?`, `domain?`, `snippet?`, `letter?`, `color?`) for `Citation`,
+  the new `SourceList` (chips) and `SourcesPanel`; `sourceDomain(source)` gives the label they show.
+- **AgentComposer is built on PromptInput** (as ChatComposer already was). PromptInput gained the hooks it needed:
+  `attachmentState` (own the files with `useAttachments`; `type AttachmentState`), `header`, `addButton`, `aside`,
+  `sendButton` + `canSubmit`, `inputRef`, `barRef`, `dropHint`, `uploadProgress`, `layout`, `classNames`. Clicking
+  the box's padding focuses the text.
+- **Collapse and AutoHeight are one implementation:** `Collapse` animates open/closed and, while open, follows its
+  content's height with a spring; `open` is optional (always shown) and `transition` configurable. `AutoHeight` is
+  `Collapse` without `open`.
+
 ## [0.3.0]
 
 Real data: model streams, form submission, async data and long lists.

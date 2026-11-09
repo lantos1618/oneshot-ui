@@ -1,4 +1,4 @@
-import { MotionPlayground } from '../lib'
+import { MotionPlayground } from '../examples'
 import { Section, Spec } from './kit'
 
 export function MotionSection() {

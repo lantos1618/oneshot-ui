@@ -1,7 +1,8 @@
 import { useEffect, useState } from 'react'
-import { AICanvas, AI_CANVAS_SAMPLE, type AiChunk, type AiMessage, type AiToolPart, AgentComposer, Conversation, Message, MessageActions, PromptInput, Suggestions, aiMessageText, useAiChat, AgentPlan, AgentTransitMap, AssistantChat, Badge, Chart, ChatApproval, ChatCard, ChatChecklist, type ChatScript, ChatSources, Citation, CodeBlock, type ComposerModel,
-  type ComposerAction, type ComposerReply, type ComposerSample, type ComposerSendMeta, ConfidenceField, type Connector, GhostTextInput, LOCALE, ModelComparison, PermissionRequest, type SlashCommand, type Source, SourcesPanel, SuggestedEdit, ThinkingSteps, VoiceInput,
-  type StepStatus, type WorkspaceItem, sleep, useViewport } from '../lib'
+import {
+  AICanvas, type AiChunk, type AiMessage, type AiToolPart, AgentComposer, Conversation, Message, MessageActions, PromptInput, Suggestions, aiMessageText, useAiChat, AgentPlan, AgentTransitMap, AssistantChat, Badge, Chart, ChatApproval, ChatCard, ChatChecklist, type ChatScript, SourceList, Citation, CodeBlock, sourceDomain, type ComposerModel, type ComposerAction, type ComposerReply, type ComposerSample, type ComposerSendMeta, ConfidenceField, type Connector, GhostTextInput, LOCALE, ModelComparison, PermissionRequest, type SlashCommand, type Source, SourcesPanel, SuggestedEdit, ThinkingSteps, VoiceInput, type StepStatus, type WorkspaceItem, sleep, useViewport,
+} from '../lib'
+import { AGENT_WORKFLOWS, AGENT_WORKFLOW_ORDER, AI_CANVAS_SAMPLE } from '../examples'
 import { Section, Spec, SpecAction } from './kit'
 
 export type Invoice = { id: string; customer: string; status: string; amount: number }
@@ -30,7 +31,7 @@ function respond(q: string): ChatScript {
   switch (k) {
     case 'sum': return { tool: ['Reading 34 messages', 'Read 34 messages', 'threads.search(since="7d") → 34 messages, 6 threads'],
       versions: ['This week: the redesign moved into build, two bugs were fixed before release, and launch slipped to Thursday because legal review is still open.', 'Short version: build started, two bugs fixed, launch is now Thursday pending legal.'],
-      part: <ChatSources items={[{ name: 'Linear', desc: 'Weekly digest', color: '#5E6AD2' }, { name: 'Slack', desc: '#launch, 34 messages', color: '#16A34A' }, { name: 'Notion', desc: 'Launch checklist', color: '#71717A' }]} />,
+      part: <SourceList sources={[{ title: 'Linear', domain: 'Weekly digest', color: '#5E6AD2' }, { title: 'Slack', domain: '#launch, 34 messages', color: '#16A34A' }, { title: 'Notion', domain: 'Launch checklist', color: '#71717A' }]} />,
       followUps: ['Chart MRR this year', 'What’s blocking launch?'] }
     case 'draft': return { tool: ['Reading thread with Sam', 'Read thread with Sam', 'threads.get("Sam") → 5 messages'],
       versions: ['Hi Sam, thanks for the notes. I’ve applied the copy changes and moved the CTA above the fold. Could you take another look by Wednesday?', 'Hey Sam, done. Copy updated and CTA moved up. Mind a quick re-review before Wednesday?'],
@@ -287,7 +288,7 @@ export function AISection() {
         <p className="m-0 text-[13px] leading-loose">Most users finish onboarding in under 3 minutes<Citation n={1} source={SRC[0]} />, though mobile is 40% slower<Citation n={2} source={SRC[1]} />.
           Teams that invite a colleague on day one keep using the product twice as often<Citation n={3} source={SRC[2]} />, so the invite step stays in the flow.</p>
         <ol className="m-0 mt-auto flex list-none flex-col gap-1 border-t border-[var(--line)] p-0 pt-2.5 text-xs text-[var(--fg3)]">
-          {SRC.map((x, i) => <li key={x.title} className="flex gap-1.5"><span className="ui-num w-3 flex-none text-[var(--fg2)]">{i + 1}</span><span className="truncate">{x.title} · {new URL(x.url).hostname}</span></li>)}
+          {SRC.map((x, i) => <li key={x.title} className="flex gap-1.5"><span className="ui-num w-3 flex-none text-[var(--fg2)]">{i + 1}</span><span className="truncate">{x.title} · {sourceDomain(x)}</span></li>)}
         </ol>
       </Spec>
       <Spec title="Permission request" desc="Say what, to whom, and why. Then show the outcome." span={2}>
@@ -329,7 +330,7 @@ export function AISection() {
         <AICanvas {...AI_CANVAS_SAMPLE} />
       </Spec>
       <Spec title="Agent transit map" desc="A live state machine. The Indexing loop and the Intake endpoint fire events into a queue, and jobs start as slots free up. Endpoints emit follow-up triggers: Deploy starts a smoke test, Ledger starts an audit, and a failed smoke test starts a regression fix. Human and Risk stations wait for your approval (human in the loop). Hover or tap a trace row to follow a job." span={3}>
-        <AgentTransitMap />
+        <AgentTransitMap machines={AGENT_WORKFLOWS} order={AGENT_WORKFLOW_ORDER} />
       </Spec>
     </Section>
   )

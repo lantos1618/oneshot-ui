@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useState } from 'react'
 import { AnimatePresence, motion } from 'motion/react'
-import { AlertDialog, Avatar, Badge, Banner, Button, type Command, CommandPalette, CopyButton, DateRangePicker, Dialog, DropdownMenu, Field, HoldToConfirm, HoverCard, Icon, InlineEdit, Input, Kbd, MenuItem, MenuSeparator,
+import { AlertDialog, Avatar, Badge, Banner, Button, type Command, CommandPalette, CopyButton, DateRangePicker, Dialog, DropdownMenu, Field, HoldToConfirm, HoverCard, Icon, IconButton, InlineEdit, Input, Kbd, MenuItem, MenuSeparator,
   type Notification, NotificationBell, Popover, PopoverContent, PopoverTrigger, Select, Sheet, Switch, Tooltip, Tour, type TourStep, cn, floatingSurface, menuItemClass, useToast } from '../lib'
 import { Row, Section, Spec, SpecPreview } from './kit'
 
@@ -154,6 +154,102 @@ function OvPaletteDemo() {
   )
 }
 
+/* Dropdown menu built from parts: checkbox and radio items, a labelled group, a submenu, shortcuts, typeahead */
+function OvViewMenu({ onPick }: { onPick: (what: string) => void }) {
+  const [grid, setGrid] = useState(true)
+  const [rulers, setRulers] = useState(false)
+  const [density, setDensity] = useState('comfortable')
+  return (
+    <DropdownMenu.Root>
+      <DropdownMenu.Trigger>View <Icon name="chevronDown" size={14} /></DropdownMenu.Trigger>
+      <DropdownMenu.Content align="end" className="w-56" aria-label="View options">
+        <DropdownMenu.Label>Show</DropdownMenu.Label>
+        <DropdownMenu.CheckboxItem checked={grid} onCheckedChange={v => { setGrid(v); onPick(`Grid ${v ? 'on' : 'off'}`) }}>Grid<DropdownMenu.Shortcut>⌘'</DropdownMenu.Shortcut></DropdownMenu.CheckboxItem>
+        <DropdownMenu.CheckboxItem checked={rulers} onCheckedChange={v => { setRulers(v); onPick(`Rulers ${v ? 'on' : 'off'}`) }}>Rulers<DropdownMenu.Shortcut>⇧R</DropdownMenu.Shortcut></DropdownMenu.CheckboxItem>
+        <DropdownMenu.Separator />
+        <DropdownMenu.Label>Density</DropdownMenu.Label>
+        <DropdownMenu.RadioGroup value={density} onValueChange={v => { setDensity(v); onPick(`Density: ${v}`) }} aria-label="Density">
+          <DropdownMenu.RadioItem value="compact">Compact</DropdownMenu.RadioItem>
+          <DropdownMenu.RadioItem value="comfortable">Comfortable</DropdownMenu.RadioItem>
+        </DropdownMenu.RadioGroup>
+        <DropdownMenu.Separator />
+        <DropdownMenu.Sub>
+          <DropdownMenu.SubTrigger icon="upload">Export</DropdownMenu.SubTrigger>
+          <DropdownMenu.SubContent>
+            {['PNG', 'SVG', 'PDF'].map(f => <DropdownMenu.Item key={f} onSelect={() => onPick(`Exported as ${f}`)}>{f}</DropdownMenu.Item>)}
+          </DropdownMenu.SubContent>
+        </DropdownMenu.Sub>
+        <DropdownMenu.Item icon="link" shortcut="L" onSelect={() => onPick('Copied link')}>Copy link</DropdownMenu.Item>
+      </DropdownMenu.Content>
+    </DropdownMenu.Root>
+  )
+}
+
+/* The same overlays, written as parts */
+function OvPartsDemo() {
+  const toast = useToast()
+  const [name, setName] = useState('Website redesign')
+  const [draft, setDraft] = useState(name)
+  const [archived, setArchived] = useState(false)
+  return (
+    <>
+      <Row>
+        <Dialog.Root onOpenChange={o => { if (o) setDraft(name) }}>
+          <Dialog.Trigger>Rename</Dialog.Trigger>
+          <Dialog.Content>
+            <Dialog.Title>Rename project</Dialog.Title>
+            <Dialog.Description>The name shows in the sidebar and in shared links.</Dialog.Description>
+            <Field label="Name"><Input value={draft} onChange={e => setDraft(e.target.value)} /></Field>
+            <Dialog.Footer>
+              <Dialog.Close>Cancel</Dialog.Close>
+              <Dialog.Close variant="primary" disabled={!draft.trim()} onClick={() => { setName(draft.trim()); toast({ title: 'Renamed', description: draft.trim() }) }}>Save</Dialog.Close>
+            </Dialog.Footer>
+          </Dialog.Content>
+        </Dialog.Root>
+        <Sheet.Root>
+          <Sheet.Trigger>Details</Sheet.Trigger>
+          <Sheet.Content side="left">
+            <Sheet.Header><Sheet.Title>{name}</Sheet.Title><Sheet.Close /></Sheet.Header>
+            <Sheet.Description>Created by Bea Kim · 24 files · 3 automations</Sheet.Description>
+            <div className="flex flex-1 flex-col gap-3">
+              <Switch label="Notify me about changes" defaultChecked />
+              <Switch label="Show in the sidebar" defaultChecked />
+            </div>
+            <Sheet.Footer><Sheet.Close variant="primary">Done</Sheet.Close></Sheet.Footer>
+          </Sheet.Content>
+        </Sheet.Root>
+        <AlertDialog.Root>
+          <AlertDialog.Trigger variant="outline-danger" disabled={archived}>{archived ? 'Archived' : 'Archive'}</AlertDialog.Trigger>
+          <AlertDialog.Content>
+            <AlertDialog.Title>Archive “{name}”?</AlertDialog.Title>
+            <AlertDialog.Description>It leaves the sidebar and stops syncing. You can restore it from Settings.</AlertDialog.Description>
+            <AlertDialog.Footer>
+              <AlertDialog.Cancel />
+              <AlertDialog.Action tone="default" onConfirm={() => new Promise<void>(r => setTimeout(() => { setArchived(true); r() }, 700))}>Archive</AlertDialog.Action>
+            </AlertDialog.Footer>
+          </AlertDialog.Content>
+        </AlertDialog.Root>
+        <Popover.Root>
+          <Tooltip.Root delay={300}>
+            <Tooltip.Trigger asChild>
+              <Popover.Trigger asChild><IconButton icon="info" label="Project info" size="icon" variant="default" /></Popover.Trigger>
+            </Tooltip.Trigger>
+            <Tooltip.Content side="bottom" arrow>Project info</Tooltip.Content>
+          </Tooltip.Root>
+          <Popover.Content side="top" align="center" sideOffset={10} arrow aria-label="Project info" className="w-[min(240px,calc(100vw-16px))] p-3">
+            <b className="text-[13px]">{name}</b>
+            <div className="mt-1 text-xs text-[var(--fg3)]">Owner <HoverCard.Root><HoverCard.Trigger asChild><a href="#overlays" onClick={e => e.preventDefault()} className="font-medium text-[var(--accent)] no-underline">@beakim</a></HoverCard.Trigger>
+              <HoverCard.Content side="bottom" arrow className="!w-[200px]"><div className="flex items-center gap-2"><Avatar name="Bea Kim" size={28} /><div><b className="block text-[13px]">Bea Kim</b><span className="text-xs text-[var(--fg3)]">PM · Berlin</span></div></div></HoverCard.Content>
+            </HoverCard.Root> · edited 2 h ago</div>
+            <Popover.Close size="sm" className="mt-3 w-full">Got it</Popover.Close>
+          </Popover.Content>
+        </Popover.Root>
+      </Row>
+      <span className="text-xs text-[var(--fg3)]">Dialog, Sheet, AlertDialog, Popover, Tooltip and HoverCard as parts. The ⓘ button is one element that is both a tooltip and a popover trigger (two nested <code className="font-[family-name:var(--mono)]">asChild</code>s).</span>
+    </>
+  )
+}
+
 /** Window event the page shell sends (⌘K "Open modal" / "Open drawer") to open this section's demo dialog or sheet. */
 export const OVERLAY_DEMO_EVENT = 'showcase:overlay-demo'
 export type OverlayDemo = 'modal' | 'sheet'
@@ -172,11 +268,11 @@ export function OverlaysSection({ openPalette }: { openPalette: () => void }) {
   }, [])
   return (
     <Section id="overlays" title="Overlays" desc="Things that open should feel like they come from somewhere.">
-      <Spec title="Dropdown menu" desc="Scales from its trigger. Items stagger in; the first takes focus.">
+      <Spec title="Dropdown menu" desc="Scales from its trigger. Items stagger in; the first takes focus. Type a letter to jump. “View” is built from parts: checkbox and radio items and a submenu.">
         <Row><DropdownMenu trigger={<>Options <Icon name="chevronDown" size={14} /></>}>
           <MenuItem shortcut="E" onSelect={pick('Edit')}>Edit</MenuItem><MenuItem shortcut="D" onSelect={pick('Duplicate')}>Duplicate</MenuItem>
           <MenuItem onSelect={pick('Share')}>Share</MenuItem><MenuSeparator /><MenuItem danger onSelect={pick('Delete')}>Delete</MenuItem>
-        </DropdownMenu><span className="text-xs text-[var(--fg3)]" aria-live="polite">{picked}</span></Row>
+        </DropdownMenu><OvViewMenu onPick={what => setPicked(what)} /><span className="text-xs text-[var(--fg3)]" aria-live="polite">{picked}</span></Row>
         <SpecPreview>{ovPreviewMenu}</SpecPreview>
       </Spec>
       <Spec title="Modal" desc="Springs in, backdrop fades, focus trapped, page scroll locked">
@@ -265,6 +361,10 @@ export function OverlaysSection({ openPalette }: { openPalette: () => void }) {
       </Spec>
       <Spec title="Notification centre" desc="Unread count, mark all read. The bell shakes when something new arrives."><OvNotificationDemo /></Spec>
       <Spec title="Announcement banner" desc="Dismiss collapses smoothly"><OvBannerDemo /></Spec>
+      <Spec title="Composable overlays" desc="Every overlay is also a set of parts (Root, Trigger, Content, Title, Description, Close, Footer), shadcn style. Triggers take asChild; content takes side, align, sideOffset and arrow."
+        keys={[[['Esc'], 'Close'], [['Tab'], 'Stays inside']]}>
+        <OvPartsDemo />
+      </Spec>
       <Spec title="Inline edit" desc="Click to edit, Enter saves, Esc cancels">
         <InlineEdit value={title} onSave={setTitle} label="title" helper="Last edited 2 h ago" className="text-base" />
       </Spec>

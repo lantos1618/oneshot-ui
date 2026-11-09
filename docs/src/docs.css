@@ -1,0 +1,15 @@
+@import "tailwindcss";
+/* the library and the showcase demos the pages mount */
+@source "../../src/lib";
+@source "../../src/showcase";
+@source "../../src/blocks";
+
+html { scroll-padding-top: 72px; }
+body { margin: 0; }
+
+/* A docs page mounts one showcase section and shows only the cards that use the page's components (DocsDemo writes
+   the per-page rule); the section heading, the code button and the tag chips belong to the showcase. */
+.docs-demo section { margin: 0 !important; }
+.docs-demo section > div:first-child { display: none; }
+.docs-demo section > div.grid { grid-template-columns: minmax(0, 1fr); }
+.docs-demo [data-kit-entry], .docs-demo [role='toolbar'][aria-label^='Use-case tags'] { display: none; }

@@ -1,6 +1,6 @@
-import { useEffect, useId, useMemo, useRef, useState, type ReactNode } from 'react'
+import { createContext, useContext, useEffect, useId, useMemo, useRef, useState, type ReactNode } from 'react'
 import { AnimatePresence, motion } from 'motion/react'
-import { AnimatedNumber, Button, DeltaBadge, Icon, IconButton, Kbd, TOUCH, cn, fmtDate, inputClass, spring, surface, useControllable, useHotkey, SparkChart, rowHoverClass } from './core'
+import { AnimatedNumber, type AsChildProps, Button, Slot, DeltaBadge, Icon, IconButton, Kbd, TOUCH, cn, fmtDate, inputClass, spring, surface, useControllable, useHotkey, SparkChart, rowHoverClass } from './core'
 import { shake } from './motion'
 import { Collapse, useToast } from './feedback'
 import { Calendar, CheckboxBox, type DateRange, SegmentedControl, inputShellClass } from './forms'
@@ -108,34 +108,98 @@ export function DataTable<T extends object>({ columns, rows, rowKey, initialSort
   )
 }
 
+type AccCtxV = { open: string[]; toggle: (v: string) => void; base: string; disabled?: boolean }
+const AccCtx = createContext<AccCtxV | null>(null)
+type AccItemCtxV = { value: string; on: boolean; disabled?: boolean; triggerId: string; panelId: string }
+const AccItemCtx = createContext<AccItemCtxV | null>(null)
+const useAccItem = (part: string) => { const c = useContext(AccItemCtx); if (!c) throw new Error(`<Accordion.${part}> must be inside <Accordion.Item>`); return c }
+const accIdPart = (v: string) => v.replace(/[^\w-]/g, '_')
+
+/** Props of Accordion.Root: `type="single"` (one open `value`, '' for none) or `"multiple"` (a list of open values). */
+export type AccordionRootProps = { className?: string; children: ReactNode; disabled?: boolean } & (
+  | { type?: 'single'; value?: string; defaultValue?: string; onValueChange?: (value: string) => void; /** the open item can be closed again (leaving none open) */ collapsible?: boolean }
+  | { type: 'multiple'; value?: string[]; defaultValue?: string[]; onValueChange?: (value: string[]) => void; collapsible?: never })
+
 /**
- * Accordion: panels grow to their content height and the chevron rotates. Open panels (by index) are uncontrolled
- * (`defaultOpen`) or controlled (`value` + `onValueChange`); `multiple` lets several stay open.
+ * Accordion.Root: which items are open. `type="single"` (default) keeps at most one open, and with `collapsible` it can
+ * be closed again; `type="multiple"` lets any number stay open. Controlled (`value` + `onValueChange`) or `defaultValue`.
  */
-export function Accordion({ items, multiple, defaultOpen = [], value, onValueChange, className }:
+export function AccordionRoot(props: AccordionRootProps) {
+  const multiple = props.type === 'multiple'
+  const toList = (v: string | string[] | undefined) => v === undefined ? undefined : Array.isArray(v) ? v : v ? [v] : []
+  const [open, setOpen] = useControllable<string[]>(toList(props.value), toList(props.defaultValue) ?? [],
+    (v: string[]) => (props.onValueChange as ((x: string | string[]) => void) | undefined)?.(multiple ? v : v[0] ?? ''))
+  const base = useId()
+  const toggle = (v: string) => {
+    if (open.includes(v)) { if (multiple || props.collapsible) setOpen(open.filter(x => x !== v)) }
+    else setOpen(multiple ? [...open, v] : [v])
+  }
+  return <AccCtx.Provider value={{ open, toggle, base, disabled: props.disabled }}><div className={props.className}>{props.children}</div></AccCtx.Provider>
+}
+/** Accordion.Item: one section (`value`), with a rule under it. `disabled` locks it. */
+export function AccordionItem({ value, disabled, className, children }: { value: string; disabled?: boolean; className?: string; children: ReactNode }) {
+  const acc = useContext(AccCtx)
+  if (!acc) throw new Error('<Accordion.Item> must be inside <Accordion.Root>')
+  const on = acc.open.includes(value), id = `${acc.base}-${accIdPart(value)}`
+  return (
+    <AccItemCtx.Provider value={{ value, on, disabled: disabled || acc.disabled, triggerId: `${id}-h`, panelId: `${id}-p` }}>
+      <div data-state={on ? 'open' : 'closed'} className={cn('border-b border-[var(--line)]', className)}>{children}</div>
+    </AccItemCtx.Provider>
+  )
+}
+/** Accordion.Trigger: the row that opens and closes its item (aria-expanded, aria-controls); the chevron turns. `asChild` renders your element (no chevron). */
+export function AccordionTrigger({ className, children, asChild }: { className?: string; children: ReactNode } & AsChildProps) {
+  const acc = useContext(AccCtx), it = useAccItem('Trigger')
+  const props = {
+    id: it.triggerId, 'aria-expanded': it.on, 'aria-controls': it.panelId, 'data-state': it.on ? 'open' : 'closed',
+    onClick: () => { if (!it.disabled) acc?.toggle(it.value) },
+    className: cn('flex w-full cursor-pointer items-center justify-between gap-3 rounded-[var(--r-md)] border-0 bg-transparent px-1.5 py-3 text-left text-[13px] font-medium transition-colors disabled:cursor-default disabled:opacity-50 [@media(pointer:coarse)]:min-h-11 [@media(pointer:coarse)]:text-sm', rowHoverClass, className),
+  }
+  if (asChild) return <Slot {...props} aria-disabled={it.disabled || undefined}>{children}</Slot>
+  return (
+    <button type="button" disabled={it.disabled} {...props}>
+      {children}
+      <motion.span animate={{ rotate: it.on ? 180 : 0 }} transition={spring(0.2, 0.3)} className="text-[var(--fg3)]"><Icon name="chevronDown" size={14} /></motion.span>
+    </button>
+  )
+}
+/**
+ * Accordion.Content (role=region, labelled by its trigger): grows to its content height. Unmounted while closed, or with
+ * `forceMount` kept in the DOM (collapsed and hidden), e.g. for in-page search or to keep form state.
+ */
+export function AccordionContent({ className, children, forceMount }: { className?: string; children: ReactNode; forceMount?: boolean }) {
+  const it = useAccItem('Content')
+  const panel = <div id={it.panelId} role="region" aria-labelledby={it.triggerId} className={cn('pb-3 text-[13px] text-[var(--fg2)]', className)}>{children}</div>
+  if (!forceMount) return <Collapse open={it.on}>{panel}</Collapse>
+  return (
+    <motion.div initial={false} className="overflow-hidden" transition={spring(0.1, 0.32)}
+      animate={it.on ? { height: 'auto', opacity: 1, visibility: 'visible' } : { height: 0, opacity: 0, transitionEnd: { visibility: 'hidden' } }}>{panel}</motion.div>
+  )
+}
+
+function AccordionConfig({ items, multiple, defaultOpen = [], value, onValueChange, className }:
   { items: { title: ReactNode; content: ReactNode }[]; multiple?: boolean; defaultOpen?: number[]
     /** open panels (controlled) */ value?: number[]; onValueChange?: (open: number[]) => void; className?: string }) {
   const [open, setOpen] = useControllable(value, defaultOpen, onValueChange)
-  const id = useId()
-  const toggle = (i: number) => setOpen(open.includes(i) ? open.filter(x => x !== i) : multiple ? [...open, i] : [i])
   return (
-    <div className={className}>
-      {items.map((it, i) => {
-        const on = open.includes(i)
-        return (
-          <div key={i} className="border-b border-[var(--line)]">
-            <button id={`${id}-h${i}`} aria-expanded={on} aria-controls={`${id}-p${i}`} onClick={() => toggle(i)}
-              className={cn('flex w-full cursor-pointer items-center justify-between gap-3 rounded-[var(--r-md)] border-0 bg-transparent px-1.5 py-3 text-left text-[13px] font-medium transition-colors [@media(pointer:coarse)]:min-h-11 [@media(pointer:coarse)]:text-sm', rowHoverClass)}>
-              {it.title}
-              <motion.span animate={{ rotate: on ? 180 : 0 }} transition={spring(0.2, 0.3)} className="text-[var(--fg3)]"><Icon name="chevronDown" size={14} /></motion.span>
-            </button>
-            <Collapse open={on}><div id={`${id}-p${i}`} role="region" aria-labelledby={`${id}-h${i}`} className="pb-3 text-[13px] text-[var(--fg2)]">{it.content}</div></Collapse>
-          </div>
-        )
-      })}
-    </div>
+    <AccordionRoot type="multiple" value={open.map(String)} className={className}
+      onValueChange={next => { const added = next.find(v => !open.includes(+v)); setOpen(multiple || added === undefined ? next.map(Number) : [+added]) }}>
+      {items.map((it, i) => (
+        <AccordionItem key={i} value={String(i)}>
+          <AccordionTrigger>{it.title}</AccordionTrigger>
+          <AccordionContent>{it.content}</AccordionContent>
+        </AccordionItem>
+      ))}
+    </AccordionRoot>
   )
 }
+
+/**
+ * Accordion: panels grow to their content height and the chevron rotates. Open panels (by index) are uncontrolled
+ * (`defaultOpen`) or controlled (`value` + `onValueChange`); `multiple` lets several stay open.
+ * Parts: Accordion.Root (type single|multiple, collapsible) / Item / Trigger (asChild) / Content (forceMount).
+ */
+export const Accordion = Object.assign(AccordionConfig, { Root: AccordionRoot, Item: AccordionItem, Trigger: AccordionTrigger, Content: AccordionContent })
 
 /** Any list whose items animate in, out and into new positions. */
 export function AnimatedList<T>({ items, keyOf, render, className }: { items: T[]; keyOf: (t: T) => string; render: (t: T) => ReactNode; className?: string }) {

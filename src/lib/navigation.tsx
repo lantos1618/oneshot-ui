@@ -1,6 +1,6 @@
-import { useCallback, useEffect, useId, useLayoutEffect, useRef, useState, type ReactNode } from 'react'
+import { createContext, useCallback, useContext, useEffect, useId, useLayoutEffect, useMemo, useRef, useState, type ButtonHTMLAttributes, type HTMLAttributes, type ReactNode, type Ref, type KeyboardEvent as RKeyboardEvent, type MouseEvent as ReactMouseEvent } from 'react'
 import { AnimatePresence, motion, type Variants } from 'motion/react'
-import { Avatar, Button, Icon, IconButton, type IconName, StatusIcon, cn, safeUrl, spring, useCoarsePointer, useControllable, useHotkey, useOutside, useRoving } from './core'
+import { type AsChildProps, Avatar, Button, type ButtonProps, Icon, IconButton, type IconName, ScrollEdges, Slot, StatusIcon, cn, prefersReducedMotion, safeUrl, spring, useCoarsePointer, useComposedRefs, useControllable, useHotkey, useOutside, useScrollEdges } from './core'
 import { ActiveIndicator } from './forms'
 import { Tooltip } from './overlay'
 
@@ -8,37 +8,168 @@ import { Tooltip } from './overlay'
  * 7. NAVIGATION
  * ══════════════════════════════════════════════════════════════════════════ */
 
+/**
+ * Values registered by the items of a composite (tabs, toggle group) in mount order, with their disabled flag, so the
+ * root knows which item is the Tab stop when none is selected.
+ */
+function useNavRegistry() {
+  const [items, setItems] = useState<{ value: string; disabled: boolean }[]>([])
+  const register = useCallback((value: string, disabled: boolean) => {
+    setItems(a => { const i = a.findIndex(x => x.value === value); if (i >= 0 && a[i].disabled === disabled) return a; const next = [...a]; if (i >= 0) next[i] = { value, disabled }; else next.push({ value, disabled }); return next })
+    return () => setItems(a => a.filter(x => x.value !== value))
+  }, [])
+  return [items, register] as const
+}
+/** The first enabled registered value. */
+const navFirst = (items: { value: string; disabled: boolean }[]) => items.find(x => !x.disabled)?.value
+/** DOM-order arrow-key step through `items` from the focused one: ±1 (wrapping when `loop`), or the first/last. */
+function navStep(items: HTMLElement[], key: string, prev: string, next: string, loop = true): HTMLElement | null {
+  if (!items.length) return null
+  const i = items.indexOf(document.activeElement as HTMLElement)
+  let n = key === next ? i + 1 : key === prev ? (i < 0 ? items.length - 1 : i - 1) : key === 'Home' ? 0 : key === 'End' ? items.length - 1 : -2
+  if (n === -2) return null
+  if (loop) n = (n + items.length) % items.length
+  else n = Math.max(0, Math.min(items.length - 1, n))
+  return items[n] ?? null
+}
+const navIdPart = (v: string) => v.replace(/[^\w-]/g, '_')
+
+/* Tabs ─────────────────────────────────────────────────────────────────────── */
+
 export type TabItem = { value: string; label: ReactNode; content?: ReactNode; badge?: ReactNode }
 
-/** Underline travels to the clicked tab; panel cross-fades. ← → move between tabs (and select them), Home/End jump to the ends. */
-export function Tabs({ items, value, defaultValue, onChange, className }:
-  { items: TabItem[]; value?: string; defaultValue?: string; onChange?: (v: string) => void; className?: string }) {
-  const [v, set] = useControllable(value, defaultValue ?? items[0]?.value ?? '', onChange)
-  const group = useId(), refs = useRef<(HTMLButtonElement | null)[]>([])
-  const i = items.findIndex(t => t.value === v)
-  const { onKeyDown } = useRoving(items.length, () => {}, { orientation: 'horizontal', index: Math.max(0, i), onMove: n => { set(items[n].value); refs.current[n]?.focus() } })
-  const current = items[i]
+type TabsCtxV = {
+  value: string; select: (v: string) => void; base: string; group: string; orientation: 'horizontal' | 'vertical'; manual: boolean
+  lazy: boolean; keepMounted: boolean; visited: Set<string>; switched: boolean
+  tabs: { value: string; disabled: boolean }[]; registerTab: (v: string, disabled: boolean) => () => void
+  panels: Set<string>; registerPanel: (v: string) => () => void
+}
+const TabsCtx = createContext<TabsCtxV | null>(null)
+const useTabs = (part: string) => { const c = useContext(TabsCtx); if (!c) throw new Error(`<Tabs.${part}> must be inside <Tabs.Root>`); return c }
+
+/**
+ * Tabs.Root: the selected tab (`value` + `onValueChange`, or `defaultValue`). `orientation="vertical"` puts the list
+ * beside the panels (↑/↓ move); `activationMode="manual"` makes arrows only move focus (Enter/Space select). Panels
+ * unmount when hidden unless `keepMounted` (all stay mounted, hidden) or `lazy` (each mounts on first visit, then stays).
+ */
+export function TabsRoot({ value, defaultValue = '', onValueChange, onChange, orientation = 'horizontal', activationMode = 'automatic', lazy = false, keepMounted = false, className, children }:
+  { value?: string; defaultValue?: string; onValueChange?: (value: string) => void; /** alias of onValueChange */ onChange?: (value: string) => void
+    orientation?: 'horizontal' | 'vertical'; activationMode?: 'automatic' | 'manual'; lazy?: boolean; keepMounted?: boolean; className?: string; children: ReactNode }) {
+  const notify = useCallback((v: string) => { onValueChange?.(v); onChange?.(v) }, [onValueChange, onChange])
+  const [v, set] = useControllable(value, defaultValue, notify)
+  const base = useId(), group = useId()
+  const [tabs, registerTab] = useNavRegistry()
+  const [panels, setPanels] = useState<Set<string>>(() => new Set())
+  const registerPanel = useCallback((p: string) => {
+    setPanels(s => s.has(p) ? s : new Set(s).add(p))
+    return () => setPanels(s => { if (!s.has(p)) return s; const n = new Set(s); n.delete(p); return n })
+  }, [])
+  const [visited, setVisited] = useState<Set<string>>(() => new Set([v]))
+  if (!visited.has(v)) setVisited(new Set(visited).add(v))
+  const switched = useRef(false)
+  const select = useCallback((n: string) => { switched.current = true; set(n) }, [set])
+  const ctx = useMemo<TabsCtxV>(() => ({ value: v, select, base, group, orientation, manual: activationMode === 'manual', lazy, keepMounted, visited, switched: switched.current, tabs, registerTab, panels, registerPanel }),
+    [v, select, base, group, orientation, activationMode, lazy, keepMounted, visited, tabs, registerTab, panels, registerPanel])
+  return <TabsCtx.Provider value={ctx}><div data-orientation={orientation} className={cn(orientation === 'vertical' && 'flex items-start gap-5', className)}>{children}</div></TabsCtx.Provider>
+}
+
+/**
+ * Tabs.List (role=tablist): one Tab stop; ←/→ (↑/↓ when vertical) move and select, Home/End jump to the ends. A
+ * horizontal list that doesn't fit scrolls sideways with edge fades and keeps the selected tab in view. `fade`: the
+ * colour behind it ('card' or 'bg').
+ */
+export function TabsList({ className, children, fade = 'card', 'aria-label': ariaLabel }: { className?: string; children: ReactNode; fade?: 'card' | 'bg'; 'aria-label'?: string }) {
+  const c = useTabs('List'), vertical = c.orientation === 'vertical'
+  const list = useRef<HTMLDivElement>(null)
+  const [edgeRef, edges] = useScrollEdges<HTMLDivElement>()
+  const ref = useComposedRefs<HTMLDivElement>(list, edgeRef)
+  useEffect(() => { // keep the selected tab in view when the list scrolls
+    const el = list.current
+    if (!el || vertical || el.scrollWidth <= el.clientWidth + 1) return
+    const tab = [...el.querySelectorAll<HTMLElement>('[role=tab]')].find(t => t.getAttribute('aria-selected') === 'true')
+    if (!tab) return
+    const l = tab.offsetLeft - el.offsetLeft, pad = 24
+    const to = l - pad < el.scrollLeft ? l - pad : l + tab.offsetWidth + pad > el.scrollLeft + el.clientWidth ? l + tab.offsetWidth + pad - el.clientWidth : null
+    if (to !== null) el.scrollTo?.({ left: Math.max(0, to), behavior: prefersReducedMotion() ? 'auto' : 'smooth' })
+  }, [c.value, vertical])
+  const onKeyDown = (e: RKeyboardEvent<HTMLDivElement>) => {
+    if (e.key === 'Enter' || (e.target as Element).closest('[role=tablist]') !== e.currentTarget) return
+    const tabs = [...e.currentTarget.querySelectorAll<HTMLElement>('[role=tab]')].filter(t => t.closest('[role=tablist]') === e.currentTarget && !(t as HTMLButtonElement).disabled)
+    const to = navStep(tabs, e.key, vertical ? 'ArrowUp' : 'ArrowLeft', vertical ? 'ArrowDown' : 'ArrowRight')
+    if (!to) return
+    e.preventDefault(); to.focus()
+    if (!c.manual && to.dataset.value !== undefined) c.select(to.dataset.value)
+  }
+  if (vertical) return (
+    <div ref={list} role="tablist" aria-orientation="vertical" aria-label={ariaLabel} onKeyDown={onKeyDown}
+      className={cn('flex flex-none flex-col gap-0.5 border-r border-[var(--line)]', className)}>{children}</div>
+  )
   return (
-    <div className={className}>
-      <div role="tablist" className="flex gap-5 border-b border-[var(--line)]" onKeyDown={e => { if (e.key !== 'Enter') onKeyDown(e) }}>
-        {items.map((t, k) => (
-          <button key={t.value} ref={el => { refs.current[k] = el }} role="tab" aria-selected={t.value === v} tabIndex={t.value === v || (i < 0 && k === 0) ? 0 : -1} onClick={() => set(t.value)}
-            className={cn('relative flex cursor-pointer items-center gap-1.5 border-0 bg-transparent px-0 py-2 text-[13px] font-medium whitespace-nowrap transition-colors [@media(pointer:coarse)]:py-2.5',
-              t.value === v ? 'text-[var(--fg)]' : 'text-[var(--fg2)] hover:text-[var(--fg)]')}>
-            {t.label}{t.badge}
-            {t.value === v && <ActiveIndicator group={group} className="top-auto -bottom-px h-0.5 rounded-full bg-[var(--fg)]" />}
-          </button>
-        ))}
-      </div>
-      {current?.content !== undefined && (
-        <AnimatePresence mode="wait" initial={false}>
-          <motion.div key={v} role="tabpanel" initial={{ opacity: 0, y: -4 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0, y: 4, transition: { duration: 0.1 } }}
-            transition={{ duration: 0.2 }} className="pt-3 text-[13px]">{current.content}</motion.div>
-        </AnimatePresence>
-      )}
+    <div className="relative">
+      {/* the bottom rule is an inset shadow over 1px of padding (not a border), so the scroller doesn't clip the underline */}
+      <div ref={ref} role="tablist" aria-orientation="horizontal" aria-label={ariaLabel} onKeyDown={onKeyDown}
+        className={cn('flex gap-5 overflow-x-auto overflow-y-hidden pb-px shadow-[inset_0_-1px_0_var(--line)] [scrollbar-width:none] [&::-webkit-scrollbar]:hidden', className)}>{children}</div>
+      <ScrollEdges {...edges} fade={fade} hint={null} />
     </div>
   )
 }
+
+/**
+ * Tabs.Trigger (role=tab): selects its `value`; the underline slides to it. `disabled` skips it. `asChild` renders your
+ * element (e.g. a router link per tab) with the tab's props.
+ */
+export function TabsTrigger({ value, disabled = false, asChild, className, children }: { value: string; disabled?: boolean; className?: string; children: ReactNode } & AsChildProps) {
+  const c = useTabs('Trigger'), on = c.value === value, vertical = c.orientation === 'vertical'
+  const register = c.registerTab
+  useLayoutEffect(() => register(value, disabled), [register, value, disabled])
+  const none = !c.tabs.some(t => t.value === c.value && !t.disabled)
+  const id = `${c.base}-tab-${navIdPart(value)}`
+  const props = {
+    role: 'tab', id, 'aria-selected': on, 'aria-controls': c.panels.has(value) ? `${c.base}-panel-${navIdPart(value)}` : undefined,
+    tabIndex: on || (none && navFirst(c.tabs) === value) ? 0 : -1, 'data-value': value, 'data-state': on ? 'active' : 'inactive',
+    onClick: () => { if (!disabled) c.select(value) },
+    onKeyDown: (e: RKeyboardEvent<HTMLElement>) => { if (c.manual && (e.key === 'Enter' || e.key === ' ')) { e.preventDefault(); c.select(value) } },
+    className: cn('relative flex flex-none cursor-pointer items-center gap-1.5 border-0 bg-transparent text-[13px] font-medium whitespace-nowrap transition-colors disabled:cursor-default disabled:opacity-50',
+      vertical ? 'h-8 justify-start rounded-[var(--r-md)] pr-4 pl-2.5 text-left [@media(pointer:coarse)]:h-10' : 'px-0 py-2 [@media(pointer:coarse)]:py-2.5',
+      on ? 'text-[var(--fg)]' : 'text-[var(--fg2)] hover:text-[var(--fg)]', vertical && !on && 'hover:bg-[var(--muted)]', className),
+  }
+  const bar = on && <ActiveIndicator group={c.group} className={vertical ? 'left-auto -right-px w-0.5 rounded-full bg-[var(--fg)]' : 'top-auto -bottom-px h-0.5 rounded-full bg-[var(--fg)]'} />
+  if (asChild) return <Slot {...(props as HTMLAttributes<HTMLElement>)} aria-disabled={disabled || undefined}>{children}</Slot>
+  return <button type="button" disabled={disabled} {...props}>{children}{bar}</button>
+}
+
+/**
+ * Tabs.Content (role=tabpanel, labelled by its tab): shown while its `value` is selected, fading in when you switch.
+ * `forceMount` keeps this panel mounted (hidden) when inactive, like the Root's `keepMounted`/`lazy` do for all of them.
+ */
+export function TabsContent({ value, forceMount, className, children }: { value: string; forceMount?: boolean; className?: string; children: ReactNode }) {
+  const c = useTabs('Content'), on = c.value === value, vertical = c.orientation === 'vertical'
+  const mounted = on || forceMount || c.keepMounted || (c.lazy && c.visited.has(value))
+  const register = c.registerPanel
+  useLayoutEffect(() => mounted ? register(value) : undefined, [register, value, mounted])
+  if (!mounted) return null
+  return (
+    <motion.div role="tabpanel" id={`${c.base}-panel-${navIdPart(value)}`} aria-labelledby={`${c.base}-tab-${navIdPart(value)}`} hidden={!on} data-state={on ? 'active' : 'inactive'}
+      initial={on && c.switched ? { opacity: 0, y: -4 } : false} animate={on ? { opacity: 1, y: 0 } : { opacity: 0, y: -4 }} transition={{ duration: 0.2 }}
+      className={cn('text-[13px]', vertical ? 'min-w-0 flex-1' : 'pt-3', className)}>{children}</motion.div>
+  )
+}
+
+function TabsConfig({ items, value, defaultValue, onChange, orientation, className }:
+  { items: TabItem[]; value?: string; defaultValue?: string; onChange?: (v: string) => void; orientation?: 'horizontal' | 'vertical'; className?: string }) {
+  return (
+    <TabsRoot value={value} defaultValue={defaultValue ?? items[0]?.value ?? ''} onValueChange={onChange} orientation={orientation} className={className}>
+      <TabsList>{items.map(t => <TabsTrigger key={t.value} value={t.value}>{t.label}{t.badge}</TabsTrigger>)}</TabsList>
+      {items.map(t => t.content !== undefined && <TabsContent key={t.value} value={t.value}>{t.content}</TabsContent>)}
+    </TabsRoot>
+  )
+}
+
+/**
+ * Underline travels to the clicked tab; panel fades in. ← → move between tabs (and select them), Home/End jump to the ends.
+ * Parts: Tabs.Root (value, orientation, activationMode, lazy, keepMounted) / Tabs.List / Tabs.Trigger (asChild) / Tabs.Content (forceMount).
+ */
+export const Tabs = Object.assign(TabsConfig, { Root: TabsRoot, List: TabsList, Trigger: TabsTrigger, Content: TabsContent })
 
 export type NavItem = { value: string; label: string; icon?: IconName; badge?: ReactNode }
 
@@ -540,3 +671,163 @@ export function Wizard({ steps, value, defaultValue = 0, onChange, onFinish, res
     </div>
   )
 }
+
+/* Toggle, toggle group, toolbar ─────────────────────────────────────────────── */
+
+const TOGGLE_SIZE = {
+  sm: 'h-[30px] min-w-[30px] px-2 text-xs [@media(pointer:coarse)]:h-8', md: 'h-9 min-w-9 px-2.5 text-[13px]',
+  'icon-sm': 'h-7 w-7 p-0 [@media(pointer:coarse)]:h-8 [@media(pointer:coarse)]:w-8', icon: 'h-9 w-9 p-0',
+} as const
+const TOGGLE_VARIANT = {
+  ghost: 'border-transparent bg-transparent',
+  outline: 'border-[var(--line)] bg-[var(--card)] aria-pressed:border-[var(--line2)] aria-checked:border-[var(--line2)]',
+} as const
+export type ToggleSize = keyof typeof TOGGLE_SIZE
+export type ToggleVariant = keyof typeof TOGGLE_VARIANT
+/** Classes for a toggle button: muted until pressed (aria-pressed or aria-checked), then filled. */
+export const toggleClass = (variant: ToggleVariant = 'ghost', size: ToggleSize = 'md', className?: string) => cn(
+  'relative inline-flex flex-none cursor-pointer items-center justify-center gap-1.5 rounded-[var(--r-md)] border font-medium whitespace-nowrap text-[var(--fg2)] no-underline outline-none transition-colors',
+  'hover:bg-[var(--muted)] hover:text-[var(--fg)] focus-visible:ring-2 focus-visible:ring-[var(--accent)] disabled:cursor-not-allowed disabled:opacity-50',
+  'aria-pressed:bg-[var(--muted)] aria-pressed:text-[var(--fg)] aria-checked:bg-[var(--muted)] aria-checked:text-[var(--fg)]',
+  TOGGLE_VARIANT[variant], TOGGLE_SIZE[size], className)
+
+type ToolbarCtxV = { orientation: 'horizontal' | 'vertical' }
+const ToolbarCtx = createContext<ToolbarCtxV | null>(null)
+
+type ToggleOwnProps = { variant?: ToggleVariant; size?: ToggleSize }
+/**
+ * A two-state button (aria-pressed): bold, mute, pin. `pressed` + `onPressedChange`, or `defaultPressed`. Give icon-only
+ * toggles an `aria-label`. `asChild` renders your element. Inside a Toolbar it joins the toolbar's arrow-key order.
+ */
+export function Toggle({ pressed, defaultPressed = false, onPressedChange, variant, size, asChild, className, children, onClick, ref, ...p }:
+  Omit<ButtonHTMLAttributes<HTMLButtonElement>, 'onChange'> & ToggleOwnProps & AsChildProps & { pressed?: boolean; defaultPressed?: boolean; onPressedChange?: (pressed: boolean) => void; ref?: Ref<HTMLButtonElement> }) {
+  const [on, set] = useControllable(pressed, defaultPressed, onPressedChange)
+  const inToolbar = useContext(ToolbarCtx) !== null
+  const props = {
+    ...p, 'aria-pressed': on, 'data-state': on ? 'on' : 'off', 'data-toolbar-item': inToolbar ? '' : undefined, className: toggleClass(variant, size, className),
+    onClick: (e: ReactMouseEvent<HTMLButtonElement>) => { onClick?.(e); if (!e.defaultPrevented) set(!on) },
+  }
+  if (asChild) return <Slot {...(props as HTMLAttributes<HTMLElement>)} ref={ref as Ref<HTMLElement>}>{children}</Slot>
+  return <button type="button" ref={ref} {...props}>{children}</button>
+}
+
+type TgCtxV = {
+  single: boolean; value: string[]; toggle: (v: string) => void; variant?: ToggleVariant; size?: ToggleSize; disabled?: boolean
+  inToolbar: boolean; tabStop: string | undefined; setFocused: (v: string) => void; register: (v: string, disabled: boolean) => () => void
+}
+const TgCtx = createContext<TgCtxV | null>(null)
+type ToggleGroupBase = { variant?: ToggleVariant; size?: ToggleSize; disabled?: boolean; orientation?: 'horizontal' | 'vertical'; loop?: boolean; className?: string; children: ReactNode; 'aria-label'?: string; 'aria-labelledby'?: string }
+/** Single: one value or none (a radio group). Multiple: any set of values (pressed buttons). */
+export type ToggleGroupProps = ToggleGroupBase & (
+  | { type: 'single'; value?: string; defaultValue?: string; onValueChange?: (value: string) => void; /** clicking the selected item clears the group */ deselectable?: boolean }
+  | { type: 'multiple'; value?: string[]; defaultValue?: string[]; onValueChange?: (value: string[]) => void; deselectable?: never })
+
+/**
+ * A row of toggle buttons. `type="single"` is a radio group (role=radiogroup, items role=radio + aria-checked): arrows move
+ * and select, like native radios. `type="multiple"` is a group of pressed buttons (aria-pressed): arrows move focus, Space
+ * or Enter toggles. Either way it is one Tab stop. Inside a Toolbar, the toolbar owns the arrow keys (they only move
+ * focus) and Space/Enter selects. Items: ToggleGroup.Item.
+ */
+export function ToggleGroupRoot(props: ToggleGroupProps) {
+  const { type, variant, size, disabled, orientation = 'horizontal', loop = true, className, children } = props
+  const single = type === 'single'
+  const toList = (v: string | string[] | undefined) => v === undefined ? undefined : Array.isArray(v) ? v : v ? [v] : []
+  const [value, setValue] = useControllable<string[]>(toList(props.value), toList(props.defaultValue) ?? [],
+    (v: string[]) => (props.onValueChange as ((x: string | string[]) => void) | undefined)?.(single ? v[0] ?? '' : v))
+  const inToolbar = useContext(ToolbarCtx) !== null
+  const [items, register] = useNavRegistry()
+  const [focused, setFocused] = useState<string>()
+  const enabled = (v?: string) => v !== undefined && items.some(x => x.value === v && !x.disabled)
+  const tabStop = enabled(focused) ? focused : value.find(enabled) ?? navFirst(items)
+  const toggle = useCallback((v: string) => {
+    const on = value.includes(v)
+    if (single) { if (!on) setValue([v]); else if (props.deselectable) setValue([]) }
+    else setValue(on ? value.filter(x => x !== v) : [...value, v])
+  }, [value, single, setValue, props.deselectable])
+  const ctx: TgCtxV = { single, value, toggle, variant, size, disabled, inToolbar, tabStop, setFocused, register }
+  const onKeyDown = (e: RKeyboardEvent<HTMLDivElement>) => {
+    if (inToolbar) return
+    const own = [...e.currentTarget.querySelectorAll<HTMLElement>('[data-tg-item]')].filter(el => el.closest('[data-tg-root]') === e.currentTarget && !(el as HTMLButtonElement).disabled)
+    const v = orientation === 'vertical'
+    const to = navStep(own, e.key, v ? 'ArrowUp' : 'ArrowLeft', v ? 'ArrowDown' : 'ArrowRight', loop)
+    if (!to) return
+    e.preventDefault(); to.focus()
+    if (single && to.dataset.value !== undefined) setValue([to.dataset.value]) // radio: arrows select
+  }
+  return (
+    <TgCtx.Provider value={ctx}>
+      <div data-tg-root role={single ? 'radiogroup' : 'group'} aria-label={props['aria-label']} aria-labelledby={props['aria-labelledby']} aria-orientation={single ? orientation : undefined}
+        aria-disabled={disabled || undefined} onKeyDown={onKeyDown} className={cn('inline-flex items-center gap-1', orientation === 'vertical' && 'flex-col', className)}>
+        {children}
+      </div>
+    </TgCtx.Provider>
+  )
+}
+/** ToggleGroup.Item: one button of the group (`value`). Give icon-only items an `aria-label`. `asChild` renders your element. */
+export function ToggleGroupItem({ value, disabled: own, asChild, className, children, ...p }:
+  Omit<ButtonHTMLAttributes<HTMLButtonElement>, 'value' | 'onChange'> & AsChildProps & { value: string; disabled?: boolean }) {
+  const g = useContext(TgCtx)
+  if (!g) throw new Error('<ToggleGroup.Item> must be inside <ToggleGroup>')
+  const disabled = own || g.disabled, on = g.value.includes(value), register = g.register
+  useLayoutEffect(() => register(value, !!disabled), [register, value, disabled])
+  const props = {
+    ...p, 'data-tg-item': '', 'data-value': value, 'data-state': on ? 'on' : 'off', 'data-toolbar-item': g.inToolbar ? '' : undefined,
+    ...(g.single ? { role: 'radio', 'aria-checked': on } : { 'aria-pressed': on }),
+    tabIndex: g.inToolbar ? undefined : value === g.tabStop ? 0 : -1,
+    className: toggleClass(g.variant, g.size, className),
+    onFocus: () => g.setFocused(value),
+    onClick: (e: ReactMouseEvent<HTMLButtonElement>) => { p.onClick?.(e); if (!e.defaultPrevented && !disabled) g.toggle(value) },
+  }
+  if (asChild) return <Slot {...(props as HTMLAttributes<HTMLElement>)} aria-disabled={disabled || undefined}>{children}</Slot>
+  return <button type="button" disabled={disabled} {...props}>{children}</button>
+}
+/** Toggle buttons sharing one value (single, a radio group) or a set (multiple). Parts: ToggleGroup.Root (= ToggleGroup) and ToggleGroup.Item. */
+export const ToggleGroup = Object.assign(ToggleGroupRoot, { Root: ToggleGroupRoot, Item: ToggleGroupItem })
+
+const TOOLBAR_ITEM = '[data-toolbar-item]'
+/**
+ * A toolbar (role=toolbar): buttons, toggles, toggle groups, links and separators that share one Tab stop. ←/→ (↑/↓ when
+ * vertical) move between every enabled item, Home/End jump to the ends; Tab leaves. The last focused item stays the Tab
+ * stop. Name it with `aria-label`. Parts: Toolbar.Button, Toolbar.Link, Toolbar.Toggle, Toolbar.ToggleGroup, Toolbar.ToggleItem, Toolbar.Separator.
+ */
+export function ToolbarRoot({ orientation = 'horizontal', loop = true, className, children, 'aria-label': ariaLabel, 'aria-labelledby': labelledBy }:
+  { orientation?: 'horizontal' | 'vertical'; loop?: boolean; className?: string; children: ReactNode; 'aria-label'?: string; 'aria-labelledby'?: string }) {
+  const ref = useRef<HTMLDivElement>(null), active = useRef(0)
+  const items = () => [...(ref.current?.querySelectorAll<HTMLElement>(TOOLBAR_ITEM) ?? [])]
+    .filter(el => el.closest('[role=toolbar]') === ref.current && !(el as HTMLButtonElement).disabled && el.getAttribute('aria-disabled') !== 'true')
+  const sync = () => { const all = items(); const i = Math.min(active.current, all.length - 1); all.forEach((el, k) => { el.tabIndex = k === i ? 0 : -1 }) }
+  useLayoutEffect(sync) // after every render: items may have come, gone or been disabled
+  const ctx = useMemo(() => ({ orientation }), [orientation])
+  return (
+    <ToolbarCtx.Provider value={ctx}>
+      <div ref={ref} role="toolbar" aria-orientation={orientation} aria-label={ariaLabel} aria-labelledby={labelledBy}
+        onFocus={e => { const i = items().indexOf(e.target as HTMLElement); if (i >= 0 && i !== active.current) { active.current = i; sync() } }}
+        onKeyDown={e => {
+          if ((e.target as Element).closest('[role=toolbar]') !== e.currentTarget || (e.target as Element).matches('input,textarea,select,[contenteditable="true"]')) return
+          const v = orientation === 'vertical'
+          const to = navStep(items(), e.key, v ? 'ArrowUp' : 'ArrowLeft', v ? 'ArrowDown' : 'ArrowRight', loop)
+          if (to) { e.preventDefault(); to.focus() }
+        }}
+        className={cn('flex items-center gap-1 rounded-[var(--r-lg)] border border-[var(--line)] bg-[var(--card)] p-1', orientation === 'vertical' ? 'inline-flex flex-col' : 'flex-wrap', className)}>
+        {children}
+      </div>
+    </ToolbarCtx.Provider>
+  )
+}
+/** Toolbar.Button: a small ghost Button in the toolbar's arrow-key order. All Button props, `asChild` too. */
+export function ToolbarButton({ variant = 'ghost', size = 'sm', ...p }: ButtonProps) {
+  return <Button variant={variant} size={size} data-toolbar-item="" {...p} />
+}
+/** Toolbar.Link: a link in the toolbar's arrow-key order (href passes through safeUrl). */
+export function ToolbarLink({ href, className, children, ...p }: HTMLAttributes<HTMLAnchorElement> & { href: string }) {
+  return <a href={safeUrl(href)} data-toolbar-item="" className={cn('inline-flex h-[30px] items-center rounded-[var(--r-md)] px-2 text-xs font-medium text-[var(--accent)] no-underline outline-none hover:bg-[var(--muted)] focus-visible:ring-2 focus-visible:ring-[var(--accent)] [@media(pointer:coarse)]:h-8', className)} {...p}>{children}</a>
+}
+/** Toolbar.Separator: a thin rule between groups (vertical in a horizontal toolbar). */
+export function ToolbarSeparator({ className }: { className?: string }) {
+  const t = useContext(ToolbarCtx), vertical = t?.orientation === 'vertical'
+  return <div role="separator" aria-orientation={vertical ? 'horizontal' : 'vertical'} className={cn('flex-none bg-[var(--line)]', vertical ? 'my-0.5 h-px w-5' : 'mx-0.5 h-5 w-px', className)} />
+}
+/** Toolbar and its parts. */
+export const Toolbar = Object.assign(ToolbarRoot, {
+  Root: ToolbarRoot, Button: ToolbarButton, Link: ToolbarLink, Separator: ToolbarSeparator, Toggle, ToggleGroup: ToggleGroupRoot, ToggleItem: ToggleGroupItem,
+})

@@ -22,8 +22,8 @@ import { execFileSync } from 'node:child_process'
 const root = new URL('..', import.meta.url).pathname
 const BUNDLES = {
   ui: ['core', 'motion', 'virtual', 'overlay', 'forms', 'navigation', 'feedback', 'data', 'layout', 'appearance', 'provider'],
-  'ui-charts': ['charts', 'diagrams', 'geo'],
-  'ui-content': ['playground', 'editor', 'datagrid', 'scheduler', 'code', 'markdown', 'media', 'collab', 'pages'],
+  'ui-charts': ['charts', 'diagramkit', 'gantt', 'statechart', 'trace', 'network', 'diagrams', 'geoworld', 'geoland', 'geo'],
+  'ui-content': ['editor', 'datagrid', 'scheduler', 'code', 'markdown', 'media', 'collab', 'pages'],
   'ui-ai': ['aistream', 'ai', 'aichat', 'aiagent'],
 }
 const LIB = Object.values(BUNDLES).flat()
@@ -34,7 +34,9 @@ const IMPORT = /^import\s+(type\s+)?(?:\{([^}]*)\}|(\*\s+as\s+\w+)|(\w+))\s*from
 const REEXPORT = /^export\s+(type\s+)?(\{[^}]*\}|\*)\s*from\s*'\.[^']*';?[ \t]*\n?/gm
 
 function load(file) {
-  const src = readFileSync(file, 'utf8')
+  // a lazily imported sibling (geo's map data) is concatenated into the same bundle: resolve it in place
+  const src = readFileSync(file, 'utf8').replace(/\bimport\('\.\/(\w+)'\)/g, (_, m) =>
+    `Promise.resolve({ ${[...readFileSync(libFile(m), 'utf8').matchAll(/^export const (\w+)/gm)].map(x => x[1]).join(', ')} })`)
   const imports = []
   // intra-library re-exports (`export { x } from './core'`, `export * from './y'`): in the concatenated
   // output those names already exist, so the line is dropped
@@ -81,7 +83,9 @@ function render(files, { self, exampleDefault }) {
 
 const libFile = m => join(root, 'src/lib', `${m}.tsx`)
 const showcaseDir = join(root, 'src/showcase')
-const examples = ['kit.tsx', ...readdirSync(showcaseDir).filter(f => f.endsWith('.tsx') && f !== 'index.tsx' && f !== 'kit.tsx').sort(), 'index.tsx'].map(f => join(showcaseDir, f))
+// ui-with-examples: the sample data (src/examples) and copy-in blocks (src/blocks) the showcase imports, then the showcase
+const samples = ['examples', 'blocks'].flatMap(d => readdirSync(join(root, 'src', d)).filter(f => f.endsWith('.tsx')).sort().map(f => join(root, 'src', d, f)))
+const examples = [...samples, 'kit.tsx', ...readdirSync(showcaseDir).filter(f => f.endsWith('.tsx') && f !== 'index.tsx' && f !== 'kit.tsx').sort(), 'index.tsx'].map(f => f.startsWith('/') ? f : join(showcaseDir, f))
 
 mkdirSync(join(root, 'dist-single'), { recursive: true })
 const sizes = [], sums = []

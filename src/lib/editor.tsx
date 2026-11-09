@@ -23,7 +23,10 @@ const RTE_TOOLS: (RteTool | '|')[] = [
   { cmd: 'link', label: 'Link', glyph: <EditorGlyph d="link" />, keys: '⌘K' },
 ]
 const RTE_BUBBLE = ['bold', 'italic', 'underline', 'link']
-/** The showcase's sample document (pass it as `defaultValue` to get the demo; the editor itself starts empty). */
+/**
+ * The showcase's sample document (pass it as `defaultValue` to get the demo; the editor itself starts empty).
+ * @deprecated Sample content: import it from `@lyndon/ui/examples`. It leaves the main entry in 0.5.
+ */
 export const RTE_SAMPLE = '<h2>Launch notes</h2><p>We’re shipping the new <b>pricing page</b> on Thursday. The yearly plan now saves <i>20%</i>, and the toggle sits above the cards.</p><ul><li>Legal review is done</li><li>Images are final</li></ul><blockquote>Ship small, ship often.</blockquote>'
 const RTE_MD: Record<string, string> = { '#': 'h2', '##': 'h3', '-': 'insertUnorderedList', '*': 'insertUnorderedList', '1.': 'insertOrderedList', '>': 'blockquote' }
 const rteContent =
@@ -286,11 +289,15 @@ export type MentionPerson = { id: string; name: string; sub?: string }
 export type MentionCommand = { cmd: string; hint: string }
 /** What MentionsInput sends: plain text interleaved with mention and command tokens. `id` is the person's id or the command for tokens. */
 export type MentionSegment = { type: 'text' | 'mention' | 'command'; value: string; id?: string }
-/** The showcase's sample people and commands (pass them as `people` / `commands`; the input itself starts with none). */
+/**
+ * The showcase's sample people and commands (pass them as `people` / `commands`; the input itself starts with none).
+ * @deprecated Sample content: import it from `@lyndon/ui/examples`. It leaves the main entry in 0.5.
+ */
 export const MENTION_PEOPLE: MentionPerson[] = [
   { id: 'al', name: 'Alex Lee', sub: 'Design' }, { id: 'bk', name: 'Bea Kim', sub: 'Product' }, { id: 'cm', name: 'Chris Moe', sub: 'Engineering' },
   { id: 'dn', name: 'Dana Ng', sub: 'Research' }, { id: 'ep', name: 'Eli Park', sub: 'Sales' },
 ]
+/** @deprecated Sample content: import it from `@lyndon/ui/examples`. It leaves the main entry in 0.5. */
 export const MENTION_COMMANDS: MentionCommand[] = [
   { cmd: '/todo', hint: 'Create a task' }, { cmd: '/remind', hint: 'Set a reminder' }, { cmd: '/poll', hint: 'Start a poll' }, { cmd: '/giphy', hint: 'Insert a GIF' }, { cmd: '/code', hint: 'Code block' },
 ]

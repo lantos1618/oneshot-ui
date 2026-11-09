@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState, type ReactNode } from 'react'
 import { AnimatePresence, animate, motion, useInView } from 'motion/react'
-import { Alert, Avatar, Badge, Button, CookieConsent, EmptyState, Icon, IconButton, OfflineIndicator, Progress, ProgressRing, Skeleton, Spinner, Switch, cn, confetti, floatingSurface, sleep, spring, useToast } from '../lib'
+import { Alert, Avatar, Badge, Button, EmptyState, Icon, IconButton, OfflineIndicator, Progress, ProgressRing, Skeleton, Spinner, Switch, cn, confetti, floatingSurface, sleep, spring, useToast } from '../lib'
+import { CookieConsent } from '../blocks'
 import { Row, Section, Spec, SpecPreview } from './kit'
 
 /** Small browser-window mock used by the consent and offline demos: a page with a header, a hero and some copy. */
