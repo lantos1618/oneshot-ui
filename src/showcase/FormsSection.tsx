@@ -1,5 +1,5 @@
 import { useRef, useState } from 'react'
-import { AddressAutocomplete, type AddressRecord, EmojiInput, Field, Input, MentionsInput, RichTextEditor, Select, SignaturePad, Switch, Textarea, UnsavedChangesBar, sleep, useFormDraft, useToast } from '../lib'
+import { AddressAutocomplete, type AddressRecord, EmojiInput, Field, Input, MENTION_COMMANDS, MENTION_PEOPLE, MentionsInput, RTE_SAMPLE, RichTextEditor, Select, SignaturePad, Switch, Textarea, UnsavedChangesBar, sleep, useFormDraft, useToast } from '../lib'
 import { Section, Spec } from './kit'
 
 const ROLE_OPTS = ['Admin', 'Editor', 'Viewer'].map(v => ({ value: v, label: v }))
@@ -52,14 +52,15 @@ function SignatureDemo() {
 export function FormsSection() {
   return (
     <Section id="forms" title="Forms" desc="Editors and smart inputs: rich text, mentions, signatures, addresses, emoji, and a form that knows when it has unsaved changes.">
-      <Spec title="Rich text editor" desc="Toolbar plus a floating bubble on selection. ⌘B, ⌘I, ⌘U work. Type “# ” for a heading, “- ” for a list." span={2}>
-        <RichTextEditor />
+      <Spec title="Rich text editor" desc="Toolbar plus a floating bubble on selection. Type “# ” for a heading, “- ” for a list." span={2}
+        keys={[[['⌘', 'B'], 'Bold'], [['⌘', 'I'], 'Italic'], [['⌘', 'U'], 'Underline']]}>
+        <RichTextEditor defaultValue={RTE_SAMPLE} />
       </Spec>
-      <Spec title="Mentions and commands" desc="Type @ to mention someone, / for a command"><MentionsInput /></Spec>
-      <Spec title="Form with unsaved changes" desc="Edit anything and a save bar slides up. Reset restores, Save validates first." span={2}><ProfileForm /></Spec>
       <Spec title="Signature pad" desc="Smooth, pressure-like strokes. Undo stroke by stroke."><SignatureDemo /></Spec>
+      <Spec title="Mentions and commands" desc="Type @ to mention someone, / for a command"><MentionsInput people={MENTION_PEOPLE} commands={MENTION_COMMANDS} /></Spec>
       <Spec title="Address autocomplete" desc="Type a street; picking a result fills the rest"><AddressAutocomplete addresses={FORMS_ADDRESSES} /></Spec>
       <Spec title="Emoji picker" desc="Categories, search, recently used"><EmojiInput /></Spec>
+      <Spec title="Form with unsaved changes" desc="Edit anything and a save bar slides up. Reset restores, Save validates first." span={3}><ProfileForm /></Spec>
     </Section>
   )
 }

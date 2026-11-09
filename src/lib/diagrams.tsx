@@ -4,7 +4,7 @@ import { AnimatedNumber, Avatar, Badge, Button, Chip, ICONS, Icon, LOCALE, Scrol
 import { Collapse } from './feedback'
 import { SegmentedControl, Slider } from './forms'
 import { PointerTooltip, usePointerTooltip } from './overlay'
-import { play, useFrameLoop } from './motion'
+import { play, useFrameLoop, useViewport } from './motion'
 
 /* ════════════════════════════════════════════════════════════════════════════
  * 14. DIAGRAMS: plans, statecharts, traces and flows. Each one is a plain component
@@ -25,7 +25,7 @@ const DG_DOTS = 'bg-[var(--bg)] [background-image:radial-gradient(circle,var(--l
 function DgChevron({ open, label, onClick, className }: { open: boolean; label: string; onClick: () => void; className?: string }) {
   return (
     <button type="button" aria-label={`Toggle ${label}`} aria-expanded={open} onClick={onClick}
-      className={cn('grid h-[18px] w-[18px] flex-none cursor-pointer place-items-center rounded border-0 bg-transparent text-[var(--fg3)] transition-transform duration-200 hover:bg-[var(--muted)] hover:text-[var(--fg)]', TOUCH.hit, !open && '-rotate-90', className)}>
+      className={cn('grid h-[18px] w-[18px] flex-none cursor-pointer place-items-center rounded-[var(--r-sm)] border-0 bg-transparent text-[var(--fg3)] transition-transform duration-200 hover:bg-[var(--muted)] hover:text-[var(--fg)]', TOUCH.hit, !open && '-rotate-90', className)}>
       <Icon name="chevronDown" size={11} strokeWidth={2.5} />
     </button>
   )
@@ -241,9 +241,9 @@ export function Gantt({ phases, dependencies, start, days = 42, today, people = 
                     <span className="truncate text-xs text-[var(--fg3)] max-sm:hidden">{fdate(s)} to {fdate(e)} · {Math.round(pr * 100)}%</span>
                   </div>
                   <div className="relative h-full border-l border-[var(--line)]" style={laneBg}>
-                    <div className="absolute top-[14px] h-[10px] rounded-[3px] bg-[color-mix(in_srgb,var(--fg3)_25%,var(--card))] transition-[left,width] duration-250 ease-[cubic-bezier(.22,1,.36,1)]"
+                    <div className="absolute top-[14px] h-[10px] rounded-[var(--r-sm)] bg-[color-mix(in_srgb,var(--fg3)_25%,var(--card))] transition-[left,width] duration-250 ease-[cubic-bezier(.22,1,.36,1)]"
                       style={{ left: pct(s), width: pct(Math.max(0.5, e - s)) }}>
-                      <i className="absolute inset-y-0 left-0 rounded-[3px] bg-[var(--fg2)] opacity-60" style={{ width: `${pr * 100}%` }} />
+                      <i className="absolute inset-y-0 left-0 rounded-[var(--r-sm)] bg-[var(--fg2)] opacity-60" style={{ width: `${pr * 100}%` }} />
                       <span className="absolute -top-[3px] left-0 h-[10px] w-0.5 rounded-[1px] bg-[var(--fg3)]" /><span className="absolute -top-[3px] right-0 h-[10px] w-0.5 rounded-[1px] bg-[var(--fg3)]" />
                     </div>
                   </div>
@@ -261,13 +261,13 @@ export function Gantt({ phases, dependencies, start, days = 42, today, people = 
                           <Avatar name={people[t.owner] ?? t.owner} size={22} className="ml-auto max-[700px]:hidden" />
                         </div>
                         <div className="relative h-full border-l border-[var(--line)]" style={laneBg}>
-                          <span className={cn('pointer-events-none absolute top-8 h-1 rounded-sm bg-[var(--fg3)] transition-opacity duration-200', view.bl ? 'opacity-45' : 'opacity-0')}
+                          <span className={cn('pointer-events-none absolute top-8 h-1 rounded-[var(--r-sm)] bg-[var(--fg3)] transition-opacity duration-200', view.bl ? 'opacity-45' : 'opacity-0')}
                             style={{ left: pct(t.start), width: pct(Math.max(0.4, t.duration)) }} />
                           <span title={sl ? `${sl} days of slack` : undefined} className={cn('pointer-events-none absolute top-[18px] h-0.5 bg-[length:6px_2px] bg-[linear-gradient(90deg,var(--fg3)_50%,transparent_50%)] transition-[opacity,left,width] duration-250', view.cp ? 'opacity-80' : 'opacity-0')}
                             style={{ left: pct(ganttEnd(x)), width: pct(isCrit ? 0 : sl) }} />
                           {ms ? (
                             <motion.span role="slider" tabIndex={0} aria-label={`${t.name} milestone, ${fdate(x.s)}`} aria-valuemin={0} aria-valuemax={days} aria-valuenow={x.s} aria-valuetext={fdate(x.s)}
-                              className={cn('absolute top-[13px] -ml-[7px] h-3.5 w-3.5 cursor-grab rounded-[3px] shadow-[0_0_0_3px_var(--card)] transition-[left] duration-250 ease-[cubic-bezier(.22,1,.36,1)] select-none [-webkit-touch-callout:none]',
+                              className={cn('absolute top-[13px] -ml-[7px] h-3.5 w-3.5 cursor-grab rounded-[var(--r-sm)] shadow-[0_0_0_3px_var(--card)] transition-[left] duration-250 ease-[cubic-bezier(.22,1,.36,1)] select-none [-webkit-touch-callout:none]',
                                 '[@media(pointer:coarse)]:top-[8px] [@media(pointer:coarse)]:-ml-[11.5px] [@media(pointer:coarse)]:h-[23px] [@media(pointer:coarse)]:w-[23px]',
                                 view.cp && isCrit ? 'bg-[var(--bad)]' : 'bg-[var(--c3)]', dragging && 'cursor-grabbing !transition-none')}
                               style={{ left: pct(x.s), rotate: 45 }} initial={{ scale: 0 }} animate={inView ? { scale: 1 } : undefined} transition={{ duration: 0.45, delay: i * 0.05, ease: [0.22, 1, 0.36, 1] }}
@@ -275,7 +275,7 @@ export function Gantt({ phases, dependencies, start, days = 42, today, people = 
                           ) : (
                             <motion.div role="slider" tabIndex={0} aria-label={`${t.name}, ${fdate(x.s)} to ${fdate(ganttEnd(x) - 1)}, ${x.d} days. Arrow keys move, Shift + arrows resize`}
                               aria-valuemin={0} aria-valuemax={days} aria-valuenow={x.s} aria-valuetext={`${fdate(x.s)}, ${x.d} days`}
-                              className={cn('absolute flex origin-left cursor-grab items-center overflow-hidden rounded-md transition-[left,width,top,height,opacity,box-shadow] duration-250 ease-[cubic-bezier(.22,1,.36,1)] select-none [-webkit-touch-callout:none]',
+                              className={cn('absolute flex origin-left cursor-grab items-center overflow-hidden rounded-[var(--r-md)] transition-[left,width,top,height,opacity,box-shadow] duration-250 ease-[cubic-bezier(.22,1,.36,1)] select-none [-webkit-touch-callout:none]',
                                 'bg-[color-mix(in_srgb,var(--gc)_22%,var(--card))] shadow-[inset_0_0_0_1px_color-mix(in_srgb,var(--gc)_50%,transparent)]',
                                 view.bl ? 'top-[5px] h-6' : 'top-2.5 h-[18px]', '[@media(pointer:coarse)]:top-[3px] [@media(pointer:coarse)]:h-8', dim && 'opacity-45',
                                 view.cp && isCrit && '!shadow-[inset_0_0_0_1.5px_var(--bad),0_0_0_2px_color-mix(in_srgb,var(--bad)_18%,transparent)]',
@@ -319,7 +319,7 @@ export function Gantt({ phases, dependencies, start, days = 42, today, people = 
                       return (
                         <motion.span key={d} title={`${n} task${n > 1 ? 's' : ''} on ${fdate(d)}`} initial={{ opacity: 0, scale: 0.6 }} animate={{ opacity: 1, scale: 1 }}
                           transition={{ duration: 0.25, delay: Math.min(0.5, (oi * days + d) * 0.006) }}
-                          className={cn('absolute top-[9px] grid h-5 place-items-center rounded font-[family-name:var(--mono)] text-[11px] font-semibold', GANTT_CELL[Math.min(3, n) as 1 | 2 | 3])}
+                          className={cn('absolute top-[9px] grid h-5 place-items-center rounded-[var(--r-sm)] font-[family-name:var(--mono)] text-[11px] font-semibold', GANTT_CELL[Math.min(3, n) as 1 | 2 | 3])}
                           style={{ left: `calc(${pct(d)} + 1px)`, width: `calc(${pct(1)} - 2px)` }}>{n > 1 ? n : ''}</motion.span>
                       )
                     })}
@@ -359,14 +359,14 @@ export function Gantt({ phases, dependencies, start, days = 42, today, people = 
         <ScrollEdges left={false} right={edges.right} touched={edges.touched} hint="Swipe for more days" />
       </div>
       <div className="flex flex-wrap items-center gap-x-4 gap-y-1.5 text-xs text-[var(--fg2)]">
-        <span className="inline-flex items-center gap-1.5"><i className="inline-block h-2 w-4 rounded-[3px] bg-[var(--fg2)] opacity-60" />Phase</span>
-        <span className="inline-flex items-center gap-1.5"><i className="inline-block h-2.5 w-2.5 rotate-45 rounded-sm bg-[var(--c3)]" />Milestone</span>
+        <span className="inline-flex items-center gap-1.5"><i className="inline-block h-2 w-4 rounded-[var(--r-sm)] bg-[var(--fg2)] opacity-60" />Phase</span>
+        <span className="inline-flex items-center gap-1.5"><i className="inline-block h-2.5 w-2.5 rotate-45 rounded-[var(--r-sm)] bg-[var(--c3)]" />Milestone</span>
         <span className="inline-flex items-center gap-1.5"><i className="inline-block h-3 w-0.5 bg-[var(--accent)]" />Today</span>
         <span className="text-[var(--fg3)] [@media(pointer:coarse)]:hidden">Hover a task to see its links</span>
         <span className="hidden text-[var(--fg3)] [@media(pointer:coarse)]:inline">Tap a task for its links · hold a bar to move it, drag its grip to resize</span>
-        {view.cp && <><span className="inline-flex items-center gap-1.5"><i className="inline-block h-2 w-4 rounded-[3px] shadow-[inset_0_0_0_1.5px_var(--bad)]" />Critical path</span>
+        {view.cp && <><span className="inline-flex items-center gap-1.5"><i className="inline-block h-2 w-4 rounded-[var(--r-sm)] shadow-[inset_0_0_0_1.5px_var(--bad)]" />Critical path</span>
           <span className="inline-flex items-center gap-1.5"><i className="inline-block w-4 border-t-2 border-dashed border-[var(--fg3)]" />Slack</span></>}
-        {view.bl && <span className="inline-flex items-center gap-1.5"><i className="inline-block h-1 w-4 rounded-sm bg-[var(--fg3)] opacity-50" />Baseline</span>}
+        {view.bl && <span className="inline-flex items-center gap-1.5"><i className="inline-block h-1 w-4 rounded-[var(--r-sm)] bg-[var(--fg3)] opacity-50" />Baseline</span>}
         {final && <span className={cn('ml-auto', late > 0 ? 'text-[var(--bad)]' : 'text-[var(--fg2)]')}>
           {phases.find(p => p.id === byId[final].phase)?.name} {fdate(sched[final].s)}{late > 0 ? ` · ${late} days later than planned` : late < 0 ? ` · ${-late} days early` : ' · on plan'}</span>}
       </div>
@@ -394,20 +394,27 @@ export type StatechartNode = {
 export type StatechartEdge = { id: string; d: string; label?: string; lx?: number; ly?: number; anchor?: 'start' | 'middle' | 'end'; dashed?: boolean; live?: boolean }
 export type StatechartDot = { key: string; edge: string; ms: number; ease?: 'linear' | 'inOut'; onDone?: () => void }
 
-/** A dot that travels a path once (motion's frame loop, positioned by attribute, no re-renders), then calls onDone. */
+/**
+ * A dot that travels a path once (motion's frame loop, positioned by a transform, no re-renders), then calls onDone.
+ * The path is sampled once into a lookup table when the dot starts, so frames only write (no getPointAtLength, which
+ * forced a layout per dot per frame).
+ */
 function DgDot({ path, ms, ease, onDone }: { path: () => SVGPathElement | null | undefined; ms: number; ease?: 'linear' | 'inOut'; onDone?: () => void }) {
   const ref = useRef<SVGCircleElement>(null)
-  const run = useRef<{ p: SVGPathElement; L: number; t0: number } | null>(null)
+  const run = useRef<{ lut: Float32Array; n: number; t0: number } | null>(null)
   const [active, setActive] = useState(true)
   const put = (u: number) => {
     const r = run.current, c = ref.current; if (!r || !c) return
-    const e = ease === 'inOut' ? (u < 0.5 ? 2 * u * u : 1 - (-2 * u + 2) ** 2 / 2) : u, q = r.p.getPointAtLength(r.L * e)
-    c.setAttribute('cx', String(q.x)); c.setAttribute('cy', String(q.y))
+    const e = ease === 'inOut' ? (u < 0.5 ? 2 * u * u : 1 - (-2 * u + 2) ** 2 / 2) : u
+    const f = clamp(e, 0, 1) * (r.n - 1), a = Math.min(r.n - 2, Math.floor(f)), k = f - a, L = r.lut
+    c.setAttribute('transform', `translate(${(L[a * 2] + (L[a * 2 + 2] - L[a * 2]) * k).toFixed(1)},${(L[a * 2 + 1] + (L[a * 2 + 3] - L[a * 2 + 1]) * k).toFixed(1)})`)
   }
   useLayoutEffect(() => {
     const p = path()
     if (!p || !ref.current) { setActive(false); onDone?.(); return }
-    run.current = { p, L: p.getTotalLength(), t0: performance.now() }
+    const len = p.getTotalLength(), n = Math.max(2, Math.min(96, Math.ceil(len / 6))), lut = new Float32Array(n * 2)
+    for (let i = 0; i < n; i++) { const q = p.getPointAtLength((len * i) / (n - 1)); lut[i * 2] = q.x; lut[i * 2 + 1] = q.y } // reads only, once
+    run.current = { lut, n, t0: performance.now() }
     put(0); ref.current.setAttribute('opacity', '1')
   }, []) // eslint-disable-line react-hooks/exhaustive-deps
   useFrameLoop(active, (_, now) => {
@@ -477,7 +484,8 @@ export function Statechart({ width, height, nodes, edges, dots = [], label, minW
   const [scrollRef, scroll] = useScrollEdges<HTMLDivElement>()
   return (
     <div className="relative min-w-0 overflow-hidden rounded-[var(--r-lg)]">
-    <div ref={scrollRef} className={cn('overflow-x-auto overscroll-x-contain rounded-[var(--r-lg)] border border-[var(--line)]', DG_DOTS, className)}>
+    <div ref={scrollRef} tabIndex={scroll.left || scroll.right ? 0 : undefined} role={scroll.left || scroll.right ? 'region' : undefined} aria-label={scroll.left || scroll.right ? `${label}, scrolls sideways` : undefined}
+      className={cn('overflow-x-auto overscroll-x-contain rounded-[var(--r-lg)] border border-[var(--line)] outline-none focus-visible:shadow-[0_0_0_2px_var(--accent)]', DG_DOTS, className)}>
       <svg viewBox={`0 0 ${width} ${height}`} role="img" aria-label={label} className="block h-auto w-full max-sm:!min-w-[var(--sc-phone)] [@media(pointer:coarse)]:!min-w-[var(--sc-phone)]" style={{ minWidth, '--sc-phone': `${width}px` } as CSSProperties}>
         <defs>
           {[['n', 'var(--fg3)'], ['l', 'var(--accent)']].map(([k, c]) => (
@@ -645,19 +653,20 @@ export function StateDiagram({ states, transitions, initial, history, width = 94
           </div>
           <div>
             <span className={dgSideLabel}>Events you can fire</span>
-            <div className="mt-1.5 flex flex-wrap gap-1.5">
+            <div className="mt-1.5 flex min-h-[66px] flex-wrap content-start gap-1.5 [@media(pointer:coarse)]:min-h-[78px]">
               {available.length ? available.map(([t, i]) => <Button key={i} size="sm" className={cn('font-[family-name:var(--mono)] !text-xs', TOUCH.tap36)} onClick={() => fire(i)}>{t.event}</Button>)
                 : <span className={dgSideLabel}>No events from here</span>}
             </div>
           </div>
           <div>
             <span className={dgSideLabel}>History</span>
-            <div className="mt-1.5 flex flex-col gap-1 text-xs">
+            {/* room for five entries from the start, so firing events never grows the card */}
+            <div className="mt-1.5 flex h-[236px] flex-col gap-1 overflow-hidden text-xs">
               {log.length ? (
                 <AnimatePresence initial={false}>
                   {log.slice(0, 5).map(x => (
                     <motion.div key={x.k} layout initial={{ opacity: 0, y: -6 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0 }} transition={spring(0.2, 0.3)}
-                      className="flex flex-col rounded-[var(--r-md)] bg-[var(--muted)] px-2 py-1.5">
+                      className="flex flex-none flex-col rounded-[var(--r-md)] bg-[var(--muted)] px-2 py-1.5">
                       <b className="font-[family-name:var(--mono)] font-semibold">{x.ev}</b>
                       <span className="text-[var(--fg3)]">{nice(x.from)} → {nice(x.to)}{x.guard ? ` · [${x.guard}]` : ''}{x.act ? ` · / ${x.act}` : ''}</span>
                     </motion.div>
@@ -992,7 +1001,7 @@ export const AGENT_WORKFLOW_ORDER = ['feature', 'purchase', 'regression']
 
 const dgBez = (p: number[], t: number) => { const u = 1 - t; return [0, 1].map(k => u * u * u * p[k] + 3 * u * u * t * p[2 + k] + 3 * u * t * t * p[4 + k] + t * t * t * p[6 + k]) }
 /** Columns by breadth-first depth from the start state; fork, join, guard and back edges included. */
-function wfLayout(m: WorkflowMachine) {
+function wfLayout(m: WorkflowMachine, minW = 900) {
   const E: { a: string; b: string; label: string; fork: boolean }[] = []
   Object.entries(m.states).forEach(([k, st]) => {
     if (st.fork) { st.fork.forEach(b => E.push({ a: k, b, label: 'fork', fork: true })); st.fork.forEach(b => E.push({ a: b, b: st.join!, label: 'join', fork: true })) }
@@ -1004,7 +1013,7 @@ function wfLayout(m: WorkflowMachine) {
   const cols: Record<number, string[]> = {}
   Object.entries(depth).forEach(([k, d]) => (cols[d] ??= []).push(k))
   const nCols = maxOf(Object.keys(cols).map(Number)) + 1
-  const W = Math.max(900, nCols * 150 + 40), H = 250, cw = (W - 40) / nCols, nw = Math.min(112, cw - 34), pos: Record<string, [number, number]> = {}
+  const W = Math.max(minW, nCols * 150 + 40), H = 250, cw = (W - 40) / nCols, nw = Math.min(112, cw - 34), pos: Record<string, [number, number]> = {}
   Object.entries(cols).forEach(([d, ks]) => ks.forEach((k, i) => { pos[k] = [20 + (+d + 0.5) * cw, H / 2 + (i - (ks.length - 1) / 2) * 78] }))
   const edges: StatechartEdge[] = E.filter(e => pos[e.a] && pos[e.b]).map(e => {
     const [x1, y1] = pos[e.a], [x2, y2] = pos[e.b], back = x2 <= x1
@@ -1034,7 +1043,9 @@ export function StateMachine({ machines = AGENT_WORKFLOWS, order, defaultValue, 
   const visible = useInView(box, { amount: 0.15 })
   const reduce = useReducedMotion()
   const m = machines[type]
-  const L = useMemo(() => wfLayout(m), [m])
+  // every machine is laid out on the widest one's canvas, so switching workflows never changes the chart's height
+  const minW = useMemo(() => maxOf(Object.values(machines).map(x => wfLayout(x).W), 900), [machines])
+  const L = useMemo(() => wfLayout(m, minW), [m, minW])
   const repaint = useRef(0)
   useFrameLoop(visible, dt => { engine.tick(dt); if ((repaint.current += dt) > 0.4) { repaint.current = 0; force() } })
   useEffect(() => engine.subscribe(ev => {
@@ -1066,17 +1077,19 @@ export function StateMachine({ machines = AGENT_WORKFLOWS, order, defaultValue, 
         <Button size="sm" variant="primary" className={TOUCH.tap36} onClick={() => { engine.fire(type); force() }}>Fire event</Button>
       </div>
       <Statechart key={type} width={L.W} height={L.H} nodes={nodes} edges={L.edges} dots={dots} label={`${m.name} statechart`} minWidth={900} />
-      <div className="flex min-h-[22px] flex-wrap items-center gap-1.5 text-xs text-[var(--fg3)]">
-        <span>Queue</span>
-        {engine.queue.length ? engine.queue.map(q => <motion.span key={q.id} initial={{ opacity: 0, scale: 0.8 }} animate={{ opacity: 1, scale: 1 }} transition={spring(0.4, 0.3)}
-          className={cn('rounded-full border px-2 py-px font-[family-name:var(--mono)] text-[11px]', q.ev === m.event ? 'border-[var(--accent)] text-[var(--accent)]' : 'border-[var(--line)] text-[var(--fg2)]')}>{q.ev}</motion.span>)
-          : <span>empty · jobs start as soon as one of {engine.maxJobs} slots is free</span>}
+      {/* fixed heights: the queue scrolls in one row and the log always holds five lines, so neither a workflow switch nor
+          new events ever change the card's height */}
+      <div className="flex h-[22px] items-center gap-1.5 overflow-x-auto overflow-y-hidden text-xs whitespace-nowrap text-[var(--fg3)] [scrollbar-width:none]">
+        <span className="flex-none">Queue</span>
+        {engine.queue.length ? engine.queue.map(q => <motion.span key={q.id} className="flex-none" initial={{ opacity: 0, scale: 0.8 }} animate={{ opacity: 1, scale: 1 }} transition={spring(0.4, 0.3)}>
+          <Badge size="sm" tone={q.ev === m.event ? 'accent' : 'neutral'} className="font-[family-name:var(--mono)]">{q.ev}</Badge></motion.span>)
+          : <span className="truncate">empty · jobs start as soon as one of {engine.maxJobs} slots is free</span>}
       </div>
-      <div className="flex max-h-[120px] flex-col gap-0.5 overflow-hidden font-[family-name:var(--mono)] text-xs text-[var(--fg2)]" aria-live="polite">
+      <div className="flex h-[96px] flex-col gap-0.5 overflow-hidden font-[family-name:var(--mono)] text-xs text-[var(--fg2)]" aria-live="polite">
         {log.length ? (
           <AnimatePresence initial={false}>
             {log.map(x => (
-              <motion.div key={x.k} layout initial={{ opacity: 0, y: -6 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0 }} transition={spring(0.2, 0.3)} className="flex gap-2.5 [&_b]:font-semibold [&_b]:text-[var(--fg)]">
+              <motion.div key={x.k} layout initial={{ opacity: 0, y: -6 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0 }} transition={spring(0.2, 0.3)} className="flex h-[17px] flex-none gap-2.5 truncate whitespace-nowrap [&_b]:font-semibold [&_b]:text-[var(--fg)]">
                 <span className="min-w-7 text-[var(--fg3)]">#{x.id}</span><span>{x.name}</span><span>{x.text}</span>
               </motion.div>
             ))}
@@ -1186,7 +1199,7 @@ export function TraceWaterfall({ spans, total, title = 'Trace', subtitle, failur
             failed ? 'bg-[color-mix(in_srgb,var(--bad)_7%,var(--card))]' : d === 0 ? 'bg-[color-mix(in_srgb,var(--muted)_55%,var(--card))]' : 'bg-[var(--card)]')} style={{ paddingLeft: `calc(12px + ${d} * var(--ind))` }}>
             {Array.from({ length: d }, (_, i) => <span key={i} className="absolute inset-y-0 w-px bg-[var(--line)]" style={{ left: `calc(21px + ${i} * var(--ind))` }} />)}
             {ch.length ? <DgChevron open={isOpen} label={s.name} onClick={() => setClosed(c => { const n = new Set(c); if (n.has(s.id)) n.delete(s.id); else n.add(s.id); return n })} /> : <span className="w-[18px] flex-none" />}
-            <span className={cn('grid h-6 w-6 flex-none place-items-center rounded-[7px] border border-[var(--line)] bg-[var(--card)] max-sm:hidden', TRACE_ICON[s.kind])}><Icon name={s.icon ?? (s.kind === 'llm' ? 'asterisk' : s.kind === 'tool' ? 'code' : 'bot')} size={13} /></span>
+            <span className={cn('grid h-6 w-6 flex-none place-items-center rounded-[var(--r-md)] border border-[var(--line)] bg-[var(--card)] max-sm:hidden', TRACE_ICON[s.kind])}><Icon name={s.icon ?? (s.kind === 'llm' ? 'asterisk' : s.kind === 'tool' ? 'code' : 'bot')} size={13} /></span>
             <span className="min-w-0 truncate"><span className={failed ? 'text-[var(--bad)]' : 'text-[var(--fg)]'}>{s.name}</span>{s.meta && <em className="ml-1 text-[var(--fg3)] not-italic">{s.meta}</em>}</span>
             <span className="ml-auto flex flex-none">{live && s.kind !== 'agent' && <Spinner size={12} tone="accent" label={`${s.name} running`} className="motion-reduce:animate-none" />}</span>
           </div>
@@ -1207,7 +1220,7 @@ export function TraceWaterfall({ spans, total, title = 'Trace', subtitle, failur
               ) : started && (
                 <>
                   <span>{(fin ? s.duration : w).toFixed(s.duration >= 10 && fin ? 0 : 1)}s{s.cost ? <> · <span className={fin ? 'text-[var(--fg2)]' : 'text-[var(--fg3)]'}>{fmt.usd(s.cost * (fin ? 1 : frac))}</span></> : null}</span>
-                  {fin && s === slowest && <span className="rounded-[5px] bg-[var(--warn-soft)] px-1.5 py-0.5 text-[11px] font-semibold tracking-[.04em] text-[var(--warn)]">SLOWEST</span>}
+                  {fin && s === slowest && <span className="rounded-[var(--r-sm)] bg-[var(--warn-soft)] px-1.5 py-0.5 text-[11px] font-semibold tracking-[.04em] text-[var(--warn)]">SLOWEST</span>}
                 </>
               )}
             </div>
@@ -1230,7 +1243,7 @@ export function TraceWaterfall({ spans, total, title = 'Trace', subtitle, failur
           <span className="text-[var(--accent)]">✦</span><b className="font-semibold">{title}</b>{subtitle && <span className="text-[var(--fg3)]">{subtitle}</span>}
           <span className="flex-1" />
           <span className="mr-1.5 flex flex-wrap items-center gap-3 text-xs text-[var(--fg2)]">
-            {(['llm', 'tool', 'agent'] as const).map(k => <span key={k} className="inline-flex items-center gap-1"><i className={cn('inline-block h-2.5 w-2.5 rounded-[3px]', TRACE_BAR[k])} />{{ llm: 'LLM call', tool: 'Tool call', agent: 'Agent' }[k]}</span>)}
+            {(['llm', 'tool', 'agent'] as const).map(k => <span key={k} className="inline-flex items-center gap-1"><i className={cn('inline-block h-2.5 w-2.5 rounded-[var(--r-sm)]', TRACE_BAR[k])} />{{ llm: 'LLM call', tool: 'Tool call', agent: 'Agent' }[k]}</span>)}
           </span>
           <Badge tone={badge[0] as 'ok'}><span className={cn('h-1.5 w-1.5 rounded-full bg-current', !done && 'animate-pulse motion-reduce:animate-none')} />{badge[1]}</Badge>
         </div>
@@ -1307,18 +1320,20 @@ export function Sankey({ sources, targets, links, width = 300, height = 176, nod
     const left = side === 'src', x = left ? xL : xR, tx = left ? xL - 7 : xR + nw + 7
     return (
       <motion.g key={`${side}${i}`} initial={{ opacity: 0 }} animate={inView ? { opacity: 1 } : undefined} transition={{ duration: 0.3, delay: left ? 0 : 0.55 }}
-        tabIndex={0} role="button" aria-label={`${n.label}: ${share(v)}`} className="cursor-default outline-none"
+        tabIndex={0} role="button" aria-labelledby={`${clip}${side}${i}l ${clip}${side}${i}v`} className="cursor-default outline-none [&:focus-visible>rect:nth-child(2)]:stroke-[var(--fg)] [&:focus-visible>rect:nth-child(2)]:[stroke-width:2]"
         onPointerEnter={() => setHover({ k: side, i })} onPointerDown={() => { hide(); setHover({ k: side, i }) }} onPointerLeave={onMouseLeave(() => setHover(null))} onFocus={() => setHover({ k: side, i })} onBlur={() => setHover(null)}>
         <rect x={left ? 0 : x} y={p.y - 2} width={left ? x + nw : W - x} height={p.h + 4} fill="transparent" />
         <rect x={x} y={p.y} width={nw} height={p.h} rx={2} fill={n.color ?? PALETTE_DG[i % PALETTE_DG.length]} />
-        <text x={tx} y={p.y + p.h / 2 - 2} textAnchor={left ? 'end' : 'start'} className="fill-[var(--fg)] [font:500_12px_var(--font)]">{n.label}</text>
-        <text x={tx} y={p.y + p.h / 2 + 12} textAnchor={left ? 'end' : 'start'} className="fill-[var(--fg3)] [font:12px_var(--font)]">{share(v)}</text>
+        {/* named by its two visible texts (aria-labelledby); the space between them (not rendered in SVG) keeps the
+            visible text "Organic 60%" rather than "Organic60%", so name and visible label match */}
+        <text id={`${clip}${side}${i}l`} x={tx} y={p.y + p.h / 2 - 2} textAnchor={left ? 'end' : 'start'} className="fill-[var(--fg)] [font:500_12px_var(--font)]">{n.label}</text>
+        {' '}<text id={`${clip}${side}${i}v`} x={tx} y={p.y + p.h / 2 + 12} textAnchor={left ? 'end' : 'start'} className="fill-[var(--fg3)] [font:12px_var(--font)]">{share(v)}</text>
       </motion.g>
     )
   }
   return (
     <div className={className}>
-      <svg ref={ref} viewBox={`0 0 ${W} ${H}`} role="img" aria-label="Sankey diagram" className="block h-auto w-full overflow-visible">
+      <svg ref={ref} viewBox={`0 0 ${W} ${H}`} role="group" aria-label="Sankey diagram" className="block h-auto w-full overflow-visible">
         <defs><clipPath id={clip}><motion.rect x={0} y={0} height={H} initial={{ width: 0 }} animate={inView ? { width: W } : undefined} transition={{ duration: 1, ease: [0.22, 1, 0.36, 1], delay: 0.1 }} /></clipPath></defs>
         <g clipPath={`url(#${clip})`}>
           {ribbons.map(({ i, l, d }) => (
@@ -1347,12 +1362,16 @@ type NetSim = { x: number; y: number; vx: number; vy: number; fx: number | null;
  * Force-directed graph (repulsion, springs, centring) simulated in-file. Drag a node to pin it while you move it,
  * hover, tap or focus a node to highlight its neighbours (tap it again or outside to clear), Shuffle to re-scatter.
  * Nodes catch touches in a wider ring; swipes over empty canvas still scroll the page. Settles when scrolled into view.
+ * The simulation pauses while the graph is off screen or hidden (width 0) and resumes where it was when it comes back;
+ * it stops once it has cooled down, and while it runs it moves the nodes by writing their attributes directly (no re-render per frame).
  */
 export function NetworkGraph({ nodes, links, groups, width = 900, height = 340, className }:
   { nodes: NetworkNode[]; links: [number, number][]; groups: [string, string][]; /** used until the container is measured */ width?: number; height?: number; className?: string }) {
   // the layout is sized to the container (1 SVG unit = 1px) so labels stay 11px and the graph fills the card
   const [wrapRef, measured] = useWidth<HTMLDivElement>()
-  const W = Math.round(measured) || width, H = W < 560 ? Math.max(height, 420) : height
+  // hidden (display: none) measures 0: keep the last real size instead of re-laying out for the fallback width
+  const lastW = useRef(0); if (measured > 0) lastW.current = Math.round(measured)
+  const W = lastW.current || width, H = W < 560 ? Math.max(height, 420) : height
   // deterministic start (a golden-angle spiral by index), so the server and the first client render agree
   const sim = useRef<NetSim[]>(nodes.map((_, i) => ({ x: W / 2 + Math.cos(i * 2.39996) * 7 * Math.sqrt(i + 0.5), y: H / 2 + Math.sin(i * 2.39996) * 7 * Math.sqrt(i + 0.5), vx: 0, vy: 0, fx: null, fy: null })))
   const alpha = useRef(1)
@@ -1363,7 +1382,10 @@ export function NetworkGraph({ nodes, links, groups, width = 900, height = 340, 
   const svgRef = useRef<SVGSVGElement>(null)
   const tap = useRef<{ i: number; x: number; y: number; was: boolean; moved: boolean } | null>(null)
   const inView = useInView(svgRef, { once: true, amount: 0.3 })
+  const { visible } = useViewport(svgRef, { amount: 0 })
+  const awake = visible && measured > 0
   const reduce = useReducedMotion()
+  const lineEls = useRef<(SVGLineElement | null)[]>([]), nodeEls = useRef<(SVGGElement | null)[]>([])
   const nb = useMemo(() => { const s = nodes.map(() => new Set<number>()); links.forEach(([a, b]) => { s[a].add(b); s[b].add(a) }); return s }, [nodes, links])
   const r = (i: number) => nodes[i].size ?? 8
   const labelW = useMemo(() => nodes.map(n => n.label.length * 6.2), [nodes])
@@ -1385,8 +1407,16 @@ export function NetworkGraph({ nodes, links, groups, width = 900, height = 340, 
       n.vx *= 0.82; n.vy *= 0.82
       n.x = clamp(n.x + n.vx, r(i) + 4, W - r(i) - 70); n.y = clamp(n.y + n.vy, r(i) + 4, H - r(i) - 4)
     })
-    alpha.current = Math.max(0.02, a * 0.985)
+    alpha.current = Math.max(0.02, a * 0.982)
   }
+  /** Moves the drawn nodes and links to the simulation (attribute writes only, no reads, no React render). */
+  const paint = () => {
+    const ns = sim.current
+    nodeEls.current.forEach((g, i) => g?.setAttribute('transform', `translate(${ns[i].x.toFixed(1)},${ns[i].y.toFixed(1)})`))
+    links.forEach(([a, b], k) => { const l = lineEls.current[k]; if (!l) return; l.setAttribute('x1', ns[a].x.toFixed(1)); l.setAttribute('y1', ns[a].y.toFixed(1)); l.setAttribute('x2', ns[b].x.toFixed(1)); l.setAttribute('y2', ns[b].y.toFixed(1)) })
+  }
+  /** Cool enough to stop: low temperature and (almost) nothing moving. */
+  const cooled = () => alpha.current <= 0.021 || (alpha.current < 0.08 && sim.current.every(n => Math.abs(n.vx) + Math.abs(n.vy) < 0.04))
   const settle = () => { for (let i = 0; i < 400; i++) tick(); force() }
   const kick = (a: number) => { alpha.current = Math.max(alpha.current, a); if (reduce && dragging === null) settle(); else setRunning(true) }
   useEffect(() => { if (inView) kick(1) }, [inView]) // eslint-disable-line react-hooks/exhaustive-deps
@@ -1397,7 +1427,9 @@ export function NetworkGraph({ nodes, links, groups, width = 900, height = 340, 
     sim.current.forEach(n => { n.x *= W / w0; n.y *= H / h0 })
     if (inView) kick(0.3); else force()
   }, [W, H]) // eslint-disable-line react-hooks/exhaustive-deps
-  useFrameLoop(running, () => { tick(); force(); if (alpha.current <= 0.021 && dragging === null) setRunning(false) })
+  // runs only while on screen and laid out; `running` survives a pause, so it resumes where it left off
+  useFrameLoop(running && awake, () => { tick(); paint(); if (cooled() && dragging === null) { alpha.current = 0.02; setRunning(false) } })
+  useEffect(() => { if (!running) force() }, [running]) // one React render with the settled positions
   const toSvg = (e: { clientX: number; clientY: number }) => { const svg = svgRef.current!, m = svg.getScreenCTM()!.inverse(), p = new DOMPoint(e.clientX, e.clientY).matrixTransform(m); return p }
   const end = (i: number, e?: ReactPointerEvent) => {
     if (dragging !== i) return
@@ -1420,17 +1452,17 @@ export function NetworkGraph({ nodes, links, groups, width = 900, height = 340, 
   return (
     <div ref={wrapRef} className={cn('flex min-w-0 flex-col gap-2', className)}>
       <div className="flex justify-end"><Button size="sm" className={TOUCH.tap36} onClick={() => { sim.current.forEach(n => { n.x = W / 2 + (Math.random() - 0.5) * W * 0.55; n.y = H / 2 + (Math.random() - 0.5) * H * 0.65 }); kick(1) }}>Shuffle</Button></div>
-      <svg ref={svgRef} viewBox={`0 0 ${W} ${H}`} width={W} height={H} role="img" aria-label="Network graph" className="block max-w-full touch-pan-y select-none">
+      <svg ref={svgRef} viewBox={`0 0 ${W} ${H}`} width={W} height={H} role="group" aria-label="Network graph" className="block max-w-full touch-pan-y select-none">
         <g>
           {links.map(([a, b], k) => {
             const on = hl !== null && (a === hl || b === hl)
-            return <line key={k} x1={ns[a].x} y1={ns[a].y} x2={ns[b].x} y2={ns[b].y}
+            return <line key={k} ref={el => { lineEls.current[k] = el }} x1={ns[a].x.toFixed(1)} y1={ns[a].y.toFixed(1)} x2={ns[b].x.toFixed(1)} y2={ns[b].y.toFixed(1)}
               className={cn('transition-[stroke,opacity] duration-150', on ? 'stroke-[var(--fg2)] [stroke-width:1.8]' : 'stroke-[var(--line2)] [stroke-width:1.2]', hl !== null && !on && 'opacity-12')} />
           })}
         </g>
         <g>
           {nodes.map((n, i) => (
-            <g key={i} transform={`translate(${ns[i].x},${ns[i].y})`} tabIndex={0} role="button" aria-label={`${n.label}, ${groups[n.group][0]}, ${nb[i].size} connections`} data-net-node=""
+            <g key={i} ref={el => { nodeEls.current[i] = el }} transform={`translate(${ns[i].x.toFixed(1)},${ns[i].y.toFixed(1)})`} tabIndex={0} role="button" aria-label={`${n.label}, ${groups[n.group][0]}, ${nb[i].size} connections`} data-net-node=""
               className={cn('touch-none outline-none transition-opacity duration-150', dragging === i ? 'cursor-grabbing' : 'cursor-grab', !isOn(i) && 'opacity-25')}
               onPointerEnter={e => { if (dragging === null && !isTouch(e)) setHl(i) }} onPointerLeave={onMouseLeave(() => { if (dragging === null) setHl(null) })}
               onFocus={() => setHl(i)} onBlur={() => setHl(null)}
@@ -1515,12 +1547,13 @@ export function ProcessFlow({ nodes: initial, edges, steps, height = 420, idle, 
     const to = { z, x: z === all ? (Wc - (x1 - x0) * z) / 2 - x0 * z : 20 - x0 * z, y: (Hc - (y1 - y0) * z) / 2 - y0 * z }
     if (anim) tween(to); else setView(to)
   }
-  useEffect(() => { if (!fitted.current && Object.keys(hs).length) { fitted.current = true; fit(false, true) } }) // eslint-disable-line react-hooks/exhaustive-deps
+  // open fitted to the whole flow (phones too: a readable zoom on the first two steps hid the rest); + / pinch zoom in
+  useEffect(() => { if (!fitted.current && Object.keys(hs).length) { fitted.current = true; fit(false) } }) // eslint-disable-line react-hooks/exhaustive-deps
   const fitRef = useRef(fit)
   useLayoutEffect(() => { fitRef.current = fit })
   useEffect(() => { // refit when the canvas itself changes size (not on every render)
     let t = 0, w = pf.current?.clientWidth ?? 0
-    const ro = new ResizeObserver(() => { const nw = pf.current?.clientWidth ?? 0; if (nw === w) return; w = nw; clearTimeout(t); t = window.setTimeout(() => fitRef.current(true, true), 120) })
+    const ro = new ResizeObserver(() => { const nw = pf.current?.clientWidth ?? 0; if (nw === w) return; w = nw; clearTimeout(t); t = window.setTimeout(() => fitRef.current(true), 120) })
     if (pf.current) ro.observe(pf.current)
     return () => { ro.disconnect(); clearTimeout(t) }
   }, [])
@@ -1657,7 +1690,7 @@ export function ProcessFlow({ nodes: initial, edges, steps, height = 420, idle, 
                 {hasL && <span className={cn('absolute top-1/2 -left-1.5 -mt-1 h-2.5 w-2.5 rounded-full border-2 bg-[var(--card)]', st ? 'border-[var(--fg3)]' : 'border-[var(--line2)]')} />}
                 {hasR && <span className={cn('absolute top-1/2 -right-1.5 -mt-1 h-2.5 w-2.5 rounded-full border-2 bg-[var(--card)]', st ? 'border-[var(--fg3)]' : 'border-[var(--line2)]')} />}
                 <div className="flex cursor-grab touch-none items-center gap-2 border-b border-[var(--line)] px-3 py-2.5">
-                  <span className="grid h-[26px] w-[26px] flex-none place-items-center rounded-[7px]" style={{ color: safeColor(n.color), background: `color-mix(in srgb, ${safeColor(n.color)} 14%, var(--card))` }}><Icon name={n.icon} size={14} /></span>
+                  <span className="grid h-[26px] w-[26px] flex-none place-items-center rounded-[var(--r-md)]" style={{ color: safeColor(n.color), background: `color-mix(in srgb, ${safeColor(n.color)} 14%, var(--card))` }}><Icon name={n.icon} size={14} /></span>
                   <div className="min-w-0"><div className="text-[13px] leading-tight font-semibold">{n.title}</div><div className="text-[11px] text-[var(--fg3)]">{n.desc}</div></div>
                   {st === 'warn' ? (
                     // StatusIcon has no warning state: same shape, warn colour, "!" instead of the tick
@@ -1690,14 +1723,50 @@ export function ProcessFlow({ nodes: initial, edges, steps, height = 420, idle, 
 
 export type DataFlowSource = { label: string; icon: IconName; color: string; rate: number }
 export type DataFlowTarget = { label: string; icon: IconName; color: string; share: number }
-type DfParticle = { c: SVGCircleElement; core: SVGCircleElement; stage: 0 | 1; p: number; t: number; v: number }
+/** A particle: which leg (0 in, 1 out), which path, progress 0–1 and speed. Drawn on one canvas, no DOM node each. */
+type DfParticle = { stage: 0 | 1; p: number; t: number; v: number; src: number }
 const DF_W = 960, DF_H = 380, DF_NW = 150, DF_NH = 44, DF_ER = 62, DF_NW_T = 148
-
+/** Most particles in flight at once (new ones wait for a free slot). */
+const DF_MAX = 120
+/** Points per path in the arc-length lookup table. */
+const DF_LUT = 64
+/** A cubic Bézier [x0,y0, c1x,c1y, c2x,c2y, x1,y1] sampled at DF_LUT points evenly spaced by arc length (x, y pairs). */
+function dfLut(P: number[]) {
+  const N = 160, xs: number[] = [], ys: number[] = [], acc = [0]
+  for (let k = 0; k <= N; k++) { const [x, y] = dgBez(P, k / N); xs.push(x); ys.push(y); if (k) acc.push(acc[k - 1] + Math.hypot(x - xs[k - 1], y - ys[k - 1])) }
+  const L = acc[N] || 1, out = new Float32Array(DF_LUT * 2)
+  for (let j = 0, k = 0; j < DF_LUT; j++) {
+    const s = (j / (DF_LUT - 1)) * L
+    while (k < N - 1 && acc[k + 1] < s) k++
+    const f = (s - acc[k]) / (acc[k + 1] - acc[k] || 1)
+    out[j * 2] = xs[k] + (xs[k + 1] - xs[k]) * f; out[j * 2 + 1] = ys[k] + (ys[k + 1] - ys[k]) * f
+  }
+  return out
+}
+const dfD = (P: number[]) => `M${P[0]},${P[1]} C${P[2]},${P[3]} ${P[4]},${P[5]} ${P[6]},${P[7]}`
+/** CSS colours (var(), color-mix(), fallbacks) resolved to rgb() through an element's computed `color`. */
+function dfResolve(el: HTMLElement, colors: string[]) {
+  const prev = el.style.color
+  const out = colors.map(c => { el.style.color = ''; el.style.color = safeColor(c, 'var(--fg3)'); return getComputedStyle(el).color })
+  el.style.color = prev
+  return out
+}
+/** A soft glow dot (the old blur filter) pre-rendered once per colour, so a frame is a few drawImage calls. */
+function dfSprite(color: string, dpr: number) {
+  const s = Math.ceil(16 * dpr), cv = document.createElement('canvas'); cv.width = cv.height = s
+  const g = cv.getContext('2d')!, r = s / 2, grd = g.createRadialGradient(r, r, 0, r, r, r)
+  grd.addColorStop(0, color); grd.addColorStop(0.35, color); grd.addColorStop(1, 'transparent')
+  g.globalAlpha = 0.55; g.fillStyle = grd; g.fillRect(0, 0, s, s)
+  g.globalAlpha = 1; g.fillStyle = color; g.beginPath(); g.arc(r, r, 1.6 * dpr, 0, Math.PI * 2); g.fill()
+  return cv
+}
 /**
  * Streaming pipeline: particles leave each source at its event rate, pass through the processing engine
  * (its stage label cycles) and fan out to destinations by share. Hover, tap or focus a node to trace its path.
  * Speed slider, Pause, and a live stat strip (throughput, processed, in flight, p95 latency). Below 560px the
  * pipeline turns vertical (sources above the engine, destinations below) so labels stay full size on phones.
+ * Particles are drawn on one canvas from per-path lookup tables (no DOM reads or writes per frame), capped at 120 in
+ * flight, and everything pauses while the diagram is off screen.
  */
 export function DataFlow({ sources, targets, engine = 'Engine', stages = ['Ingest', 'Transform', 'Enrich', 'Route'], className }:
   { sources: DataFlowSource[]; targets: DataFlowTarget[]; engine?: string; stages?: string[]; className?: string }) {
@@ -1716,60 +1785,110 @@ export function DataFlow({ sources, targets, engine = 'Engine', stages = ['Inges
   const [stats, setStats] = useState({ tp: 0, processed: 0, inflight: 0, p95: 42, delivered: targets.map(() => 0) })
   const box = useRef<HTMLDivElement>(null)
   const inView = useInView(box, { once: true, amount: 0.3 })
-  const visible = useInView(box, { amount: 0.05 })
+  const { visible } = useViewport(box, { amount: 0.05 })
   const reduce = useReducedMotion()
-  const ptG = useRef<SVGGElement>(null), pulseC = useRef<SVGCircleElement>(null)
-  const inL = useRef<(SVGPathElement | null)[]>([]), outL = useRef<(SVGPathElement | null)[]>([])
-  const sim = useRef({ parts: [] as DfParticle[], acc: sources.map(() => 0), processed: 0, delivered: targets.map(() => 0), lastP: 0 })
+  const pulseC = useRef<SVGCircleElement>(null)
+  const cvRef = useRef<HTMLCanvasElement>(null)
+  const sim = useRef({ parts: [] as DfParticle[], acc: sources.map(() => 0), processed: 0, delivered: targets.map(() => 0) })
   const hlRef = useRef(hl); hlRef.current = hl
-  const glow = dgSafeId(useId())
+  const uid = dgSafeId(useId())
+  const speedId = `${uid}-speed`
   const sy = (i: number) => 34 + i * ((H - 68 - nh) / Math.max(1, sources.length - 1)), dy = (i: number) => 70 + i * ((H - 140 - nh) / Math.max(1, targets.length - 1))
   const srcAt = (i: number) => tall ? cols2(sources.length, i, 8, W) : [20, sy(i)] as const
   const dstAt = (i: number) => tall ? cols2(targets.length, i, dTop, W) : [W - 20 - nw, dy(i)] as const
   const mid = (n: number, i: number) => i - (n - 1) / 2
-  const inD = sources.map((_, i) => {
+  // the links as Bézier control points: they give both the drawn paths and the particles' lookup tables
+  const inP = sources.map((_, i) => {
     const [sx0, sy0] = srcAt(i)
-    if (tall) { const x0 = sx0 + nw / 2, y0 = sy0 + nh, x1 = ex + mid(sources.length, i) * 12, y1 = ey - er - 6; return `M${x0},${y0} C${x0},${y0 + 40} ${x1},${y1 - 40} ${x1},${y1}` }
-    const x0 = sx0 + nw, y0 = sy0 + nh / 2, x1 = ex - er - 6, y1 = ey + mid(sources.length, i) * 14; return `M${x0},${y0} C${x0 + 110},${y0} ${x1 - 110},${y1} ${x1},${y1}`
+    if (tall) { const x0 = sx0 + nw / 2, y0 = sy0 + nh, x1 = ex + mid(sources.length, i) * 12, y1 = ey - er - 6; return [x0, y0, x0, y0 + 40, x1, y1 - 40, x1, y1] }
+    const x0 = sx0 + nw, y0 = sy0 + nh / 2, x1 = ex - er - 6, y1 = ey + mid(sources.length, i) * 14; return [x0, y0, x0 + 110, y0, x1 - 110, y1, x1, y1]
   })
-  const outD = targets.map((_, i) => {
+  const outP = targets.map((_, i) => {
     const [dx0, dy0] = dstAt(i)
-    if (tall) { const x0 = ex + mid(targets.length, i) * 14, y0 = ey + er + 6, x1 = dx0 + nw / 2, y1 = dy0; return `M${x0},${y0} C${x0},${y0 + 30} ${x1},${y1 - 30} ${x1},${y1}` }
-    const x0 = ex + er + 6, y0 = ey + mid(targets.length, i) * 16, x1 = dx0, y1 = dy0 + nh / 2; return `M${x0},${y0} C${x0 + 110},${y0} ${x1 - 110},${y1} ${x1},${y1}`
+    if (tall) { const x0 = ex + mid(targets.length, i) * 14, y0 = ey + er + 6, x1 = dx0 + nw / 2, y1 = dy0; return [x0, y0, x0, y0 + 30, x1, y1 - 30, x1, y1] }
+    const x0 = ex + er + 6, y0 = ey + mid(targets.length, i) * 16, x1 = dx0, y1 = dy0 + nh / 2; return [x0, y0, x0 + 110, y0, x1 - 110, y1, x1, y1]
   })
+  const geoKey = JSON.stringify([inP, outP])
+  // sampled once per geometry (resize between wide and tall, or new sources/targets), never per frame
+  const luts = useMemo(() => ({ in: inP.map(dfLut), out: outP.map(dfLut) }), [geoKey]) // eslint-disable-line react-hooks/exhaustive-deps
   const pickTarget = () => { const tot = targets.reduce((a, t) => a + t.share, 0); let r = Math.random() * tot; return Math.max(0, targets.findIndex(t => (r -= t.share) <= 0)) }
 
-  useFrameLoop(visible && !paused && !reduce, dt => {
-    const S = sim.current, g = ptG.current; if (!g) return
+  // canvas: sized from a ResizeObserver entry (no layout reads), colours resolved on mount and on theme changes
+  const cv = useRef({ w: 0, h: 0, dpr: 1, sprites: [] as HTMLCanvasElement[], srcSprite: [] as number[], dstSprite: [] as number[], accent: '', now: 0 })
+  const drawRef = useRef<(dt: number, now: number) => void>(() => {})
+  const colorKey = [...sources, ...targets].map(n => n.color).join('|')
+  useEffect(() => {
+    const el = cvRef.current; if (!el) return
+    const ro = new ResizeObserver(([e]) => {
+      const c = cv.current, dpr = Math.min(2, devicePixelRatio || 1), w = e.contentRect.width, h = e.contentRect.height
+      if (w === c.w && h === c.h && dpr === c.dpr) return
+      c.w = w; c.h = h; c.dpr = dpr; el.width = Math.round(w * dpr); el.height = Math.round(h * dpr)
+      drawRef.current(0, c.now) // resizing clears a canvas: repaint the current frame (matters while paused)
+    })
+    ro.observe(el)
+    return () => ro.disconnect()
+  }, [])
+  useEffect(() => {
+    const el = cvRef.current; if (!el) return
+    const build = () => {
+      const c = cv.current, dpr = Math.min(2, devicePixelRatio || 1), all = dfResolve(el, [...sources.map(s => s.color), ...targets.map(t => t.color), 'var(--accent)'])
+      c.accent = all.pop()!
+      const uniq = [...new Set(all)]
+      c.sprites = uniq.map(col => dfSprite(col, dpr))
+      c.srcSprite = sources.map((_, i) => uniq.indexOf(all[i])); c.dstSprite = targets.map((_, i) => uniq.indexOf(all[sources.length + i]))
+      drawRef.current(0, c.now)
+    }
+    build()
+    // theme switches change the tokens on <html> (data-theme, class, style) or the colour scheme
+    const mo = new MutationObserver(build); mo.observe(document.documentElement, { attributes: true, attributeFilter: ['data-theme', 'class', 'style'] })
+    const mq = matchMedia('(prefers-color-scheme: dark)'); mq.addEventListener?.('change', build)
+    return () => { mo.disconnect(); mq.removeEventListener?.('change', build) }
+  }, [colorKey]) // eslint-disable-line react-hooks/exhaustive-deps
+
+  const running = visible && !paused && !reduce
+  // one frame: the engine's orbiting rings (dash offsets, so a rotation costs no layout) and every particle
+  const draw = (dt: number, now: number) => {
+    const S = sim.current, el = cvRef.current, c = cv.current; if (!el || !c.w) return
+    c.now = now
     sources.forEach((s, i) => {
       S.acc[i] += (dt * s.rate / 40) * speed
-      while (S.acc[i] >= 1) {
-        S.acc[i]--
-        if (S.parts.length >= 140) continue
-        const mk = (r: number, o: number) => { const c = document.createElementNS('http://www.w3.org/2000/svg', 'circle'); c.setAttribute('r', String(r)); c.setAttribute('fill', s.color); c.setAttribute('opacity', String(o)); g.appendChild(c); return c }
-        const c = mk(2.6, 0.8); c.setAttribute('filter', `url(#${glow})`)
-        S.parts.push({ c, core: mk(1.6, 1), stage: 0, p: i, t: 0, v: 0.35 + Math.random() * 0.25 })
-      }
+      while (S.acc[i] >= 1) { S.acc[i]--; if (S.parts.length < DF_MAX) S.parts.push({ stage: 0, p: i, t: 0, v: 0.35 + Math.random() * 0.25, src: i }) }
     })
-    const h = hlRef.current
-    for (let k = S.parts.length - 1; k >= 0; k--) {
-      const q = S.parts[k]
+    const g = el.getContext('2d'); if (!g) return
+    const k = (c.w / W) * c.dpr, h = hlRef.current, half = 8 * c.dpr
+    g.setTransform(1, 0, 0, 1, 0, 0); g.clearRect(0, 0, el.width, el.height)
+    let pulse = false
+    for (let j = S.parts.length - 1; j >= 0; j--) {
+      const q = S.parts[j]
       q.t += dt * q.v * speed
       if (q.t >= 1) {
-        if (q.stage === 0) {
-          q.stage = 1; q.t = 0; q.p = pickTarget(); S.processed++
-          const col = targets[q.p].color; q.c.setAttribute('fill', col); q.core.setAttribute('fill', col)
-          if (S.processed % 6 === 0 && pulseC.current) animate(pulseC.current, { fillOpacity: [0.2, 0.08] }, { duration: 0.5 })
-        } else { S.delivered[q.p]++; q.c.remove(); q.core.remove(); S.parts.splice(k, 1); continue }
+        if (q.stage === 0) { q.stage = 1; q.t = 0; q.p = pickTarget(); S.processed++; if (S.processed % 6 === 0) pulse = true }
+        else { S.delivered[q.p]++; S.parts.splice(j, 1); continue }
       }
-      const path = (q.stage ? outL.current : inL.current)[q.p]; if (!path) continue
-      const pt = path.getPointAtLength(q.t * path.getTotalLength())
-      q.c.setAttribute('cx', String(pt.x)); q.c.setAttribute('cy', String(pt.y)); q.core.setAttribute('cx', String(pt.x)); q.core.setAttribute('cy', String(pt.y))
+      const lut = (q.stage ? luts.out : luts.in)[q.p]; if (!lut) continue
+      const f = q.t * (DF_LUT - 1), a = Math.min(DF_LUT - 2, Math.floor(f)), u = f - a
+      const x = lut[a * 2] + (lut[a * 2 + 2] - lut[a * 2]) * u, y = lut[a * 2 + 1] + (lut[a * 2 + 3] - lut[a * 2 + 1]) * u
       const dim = h && !((h.k === 's' && q.stage === 0 && q.p === h.i) || (h.k === 'd' && q.stage === 1 && q.p === h.i))
-      q.c.setAttribute('opacity', String(dim ? 0.1 : 0.8)); q.core.setAttribute('opacity', String(dim ? 0.12 : 1))
+      const sp = c.sprites[q.stage ? c.dstSprite[q.p] : c.srcSprite[q.p]]; if (!sp) continue
+      g.globalAlpha = dim ? 0.12 : 1
+      g.drawImage(sp, x * k - half, y * k - half)
     }
-  })
-  useEffect(() => () => { sim.current.parts.forEach(q => { q.c.remove(); q.core.remove() }); sim.current.parts = [] }, [])
+    g.globalAlpha = 1
+    if (c.accent) {
+      const ring = (r: number, alpha: number, lw: number, dash: number[], turn: number) => {
+        g.globalAlpha = alpha; g.strokeStyle = c.accent; g.lineWidth = lw * k; g.setLineDash(dash.map(d => d * k))
+        g.lineDashOffset = (reduce ? 0 : ((now / 1000) * turn) % 1) * 2 * Math.PI * r * k
+        g.beginPath(); g.arc(ex * k, ey * k, r * k, 0, Math.PI * 2); g.stroke()
+      }
+      ring(er + 8, 0.35, 1.5, [3, 7], -1 / 24); ring(er + 18, 0.25, 1, [40, 300], 1 / 9)
+      g.setLineDash([]); g.globalAlpha = 1
+    }
+    if (pulse) pulseC.current?.animate?.([{ fillOpacity: 0.2 }, { fillOpacity: 0.08 }], { duration: 500, easing: 'ease-out' })
+  }
+  drawRef.current = (dt, now) => draw(running ? dt : 0, now)
+  useFrameLoop(running, (dt, now) => draw(dt, now))
+  // leaving the screen (or pausing) keeps the particles where they are; reduced motion clears them
+  useEffect(() => { if (reduce) { sim.current.parts = []; drawRef.current(0, 0) } }, [reduce])
   useEffect(() => {
     if (!visible || paused) return
     const id = setInterval(() => {
@@ -1784,19 +1903,20 @@ export function DataFlow({ sources, targets, engine = 'Engine', stages = ['Inges
   const on = (k: 's' | 'd', i: number) => !hl || (hl.k === k && hl.i === i)
   const linkOn = (k: 's' | 'd', i: number) => hl && (hl.k !== k || hl.i === i)
   const node = (k: 's' | 'd', n: DataFlowSource | DataFlowTarget, i: number, x: number, y: number, sub: string) => (
-    <motion.g key={`${k}${i}`} transform={`translate(${x},${y})`} tabIndex={0} role="button" aria-label={`${n.label}: ${sub}`}
-      className={cn('cursor-default outline-none transition-opacity duration-200', !on(k, i) && '!opacity-30')}
+    // named by its visible label and sub line (aria-labelledby), so voice control can target it by what it shows
+    <motion.g key={`${k}${i}`} transform={`translate(${x},${y})`} tabIndex={0} role="button" aria-labelledby={`${uid}${k}${i}l ${uid}${k}${i}v`}
+      className={cn('cursor-default outline-none transition-opacity duration-200 [&:focus-visible>rect:first-child]:stroke-[var(--accent)] [&:focus-visible>rect:first-child]:[stroke-width:2]', !on(k, i) && '!opacity-30')}
       initial={{ opacity: 0 }} animate={inView ? { opacity: 1 } : undefined} transition={{ duration: 0.4, delay: (k === 'd' ? 0.4 : 0) + i * 0.06 }}
       data-df-node="" onPointerEnter={e => { if (!isTouch(e)) setHl({ k, i }) }} onPointerDown={e => { if (isTouch(e)) setHl(h => h && h.k === k && h.i === i ? null : { k, i }) }} onPointerLeave={onMouseLeave(() => setHl(null))} onFocus={() => setHl({ k, i })} onBlur={() => setHl(null)}>
       <rect width={nw} height={nh} rx={10} className="fill-[var(--card)] stroke-[var(--line)]" />
       <rect x={10} y={10} width={24} height={24} rx={7} style={{ fill: `color-mix(in srgb, ${safeColor(n.color)} 15%, var(--card))` }} />
       <g transform="translate(15.5,15.5) scale(0.54)" style={{ color: safeColor(n.color) }}><path d={ICONS[n.icon]} fill="none" stroke="currentColor" strokeWidth={3.6} strokeLinecap="round" strokeLinejoin="round" /></g>
-      <text x={42} y={tall ? 19 : 20} className={cn('fill-[var(--fg)]', tall ? '[font:500_13px_var(--font)]' : '[font:500_12px_var(--font)]')}>{n.label}</text>
-      <text x={42} y={34} className={cn('fill-[var(--fg3)]', tall ? '[font:12px_var(--font)]' : '[font:11px_var(--font)]')}>{sub}</text>
+      <text id={`${uid}${k}${i}l`} x={42} y={tall ? 19 : 20} className={cn('fill-[var(--fg)]', tall ? '[font:500_13px_var(--font)]' : '[font:500_12px_var(--font)]')}>{n.label}</text>
+      {' '}<text id={`${uid}${k}${i}v`} x={42} y={34} className={cn('fill-[var(--fg3)]', tall ? '[font:12px_var(--font)]' : '[font:11px_var(--font)]')}>{sub}</text>
     </motion.g>
   )
-  const lk = (d: string, k: 's' | 'd', i: number, ref: (el: SVGPathElement | null) => void, order: number) => (
-    <motion.path key={`${k}${i}`} ref={ref} d={d} fill="none" initial={{ pathLength: reduce ? 1 : 0 }} animate={inView ? { pathLength: 1 } : undefined} transition={{ duration: 0.8, delay: 0.1 + order * 0.05, ease: [0.22, 1, 0.36, 1] }}
+  const lk = (d: string, k: 's' | 'd', i: number, order: number) => (
+    <motion.path key={`${k}${i}`} d={d} fill="none" initial={{ pathLength: reduce ? 1 : 0 }} animate={inView ? { pathLength: 1 } : undefined} transition={{ duration: 0.8, delay: 0.1 + order * 0.05, ease: [0.22, 1, 0.36, 1] }}
       className={cn('transition-[opacity,stroke] duration-200 [stroke-width:1.5]', linkOn(k, i) ? 'stroke-[var(--fg3)]' : 'stroke-[var(--line2)]', hl && !linkOn(k, i) && 'opacity-15')} />
   )
   const stat = (label: string, v: number, unit?: string) => (
@@ -1806,33 +1926,27 @@ export function DataFlow({ sources, targets, engine = 'Engine', stages = ['Inges
   return (
     <div ref={box} className={cn('flex flex-col gap-3', className)}>
       <div className="flex items-center justify-end gap-2">
-        <span className="text-xs text-[var(--fg3)]">Speed</span>
-        <div className="w-[90px] [@media(pointer:coarse)]:w-[120px]"><Slider min={0.3} max={3} step={0.1} value={speed} onChange={setSpeed} /></div>
+        <label htmlFor={speedId} className="text-xs text-[var(--fg3)]">Speed</label>
+        <div className="w-[90px] [@media(pointer:coarse)]:w-[120px]"><Slider id={speedId} min={0.3} max={3} step={0.1} value={speed} onChange={setSpeed} /></div>
         <Button size="sm" className={TOUCH.tap36} onClick={() => setPaused(p => !p)}>{paused ? 'Resume' : 'Pause'}</Button>
       </div>
       <div ref={wrapRef} className="overflow-x-auto overscroll-x-contain rounded-[var(--r-lg)] border border-[var(--line)] bg-[var(--bg)]">
-        <svg viewBox={`0 0 ${W} ${H}`} role="img" aria-label="Data flow from sources through a processing engine to destinations" className={cn('block h-auto w-full', tall ? 'mx-auto max-w-[420px]' : 'min-w-[640px] [@media(pointer:coarse)]:min-w-[960px]')}>
-          <defs><filter id={glow} x="-50%" y="-50%" width="200%" height="200%"><feGaussianBlur stdDeviation={2.2} /></filter></defs>
-          <g>
-            {inD.map((d, i) => lk(d, 's', i, el => { inL.current[i] = el }, i))}
-            {outD.map((d, i) => lk(d, 'd', i, el => { outL.current[i] = el }, sources.length + i))}
-          </g>
-          <g ref={ptG} />
+        <div className={cn('relative', tall ? 'mx-auto max-w-[420px]' : 'min-w-[640px] [@media(pointer:coarse)]:min-w-[960px]')}>
+        {/* three layers with one geometry: links (SVG), particles (canvas), nodes and engine (SVG), so particles pass under the nodes */}
+        <svg viewBox={`0 0 ${W} ${H}`} aria-hidden className="block h-auto w-full">
+          {inP.map((P, i) => lk(dfD(P), 's', i, i))}
+          {outP.map((P, i) => lk(dfD(P), 'd', i, sources.length + i))}
+        </svg>
+        <canvas ref={cvRef} aria-hidden className="pointer-events-none absolute inset-0 h-full w-full" />
+        <svg viewBox={`0 0 ${W} ${H}`} role="group" aria-label="Data flow from sources through a processing engine to destinations" className="pointer-events-none absolute inset-0 block h-full w-full [&_[data-df-node]]:pointer-events-auto">
           <g>
             {sources.map((s, i) => node('s', s, i, srcAt(i)[0], srcAt(i)[1], `${Math.round(s.rate * speed)} ev/s`))}
             {targets.map((t, i) => node('d', t, i, dstAt(i)[0], dstAt(i)[1], `${stats.delivered[i].toLocaleString(LOCALE)} delivered`))}
           </g>
-          <g transform={`translate(${ex},${ey})`}>
+          <g transform={`translate(${ex},${ey})`} role="img" aria-label={`${engine}: ${stages[stage]}`}>
             <motion.g initial={{ opacity: 0, scale: 0.85 }} animate={inView ? { opacity: 1, scale: 1 } : undefined} transition={spring(0.3, 0.6)}>
               <circle r={er + 18} fill="none" stroke="var(--accent)" strokeOpacity={0.12} />
-              {/* the orbiting rings only spin while the diagram is on screen (an infinite SVG animation ticks every frame) */}
-              {visible && !reduce ? <>
-                <motion.circle r={er + 8} fill="none" stroke="var(--accent)" strokeOpacity={0.35} strokeWidth={1.5} strokeDasharray="3 7" animate={{ rotate: 360 }} transition={{ duration: 24, repeat: Infinity, ease: 'linear' }} />
-                <motion.circle r={er + 18} fill="none" stroke="var(--accent)" strokeOpacity={0.25} strokeDasharray="40 300" animate={{ rotate: -360 }} transition={{ duration: 9, repeat: Infinity, ease: 'linear' }} />
-              </> : <>
-                <circle r={er + 8} fill="none" stroke="var(--accent)" strokeOpacity={0.35} strokeWidth={1.5} strokeDasharray="3 7" />
-                <circle r={er + 18} fill="none" stroke="var(--accent)" strokeOpacity={0.25} strokeDasharray="40 300" />
-              </>}
+              {/* the two orbiting rings are drawn on the particle canvas (rotating SVG cost a layout every frame) */}
               <circle r={er} className="fill-[var(--card)] stroke-[var(--line)]" />
               <circle ref={pulseC} r={er} fill="var(--accent)" fillOpacity={0.08} />
               <text y={-4} textAnchor="middle" className="fill-[var(--fg)] [font:600_13px_var(--font)]">{engine}</text>
@@ -1842,6 +1956,7 @@ export function DataFlow({ sources, targets, engine = 'Engine', stages = ['Inges
             </motion.g>
           </g>
         </svg>
+        </div>
       </div>
       <div className="grid grid-cols-2 gap-3 sm:grid-cols-4">
         {stat('Throughput', paused ? 0 : stats.tp, 'ev/s')}{stat('Processed', stats.processed)}{stat('In flight', stats.inflight)}{stat('Latency p95', stats.p95, 'ms')}

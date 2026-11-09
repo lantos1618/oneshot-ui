@@ -1,0 +1,29 @@
+version: 2
+updates:
+  - package-ecosystem: npm
+    directory: /
+    schedule:
+      interval: weekly
+      day: monday
+    open-pull-requests-limit: 10
+    # wait a week after a release before proposing it (supply-chain cooldown)
+    cooldown:
+      default-days: 7
+    groups:
+      test-tooling:
+        patterns: ['vitest', '@vitest/*', '@testing-library/*', 'jsdom', '@playwright/test', 'axe-core']
+      build-tooling:
+        patterns: ['vite', '@vitejs/*', 'tailwindcss', '@tailwindcss/*', 'typescript', 'oxlint', '@types/*']
+      react-and-motion:
+        patterns: ['react', 'react-dom', 'motion']
+
+  - package-ecosystem: github-actions
+    directory: /
+    schedule:
+      interval: weekly
+      day: monday
+    cooldown:
+      default-days: 7
+    groups:
+      actions:
+        patterns: ['*']

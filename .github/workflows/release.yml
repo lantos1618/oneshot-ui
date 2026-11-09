@@ -1,0 +1,50 @@
+# Manual release to npm with provenance, through npm trusted publishing (OIDC; no npm token is stored).
+# Not wired to tags on purpose: run it from the Actions tab once the version in package.json is bumped and CI is
+# green. Before the first run, add this repository and workflow as a trusted publisher for @lyndon/ui on npmjs.com
+# and create the `npm` environment (Settings → Environments) with required reviewers.
+name: Release (manual)
+
+on:
+  workflow_dispatch:
+    inputs:
+      confirm:
+        description: 'Type the version being published (must match package.json)'
+        required: true
+
+permissions:
+  contents: read
+
+concurrency:
+  group: release
+  cancel-in-progress: false
+
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    environment: npm
+    permissions:
+      contents: read
+      id-token: write # npm trusted publishing + provenance
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: pnpm/action-setup@73e46992e05b19abd31f2f3c20e0e7370d762115 # v6.1.1
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version: 22
+          registry-url: https://registry.npmjs.org
+      - name: Check the version
+        env:
+          CONFIRM: ${{ inputs.confirm }}
+        run: |
+          version=$(node -p "require('./package.json').version")
+          if [ "$version" != "$CONFIRM" ]; then echo "package.json is $version, input was $CONFIRM"; exit 1; fi
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm audit --prod --audit-level=moderate
+      - run: pnpm check
+      - run: pnpm test:pack
+      # Trusted publishing needs npm 11.5.1 or later; Node 22 ships npm 10.
+      - run: npm install --global npm@11.6.2 # zizmor: ignore[adhoc-packages] pinned; only the publish step needs it
+      - run: npm publish --provenance --access public --ignore-scripts

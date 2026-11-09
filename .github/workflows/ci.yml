@@ -1,0 +1,82 @@
+# Checks on every push and pull request: types, library and single-file builds, SSR, unit tests, the e2e suite
+# against the built showcase, dependency audit and a pack check. Actions are pinned to full commit SHAs (the tag is
+# in the comment; Dependabot keeps both up to date).
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+env:
+  NODE_VERSION: 22
+
+jobs:
+  check:
+    name: Types, build, SSR, unit tests, audit, pack
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: pnpm/action-setup@73e46992e05b19abd31f2f3c20e0e7370d762115 # v6.1.1 (version from packageManager)
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: pnpm
+      - name: Install
+        run: pnpm install --frozen-lockfile
+      - name: Audit production dependencies
+        run: pnpm audit --prod --audit-level=moderate
+      - name: Type-check (app, node configs)
+        run: pnpm exec tsc -b
+      - name: Type-check tests
+        run: pnpm typecheck:tests
+      - name: Build library, CSS and single files
+        run: pnpm build
+      - name: Single-file bundles type-check on their own
+        run: node scripts/build-single.mjs && npx tsc -p tsconfig.single.json --noEmit
+      - name: Server rendering
+        run: pnpm test:ssr
+      - name: Unit and interaction tests
+        run: pnpm test
+      - name: Pack check (no maps, local paths or secrets; checksums match)
+        run: pnpm test:pack
+
+  e2e:
+    name: E2E (showcase, Chromium)
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: pnpm/action-setup@73e46992e05b19abd31f2f3c20e0e7370d762115 # v6.1.1
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: pnpm
+      - name: Install
+        run: pnpm install --frozen-lockfile
+      - name: Install Chromium for Playwright
+        run: pnpm exec playwright install --with-deps chromium
+      - name: Run e2e (builds the showcase and serves it with vite preview)
+        run: pnpm test:e2e
+      - name: Upload report
+        if: ${{ failure() }}
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: playwright-report
+          path: |
+            playwright-report/
+            test-results/
+          retention-days: 14

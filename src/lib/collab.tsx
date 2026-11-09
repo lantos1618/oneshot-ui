@@ -1,7 +1,7 @@
 import { useEffect, useLayoutEffect, useRef, useState, type PointerEvent as RPointerEvent, type ReactNode } from 'react'
 import { AnimatePresence, motion, useReducedMotion } from 'motion/react'
 import { Input } from './forms'
-import { Avatar, Button, Icon, IconButton, TOUCH, cn, fmtDate, isCoarsePointer, safeColor, spring, surface, useControllable, useWidth } from './core'
+import { Avatar, Badge, Button, Icon, IconButton, TOUCH, cn, fmtDate, isCoarsePointer, safeColor, spring, surface, useControllable, useWidth } from './core'
 import { play, useFrameLoop, useViewport } from './motion'
 import { AnimatedList } from './data'
 import { Collapse, TypingDots, useToast } from './feedback'
@@ -16,8 +16,8 @@ function CommentBox({ onSubmit, placeholder, autoFocus }: { onSubmit: (text: str
   const [t, setT] = useState('')
   return (
     <form className="flex gap-2" onSubmit={e => { e.preventDefault(); if (t.trim()) { onSubmit(t.trim()); setT('') } }}>
-      <Input autoFocus={autoFocus} value={t} onChange={e => setT(e.target.value)} placeholder={placeholder} className={cn('!h-8 [@media(pointer:coarse)]:!text-base', TOUCH.row)} />
-      <Button size="sm" variant="primary" type="submit" disabled={!t.trim()} className={TOUCH.row}>Send</Button>
+      <Input autoFocus={autoFocus} value={t} onChange={e => setT(e.target.value)} placeholder={placeholder} className={cn('!h-8 min-w-0 flex-1 [@media(pointer:coarse)]:!text-base', TOUCH.row)} />
+      <Button size="sm" variant="primary" type="submit" disabled={!t.trim()} className={cn('flex-none', TOUCH.row)}>Send</Button>
     </form>
   )
 }
@@ -119,7 +119,7 @@ export function AnchoredComments({ doc, threads, defaultThreads = [], onChange, 
                 <mark key={j} role="button" tabIndex={0} aria-label={`${run.text}: open comment thread${res ? ' (resolved)' : ''}`}
                   onClick={() => focusThread(run.thread)} onKeyDown={e => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); focusThread(run.thread) } }}
                   onMouseEnter={() => setHot(run.thread)} onMouseLeave={() => setHot(null)} onFocus={() => setHot(run.thread)} onBlur={() => setHot(null)}
-                  className={cn('cursor-pointer rounded-[3px] px-px transition-[background-color,color] duration-200 outline-none focus-visible:shadow-[0_0_0_2px_var(--warn)]',
+                  className={cn('cursor-pointer rounded-[var(--r-sm)] px-px transition-[background-color,color] duration-200 outline-none focus-visible:shadow-[0_0_0_2px_var(--warn)]',
                     // touch: a taller hit area via padding, with the highlight kept to the text (content box)
                     '[@media(pointer:coarse)]:bg-clip-content [@media(pointer:coarse)]:py-[7px]',
                     res ? 'bg-transparent text-[var(--fg2)] underline decoration-[var(--fg3)] decoration-dotted underline-offset-4'
@@ -160,7 +160,7 @@ export function AnchoredComments({ doc, threads, defaultThreads = [], onChange, 
                       initial={pop[t.id + e] ? { scale: 0.8 } : false} animate={{ scale: 1 }} transition={spring(0.6, 0.35)}
                       className={cn('inline-flex h-6 cursor-pointer items-center gap-1 rounded-full border px-2 text-xs [@media(pointer:coarse)]:h-9 [@media(pointer:coarse)]:min-w-11 [@media(pointer:coarse)]:justify-center [@media(pointer:coarse)]:px-2.5 [@media(pointer:coarse)]:text-sm',
                         mine ? 'border-[var(--accent)] bg-[var(--accent-soft)]' : 'border-[var(--line)] bg-[var(--card)] hover:bg-[var(--muted)]')}>
-                      <span>{e}</span>{n > 0 && <span className="ui-num text-[var(--fg2)]">{n}</span>}
+                      <span>{e}</span>{n > 0 && <span className="tabular-nums text-[var(--fg2)]">{n}</span>}
                     </motion.button>
                   )
                 })}
@@ -171,8 +171,9 @@ export function AnchoredComments({ doc, threads, defaultThreads = [], onChange, 
               </div>
               <form onSubmit={e => { e.preventDefault(); reply(t.id) }} className="flex gap-1.5 border-t border-[var(--line)] bg-[color-mix(in_srgb,var(--muted)_40%,var(--card))] p-2">
                 <Input value={drafts[t.id] ?? ''} onChange={e => setDrafts(d => ({ ...d, [t.id]: e.target.value }))}
-                  placeholder="Reply…" aria-label="Reply" className={cn('!h-[30px] !px-2 [@media(pointer:coarse)]:!text-base', TOUCH.row)} onFocus={() => setHot(t.id)} />
-                <Button size="sm" variant="primary" type="submit" disabled={!(drafts[t.id] ?? '').trim()} className={TOUCH.row}>Reply</Button>
+                  placeholder="Reply…" aria-label="Reply" className={cn('!h-[30px] min-w-0 flex-1 !px-2 [@media(pointer:coarse)]:!text-base', TOUCH.row)} onFocus={() => setHot(t.id)} />
+                {/* the input shrinks (min-w-0), so the button is never pushed out of a narrow card */}
+                <Button size="sm" variant="primary" type="submit" disabled={!(drafts[t.id] ?? '').trim()} className={cn('flex-none', TOUCH.row)}>Reply</Button>
 
               </form>
             </>)}
@@ -254,7 +255,7 @@ export function LivePresence({ people = PRESENCE_PEOPLE, me = PRESENCE_ME, title
         className={cn(surface.md, 'relative min-h-[200px] flex-1 cursor-none touch-pan-y overflow-hidden !bg-[var(--bg)]')}>
         <div className="absolute inset-4 flex flex-col gap-2">
           <b className="text-sm">{title}</b>
-          {['92%', '92%', '64%', '92%', '64%'].map((wd, i) => <div key={i} className="h-[9px] rounded bg-[var(--line)]" style={{ width: wd }} />)}
+          {['92%', '92%', '64%', '92%', '64%'].map((wd, i) => <div key={i} className="h-[9px] rounded-[var(--r-sm)] bg-[var(--line)]" style={{ width: wd }} />)}
         </div>
         {people.map((p, i) => <CollabCursor key={p.name} name={p.name.split(' ')[0]} color={p.color} elRef={el => { els.current[i] = el }} />)}
         <CollabCursor name="You" color={me.color} hidden={!meOn} elRef={el => { mine.current = el }} />
@@ -283,7 +284,7 @@ const inboxTime = (tz: string, at: number) => fmtDate(new Date(at), { hour: '2-d
 function InboxTyping({ name }: { name: string }) {
   return (
     <motion.div initial={{ opacity: 0, y: 6 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0, transition: { duration: 0.1 } }}
-      className="flex self-start rounded-2xl rounded-bl-[5px] bg-[var(--muted)] px-3 py-1.5">
+      className="flex self-start rounded-[var(--r-lg)] rounded-bl-[5px] bg-[var(--muted)] px-3 py-1.5">
       <TypingDots label={`${name} is typing`} />
     </motion.div>
   )
@@ -381,7 +382,7 @@ export function ChatInbox({ conversations, replies = INBOX_REPLIES, simulateInco
               <AnimatePresence>
                 {!!x.unread && (
                   <motion.span key={x.unread} initial={{ scale: 0.4 }} animate={{ scale: 1 }} exit={{ scale: 0, opacity: 0 }} transition={spring(0.55, 0.4)} aria-label={`${x.unread} unread`}
-                    className="absolute right-3 bottom-3 grid h-[18px] min-w-[18px] place-items-center rounded-full bg-[var(--accent)] px-1 text-[11px] font-semibold text-[var(--card)]">{x.unread}</motion.span>
+                    className="absolute right-3 bottom-3 inline-flex"><Badge size="sm" className="min-w-[18px] justify-center !bg-[var(--accent)] font-semibold tabular-nums !text-[var(--card)]">{x.unread}</Badge></motion.span>
                 )}
               </AnimatePresence>
             </div>
@@ -395,7 +396,7 @@ export function ChatInbox({ conversations, replies = INBOX_REPLIES, simulateInco
   const detailsPane = c && (
     <div className="flex flex-col items-center gap-1.5 overflow-auto px-3 py-4 text-center">
       <Avatar name={c.name} size={64} status={c.online ? 'online' : undefined} className="!border-0" />
-      <b className="mt-1 text-[15px]">{c.name}</b>
+      <b className="mt-1 text-sm">{c.name}</b>
       <span className="text-xs text-[var(--fg3)]">{c.role}</span>
       <div className="mt-2 flex gap-2"><Button size="sm" className={TOUCH.tap36}><Icon name="phone" size={13} />Call</Button><Button size="sm" className={TOUCH.tap36}><Icon name="user" size={13} />Profile</Button></div>
       <dl className="m-0 mt-3 w-full text-left text-xs">
@@ -425,7 +426,7 @@ export function ChatInbox({ conversations, replies = INBOX_REPLIES, simulateInco
         <AnimatePresence initial={false}>
           {c.messages.map((m, i) => (
             <motion.div key={i} initial={{ opacity: 0, y: 10, scale: 0.96 }} animate={{ opacity: 1, y: 0, scale: 1 }} transition={spring(0.3, 0.35)}
-              className={cn('rounded-2xl px-3 py-2 text-[13px] leading-[1.45] [overflow-wrap:anywhere]', narrow ? 'max-w-[84%]' : 'max-w-[70%]', m.from === 'me' ? 'origin-bottom-right self-end rounded-br-[5px] bg-[var(--primary)] text-[var(--on-primary)]' : 'origin-bottom-left self-start rounded-bl-[5px] bg-[var(--muted)]')}>
+              className={cn('rounded-[var(--r-lg)] px-3 py-2 text-[13px] leading-[1.45] [overflow-wrap:anywhere]', narrow ? 'max-w-[84%]' : 'max-w-[70%]', m.from === 'me' ? 'origin-bottom-right self-end rounded-br-[5px] bg-[var(--primary)] text-[var(--on-primary)]' : 'origin-bottom-left self-start rounded-bl-[5px] bg-[var(--muted)]')}>
               {m.text}
             </motion.div>
           ))}

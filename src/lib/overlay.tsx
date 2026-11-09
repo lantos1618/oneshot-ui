@@ -54,9 +54,13 @@ const FLIP_SIDE: Partial<Record<Placement, Placement>> = {
  * Absolutely positioned panel next to its (relative) parent. Flips to the other side when it would
  * run off the bottom (or top) of the viewport and there is more room there (`flip={false}` pins it), and
  * slides sideways to stay 8px inside the screen edges on narrow (phone) viewports. Never wider than the screen.
+ * The side is chosen once, when it opens, and stays locked while it is open, so content that shrinks or grows (a
+ * filtered list) never makes it jump to the other side. `flip="scroll"` never flips: when the panel doesn't fit on its
+ * side the page scrolls just enough to show it (for type-to-filter lists, whose height changes as you type: above the
+ * field they would shrink from the top and cover the label).
  */
 export function FloatingPanel({ open, placement = 'bottom-start', flip = true, matchWidth, className, children, role = 'dialog', id, ...p }:
-  { open: boolean; placement?: Placement; flip?: boolean; matchWidth?: boolean; className?: string; children: ReactNode; role?: string; id?: string } & Omit<HTMLAttributes<HTMLDivElement>, 'onAnimationStart' | 'onDrag' | 'onDragStart' | 'onDragEnd'>) {
+  { open: boolean; placement?: Placement; flip?: boolean | 'scroll'; matchWidth?: boolean; className?: string; children: ReactNode; role?: string; id?: string } & Omit<HTMLAttributes<HTMLDivElement>, 'onAnimationStart' | 'onDrag' | 'onDragStart' | 'onDragEnd'>) {
   const [side, setSide] = useState<Placement>(placement)
   const [shift, setShift] = useState(0)
   const ref = useRef<HTMLDivElement>(null), shiftRef = useRef(0)
@@ -79,9 +83,9 @@ export function FloatingPanel({ open, placement = 'bottom-start', flip = true, m
     const wantsUp = placement.startsWith('top'), fitsDown = h + 6 <= below, fitsUp = h + 8 <= above
     // flip only to a side where it fits; when it fits neither (tall panel, short phone screen) open downward and
     // scroll the page so the panel is in view, instead of hanging off the top of the screen
-    const flipIt = wantsUp ? !fitsUp && (fitsDown || below > above) : !fitsDown && fitsUp
+    const flipIt = flip !== 'scroll' && (wantsUp ? !fitsUp && (fitsDown || below > above) : !fitsDown && fitsUp)
     setSide(flipIt ? alt : placement)
-    if (!fitsDown && !fitsUp) {
+    if (flip === 'scroll' ? !(wantsUp ? fitsUp : fitsDown) : !fitsDown && !fitsUp) {
       const r = requestAnimationFrame(() => el.scrollIntoView({ block: 'nearest', behavior: prefersReducedMotion() ? 'auto' : 'smooth' }))
       return () => cancelAnimationFrame(r)
     }
@@ -324,7 +328,8 @@ export function ContextMenu({ items, children, className, label = 'Options', onO
   const fromArea = <E extends { target: EventTarget }>(fn: (e: E) => void) => (e: E) => { if (inArea(e.target)) fn(e) }
 
   return (
-    <div ref={area} tabIndex={0} aria-haspopup="menu" aria-expanded={open} data-state={open ? 'open' : 'closed'}
+    // a named group (not a button: the area holds arbitrary content); aria-keyshortcuts tells screen readers how to open it
+    <div ref={area} tabIndex={0} role="group" aria-label={label} aria-keyshortcuts="Shift+F10 ContextMenu" data-state={open ? 'open' : 'closed'}
       className={cn('relative select-none outline-none [-webkit-touch-callout:none] focus-visible:ring-2 focus-visible:ring-[var(--accent)]', className)}
       onContextMenu={e => { if (!inArea(e.target)) return; e.preventDefault(); hold.cancel(); openAt(e.clientX, e.clientY) }}
       onPointerDown={fromArea(hold.bind.onPointerDown)} onPointerMove={hold.bind.onPointerMove}
@@ -383,7 +388,7 @@ export function useHoverIntent(ref: RefObject<HTMLElement | null>, openDelay = 3
   }
 }
 
-const tipClass = 'flex items-center gap-1.5 whitespace-nowrap rounded-md bg-[var(--primary)] px-2 py-1 text-xs text-[var(--on-primary)] shadow-[var(--shadow)]'
+const tipClass = 'flex items-center gap-1.5 whitespace-nowrap rounded-[var(--r-md)] bg-[var(--primary)] px-2 py-1 text-xs text-[var(--on-primary)] shadow-[var(--shadow)]'
 /** Where a portalled tooltip sits for each placement: anchor point plus a CSS translate. */
 function tipFixed(r: DOMRect, p: Placement) {
   if (p === 'right') return { left: r.right + 8, top: r.top + r.height / 2, transform: 'translateY(-50%)' }
@@ -482,7 +487,7 @@ export function PointerTooltip({ tip, className }: { tip: PointerTip; className?
   const left = Math.max(8, Math.min(vw - box.w - 8, right ? t.x + 14 : t.x - 14 - box.w))
   const top = Math.max(8, t.y - (t.touch ? box.h + 30 : 44))
   return createPortal(
-    <div ref={el} role="tooltip" className={cn(floatingSurface, 'pointer-events-none fixed z-[90] w-max max-w-[calc(100vw-16px)] rounded-lg px-2 py-1.5 text-xs leading-snug text-[var(--fg)] transition-opacity duration-150', className)}
+    <div ref={el} role="tooltip" className={cn(floatingSurface, 'pointer-events-none fixed z-[90] w-max max-w-[calc(100vw-16px)] rounded-[var(--r-md)] px-2 py-1.5 text-xs leading-snug text-[var(--fg)] transition-opacity duration-150', className)}
       style={{ left, top, opacity: tip ? 1 : 0, fontFamily: 'var(--font)' }}>{t.content}</div>,
     document.body,
   )
@@ -610,8 +615,8 @@ export function Dialog({ open, onOpenChange, title, description, children, foote
       <div className="pointer-events-none fixed inset-0 z-[71] grid place-items-center px-[max(16px,env(safe-area-inset-left),env(safe-area-inset-right))] pt-[max(16px,env(safe-area-inset-top))] pb-[max(16px,env(safe-area-inset-bottom))]">
         <motion.div role="dialog" aria-modal="true" aria-labelledby={id}
           initial={{ opacity: 0, scale: 0.94, y: 8 }} animate={{ opacity: 1, scale: 1, y: 0 }} exit={{ opacity: 0, scale: 0.96, transition: { duration: 0.15 } }}
-          transition={spring(0.3, 0.4)} className={cn('pointer-events-auto max-h-full w-full max-w-[420px] overflow-auto overscroll-contain rounded-2xl border border-[var(--line)] bg-[var(--card)] p-5 shadow-[var(--shadow)]', className)}>
-          <h4 id={id} className="m-0 mb-1.5 text-[17px] font-semibold">{title}</h4>
+          transition={spring(0.3, 0.4)} className={cn('pointer-events-auto max-h-full w-full max-w-[420px] overflow-auto overscroll-contain rounded-[var(--r-lg)] border border-[var(--line)] bg-[var(--card)] p-5 shadow-[var(--shadow)]', className)}>
+          <h2 id={id} className="m-0 mb-1.5 text-base font-semibold">{title}</h2>
           {description && <p className="m-0 mb-4 text-[13px] text-[var(--fg2)]">{description}</p>}
           {children}
           {footer && <div className="mt-4 flex flex-wrap justify-end gap-2">{footer}</div>}
@@ -624,7 +629,7 @@ export function Dialog({ open, onOpenChange, title, description, children, foote
 const SHEET = {
   right: { cls: 'top-0 right-0 bottom-0 w-[min(380px,92vw)] pt-[max(20px,env(safe-area-inset-top))] pb-[max(20px,env(safe-area-inset-bottom))]', off: { x: '100%' } },
   left: { cls: 'top-0 left-0 bottom-0 w-[min(380px,92vw)] pt-[max(20px,env(safe-area-inset-top))] pb-[max(20px,env(safe-area-inset-bottom))]', off: { x: '-100%' } },
-  bottom: { cls: 'left-0 right-0 bottom-0 max-h-[85dvh] rounded-t-2xl !pt-2 pb-[max(20px,env(safe-area-inset-bottom))]', off: { y: '100%' } },
+  bottom: { cls: 'left-0 right-0 bottom-0 max-h-[85dvh] rounded-t-[var(--r-lg)] !pt-2 pb-[max(20px,env(safe-area-inset-bottom))]', off: { y: '100%' } },
 }
 /** Below this width a left or right Sheet opens as a bottom sheet instead. */
 const SHEET_BOTTOM_BELOW = 640
@@ -651,7 +656,7 @@ export function Sheet({ open, onOpenChange, title, side = 'right', responsive = 
         className={cn('fixed z-[71] flex flex-col gap-3 overflow-auto overscroll-contain bg-[var(--card)] px-5 shadow-[var(--shadow)]', cls, className)}>
         {grab && <div aria-hidden {...grab} className="-mx-5 -mb-2 flex flex-none cursor-grab justify-center pt-1 pb-2 touch-none"><span className="h-1 w-9 rounded-full bg-[var(--line2)]" /></div>}
         <div className={cn('flex flex-none items-center justify-between', grab?.className)} onPointerDown={grab?.onPointerDown}>
-          <h4 className="m-0 text-base font-semibold">{title}</h4>
+          <h2 className="m-0 text-base font-semibold">{title}</h2>
           <IconButton icon="x" label="Close" onClick={() => onOpenChange(false)} onPointerDown={e => e.stopPropagation()} />
         </div>
         <div className="flex-1">{children}</div>
@@ -724,7 +729,7 @@ export function CommandPalette({ open, onOpenChange, commands, placeholder = 'Ty
           <Icon name="search" className="text-[var(--fg3)]" />
           <input data-autofocus value={q} onChange={e => setQ(e.target.value)} onKeyDown={onKeyDown} placeholder={placeholder}
             role="combobox" aria-expanded="true" aria-controls={`${uid}-list`} aria-activedescendant={list[active] ? `${uid}-${list[active].c.id}` : undefined}
-            className="w-full border-0 bg-transparent py-3 text-[15px] outline-none" />
+            className="w-full border-0 bg-transparent py-3 text-base outline-none" />
         </div>
         <div ref={listRef} id={`${uid}-list`} role="listbox" className="max-h-[min(340px,50vh)] overflow-auto overscroll-contain p-1.5 max-[640px]:max-h-[min(420px,60dvh)]">
           {list.length === 0 && (
@@ -737,7 +742,7 @@ export function CommandPalette({ open, onOpenChange, commands, placeholder = 'Ty
               {c.group && c.group !== list[i - 1]?.c.group && <MenuLabel>{c.group}</MenuLabel>}
               <button id={`${uid}-${c.id}`} data-i={i} role="option" aria-selected={i === active} tabIndex={-1} onPointerMove={() => setActive(i)} onClick={() => run(i)}
                 className={cn(menuItemClass, 'relative', words.length ? 'text-[var(--fg2)]' : '')}>
-                {i === active && <motion.span layoutId={`${uid}-active`} className="absolute inset-0 rounded-[7px] bg-[var(--muted)]" transition={spring(0.15, 0.25)} />}
+                {i === active && <motion.span layoutId={`${uid}-active`} className="absolute inset-0 rounded-[var(--r-md)] bg-[var(--muted)]" transition={spring(0.15, 0.25)} />}
                 <span className="relative flex min-w-0 items-center gap-2">
                   {c.icon && <Icon name={c.icon} size={15} className="text-[var(--fg3)]" />}
                   <span className="truncate">{cmdkMark(c.label, words)}</span>
@@ -788,12 +793,13 @@ export function InlineEdit({ value, onSave, className, helper, savedHelper = 'Sa
     <input autoFocus value={draft} aria-label={label ?? 'Title'} maxLength={80} onFocus={e => e.currentTarget.select()} onChange={e => setDraft(e.target.value)} onBlur={() => done(true)}
       onKeyDown={e => { e.stopPropagation(); if (e.nativeEvent.isComposing) return; if (e.key === 'Enter') { e.preventDefault(); done(true, true) } if (e.key === 'Escape') { e.preventDefault(); done(false, true) } }}
       style={{ width: `${Math.max(12, draft.length + 2)}ch` }}
-      className={cn('-mx-2 max-w-full min-w-[min(200px,100%)] rounded-lg border-0 bg-[var(--card)] px-2 py-1 font-semibold outline-none shadow-[0_0_0_1px_var(--fg3),0_0_0_4px_var(--muted)]', className)} />
+      className={cn('-mx-2 max-w-full min-w-[min(200px,100%)] rounded-[var(--r-md)] border-0 bg-[var(--card)] px-2 py-1 font-semibold outline-none shadow-[0_0_0_1px_var(--fg3),0_0_0_4px_var(--muted)]', className)} />
   ) : (
-    <button ref={btn} onClick={() => { setDraft(value); setEditing(true) }} aria-label={`Edit ${label ?? value}`}
-      className={cn('group relative -mx-2 flex max-w-full cursor-text items-center gap-2 overflow-hidden rounded-lg border-0 bg-transparent px-2 py-1 text-left font-semibold hover:bg-[var(--muted)]', className)}>
-      {saves > 0 && <motion.span key={`f${saves}`} aria-hidden className="absolute inset-0 rounded-lg bg-[var(--ok-soft)]" initial={{ opacity: 1 }} animate={{ opacity: 0 }} transition={{ duration: 0.9, ease: 'easeOut' }} />}
-      <motion.span key={saves} className="relative truncate" initial={saves ? { opacity: 0.3, x: -3 } : false} animate={{ opacity: 1, x: 0 }} transition={spring(0.3, 0.3)}>{value}</motion.span>
+    // the name is the visible text plus a hidden ", edit title", so speech users can say what they see
+    <button ref={btn} onClick={() => { setDraft(value); setEditing(true) }}
+      className={cn('group relative -mx-2 flex max-w-full cursor-text items-center gap-2 overflow-hidden rounded-[var(--r-md)] border-0 bg-transparent px-2 py-1 text-left font-semibold hover:bg-[var(--muted)]', className)}>
+      {saves > 0 && <motion.span key={`f${saves}`} aria-hidden className="absolute inset-0 rounded-[var(--r-md)] bg-[var(--ok-soft)]" initial={{ opacity: 1 }} animate={{ opacity: 0 }} transition={{ duration: 0.9, ease: 'easeOut' }} />}
+      <motion.span key={saves} className="relative truncate" initial={saves ? { opacity: 0.3, x: -3 } : false} animate={{ opacity: 1, x: 0 }} transition={spring(0.3, 0.3)}>{value}<span className="sr-only">, edit{label ? ` ${label}` : ''}</span></motion.span>
       <Icon name="edit" size={14} className="relative text-[var(--fg3)] opacity-0 transition-opacity group-hover:opacity-100 group-focus-visible:opacity-100 [@media(hover:none)]:opacity-100" />
     </button>
   )
@@ -920,7 +926,7 @@ export function Tour({ steps, step, defaultStep = -1, onStepChange, children, cl
       {children}
       <AnimatePresence>
         {open && geo && (
-          <motion.div key="spot" aria-hidden className="pointer-events-none absolute top-0 left-0 z-[5] rounded-lg shadow-[0_0_0_9999px_rgba(0,0,0,.45)]"
+          <motion.div key="spot" aria-hidden className="pointer-events-none absolute top-0 left-0 z-[5] rounded-[var(--r-md)] shadow-[0_0_0_9999px_rgba(0,0,0,.45)]"
             initial={{ opacity: 0, x: geo.x, y: geo.y, width: geo.w, height: geo.h }} animate={{ opacity: 1, x: geo.x, y: geo.y, width: geo.w, height: geo.h }}
             exit={{ opacity: 0, transition: { duration: 0.2 } }} transition={{ ...spring(0.2, 0.5), opacity: { duration: 0.25 } }} />
         )}

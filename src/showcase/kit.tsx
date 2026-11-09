@@ -1,5 +1,5 @@
-import { createContext, useContext, useId, useLayoutEffect, useState, useSyncExternalStore, type ReactNode } from 'react'
-import { Card, Icon, Reveal, cn } from '../lib'
+import { createContext, useContext, useId, useLayoutEffect, useRef, useState, useSyncExternalStore, type ReactNode } from 'react'
+import { Badge, Button, type ButtonProps, Card, Icon, Kbd, Reveal, cn } from '../lib'
 import { openCodeDrawer } from './CodeDrawer'
 
 /* Showcase kit: Section, Spec (card), Row, the section list, use-case tags, and the card registry the
@@ -123,13 +123,60 @@ export function flashSpec(id: string) {
 
 /* Layout pieces ─────────────────────────────────────────────────────────────── */
 
-/** A component card: title, one-line description, use-case tag chips, then the demo. Fades up when scrolled into view. */
-export function Spec({ title, desc, children, span = 1 }: { title: string; desc?: string; children: ReactNode; span?: 1 | 2 | 3 }) {
+/** Everything Tab reaches inside an element: visible, enabled, not inert. */
+const KIT_TABBABLE = 'a[href],button,input,select,textarea,[tabindex],[contenteditable=""],[contenteditable="true"],summary'
+const kitTabbables = (root: Element | null) => root ? [...root.querySelectorAll<HTMLElement>(KIT_TABBABLE)]
+  .filter(e => e.tabIndex >= 0 && !(e as HTMLButtonElement).disabled && !e.closest('[inert]') && e.getClientRects().length > 0) : []
+/** Demos with at least this many Tab stops offer a "Skip to next card" link after the card's header. */
+const KIT_SKIP_AT = 6
+const kitReduce = () => matchMedia('(prefers-reduced-motion: reduce)').matches
+/** The visible card after this one (cards hidden by the filter are skipped). */
+const kitNextCard = (card: Element | null) => {
+  const cards = [...document.querySelectorAll<HTMLElement>('main [data-spec]')].filter(c => c.offsetParent)
+  const i = card ? cards.indexOf(card as HTMLElement) : -1
+  return i >= 0 ? cards[i + 1] ?? null : null
+}
+/** Move focus to a card's first control (its code button) and scroll it into view. */
+function kitFocusCard(card: HTMLElement) {
+  card.querySelector<HTMLElement>('[data-kit-entry]')?.focus({ preventScroll: true })
+  card.scrollIntoView({ block: 'start', behavior: kitReduce() ? 'auto' : 'smooth' })
+}
+
+/** A key hint for a card: keys pressed together, and what they do. */
+export type SpecKey = [keys: string[], label: string]
+
+/** A one-shot action in a card's header (Resample, Randomise, Replay…): the same size and place on every card. */
+export function SpecAction({ className, ...p }: Omit<ButtonProps, 'size'>) {
+  return <Button size="xs" className={cn('flex-none', className)} {...p} />
+}
+
+/** A static picture of a demo's open or finished state (a menu, a dialog, a toast), so the card shows what its trigger
+ * does. Not interactive and hidden from assistive tech: the live control above it is the real thing. */
+export function SpecPreview({ children, className, label = 'Open state' }: { children: ReactNode; className?: string; label?: string }) {
+  return (
+    <div aria-hidden inert className={cn('relative mt-auto overflow-hidden rounded-[var(--r-md)] border border-dashed border-[var(--line)] bg-[var(--bg)] px-3 pt-6 pb-3 select-none', className)}>
+      <span className="absolute top-1.5 left-2.5 text-[11px] font-medium text-[var(--fg3)]">{label}</span>
+      {children}
+    </div>
+  )
+}
+
+/**
+ * A component card: title, one-line description, key hints, use-case tag chips, then the demo. Fades up when scrolled
+ * into view. `actions` go in the header's top-right slot (one-shot demo actions, or a Switch for a live mode).
+ * Keyboard: the code button is one Tab stop and the tag chips another (arrows move between chips). Demos with many
+ * controls get a "Skip to next card" link right after the header, so Tab doesn't have to walk the whole demo.
+ */
+export function Spec({ title, desc, children, span = 1, actions, keys }:
+  { title: string; desc?: string; children: ReactNode; span?: 1 | 2 | 3; actions?: ReactNode; keys?: SpecKey[] }) {
   const key = useId()
   const section = useContext(SectionContext)
   const { query, setQuery, focusFilter } = useContext(ShellContext)
   const base = specSlug(title)
   const [id, setId] = useState(base)
+  const [tagAt, setTagAt] = useState(0)
+  const [skip, setSkip] = useState(false)
+  const cardRef = useRef<HTMLDivElement>(null), bodyRef = useRef<HTMLDivElement>(null), tagRefs = useRef<(HTMLButtonElement | null)[]>([])
   const tags = specTags(title, section)
   const tagKey = tags.join(',')
   useLayoutEffect(() => {
@@ -137,36 +184,60 @@ export function Spec({ title, desc, children, span = 1 }: { title: string; desc?
   }, [key, base, title, desc, section, tagKey]) // eslint-disable-line react-hooks/exhaustive-deps
   useLayoutEffect(() => () => { kitSpecs.delete(key); kitNotify() }, [key])
   const shown = specMatches({ title, desc: desc ?? '', tags }, query)
+  const chips = tags.slice(0, 4)
   const pickTag = (t: string) => {
     setQuery(t); focusFilter()
-    scrollTo({ top: 0, behavior: matchMedia('(prefers-reduced-motion: reduce)').matches ? 'auto' : 'smooth' })
+    scrollTo({ top: 0, behavior: kitReduce() ? 'auto' : 'smooth' })
+  }
+  const tagKeys = (e: React.KeyboardEvent, i: number) => {
+    const n = chips.length, d = e.key === 'ArrowRight' || e.key === 'ArrowDown' ? 1 : e.key === 'ArrowLeft' || e.key === 'ArrowUp' ? -1 : 0
+    const j = d ? (i + d + n) % n : e.key === 'Home' ? 0 : e.key === 'End' ? n - 1 : -1
+    if (j < 0) return
+    e.preventDefault(); setTagAt(j); tagRefs.current[j]?.focus()
+  }
+  // decide, as focus enters the header, whether this demo is long enough to be worth skipping
+  const onFocus = (e: React.FocusEvent) => {
+    if (bodyRef.current?.contains(e.target)) return
+    setSkip(kitTabbables(bodyRef.current).length >= KIT_SKIP_AT && !!kitNextCard(cardRef.current))
   }
   return (
-    <Reveal id={id} data-spec={title}
+    <Reveal id={id} data-spec={title} ref={cardRef} onFocus={onFocus}
       className={cn('group/spec min-w-0 scroll-mt-28 rounded-[var(--r-lg)] transition-shadow duration-500 data-[flash]:shadow-[0_0_0_2px_var(--accent),0_0_0_6px_var(--accent-soft)]',
         span === 2 && 'md:col-span-2', span === 3 && 'col-span-full', !shown && 'hidden')}>
-      <Card className="flex h-full flex-col">
-        <div className="flex min-w-0 items-start gap-1">
+      <Card className="relative flex h-full flex-col">
+        <div className="flex min-w-0 items-start gap-1.5">
           <h3 className="m-0 min-w-0 flex-1 text-sm leading-snug font-semibold">{title}</h3>
-          <button type="button" data-qa-skip onClick={() => openCodeDrawer(title)} aria-label={`View code for ${title}`} title="View code"
-            className="-my-0.5 grid h-[22px] w-[22px] flex-none cursor-pointer place-items-center rounded-[var(--r-md)] border-0 bg-transparent text-[var(--fg3)] opacity-0 transition-[opacity,background-color] duration-150 group-hover/spec:opacity-100 hover:bg-[var(--muted)] hover:text-[var(--fg)] focus-visible:opacity-100 focus-visible:outline-2 focus-visible:outline-[var(--accent)] max-[900px]:opacity-100 [@media(hover:none)]:opacity-100 [@media(pointer:coarse)]:-my-[7px] [@media(pointer:coarse)]:-mr-[5px] [@media(pointer:coarse)]:-ml-[5px] [@media(pointer:coarse)]:h-8 [@media(pointer:coarse)]:w-8">
+          {actions && <div className="-my-0.5 flex flex-none flex-wrap items-center justify-end gap-1.5 [@media(pointer:coarse)]:-my-[7px]">{actions}</div>}
+          <button type="button" data-qa-skip data-kit-entry onClick={() => openCodeDrawer(title)} aria-label={`View code for ${title}`} title="View code"
+            className="-my-0.5 grid h-[22px] w-[22px] flex-none cursor-pointer place-items-center rounded-[var(--r-md)] border-0 bg-transparent text-[var(--fg3)] transition-colors duration-150 hover:bg-[var(--muted)] hover:text-[var(--fg)] focus-visible:outline-2 focus-visible:outline-[var(--accent)] [@media(pointer:coarse)]:-my-[7px] [@media(pointer:coarse)]:-mr-[5px] [@media(pointer:coarse)]:-ml-[5px] [@media(pointer:coarse)]:h-8 [@media(pointer:coarse)]:w-8">
             <Icon name="code" size={15} />
           </button>
         </div>
         {desc && <p className="m-0 mt-1 text-xs leading-snug text-[var(--fg3)]">{desc}</p>}
-        {tags.length > 0 && (
-          <div className="mt-2 mb-4 flex flex-wrap gap-1">
-            {/* on touch the button is 32px tall (transparent padding, pulled back with negative margins) around the same 21px pill */}
-            {tags.slice(0, 4).map(t => (
-              <button key={t} type="button" onClick={() => pickTag(t)} aria-label={`Show components tagged ${t}`}
-                className="group/tag cursor-pointer border-0 bg-transparent p-0 [@media(pointer:coarse)]:-my-[5.5px] [@media(pointer:coarse)]:py-[5.5px]">
-                <span className="block rounded-full bg-[var(--muted)] px-2 py-0.5 text-[11px] leading-normal font-medium text-[var(--fg2)] group-hover/tag:bg-[var(--accent-soft)] group-hover/tag:text-[var(--accent)]">{t}</span>
+        {keys && keys.length > 0 && (
+          <ul aria-label="Keyboard" className="m-0 mt-2 flex list-none flex-wrap gap-x-3 gap-y-1.5 p-0 text-[11px] leading-none text-[var(--fg3)]">
+            {keys.map(([ks, label], i) => <li key={i} className="inline-flex items-center gap-1">{ks.map((k, j) => <Kbd key={j} className="inline-grid h-[18px] min-w-[18px] place-items-center leading-none">{k}</Kbd>)}<span className="ml-0.5">{label}</span></li>)}
+          </ul>
+        )}
+        {chips.length > 0 && (
+          <div role="toolbar" aria-label={`Use-case tags for ${title}`} className="mt-2 mb-4 flex flex-wrap gap-1">
+            {/* one Tab stop for the row (arrows move inside it); on touch each chip is 32px tall (transparent padding, pulled back with negative margins) around the same 21px pill */}
+            {chips.map((t, i) => (
+              <button key={t} ref={el => { tagRefs.current[i] = el }} type="button" tabIndex={i === Math.min(tagAt, chips.length - 1) ? 0 : -1} onClick={() => pickTag(t)} onKeyDown={e => tagKeys(e, i)} onFocus={() => setTagAt(i)}
+                aria-label={`Show components tagged ${t}`}
+                className="group/tag cursor-pointer rounded-full border-0 bg-transparent p-0 focus-visible:outline-2 focus-visible:outline-offset-1 focus-visible:outline-[var(--accent)] [@media(pointer:coarse)]:-my-[5.5px] [@media(pointer:coarse)]:py-[5.5px]">
+                <Badge size="sm" className="group-hover/tag:!bg-[var(--accent-soft)] group-hover/tag:!text-[var(--accent)]">{t}</Badge>
               </button>
             ))}
           </div>
         )}
-        {!tags.length && <div className="mb-4" />}
-        <div data-spec-body className="flex flex-1 flex-col gap-3">{children}</div>
+        {!chips.length && <div className="mb-4" />}
+        <a href="#" tabIndex={skip ? 0 : -1} aria-hidden={!skip || undefined} data-qa-skip
+          onClick={e => { e.preventDefault(); const n = kitNextCard(cardRef.current); if (n) kitFocusCard(n) }}
+          className="pointer-events-none absolute right-3 bottom-3 z-10 rounded-[var(--r-md)] border border-[var(--line)] bg-[var(--card)] px-2.5 py-1.5 text-xs font-medium text-[var(--fg)] no-underline opacity-0 shadow-[var(--shadow)] focus-visible:pointer-events-auto focus-visible:opacity-100 focus-visible:outline-2 focus-visible:outline-[var(--accent)]">
+          Skip to next card ↓
+        </a>
+        <div ref={bodyRef} data-spec-body className="flex flex-1 flex-col gap-3">{children}</div>
       </Card>
     </Reveal>
   )
@@ -181,7 +252,7 @@ export function Section({ id, title, desc, children }: { id: string; title: stri
   return (
     <SectionContext.Provider value={id}>
       <section id={id} className={cn('mb-12 scroll-mt-28 md:mb-16 min-[900px]:scroll-mt-20', empty && 'hidden')}>
-        <div className="mb-4"><h2 className="m-0 mb-1 text-[22px] leading-tight font-semibold tracking-tight min-[900px]:text-[26px]">{title}</h2><p className="m-0 text-[var(--fg2)]">{desc}</p></div>
+        <div className="mb-4"><h2 className="m-0 mb-1 text-[22px] leading-tight font-semibold tracking-tight min-[900px]:text-[28px]">{title}</h2><p className="m-0 text-[var(--fg2)]">{desc}</p></div>
         <div className="grid gap-4 [grid-template-columns:repeat(auto-fill,minmax(min(100%,300px),1fr))]">{children}</div>
       </section>
     </SectionContext.Provider>

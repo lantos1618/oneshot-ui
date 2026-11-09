@@ -345,19 +345,31 @@ What the components do with untrusted input, and what stays your job. Report vul
   `HoldToConfirm` or approval prompts with `frame-ancestors 'none'` (or `'self'`); `HoldToConfirm` holds for at
   least 500 ms whatever `duration` says.
 
-## Recommended CI
+## CI
 
-There is no CI in this repository yet. When there is, these checks are the baseline:
+GitHub Actions run on every push to `main` and every pull request. All actions are pinned to commit SHAs, every
+workflow has `permissions: contents: read` (jobs widen it only where they must), and the workflows pass actionlint
+and zizmor.
 
-- `pnpm install --frozen-lockfile`, then `pnpm audit --prod --audit-level=moderate` (blocking) and lockfile-lint.
-- CodeQL (security-extended) and Semgrep (`p/react`, `p/xss`) plus custom rules for `innerHTML`,
-  `srcDoc` with `allow-scripts`, non-literal `RegExp`, nested quantifiers (eslint-plugin-regexp), `Math.max(...`
-  spreads and unvalidated `JSON.parse` of storage.
-- OpenSSF Scorecard and zizmor for the workflows; actions pinned to commit SHAs; least-privilege `permissions`.
-- Publishing through npm trusted publishing with provenance and 2FA; `prepublishOnly` already runs
-  `pnpm build && pnpm test:ssr`.
-- A pack check (`npm pack --dry-run`): no source maps, local paths or secrets (gitleaks), and a rebuild of
-  `dist/` and `dist-single/` that must match what is published (compare with `SHA256SUMS`).
+- **`ci.yml` → check:** `pnpm install --frozen-lockfile`, `pnpm audit --prod --audit-level=moderate`,
+  `tsc -b` plus the tests' own type-check, `pnpm build`, the single-file bundles type-checked on their own,
+  `pnpm test:ssr`, `pnpm test` (Vitest), and `pnpm test:pack`: what `npm pack` would publish has every entry
+  point, no source maps, `sourceMappingURL` comments, local paths or secret-shaped strings, and
+  `dist-single/SHA256SUMS` matches the bundles.
+- **`ci.yml` → e2e:** Playwright (Chromium) against the built showcase served by `vite preview`, on desktop light,
+  desktop dark and iPhone 13: no console errors, no axe violations beyond `tests/e2e/axe-baseline.json`,
+  layout-shift budgets per section, no sideways page scroll on the phone. The report is uploaded when it fails.
+- **`codeql.yml`:** CodeQL, `security-extended` suite, on pushes, pull requests and weekly.
+- **`dependabot.yml`:** weekly grouped updates for npm and for the pinned actions, with a 7-day cooldown.
+- **`release.yml`:** manual only (`workflow_dispatch`). Publishes through npm trusted publishing with provenance
+  from a protected `npm` environment after `pnpm check` and the pack check.
+
+Run the same locally with `pnpm check`, `pnpm test:pack` and `pnpm test:e2e` (see "Testing" in CONVENTIONS.md).
+
+Not automated yet, and recommended by the security review: Semgrep (`p/react`, `p/xss`) with custom rules for
+`innerHTML`, `srcDoc` with `allow-scripts`, non-literal `RegExp`, nested quantifiers (eslint-plugin-regexp),
+`Math.max(...` spreads and unvalidated `JSON.parse` of storage; lockfile-lint; OpenSSF Scorecard; gitleaks over
+the history; and a reproducible-build diff of `dist/` against the published tarball.
 
 ## Browser support
 

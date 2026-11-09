@@ -55,6 +55,7 @@ export function WorldMap({ data, metrics, hubs = [], names = {}, top = 8, classN
       <div className="flex justify-end"><SegmentedControl size="sm" value={metric} onChange={setMetric} options={metrics.map(m => ({ value: m.key, label: m.label }))} /></div>
       <div className="grid items-start gap-5 md:grid-cols-[minmax(0,1fr)_230px]">
         <div className="flex min-w-0 flex-col gap-2">
+          <div className="relative">
           <svg ref={ref} viewBox={`0 0 ${WORLD_MAP.w} ${WORLD_MAP.h}`} role="img" aria-label={`World map by ${M.label.toLowerCase()}`} className="block h-auto w-full" onPointerLeave={onMouseLeave(() => { setHover(null); hide() })}>
             <g>
               {WORLD_MAP.countries.map(([id, n, d], i) => (
@@ -66,10 +67,8 @@ export function WorldMap({ data, metrics, hubs = [], names = {}, top = 8, classN
             </g>
             {hovered && <path d={hovered[2]} className="pointer-events-none stroke-[var(--fg)] [stroke-width:.9]" style={{ fill: fill(hovered[1]) }} />}
             <g>
-              {hubs.map(([n, x, y], i) => (
+              {hubs.map(([n, x, y]) => (
                 <g key={n}>
-                  {!reduce && onScreen && <motion.circle cx={x} cy={y} r={3} fill="none" stroke="var(--c3)" strokeWidth={1.2} vectorEffect="non-scaling-stroke" style={{ transformBox: 'fill-box', transformOrigin: 'center' }}
-                    animate={{ scale: [1, 3.2], opacity: [0.9, 0] }} transition={{ duration: 2.2, repeat: Infinity, delay: i * 0.27, ease: 'easeOut' }} />}
                   <circle cx={x} cy={y} r={2.6} fill="var(--c3)" stroke="var(--card)" strokeWidth={1} pointerEvents="none" />
                   <circle cx={x} cy={y} r={7} fill="transparent" className="cursor-pointer"
                     onPointerEnter={() => setHover(null)} onPointerDown={e => { setHover(null); show(e, <><b className="font-semibold">{n}</b><br /><span className="text-[var(--fg2)]">Regional hub</span></>) }}
@@ -78,9 +77,12 @@ export function WorldMap({ data, metrics, hubs = [], names = {}, top = 8, classN
               ))}
             </g>
           </svg>
+          {/* hub pulses: HTML rings over the map, animated on the compositor (transform + opacity), so they cost no layout */}
+          {!reduce && hubs.map(([n, x, y], i) => <GeoHubPulse key={n} x={x / WORLD_MAP.w} y={y / WORLD_MAP.h} size={(19.2 / WORLD_MAP.w) * 100} delay={i * 270} active={onScreen} />)}
+          </div>
           <div className="flex flex-wrap items-center gap-2 text-[11px] text-[var(--fg3)]">
-            <span>Low</span><span className="flex gap-0.5">{GEO_STEPS.map(s => <i key={s} className="block h-2 w-[22px] rounded-sm" style={{ background: geoRamp(s) }} />)}</span><span>High</span>
-            <span className="ml-2.5 inline-flex items-center gap-1"><i className="inline-block h-2 w-2 rounded-sm bg-[var(--muted)]" />No data</span>
+            <span>Low</span><span className="flex gap-0.5">{GEO_STEPS.map(s => <i key={s} className="block h-2 w-[22px] rounded-[var(--r-sm)]" style={{ background: geoRamp(s) }} />)}</span><span>High</span>
+            <span className="ml-2.5 inline-flex items-center gap-1"><i className="inline-block h-2 w-2 rounded-[var(--r-sm)] bg-[var(--muted)]" />No data</span>
           </div>
         </div>
         <div ref={listRef} className="flex flex-col gap-0.5">
@@ -89,9 +91,10 @@ export function WorldMap({ data, metrics, hubs = [], names = {}, top = 8, classN
             <div key={n} className={cn('flex cursor-default items-center gap-2 rounded-[var(--r-md)] px-1.5 py-1 text-xs hover:bg-[var(--muted)]', TOUCH.tap36, spot === n && 'bg-[var(--muted)]')}
               onPointerEnter={e => { if (!isTouch(e)) setSpot(n) }} onPointerDown={e => { if (isTouch(e)) setSpot(s => (s === n ? null : n)) }} onPointerLeave={onMouseLeave(() => setSpot(null))}>
               <span className="min-w-0 flex-1 truncate">{names[n] ?? n}</span>
-              <span className="h-[5px] w-11 flex-none overflow-hidden rounded-[3px] bg-[var(--muted)]">
-                <motion.i key={metric} className="block h-full rounded-[3px] bg-[var(--accent)]" initial={{ width: reduce ? `${(v[metric] / ranked[0][1][metric]) * 100}%` : '0%' }}
-                  animate={inView ? { width: `${(v[metric] / ranked[0][1][metric]) * 100}%` } : undefined} transition={{ duration: 0.6, delay: i * 0.04, ease: [0.22, 1, 0.36, 1] }} />
+              <span className="h-[5px] w-11 flex-none overflow-hidden rounded-[var(--r-sm)] bg-[var(--muted)]">
+                {/* scaleX from the left, not width: the bar grows without a layout per frame */}
+                <motion.i key={metric} className="block h-full origin-left rounded-[var(--r-sm)] bg-[var(--accent)]" initial={{ scaleX: reduce ? v[metric] / ranked[0][1][metric] : 0 }}
+                  animate={inView ? { scaleX: v[metric] / ranked[0][1][metric] } : undefined} transition={{ duration: 0.6, delay: i * 0.04, ease: [0.22, 1, 0.36, 1] }} />
               </span>
               <span className="w-[46px] text-right font-[family-name:var(--mono)] text-[11px] text-[var(--fg2)]">{(M.short ?? M.format)(v[metric])}</span>
             </div>
@@ -101,6 +104,24 @@ export function WorldMap({ data, metrics, hubs = [], names = {}, top = 8, classN
       <PointerTooltip tip={tip} />
     </div>
   )
+}
+
+/**
+ * A hub's expanding ring: an HTML element over the map with a native keyframe animation (WAAPI: scale + fade), so it
+ * runs on the compositor with no script, style writes or layout per frame; paused (not torn down) while off screen.
+ * `x`, `y` are fractions of the map box, `size` the ring's final diameter in % of its width.
+ */
+function GeoHubPulse({ x, y, size, delay, active }: { x: number; y: number; size: number; delay: number; active: boolean }) {
+  const ref = useRef<HTMLSpanElement>(null), anim = useRef<Animation | null>(null)
+  useEffect(() => {
+    const el = ref.current; if (!el || typeof el.animate !== 'function') return
+    const a = el.animate([{ transform: 'translate(-50%,-50%) scale(0.31)', opacity: 0.9 }, { transform: 'translate(-50%,-50%) scale(1)', opacity: 0 }], { duration: 2200, delay, iterations: Infinity, easing: 'ease-out' })
+    anim.current = a
+    return () => { a.cancel(); anim.current = null }
+  }, [delay])
+  useEffect(() => { const a = anim.current; if (!a) return; if (active) a.play(); else a.pause() }, [active])
+  return <span ref={ref} aria-hidden className="pointer-events-none absolute aspect-square rounded-full border-[1.5px] border-[var(--c3)] opacity-0"
+    style={{ left: `${x * 100}%`, top: `${y * 100}%`, width: `${size}%`, transform: 'translate(-50%,-50%)' }} />
 }
 
 /* Globe ───────────────────────────────────────────────────────────────────── */

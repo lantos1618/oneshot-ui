@@ -9,10 +9,10 @@ import { Popover, PopoverContent, PopoverTrigger } from './overlay'
 function ThemeMini({ p, clip }: { p: Palette; clip?: string }) {
   return (
     <span className="absolute inset-0 block" style={{ background: p.bg, clipPath: clip }}>
-      <span className="absolute inset-2 rounded-[5px]" style={{ background: p.card, boxShadow: `inset 0 0 0 1px ${p.line}` }} />
-      <span className="absolute top-[15px] left-[15px] h-1 w-[34%] rounded-sm" style={{ background: p.fg }} />
-      <span className="absolute top-[23px] left-[15px] h-[3px] w-[48%] rounded-sm opacity-90" style={{ background: p.fg3 }} />
-      <span className="absolute bottom-[14px] left-[15px] h-2 w-[22px] rounded-[3px]" style={{ background: p.primary }} />
+      <span className="absolute inset-2 rounded-[var(--r-sm)]" style={{ background: p.card, boxShadow: `inset 0 0 0 1px ${p.line}` }} />
+      <span className="absolute top-[15px] left-[15px] h-1 w-[34%] rounded-[var(--r-sm)]" style={{ background: p.fg }} />
+      <span className="absolute top-[23px] left-[15px] h-[3px] w-[48%] rounded-[var(--r-sm)] opacity-90" style={{ background: p.fg3 }} />
+      <span className="absolute bottom-[14px] left-[15px] h-2 w-[22px] rounded-[var(--r-sm)]" style={{ background: p.primary }} />
       <span className="absolute right-[15px] bottom-[14px] h-2 w-2 rounded-full" style={{ background: p.accent }} />
     </span>
   )
@@ -76,12 +76,12 @@ export function AppearancePanel({ onClose, open = true, className }: { onClose?:
   return (
     <div className={className}>
       <div className="flex items-center justify-between px-3 pt-3 pb-1">
-        <b className="text-[15px] font-semibold">Appearance</b>
+        <b className="text-base font-semibold">Appearance</b>
         {onClose && <IconButton icon="x" label="Close" onClick={onClose} />}
       </div>
       <div className={appearanceSection}>
         <div className={appearanceLabel}>Mode</div>
-        <SegmentedControl className={cn('w-full transition-opacity', settings.useCustom && 'opacity-60')} value={settings.mode} onChange={m => set({ mode: m as ThemeSettings['mode'] })}
+        <SegmentedControl aria-label="Mode" className={cn('w-full transition-opacity', settings.useCustom && 'opacity-60')} value={settings.mode} onChange={m => set({ mode: m as ThemeSettings['mode'] })}
           options={[{ value: 'light', label: 'Light', icon: 'sun' }, { value: 'dark', label: 'Dark', icon: 'moon' }, { value: 'system', label: 'System', icon: 'monitor' }]} />
       </div>
       <div className={appearanceSection}>
@@ -133,7 +133,7 @@ export function AppearancePanel({ onClose, open = true, className }: { onClose?:
         <div className="mb-3 grid grid-cols-2 gap-2">
           {CUSTOMISE.map(([k, n]) => (
             <label key={k} className="relative flex min-w-0 cursor-pointer items-center gap-2 rounded-[var(--r-md)] border border-[var(--line)] px-2 py-1 text-xs hover:bg-[var(--muted)] [@media(pointer:coarse)]:min-h-9 has-[:focus-visible]:outline-2 has-[:focus-visible]:outline-[var(--accent)]">
-              <span className="h-[18px] w-[18px] flex-none rounded-[5px] shadow-[inset_0_0_0_1px_rgba(127,127,127,.35)]" style={{ background: base.v[k] }} />{n}
+              <span className="h-[18px] w-[18px] flex-none rounded-[var(--r-sm)] shadow-[inset_0_0_0_1px_rgba(127,127,127,.35)]" style={{ background: base.v[k] }} />{n}
               <span className="ml-auto font-[family-name:var(--mono)] text-[11px] text-[var(--fg3)]">{base.v[k]}</span>
               <input type="color" aria-label={`${n} colour`} value={base.v[k].length === 7 ? base.v[k].toLowerCase() : '#000000'}
                 onChange={e => set({ custom: editPalette(base.v, base.dark, k, e.target.value), useCustom: true })}

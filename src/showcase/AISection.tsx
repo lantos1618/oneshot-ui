@@ -1,8 +1,8 @@
-import { useState } from 'react'
-import { AICanvas, AgentComposer, AgentPlan, AgentTransitMap, AssistantChat, Badge, Button, Chart, ChatApproval, ChatCard, ChatChecklist, type ChatScript, ChatSources, Citation, CodeBlock, type ComposerModel,
+import { useEffect, useState } from 'react'
+import { AICanvas, AI_CANVAS_SAMPLE, AgentComposer, AgentPlan, AgentTransitMap, AssistantChat, Badge, Chart, ChatApproval, ChatCard, ChatChecklist, type ChatScript, ChatSources, Citation, CodeBlock, type ComposerModel,
   type ComposerAction, type ComposerReply, type ComposerSample, type ComposerSendMeta, ConfidenceField, type Connector, GhostTextInput, LOCALE, ModelComparison, PermissionRequest, type SlashCommand, type Source, SourcesPanel, SuggestedEdit, ThinkingSteps, VoiceInput,
-  type WorkspaceItem, sleep } from '../lib'
-import { Section, Spec } from './kit'
+  type StepStatus, type WorkspaceItem, sleep, useViewport } from '../lib'
+import { Section, Spec, SpecAction } from './kit'
 
 export type Invoice = { id: string; customer: string; status: string; amount: number }
 
@@ -72,6 +72,7 @@ const THOUGHTS = [
 const SRC: Source[] = [
   { title: 'Product analytics', url: 'https://analytics.example.com/funnel', snippet: 'Last 30 days, 4,210 sessions.' },
   { title: 'UX research report', url: 'https://notes.example.com/research', snippet: 'October study, 18 participants.' },
+  { title: 'Retention cohorts', url: 'https://analytics.example.com/cohorts', snippet: 'Q3 cohorts, invited vs solo workspaces.' },
 ]
 
 /* Agent composer demo: a workspace, connectors, models and a canned reply (a real app passes its own). */
@@ -122,33 +123,59 @@ function PermissionDemo() {
   </>
 }
 
+/** Clicks a control inside a demo once, right after mount, so the card opens mid-flow (an answered question, a finished
+ * run) instead of empty. Runs before the card is on screen, so the growth it causes never shifts what you're reading. */
+const AI_PLAN = ['Read the brief', 'Search 12 sources', 'Compare findings', 'Write summary']
+/** Agent plan that opens mid-run (two steps done, the third working) and finishes once it is on screen; Replay restarts it. */
+function AiPlanDemo({ run }: { run: number }) {
+  const [cur, setCur] = useState(2)
+  const { ref, visible } = useViewport<HTMLDivElement>(null, { amount: 0.5 })
+  useEffect(() => { if (run) setCur(0) }, [run])
+  useEffect(() => {
+    if (!visible || cur >= AI_PLAN.length) return
+    const t = setTimeout(() => setCur(c => c + 1), 1400 + (cur % 2) * 500)
+    return () => clearTimeout(t)
+  }, [visible, cur])
+  const steps = AI_PLAN.map((label, i) => ({ label, status: (i < cur ? 'done' : i === cur ? 'active' : 'pending') as StepStatus }))
+  return (
+    <div ref={ref} className="flex flex-col gap-2">
+      <AgentPlan steps={steps} />
+      <span className="text-xs text-[var(--fg3)]" aria-live="polite">{cur >= AI_PLAN.length ? 'Done · summary ready' : `Step ${cur + 1} of ${AI_PLAN.length}: ${AI_PLAN[cur].toLowerCase()}…`}</span>
+    </div>
+  )
+}
+
 export function AISection() {
   const [replay, setReplay] = useState(0)
+  const [planRun, setPlanRun] = useState(0)
   return (
     <Section id="ai" title="AI" desc="Streaming, showing work, asking permission, and being honest about uncertainty.">
       <Spec title="Chat" desc="Answers compose the library’s own components: charts, tables, code blocks, sources, checklists and approval cards. Type / for commands." span={3}>
-        <AssistantChat starters={STARTERS} commands={COMMANDS} respond={respond} />
+        <AssistantChat defaultTurns={['Chart MRR this year']} starters={STARTERS} commands={COMMANDS} respond={respond} />
       </Spec>
       <Spec title="Chat composer" desc="A composer that doubles as a control panel: attach (+, drag, paste), add context from the workspace, pick a permission mode, configure the model, toggle connectors. Keep typing while it works and follow-ups queue. The first send glides it into the conversation." span={3}>
         <AgentComposer onSend={acDemoReply} onApprovalRequest={acDemoApprove} items={AC_ITEMS} doc={AC_DOC} connectors={AC_CONNECTORS} models={AI_DEMO_MODELS} samples={AC_SAMPLES} hint="Try: “Summarise the invoice and draft a reminder”" />
       </Spec>
-      <Spec title="Thinking steps" desc="Vertical stepper for reasoning. Collapses to a summary when done.">
-        <Button size="sm" className="self-start" onClick={() => setReplay(r => r + 1)}>Replay</Button>
+      <Spec title="Thinking steps" desc="Vertical stepper for reasoning. Click a finished step to read its detail." actions={<SpecAction onClick={() => setReplay(r => r + 1)}>Replay</SpecAction>}>
         <ThinkingSteps autoPlay replayKey={replay} steps={THOUGHTS} />
       </Spec>
-      <Spec title="Agent plan" desc="Plan first, then live progress">
-        <AgentPlan steps={['Read the brief', 'Search 12 sources', 'Compare findings', 'Write summary']} />
+      <Spec title="Agent plan" desc="Plan first, then live progress" actions={<SpecAction onClick={() => setPlanRun(r => r + 1)}>Replay</SpecAction>}>
+        <AiPlanDemo run={planRun} />
+      </Spec>
+      <Spec title="Citations" desc="Hover or tap a number">
+        <p className="m-0 text-[13px] leading-loose">Most users finish onboarding in under 3 minutes<Citation n={1} source={SRC[0]} />, though mobile is 40% slower<Citation n={2} source={SRC[1]} />.
+          Teams that invite a colleague on day one keep using the product twice as often<Citation n={3} source={SRC[2]} />, so the invite step stays in the flow.</p>
+        <ol className="m-0 mt-auto flex list-none flex-col gap-1 border-t border-[var(--line)] p-0 pt-2.5 text-xs text-[var(--fg3)]">
+          {SRC.map((x, i) => <li key={x.title} className="flex gap-1.5"><span className="ui-num w-3 flex-none text-[var(--fg2)]">{i + 1}</span><span className="truncate">{x.title} · {new URL(x.url).hostname}</span></li>)}
+        </ol>
       </Spec>
       <Spec title="Permission request" desc="Say what, to whom, and why. Then show the outcome." span={2}>
         <PermissionDemo />
       </Spec>
-      <Spec title="Citations" desc="Hover or tap a number">
-        <p className="m-0 text-[13px] leading-loose">Most users finish onboarding in under 3 minutes<Citation n={1} source={SRC[0]} />, though mobile is 40% slower<Citation n={2} source={SRC[1]} />.</p>
+      <Spec title="Ghost text" desc="Type “Thanks”, press Tab or tap the suggestion" keys={[[['Tab'], 'Accept'], [['Esc'], 'Dismiss']]}>
+        <GhostTextInput placeholder="Write a message" defaultValue="Thanks" suggestions={['Thanks for the quick turnaround!', 'Thanks, I’ll take a look today.', 'Let’s sync tomorrow at 10.', 'Looks great, ship it.']} />
       </Spec>
-      <Spec title="Ghost text" desc="Type “Thanks”, press Tab or tap the suggestion">
-        <GhostTextInput placeholder="Write a message" suggestions={['Thanks for the quick turnaround!', 'Thanks, I’ll take a look today.', 'Let’s sync tomorrow at 10.', 'Looks great, ship it.']} />
-      </Spec>
-      <Spec title="Suggested edit" desc="Diff with accept and reject">
+      <Spec title="Suggested edit" desc="Diff with accept and reject" span={2}>
         <SuggestedEdit before="I just wanted to quickly reach out to let you know that the meeting will probably have to be moved a little bit later." after="The meeting is moving to 3 pm." />
       </Spec>
       <Spec title="Confidence flags" desc="Only uncertain fields marked">
@@ -171,14 +198,14 @@ export function AISection() {
           ]} />
       </Spec>
       <Spec title="Model comparison" desc="Same prompt, three models, streamed side by side with latency, speed and cost. Vote for the best." span={3}>
-        <ModelComparison prompt="Summarise why our yearly plan should be 20% cheaper, in two sentences." models={[
+        <ModelComparison autoRun prompt="Summarise why our yearly plan should be 20% cheaper, in two sentences." models={[
           { name: 'Fast', tier: 'Speed tier', color: 'var(--c4)', firstToken: 0.2, speed: 22, tps: 210, cost: '$0.0004', text: 'A 20% yearly discount matches what most SaaS companies offer. It is worth it because yearly customers churn much less, so you earn the discount back quickly.' },
           { name: 'Balanced', tier: 'Default tier', color: 'var(--accent)', firstToken: 0.5, speed: 12, tps: 96, cost: '$0.002', text: 'Twenty percent off yearly is the market norm, so it won’t look unusual. Because annual customers churn about 3× less and your yearly users stay ~31 months, the discount pays for itself within the first quarter.' },
           { name: 'Deep', tier: 'Reasoning tier', color: 'var(--c3)', firstToken: 1.4, speed: 7, tps: 44, cost: '$0.011', text: 'Price the yearly plan at €19/month (20% off). It aligns with the median benchmark, and with annual churn 3.4× lower and a 31-month average lifetime in your data, expected revenue per customer rises roughly 40% despite the discount.' },
         ]} />
       </Spec>
       <Spec title="AI canvas" desc="Chat on the left, a living document on the right (stacked on phones). Edits stream in with changes highlighted. Click or tap a code line to ask about it." span={3}>
-        <AICanvas />
+        <AICanvas {...AI_CANVAS_SAMPLE} />
       </Spec>
       <Spec title="Agent transit map" desc="A live state machine. The Indexing loop and the Intake endpoint fire events into a queue, and jobs start as slots free up. Endpoints emit follow-up triggers: Deploy starts a smoke test, Ledger starts an audit, and a failed smoke test starts a regression fix. Human and Risk stations wait for your approval (human in the loop). Hover or tap a trace row to follow a job." span={3}>
         <AgentTransitMap />

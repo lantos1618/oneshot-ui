@@ -96,7 +96,7 @@ function gridMark(text: string, matches: RegExpMatchArray[] | undefined): ReactN
     if (!m[0]) continue
     const at = m.index ?? 0
     if (at > last) out.push(text.slice(last, at))
-    out.push(<mark key={k++} className="rounded-[2px] bg-[color-mix(in_srgb,var(--warn)_35%,transparent)] px-px text-inherit">{m[0]}</mark>)
+    out.push(<mark key={k++} className="rounded-[var(--r-sm)] bg-[color-mix(in_srgb,var(--warn)_35%,transparent)] px-px text-inherit">{m[0]}</mark>)
     last = at + m[0].length
   }
   if (!out.length) return text
@@ -167,12 +167,55 @@ function gridHighlight(q: string, s: GridSchema): ReactNode {
 /* ---- library Select (keyboard, type-ahead) restyled for chips, blocks and the toolbar ---- */
 const GRID_PICK = {
   chip: 'flex h-full min-w-0 shrink [@media(pointer:coarse)]:[&>button]:text-[13px] [&>button]:h-full [&>button]:w-auto [&>button]:min-w-0 [&>button]:max-w-[180px] [&>button]:gap-1 [&>button]:rounded-none [&>button]:border-y-0 [&>button]:border-l-0 [&>button]:bg-transparent [&>button]:px-2 [&>button]:text-xs [&>button]:text-[var(--fg)]',
-  block: '[@media(pointer:coarse)]:[&>button]:h-8 [@media(pointer:coarse)]:[&>button]:text-[13px] [&>button]:h-6 [&>button]:w-auto [&>button]:gap-1 [&>button]:rounded-xl [&>button]:border-0 [&>button]:bg-white [&>button]:px-2 [&>button]:text-xs [&>button]:font-semibold [&>button]:text-[#18181B] [&>button_svg]:text-[#71717A] [&>div]:text-[var(--fg)] [&>div]:font-normal',
+  block: '[@media(pointer:coarse)]:[&>button]:h-8 [@media(pointer:coarse)]:[&>button]:text-[13px] [&>button]:h-6 [&>button]:w-auto [&>button]:gap-1 [&>button]:rounded-[var(--r-lg)] [&>button]:border-0 [&>button]:bg-white [&>button]:px-2 [&>button]:text-xs [&>button]:font-semibold [&>button]:text-[#18181B] [&>button_svg]:text-[#71717A] [&>div]:text-[var(--fg)] [&>div]:font-normal',
   toolbar: '[@media(pointer:coarse)]:[&>button]:h-9 [@media(pointer:coarse)]:[&>button]:text-[13px] [&>button]:h-7 [&>button]:w-auto [&>button]:min-w-[110px] [&>button]:px-2 [&>button]:text-xs [&>button]:text-[var(--fg)]',
 } as const
 function GridPick({ value, options, onChange, label, variant, className }:
   { value: string; options: [string, string][]; onChange: (v: string) => void; label: string; variant: keyof typeof GRID_PICK; className?: string }) {
   return <Select aria-label={label} value={value} options={options.map(([v, l]) => ({ value: v, label: l }))} onChange={onChange} className={cn(GRID_PICK[variant], className)} />
+}
+
+const GRID_TB_ITEMS = 'button:not([disabled]),input:not([disabled]):not([type=hidden]),select:not([disabled]),textarea:not([disabled]),[role=slider]'
+/**
+ * Makes everything focusable inside `ref` one Tab stop (a WAI-ARIA toolbar): ← / → (and Home / End) move between the
+ * controls, Tab leaves. A text field keeps the arrows until its caret reaches the edge; open lists keep theirs; radio
+ * buttons (the mode switch) are just stops here, so moving past them never changes the mode (Space or Enter picks).
+ * Tab indexes are re-applied whenever the content changes, since the controls inside come and go.
+ */
+function useGridToolbar(ref: React.RefObject<HTMLElement | null>) {
+  const cur = useRef(0)
+  useEffect(() => {
+    const root = ref.current; if (!root) return
+    const items = () => [...root.querySelectorAll<HTMLElement>(GRID_TB_ITEMS)].filter(el => !el.closest('[role=listbox],[role=menu],[role=dialog]') && el.getClientRects().length > 0)
+    const apply = () => {
+      const list = items(); if (!list.length) return
+      const a = document.activeElement, at = list.indexOf(a as HTMLElement)
+      if (at >= 0) cur.current = at
+      cur.current = Math.min(cur.current, list.length - 1)
+      list.forEach((el, i) => { const want = i === cur.current ? '0' : '-1'; if (el.getAttribute('tabindex') !== want) el.setAttribute('tabindex', want) })
+    }
+    const onFocus = () => apply()
+    const onKey = (e: KeyboardEvent) => {
+      if (e.altKey || e.ctrlKey || e.metaKey) return
+      const k = e.key; if (k !== 'ArrowLeft' && k !== 'ArrowRight' && k !== 'Home' && k !== 'End') return
+      const t = e.target as HTMLElement
+      if (t instanceof HTMLInputElement || t instanceof HTMLTextAreaElement) { // text: arrows move the caret until it hits the edge
+        if (k === 'Home' || k === 'End') return
+        const { selectionStart: a, selectionEnd: b, value } = t
+        if (a !== b || (k === 'ArrowLeft' && a !== 0) || (k === 'ArrowRight' && (a ?? 0) < value.length)) return
+      }
+      const list = items(), i = list.indexOf(t); if (i < 0) return
+      const n = k === 'Home' ? 0 : k === 'End' ? list.length - 1 : clamp(i + (k === 'ArrowRight' ? 1 : -1), 0, list.length - 1)
+      if (n === i) return
+      e.preventDefault(); e.stopPropagation(); cur.current = n; apply(); list[n].focus()
+    }
+    apply()
+    const mo = new MutationObserver(() => apply())
+    mo.observe(root, { subtree: true, childList: true, attributes: true, attributeFilter: ['tabindex', 'disabled'] })
+    // capture: runs before the controls' own arrow handling (the segmented control would otherwise switch modes)
+    root.addEventListener('focusin', onFocus); root.addEventListener('keydown', onKey, true)
+    return () => { mo.disconnect(); root.removeEventListener('focusin', onFocus); root.removeEventListener('keydown', onKey, true) }
+  }, [ref])
 }
 
 /** One shared filter model, edited three ways (Bricks chips, a Text query, nested Blocks). */
@@ -183,6 +226,8 @@ function GridFilterBuilder({ tree, onChange, schema, fields, defaultField, count
   const [qErr, setQErr] = useState<string | null>(null)
   const [focusNew, setFocusNew] = useState<string | null>(null)
   const ref = useRef(tree); ref.current = tree
+  const bar = useRef<HTMLDivElement>(null)
+  useGridToolbar(bar)
   const set = (t: GridGroup) => { ref.current = t; onChange(t) }
   const newCond = (field = defaultField): GridCondition => ({ id: gridId(), f: [field, GRID_OPS[schema.kind(field)][schema.kind(field) === 'number' ? 0 : 2], schema.options(field)?.[0] ?? ''] })
   const setField = (id: string, i: 0 | 1 | 2, v: string) => set(gridUpdate(ref.current, id, n => {
@@ -201,7 +246,7 @@ function GridFilterBuilder({ tree, onChange, schema, fields, defaultField, count
 
   const condFields = (n: GridCondition, variant: 'chip' | 'block') => {
     const [k, op, v] = n.f, opts = schema.options(k)
-    const sel = variant === 'chip' ? 'h-full min-w-0 shrink border-0 border-r border-[var(--line)] bg-transparent px-2 text-xs text-[var(--fg)]' : 'h-6 rounded-xl border-0 bg-white px-2 text-xs font-semibold text-[#18181B]'
+    const sel = variant === 'chip' ? 'h-full min-w-0 shrink border-0 border-r border-[var(--line)] bg-transparent px-2 text-xs text-[var(--fg)]' : 'h-6 rounded-[var(--r-lg)] border-0 bg-white px-2 text-xs font-semibold text-[#18181B]'
     return (
       <>
         <GridPick label="Field" variant={variant} value={k} options={fields} onChange={x => setField(n.id, 0, x)} className={variant === 'chip' ? '[&>button]:font-semibold' : undefined} />
@@ -223,8 +268,8 @@ function GridFilterBuilder({ tree, onChange, schema, fields, defaultField, count
           <motion.span key={n.id} layout initial={{ opacity: 0, scale: 0.9 }} animate={{ opacity: 1, scale: 1 }} exit={{ opacity: 0, scale: 0.9, transition: { duration: 0.12 } }} transition={spring(0.4, 0.3)} className="inline-flex min-w-0 max-w-full items-center gap-1.5">
             {i === 0 ? <span className="px-1 text-xs text-[var(--fg3)]">Where</span>
               : <button onClick={() => set({ ...ref.current, j: ref.current.j === 'AND' ? 'OR' : 'AND' })} aria-label={`Join: ${tree.j}. Click to switch`}
-                className="h-7 cursor-pointer rounded-[7px] border border-[var(--line)] bg-[var(--card)] px-2 font-[family-name:var(--mono)] text-[11px] font-semibold text-[var(--fg2)] hover:text-[var(--fg)] [@media(pointer:coarse)]:h-9 [@media(pointer:coarse)]:min-w-11">{tree.j}</button>}
-            <span className="inline-flex h-7 min-w-0 max-w-full items-stretch rounded-[7px] border border-[var(--line)] bg-[var(--card)] text-xs [@media(pointer:coarse)]:h-9">
+                className="h-7 cursor-pointer rounded-[var(--r-md)] border border-[var(--line)] bg-[var(--card)] px-2 font-[family-name:var(--mono)] text-[11px] font-semibold text-[var(--fg2)] hover:text-[var(--fg)] [@media(pointer:coarse)]:h-9 [@media(pointer:coarse)]:min-w-11">{tree.j}</button>}
+            <span className="inline-flex h-7 min-w-0 max-w-full items-stretch rounded-[var(--r-md)] border border-[var(--line)] bg-[var(--card)] text-xs [@media(pointer:coarse)]:h-9">
               {condFields(n as GridCondition, 'chip')}
               <button onClick={() => remove(n.id)} aria-label="Remove filter" className="grid cursor-pointer place-items-center border-0 bg-transparent px-2 text-[var(--fg3)] hover:text-[var(--bad)] [@media(pointer:coarse)]:min-w-9"><Icon name="x" size={12} strokeWidth={2.4} /></button>
             </span>
@@ -232,7 +277,7 @@ function GridFilterBuilder({ tree, onChange, schema, fields, defaultField, count
         ))}
       </AnimatePresence>
       <button onClick={() => { const c = newCond(); setFocusNew(c.id); set({ ...ref.current, c: [...ref.current.c, c] }) }}
-        className="h-7 cursor-pointer rounded-[7px] border border-dashed border-[var(--line2)] bg-transparent px-2.5 text-xs font-medium text-[var(--fg2)] hover:border-[var(--fg3)] hover:text-[var(--fg)] [@media(pointer:coarse)]:h-9 [@media(pointer:coarse)]:px-3.5">+ Filter</button>
+        className="h-7 cursor-pointer rounded-[var(--r-md)] border border-dashed border-[var(--line2)] bg-transparent px-2.5 text-xs font-medium text-[var(--fg2)] hover:border-[var(--fg3)] hover:text-[var(--fg)] [@media(pointer:coarse)]:h-9 [@media(pointer:coarse)]:px-3.5">+ Filter</button>
     </>
   ) : (
     <>
@@ -246,13 +291,13 @@ function GridFilterBuilder({ tree, onChange, schema, fields, defaultField, count
   const mirror = useRef<HTMLDivElement>(null)
   const text = () => (
     <div className="flex w-full flex-col gap-1">
-      <div className={cn(inputShellClass(!!qErr), 'relative h-[30px] w-full min-w-[240px] !rounded-[7px] [@media(pointer:coarse)]:h-10')}>
-        <div ref={mirror} aria-hidden className={cn('pointer-events-none absolute inset-0 overflow-hidden px-2.5 font-[family-name:var(--mono)] text-[12.5px] leading-[28px] whitespace-pre text-[var(--fg)] [@media(pointer:coarse)]:leading-[38px]', TOUCH.input)}>{gridHighlight(qText, schema)} </div>
+      <div className={cn(inputShellClass(!!qErr), GRID_FOCUS_RING, 'relative h-[30px] w-full min-w-[240px] !rounded-[var(--r-md)] [@media(pointer:coarse)]:h-10')}>
+        <div ref={mirror} aria-hidden className={cn('pointer-events-none absolute inset-0 overflow-hidden px-2.5 font-[family-name:var(--mono)] text-xs leading-[28px] whitespace-pre text-[var(--fg)] [@media(pointer:coarse)]:leading-[38px]', TOUCH.input)}>{gridHighlight(qText, schema)} </div>
         <input value={qText} autoFocus spellCheck={false} autoComplete="off" aria-label="Filter query" aria-invalid={!!qErr || undefined}
           onChange={e => { applyText(e.target.value); if (mirror.current) mirror.current.scrollLeft = e.target.scrollLeft }}
           onScroll={e => { if (mirror.current) mirror.current.scrollLeft = e.currentTarget.scrollLeft }}
           onKeyUp={e => { if (mirror.current) mirror.current.scrollLeft = e.currentTarget.scrollLeft }}
-          className={cn('absolute inset-0 w-full border-0 bg-transparent px-2.5 font-[family-name:var(--mono)] text-[12.5px] leading-[28px] whitespace-pre text-transparent caret-[var(--fg)] [@media(pointer:coarse)]:leading-[38px] outline-none selection:bg-[color-mix(in_srgb,var(--accent)_30%,transparent)]', TOUCH.input)} />
+          className={cn('absolute inset-0 w-full border-0 bg-transparent px-2.5 font-[family-name:var(--mono)] text-xs leading-[28px] whitespace-pre text-transparent caret-[var(--fg)] [@media(pointer:coarse)]:leading-[38px] outline-none selection:bg-[color-mix(in_srgb,var(--accent)_30%,transparent)]', TOUCH.input)} />
       </div>
       <div className="flex flex-wrap items-center gap-1 px-0.5 pt-0.5">
         <span role="status" className={cn('text-xs', qErr ? 'text-[var(--bad)]' : qText.trim() ? 'text-[var(--ok)]' : 'text-[var(--fg3)]')}>
@@ -263,7 +308,7 @@ function GridFilterBuilder({ tree, onChange, schema, fields, defaultField, count
           <button key={k} onClick={e => {
             const v = qText.trimEnd(), next = (v ? v + (/\b(and|or)$/i.test(v) ? ' ' : ' and ') : '') + (/\s/.test(l) ? k : l.toLowerCase()) + ' '
             applyText(next); const inp = (e.currentTarget.closest('[data-fb]') as HTMLElement).querySelector('input'); inp?.focus(); inp?.setSelectionRange(next.length, next.length)
-          }} className={cn('cursor-pointer rounded-[5px] border border-[var(--line)] bg-[var(--card)] px-1.5 py-0.5 font-[family-name:var(--mono)] text-[11px] text-[var(--fg2)] hover:border-[var(--accent)] hover:text-[var(--accent)] [@media(pointer:coarse)]:px-2 [@media(pointer:coarse)]:text-xs', TOUCH.tap)}>{l.toLowerCase()}</button>
+          }} className={cn('cursor-pointer rounded-[var(--r-sm)] border border-[var(--line)] bg-[var(--card)] px-1.5 py-0.5 font-[family-name:var(--mono)] text-[11px] text-[var(--fg2)] hover:border-[var(--accent)] hover:text-[var(--accent)] [@media(pointer:coarse)]:px-2 [@media(pointer:coarse)]:text-xs', TOUCH.tap)}>{l.toLowerCase()}</button>
         ))}
       </div>
     </div>
@@ -275,7 +320,7 @@ function GridFilterBuilder({ tree, onChange, schema, fields, defaultField, count
     onMove: (id, list, index) => { const [t, n] = gridRemove(ref.current, id); if (n) set(gridInsert(t, list, index, n)) },
   })
   const BC: Record<string, string> = { cond: 'var(--accent)', AND: 'var(--c3)', OR: 'var(--c4)' }
-  const blockBase = 'relative mb-2 rounded-lg text-xs font-semibold text-white bg-[color-mix(in_srgb,var(--bc)_90%,#000)] shadow-[0_2px_0_color-mix(in_srgb,var(--bc)_60%,#000)]'
+  const blockBase = 'relative mb-2 rounded-[var(--r-md)] text-xs font-semibold text-white bg-[color-mix(in_srgb,var(--bc)_90%,#000)] shadow-[0_2px_0_color-mix(in_srgb,var(--bc)_60%,#000)]'
   const grip = (id: string) => <span {...sort.handleProps(id)} aria-label="Drag block" role="img" className={cn('cursor-grab touch-none px-0.5 text-[13px] opacity-75 select-none hover:opacity-100 [@media(pointer:coarse)]:-my-1 [@media(pointer:coarse)]:grid [@media(pointer:coarse)]:h-8 [@media(pointer:coarse)]:w-7 [@media(pointer:coarse)]:place-items-center', TOUCH.input)}>⠿</span>
   const x = (id: string, what: string) => <button onClick={() => remove(id)} aria-label={`Remove ${what}`} className="ml-0.5 grid h-5 w-5 flex-none cursor-pointer place-items-center rounded-full border-0 bg-black/15 text-white hover:bg-black/30 [@media(pointer:coarse)]:h-8 [@media(pointer:coarse)]:w-8"><Icon name="x" size={10} strokeWidth={3} /></button>
   const block = (n: GridFilterNode, root = false): ReactNode => {
@@ -295,7 +340,7 @@ function GridFilterBuilder({ tree, onChange, schema, fields, defaultField, count
           {root ? <span className="opacity-90">Show rows where</span> : grip(n.id)}
           <motion.button key={n.j} initial={{ scale: 0.85 }} animate={{ scale: 1 }} transition={spring(0.5, 0.3)} aria-label={`Match ${n.j === 'AND' ? 'all' : 'any'}. Click to switch`}
             onClick={() => set(gridUpdate(ref.current, n.id, g => ({ ...g, j: (g as GridGroup).j === 'AND' ? 'OR' : 'AND' })))}
-            className="h-[22px] cursor-pointer rounded-xl border-0 bg-white/95 px-2.5 text-xs font-bold text-[#18181B] [@media(pointer:coarse)]:h-8 [@media(pointer:coarse)]:min-w-11 [@media(pointer:coarse)]:text-[13px]">{n.j === 'AND' ? 'all' : 'any'}</motion.button>
+            className="h-[22px] cursor-pointer rounded-[var(--r-lg)] border-0 bg-white/95 px-2.5 text-xs font-bold text-[#18181B] [@media(pointer:coarse)]:h-8 [@media(pointer:coarse)]:min-w-11 [@media(pointer:coarse)]:text-[13px]">{n.j === 'AND' ? 'all' : 'any'}</motion.button>
           <span className="opacity-90">of these are true</span>
           {!root && <span className="ml-auto">{x(n.id, 'group')}</span>}
         </div>
@@ -318,7 +363,7 @@ function GridFilterBuilder({ tree, onChange, schema, fields, defaultField, count
         <span className="text-xs text-[var(--fg3)]">Add a block</span>
         {([['cond', 'where … is …'], ['AND', 'all of'], ['OR', 'any of']] as const).map(([k, l]) => (
           <button key={k} onClick={() => addBlock(k)} style={{ '--bc': BC[k] } as CSSProperties}
-            className="cursor-pointer rounded-[7px] border-0 bg-[color-mix(in_srgb,var(--bc)_90%,#000)] px-2.5 py-2 text-left text-xs font-semibold [@media(pointer:coarse)]:min-h-9 text-white shadow-[0_2px_0_color-mix(in_srgb,var(--bc)_60%,#000)] hover:brightness-110 active:translate-y-px">{l}</button>
+            className="cursor-pointer rounded-[var(--r-md)] border-0 bg-[color-mix(in_srgb,var(--bc)_90%,#000)] px-2.5 py-2 text-left text-xs font-semibold [@media(pointer:coarse)]:min-h-9 text-white shadow-[0_2px_0_color-mix(in_srgb,var(--bc)_60%,#000)] hover:brightness-110 active:translate-y-px">{l}</button>
         ))}
         <span className="mt-1.5 text-xs text-[var(--fg3)]">Drag ⠿ to reorder or drop a block inside a group to nest it. Text and Bricks stay in sync.</span>
       </div>
@@ -327,7 +372,7 @@ function GridFilterBuilder({ tree, onChange, schema, fields, defaultField, count
   )
 
   return (
-    <div data-fb className="flex flex-wrap items-center gap-1.5 rounded-t-[var(--r-md)] border border-b-0 border-[var(--line)] bg-[color-mix(in_srgb,var(--muted)_40%,var(--card))] p-2">
+    <div ref={bar} data-fb role="toolbar" aria-label="Filters. Left and right arrows move between controls" className="flex flex-wrap items-center gap-1.5 rounded-t-[var(--r-md)] border border-b-0 border-[var(--line)] bg-[color-mix(in_srgb,var(--muted)_40%,var(--card))] p-2">
       <SegmentedControl size="sm" value={mode} onChange={switchMode} className="mr-1 [@media(pointer:coarse)]:[&>button]:h-9" options={[{ value: 'bricks', label: 'Bricks' }, { value: 'text', label: 'Text' }, { value: 'blocks', label: 'Blocks' }]} />
       <span className="order-last ml-auto pr-1 text-xs text-[var(--fg3)] md:order-none md:hidden">{count}</span>
       <motion.div key={mode} initial={{ opacity: 0, y: 4 }} animate={{ opacity: 1, y: 0 }} transition={{ duration: 0.2 }}
@@ -338,6 +383,9 @@ function GridFilterBuilder({ tree, onChange, schema, fields, defaultField, count
     </div>
   )
 }
+
+/** A visible accent ring on a text-field shell while its input has keyboard focus. */
+const GRID_FOCUS_RING = 'has-[input:focus-visible]:!border-[var(--accent)] has-[input:focus-visible]:!shadow-[0_0_0_2px_var(--accent-soft)]'
 
 const gridCmp = (x: unknown, y: unknown) =>
   (typeof x === 'number' && typeof y === 'number') || (x instanceof Date && y instanceof Date) ? Number(x) - Number(y) : String(x).localeCompare(String(y))
@@ -541,7 +589,7 @@ export function DataGrid<T extends object>({ columns, rows, defaultRows = [], on
               onDoubleClick={() => canEdit(c) && setEdit({ id, key: c.key })} title={canEdit(c) ? 'Double-click or press Enter to edit' : undefined}
               onPointerDown={e => { ptr.current = e.pointerType }} onClick={() => onCell(r, c)} onFocus={e => { if (e.target === e.currentTarget) setCursor({ id, key: c.key }) }}
               onKeyDown={e => onCellKey(e, r, c)} aria-readonly={!canEdit(c) || undefined}
-              className={cn(td, 'relative outline-none group-hover/row:bg-[color-mix(in_srgb,var(--muted)_55%,var(--card))] focus-visible:shadow-[inset_0_0_0_2px_var(--accent)]', i === 0 && sticky1, c.type === 'number' && 'text-right font-[family-name:var(--mono)] text-xs', editing && '!p-0 shadow-[inset_0_0_0_2px_var(--accent)]',
+              className={cn(td, 'relative outline-none group-hover/row:bg-[color-mix(in_srgb,var(--muted)_55%,var(--card))] focus-visible:shadow-[inset_0_0_0_2px_var(--accent)]', i === 0 && sticky1, c.type === 'number' && 'text-right tabular-nums', editing && '!p-0 shadow-[inset_0_0_0_2px_var(--accent)]',
                 picked && 'shadow-[inset_0_0_0_2px_color-mix(in_srgb,var(--accent)_55%,transparent)]', picked && (c.type === 'number' ? '!pl-10' : '!pr-10'))}>
               {editing
                 ? <input autoFocus defaultValue={String(r[c.key] ?? '')} aria-label={`Edit ${c.label}`} onFocus={e => e.currentTarget.select()}
@@ -549,7 +597,7 @@ export function DataGrid<T extends object>({ columns, rows, defaultRows = [], on
                     if (e.nativeEvent.isComposing) return
                     if (e.key === 'Enter' || e.key === 'Escape') { e.preventDefault(); e.stopPropagation(); closeEdit(r, c, e.key === 'Enter' ? e.currentTarget.value : null) }
                   }} onBlur={e => save(r, c, e.currentTarget.value)}
-                  className={cn('h-full w-full border-0 bg-[var(--card)] px-2.5 text-[13px] text-[var(--fg)] outline-none [@media(pointer:coarse)]:!text-base', c.type === 'number' && 'text-right font-[family-name:var(--mono)] text-xs')} />
+                  className={cn('h-full w-full border-0 bg-[var(--card)] px-2.5 text-[13px] text-[var(--fg)] shadow-[inset_0_0_0_2px_var(--accent)] outline-none [@media(pointer:coarse)]:!text-base', c.type === 'number' && 'text-right tabular-nums')} />
                 : <>
                   {flash && flash.id === id && flash.key === c.key && (
                     <motion.span key={flash.n} aria-hidden className="pointer-events-none absolute inset-0 bg-[var(--accent-soft)]" initial={{ opacity: 1 }} animate={{ opacity: 0 }} transition={{ duration: 0.8 }} />
@@ -576,19 +624,24 @@ export function DataGrid<T extends object>({ columns, rows, defaultRows = [], on
   const allClosed = groupKeys.length > 0 && groupKeys.every(k => closed.has(k))
   const rgToggle = (f: 'cs' | 'w' | 'rx', label: string, title: string) => (
     <button aria-pressed={flags[f]} title={title} onClick={() => setFlags(x => ({ ...x, [f]: !x[f] }))}
-      className={cn('h-5 min-w-6 cursor-pointer rounded border-0 px-1 font-[family-name:var(--mono)] text-[11px] font-semibold [@media(pointer:coarse)]:h-8 [@media(pointer:coarse)]:min-w-8 [@media(pointer:coarse)]:text-xs', flags[f] ? 'bg-[var(--accent-soft)] text-[color-mix(in_srgb,var(--accent)_78%,var(--fg))]' : 'bg-transparent text-[var(--fg3)] hover:bg-[var(--muted)] hover:text-[var(--fg)]')}>{label}</button>
+      className={cn('h-5 min-w-6 cursor-pointer rounded-[var(--r-sm)] border-0 px-1 font-[family-name:var(--mono)] text-[11px] font-semibold [@media(pointer:coarse)]:h-8 [@media(pointer:coarse)]:min-w-8 [@media(pointer:coarse)]:text-xs', flags[f] ? 'bg-[var(--accent-soft)] text-[color-mix(in_srgb,var(--accent)_78%,var(--fg))]' : 'bg-transparent text-[var(--fg3)] hover:bg-[var(--muted)] hover:text-[var(--fg)]')}>{label}</button>
   )
 
+  /** "Jump to rows": focus the grid's current cell (the one Tab would reach) */
+  const jumpToRows = () => { if (tab) focusCell(tab.id, tab.key) }
   return (
-    <div ref={gridBox} className={cn('flex min-w-0 flex-col', className)}>
+    <div ref={gridBox} className={cn('relative flex min-w-0 flex-col', className)}>
+      <button type="button" onClick={jumpToRows}
+        className="sr-only z-[9] rounded-[var(--r-md)] bg-[var(--primary)] px-3 py-1.5 text-xs font-medium text-[var(--on-primary)] focus-visible:not-sr-only focus-visible:absolute focus-visible:top-2 focus-visible:right-2">Jump to rows</button>
       <GridFilterBuilder
  tree={filter} onChange={setFilter} schema={schema} fields={fields} defaultField={defaultField} count={`${visible.length} of ${data.length} rows`} />
       <div className="flex flex-wrap items-center gap-2 border-x border-[var(--line)] bg-[var(--card)] p-2">
-        <div className={cn(inputShellClass(!!rg.err), 'flex h-7 min-w-[200px] flex-[0_1_380px] items-center pr-1 [@media(pointer:coarse)]:h-10', narrow && '!flex-[1_1_100%]')}>
+        <div className={cn(inputShellClass(!!rg.err), GRID_FOCUS_RING, 'flex h-7 min-w-[200px] flex-[0_1_380px] items-center pr-1 [@media(pointer:coarse)]:h-10', narrow && '!flex-[1_1_100%]')}>
           <span aria-hidden className="grid h-full place-items-center border-r border-[var(--line)] px-2 font-[family-name:var(--mono)] text-[11px] font-semibold text-[var(--fg3)]">rg</span>
-          <input value={qInput} maxLength={GRID_RG_MAX + 50} onChange={e => setQInput(e.target.value)} onKeyDown={e => { if (e.key === 'Escape') { setQInput(''); setQ('') } }} placeholder="search every cell, regex ok: north|quill" spellCheck={false} autoComplete="off"
-            aria-label="Search rows (ripgrep style)" aria-invalid={!!rg.err || undefined}
-            className={cn('h-full min-w-0 flex-1 border-0 bg-transparent px-2 font-[family-name:var(--mono)] text-[12.5px] text-[var(--fg)] outline-none placeholder:text-[var(--fg3)]', TOUCH.input)} />
+          <input value={qInput} maxLength={GRID_RG_MAX + 50} onChange={e => setQInput(e.target.value)} placeholder="search every cell, regex ok: north|quill" spellCheck={false} autoComplete="off"
+            onKeyDown={e => { if (e.key === 'Escape') { setQInput(''); setQ('') } if (e.key === 'ArrowDown' && !e.altKey) { e.preventDefault(); jumpToRows() } }}
+            aria-label="Search rows (ripgrep style)" aria-invalid={!!rg.err || undefined} aria-keyshortcuts="ArrowDown" aria-description="Down arrow jumps to the rows"
+            className={cn('h-full min-w-0 flex-1 border-0 bg-transparent px-2 font-[family-name:var(--mono)] text-xs text-[var(--fg)] outline-none placeholder:text-[var(--fg3)]', TOUCH.input)} />
           {rgToggle('cs', 'Aa', 'Match case (otherwise smart case, like rg -S)')}{rgToggle('w', '\\b', 'Whole word (-w)')}{rgToggle('rx', '.*', 'Regular expression (off = literal, like -F)')}
         </div>
         <span className="text-xs text-[var(--fg3)]" aria-live="polite">

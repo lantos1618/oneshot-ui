@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState, useSyncExternalStore } from 'react'
 import { AnimatePresence, motion } from 'motion/react'
-import { Button, IconButton, Kbd, OverlayPortal, Spinner, cn, spring } from '../lib'
+import { Badge, Button, IconButton, Kbd, OverlayPortal, Spinner, cn, spring } from '../lib'
 
 /* Design QA: an audit of every card on the page (off-grid spacing, one-off heights, font sizes and radii,
  * misalignment, clipped content, low contrast), a measuring overlay (box model, gaps to neighbours, pinned
@@ -73,22 +73,26 @@ function qaRgb(c: string): QaRgb | null {
   return out
 }
 const qaLum = ({ r, g, b }: QaRgb) => { const f = (v: number) => { v /= 255; return v <= 0.03928 ? v / 12.92 : Math.pow((v + 0.055) / 1.055, 2.4) }; return 0.2126 * f(r) + 0.7152 * f(g) + 0.0722 * f(b) }
-/** The solid colour behind an element, or null when it sits on a gradient, image or translucent layer. */
-function qaBgOf(el: Element): QaRgb | null {
+/** The solid colour behind an element and the element that paints it, or null when it sits on a gradient, image or translucent layer. */
+function qaBgOf(el: Element): { c: QaRgb; at: Element | null } | null {
   for (let e: Element | null = el; e; e = e.parentElement) {
     const cs = getComputedStyle(e), c = qaRgb(cs.backgroundColor)
-    if (c && c.a > 0.9) return c
+    if (c && c.a > 0.9) return { c, at: e }
     if (c && c.a > 0.25) return null
     if (cs.backgroundImage !== 'none' && e !== el) return null
   }
-  return qaRgb(getComputedStyle(document.body).backgroundColor)
+  const c = qaRgb(getComputedStyle(document.body).backgroundColor)
+  return c && { c, at: null }
 }
-/** Effective opacity up to (not including) the card, which fades in on scroll. */
-function qaOpacity(el: Element) {
+/** Opacity the text is drawn with against its background: the product of `opacity` from the element up to (not
+ * including) the one that paints the background. The card itself fades in on scroll, so it stops there too. */
+function qaOpacity(el: Element, bgAt: Element | null) {
   let o = 1
-  for (let e: Element | null = el; e && !e.hasAttribute('data-spec'); e = e.parentElement) o *= parseFloat(getComputedStyle(e).opacity)
+  for (let e: Element | null = el; e && e !== bgAt && !e.hasAttribute('data-spec'); e = e.parentElement) o *= parseFloat(getComputedStyle(e).opacity)
   return o
 }
+/** `fg` drawn at `alpha` over `bg`. */
+const qaBlend = (fg: QaRgb, bg: QaRgb, alpha: number): QaRgb => ({ r: fg.r * alpha + bg.r * (1 - alpha), g: fg.g * alpha + bg.g * (1 - alpha), b: fg.b * alpha + bg.b * (1 - alpha), a: 1 })
 
 /** Scan every visible card. Rules ported from the original page. */
 function qaAudit(): { issues: Record<QaKind, QaIssue[]>; checked: number } {
@@ -101,8 +105,10 @@ function qaAudit(): { issues: Record<QaKind, QaIssue[]>; checked: number } {
     const cs = getComputedStyle(el), r = el.getBoundingClientRect()
     // 1. spacing on a 4px scale (2px steps allowed up to 12px)
     const flexy = cs.display.includes('flex') || cs.display.includes('grid')
+    const autoMargin = el.matches('.mt-auto,.mb-auto,.my-auto,.m-auto')
     for (const p of ['paddingTop', 'paddingRight', 'paddingBottom', 'paddingLeft', 'marginTop', 'marginBottom', 'rowGap', 'columnGap'] as const) {
       const v = qaPx(cs[p])
+      if (p.startsWith('margin') && autoMargin) continue // an auto margin (pushing to the end of a flex column) isn't a spacing value
       if (v && !qaOnGrid(v) && !(p.endsWith('Gap') && !flexy)) issues.spacing.push({ el, msg: `${p.replace(/([A-Z])/g, '-$1').toLowerCase()} ${v}px`, val: v })
     }
     // 2. control heights, font sizes and radii: collected, judged by rarity below
@@ -111,11 +117,12 @@ function qaAudit(): { issues: Record<QaKind, QaIssue[]>; checked: number } {
     if (hasText) {
       add(hist.fs, qaPx(cs.fontSize), el)
       // 3. contrast of text on a solid background (WCAG AA: 4.5:1, or 3:1 for large text)
-      const fg = qaRgb(cs.color), bg = qaBgOf(el)
-      if (fg && bg && fg.a > 0.9 && qaOpacity(el) > 0.95 && !el.closest('[disabled],[aria-disabled="true"],[aria-hidden="true"],[inert]')) {
-        const a = qaLum(fg), b = qaLum(bg), ratio = (Math.max(a, b) + 0.05) / (Math.min(a, b) + 0.05)
+      // the text colour's own alpha and every ancestor's opacity count: faded text is blended into its background (as axe does)
+      const fg = qaRgb(cs.color), bgOf = qaBgOf(el), alpha = fg && bgOf ? fg.a * qaOpacity(el, bgOf.at) : 0
+      if (fg && bgOf && alpha > 0.1 && !el.closest('[disabled],[aria-disabled="true"],[aria-hidden="true"],[inert]')) {
+        const a = qaLum(qaBlend(fg, bgOf.c, alpha)), b = qaLum(bgOf.c), ratio = (Math.max(a, b) + 0.05) / (Math.min(a, b) + 0.05)
         const fs = qaPx(cs.fontSize), big = fs >= 18 || (fs >= 14 && +cs.fontWeight >= 700)
-        if (ratio < (big ? 3 : 4.5)) issues.contrast.push({ el, msg: `${ratio.toFixed(2)}:1 at ${fs}px`, val: ratio })
+        if (ratio < (big ? 3 : 4.5)) issues.contrast.push({ el, msg: `${ratio.toFixed(2)}:1 at ${fs}px${alpha < 0.99 ? `, ${Math.round(alpha * 100)}% opacity` : ''}`, val: ratio })
       }
     }
     const rad = qaPx(cs.borderTopLeftRadius)
@@ -169,7 +176,7 @@ const QA_GROUPS: [QaKind, string, string, string][] = [
   ['clip', 'Clipped content', 'bg-[var(--bad)]', 'content wider than its box'],
   ['contrast', 'Low contrast', 'bg-[var(--bad)]', 'text below WCAG AA'],
 ]
-const QA_TONE = { ok: 'bg-[var(--ok-soft)] text-[var(--ok)]', warn: 'bg-[var(--warn-soft)] text-[var(--warn)]', bad: 'bg-[var(--bad-soft)] text-[var(--bad)]' }
+const QA_TONE = { ok: 'ok', warn: 'warn', bad: 'bad' } as const
 
 /* Overlay drawing (imperative: it follows the pointer every frame) ──────────── */
 
@@ -279,8 +286,9 @@ function qaReveal(el: Element, msg: string) {
 /* Layout shift (CLS), measured live with the Core Web Vitals session-window rule ──────────── */
 
 type QaShiftEntry = PerformanceEntry & { value: number; hadRecentInput: boolean; sources?: readonly { node: Node | null; previousRect: DOMRectReadOnly; currentRect: DOMRectReadOnly }[] }
-type QaShift = { value: number; node: Element | null; name: string }
-const qaCls = { score: 0, win: 0, winStart: 0, last: 0, shifts: [] as QaShift[], unsupported: false, started: false, version: 0 }
+/** One source of layout shift, aggregated: every shift whose largest moving element sits in the same card or landmark. */
+type QaShiftSource = { name: string; total: number; count: number; node: Element | null; tags: Map<string, number> }
+const qaCls = { score: 0, win: 0, winStart: 0, last: 0, sum: 0, count: 0, sources: new Map<string, QaShiftSource>(), unsupported: false, started: false, version: 0 }
 const qaClsListeners = new Set<() => void>()
 function qaStartCls() {
   if (qaCls.started) return
@@ -299,8 +307,10 @@ function qaStartCls() {
         const src = [...(en.sources ?? [])].sort((a, b) => b.currentRect.width * b.currentRect.height - a.currentRect.width * a.currentRect.height)[0]
         const node = src?.node instanceof Element ? src.node : src?.node?.parentElement ?? null
         const area = node && (qaCard(node)?.dataset.spec ?? node.closest('section')?.id ?? node.closest('nav,header,aside,[role=dialog]')?.getAttribute('aria-label') ?? node.closest('nav,header,aside')?.tagName.toLowerCase() ?? 'page')
-        const where = node ? `${area} · ${node.tagName.toLowerCase()}` : 'unknown'
-        qaCls.shifts.push({ value: en.value, node, name: where })
+        const name = area ?? 'unknown', tag = node?.tagName.toLowerCase() ?? '?'
+        const agg = qaCls.sources.get(name) ?? { name, total: 0, count: 0, node: null, tags: new Map<string, number>() }
+        agg.total += en.value; agg.count++; agg.node = node ?? agg.node; agg.tags.set(tag, (agg.tags.get(tag) ?? 0) + 1)
+        qaCls.sources.set(name, agg); qaCls.sum += en.value; qaCls.count++
         if (qaState.m && qaFlashHost && src) [src.previousRect, src.currentRect].forEach((r, k) => {
           const b = qaBox(qaFlashHost!, r.x, r.y, r.width, r.height, k ? { outline: `2px solid ${QA_COL.bad}`, background: 'rgba(220,38,38,.1)' } : { outline: `1.5px solid ${QA_COL.content}` })
           setTimeout(() => b.remove(), 1200)
@@ -320,21 +330,28 @@ function QaClsMeter({ focusKey }: { focusKey: number }) {
   useEffect(() => { if (focusKey) ref.current?.focus() }, [focusKey])
   if (qaCls.unsupported) return <div className="border-b border-[var(--line)] px-3 py-2.5 text-xs text-[var(--fg3)]">Layout-shift measurement isn’t supported in this browser.</div>
   const [label, tone] = qaClsRating(qaCls.score)
-  const recent = qaCls.shifts.map((s, i) => [s, i] as const).slice(-4).reverse()
+  const top = [...qaCls.sources.values()].sort((a, b) => b.total - a.total).slice(0, 5)
+  const fmt = (v: number) => v < 0.0005 ? '<0.001' : v.toFixed(3)
   return (
     <div ref={ref} tabIndex={-1} className="flex flex-col gap-1.5 border-b border-[var(--line)] px-3 py-2.5 outline-none">
       <div className="flex items-center gap-2 text-[13px]">
         <b className="font-semibold">Layout shift (CLS)</b>
-        <span className={cn('ui-num ml-auto rounded-full px-2 py-0.5 font-[family-name:var(--mono)] text-xs font-semibold', tone)} aria-live="polite">{qaCls.score.toFixed(3)} · {label}</span>
+        <span aria-live="polite" className="ml-auto"><Badge tone={tone} className="ui-num font-[family-name:var(--mono)] font-semibold">{qaCls.score.toFixed(3)} · {label}</Badge></span>
       </div>
-      {recent.length ? (
+      {top.length ? (
         <div className="flex flex-col">
-          {recent.map(([s, i]) => (
-            <button key={i} type="button" onClick={() => s.node && qaReveal(s.node, `shifted ${s.value.toFixed(3)}`)} disabled={!s.node?.isConnected}
-              className="flex cursor-pointer gap-2 rounded-md border-0 bg-transparent px-1.5 py-1 text-left text-xs text-[var(--fg2)] hover:bg-[var(--muted)] hover:text-[var(--fg)] disabled:cursor-default">
-              <span className="ui-num min-w-10 font-[family-name:var(--mono)] text-[11px] text-[var(--fg3)]">{s.value < 0.0005 ? '<0.001' : s.value.toFixed(3)}</span><span className="truncate">{s.name}</span>
-            </button>
-          ))}
+          <span className="ui-num px-1.5 pb-0.5 text-[11px] text-[var(--fg3)]">Top sources · {fmt(qaCls.sum)} in {qaCls.count} shift{qaCls.count === 1 ? '' : 's'} so far</span>
+          {top.map(s => {
+            const tags = [...s.tags.entries()].sort((a, b) => b[1] - a[1]).slice(0, 2).map(([t]) => t).join(', ')
+            return (
+              <button key={s.name} type="button" onClick={() => s.node && qaReveal(s.node, `${fmt(s.total)} over ${s.count} shift${s.count === 1 ? '' : 's'}`)} disabled={!s.node?.isConnected}
+                className="flex cursor-pointer items-baseline gap-2 rounded-[var(--r-md)] border-0 bg-transparent px-1.5 py-1 text-left text-xs text-[var(--fg2)] hover:bg-[var(--muted)] hover:text-[var(--fg)] disabled:cursor-default">
+                <span className="ui-num min-w-11 font-[family-name:var(--mono)] text-[11px] text-[var(--fg)]">{fmt(s.total)}</span>
+                <span className="min-w-0 flex-1 truncate">{s.name}</span>
+                <span className="ui-num flex-none text-[11px] text-[var(--fg3)]">{s.count}× {tags}</span>
+              </button>
+            )
+          })}
         </div>
       ) : <span className="text-xs text-[var(--fg3)]">No unexpected shifts yet. Shifts within 0.5 s of your own input don’t count.</span>}
     </div>
@@ -439,7 +456,7 @@ export function DesignQA() {
   }, [st.m])
 
   const score = result?.score
-  const scoreTone = score == null ? '' : score >= 90 ? QA_TONE.ok : score >= 75 ? QA_TONE.warn : QA_TONE.bad
+  const scoreTone = score == null ? 'neutral' : score >= 90 ? QA_TONE.ok : score >= 75 ? QA_TONE.warn : QA_TONE.bad
   const toggleGroup = (k: QaKind) => setExpanded(s => { const n = new Set(s); if (n.has(k)) n.delete(k); else n.add(k); return n })
 
   return (
@@ -456,7 +473,7 @@ export function DesignQA() {
             className="fixed bottom-[calc(env(safe-area-inset-bottom,0px)+16px)] left-4 z-[77] flex max-h-[min(70vh,640px)] w-[min(340px,calc(100vw-32px))] flex-col rounded-[var(--r-lg)] border border-[var(--line)] bg-[var(--card)] text-[13px] text-[var(--fg)] shadow-[var(--shadow)] max-[640px]:inset-x-0 max-[640px]:bottom-0 max-[640px]:max-h-[55dvh] max-[640px]:w-auto max-[640px]:rounded-b-none max-[640px]:border-x-0 max-[640px]:border-b-0 max-[640px]:pb-[env(safe-area-inset-bottom,0px)] [@media(max-height:500px)]:max-h-[calc(100dvh-24px)]">
             <div className="flex flex-none items-center gap-2 border-b border-[var(--line)] py-2 pr-2 pl-3">
               <QaRulerIcon size={15} /><b className="text-sm font-semibold">Design QA</b>
-              {score != null && <span className={cn('ui-num ml-auto rounded-full px-2 py-0.5 font-[family-name:var(--mono)] text-xs font-semibold', scoreTone)} aria-label={`Score ${score} out of 100`}>{score}/100</span>}
+              {score != null && <span className="ml-auto" aria-label={`Score ${score} out of 100`}><Badge tone={scoreTone} className="ui-num font-[family-name:var(--mono)] font-semibold">{score}/100</Badge></span>}
               <IconButton icon="x" label="Close Design QA" onClick={designQA.toggle} className={score == null ? 'ml-auto' : ''} />
             </div>
             <div className="flex flex-none flex-wrap items-center gap-1.5 border-b border-[var(--line)] px-3 py-2.5">
@@ -478,7 +495,7 @@ export function DesignQA() {
                     <button type="button" aria-expanded={open} onClick={() => toggleGroup(k)}
                       className="flex w-full cursor-pointer items-center gap-2 rounded-[var(--r-md)] border-0 bg-transparent p-2 text-left text-[13px] font-medium text-[var(--fg)] hover:bg-[var(--muted)]">
                       <span className={cn('h-2 w-2 flex-none rounded-full', list.length ? dot : 'bg-[var(--ok)]')} />{label}
-                      <span className="ui-num ml-auto rounded-full bg-[var(--muted)] px-2 py-px font-[family-name:var(--mono)] text-[11px] font-semibold text-[var(--fg2)]">{list.length}</span>
+                      <Badge size="sm" className="ui-num ml-auto font-[family-name:var(--mono)] font-semibold">{list.length}</Badge>
                     </button>
                     {open && (
                       <div className="flex flex-col pr-1 pb-1.5 pl-6">
@@ -487,7 +504,7 @@ export function DesignQA() {
                           const [card, what] = qaName(i.el)
                           return (
                             <button key={j} type="button" onClick={() => qaReveal(i.el, i.msg)}
-                              className="flex cursor-pointer gap-2 rounded-md border-0 bg-transparent px-2 py-1 text-left text-xs text-[var(--fg2)] hover:bg-[var(--muted)] hover:text-[var(--fg)]">
+                              className="flex cursor-pointer gap-2 rounded-[var(--r-md)] border-0 bg-transparent px-2 py-1 text-left text-xs text-[var(--fg2)] hover:bg-[var(--muted)] hover:text-[var(--fg)]">
                               <span className="min-w-[58px] flex-none font-[family-name:var(--mono)] text-[11px] text-[var(--fg3)]">{i.msg.split(' ').slice(-2).join(' ')}</span>
                               <span className="min-w-0 break-words">{card} · {what}</span>
                             </button>

@@ -1,6 +1,6 @@
 {
   "name": "@lyndon/ui",
-  "version": "0.2.0",
+  "version": "0.2.1",
   "description": "Animated React 19 components with themes, in the shadcn style: forms, overlays, data grids, charts, diagrams, maps, AI chat. Also ships as drop-in single files for AI tools.",
   "keywords": [
     "react",
@@ -168,10 +168,17 @@
     "build:single": "node scripts/build-single.mjs && tsc -p tsconfig.single.json --noEmit",
     "build:demo": "tsc -b && vite build",
     "test:ssr": "node scripts/ssr-check.mjs",
+    "test": "vitest run",
+    "test:watch": "vitest",
+    "test:e2e": "playwright test --trace off",
+    "test:e2e:update-baseline": "node tests/e2e/update-baseline.mjs",
+    "test:pack": "node tests/pack-check.mjs",
     "prepublishOnly": "pnpm build && pnpm test:ssr",
     "typecheck": "tsc -b",
+    "typecheck:tests": "tsc -p tsconfig.test.json --noEmit",
     "lint": "oxlint",
-    "preview": "vite preview"
+    "preview": "vite preview",
+    "check": "tsc -b && pnpm typecheck:tests && pnpm build && pnpm test:ssr && pnpm test"
   },
   "peerDependencies": {
     "motion": "^13.0.0 || ^14.0.0",
@@ -179,19 +186,27 @@
     "react-dom": "^19.0.0"
   },
   "devDependencies": {
+    "@playwright/test": "1.63.0",
     "@tailwindcss/cli": "^4.3.5",
     "@tailwindcss/vite": "^4.3.5",
+    "@testing-library/dom": "^10.4.2",
+    "@testing-library/jest-dom": "^7.0.1",
+    "@testing-library/react": "^16.3.3",
+    "@testing-library/user-event": "^14.6.8",
     "@types/node": "^24.19.2",
     "@types/react": "^19.3.0",
     "@types/react-dom": "^19.3.0",
     "@vitejs/plugin-react": "^6.1.2",
+    "axe-core": "4.14.0",
+    "jsdom": "^31.0.0",
     "motion": "^14.10.1",
     "oxlint": "^1.90.0",
     "react": "^19.3.1",
     "react-dom": "^19.3.1",
     "tailwindcss": "^4.3.5",
     "typescript": "~7.0.2",
-    "vite": "^8.3.6"
+    "vite": "^8.3.6",
+    "vitest": "^5.1.0"
   },
   "publishConfig": {
     "access": "public"

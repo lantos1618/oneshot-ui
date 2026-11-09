@@ -1,4 +1,4 @@
-import { useEffect, useId, useMemo, useRef, useState, type ReactNode } from 'react'
+import { memo, useEffect, useId, useLayoutEffect, useMemo, useRef, useState, type ReactNode } from 'react'
 import { motion, useReducedMotion } from 'motion/react'
 import { Button, Icon, IconButton, ScrollEdges, cn, sleep, spring, useControllable, useMediaQuery, useRoving, useScrollEdges, useSize, useWidth } from './core'
 import { ActiveIndicator, SegmentedControl } from './forms'
@@ -18,9 +18,9 @@ const CODE_TOKEN_CLASS: Record<CodeTokenKind, string> = {
   str: 'text-[color-mix(in_srgb,var(--ok)_72%,var(--fg))]',
   kw: 'text-[color-mix(in_srgb,var(--bad)_75%,var(--fg))]',
   num: 'text-[color-mix(in_srgb,var(--c3)_70%,var(--fg))]',
-  fn: 'text-[var(--accent)]',
+  fn: 'text-[color-mix(in_srgb,var(--accent)_82%,var(--fg))]',
   attr: 'text-[color-mix(in_srgb,var(--warn)_66%,var(--fg))]',
-  prop: 'text-[var(--accent)]',
+  prop: 'text-[color-mix(in_srgb,var(--accent)_82%,var(--fg))]',
   var: 'text-[color-mix(in_srgb,var(--c3)_70%,var(--fg))]',
   pre: '',
 }
@@ -115,22 +115,45 @@ export function codeLineDiff(before: string[], after: string[]): CodeDiffRow[] {
 type CodeRow = { text: string; no?: number | null; kind?: 'hi' | 'add' | 'del' | 'hunk' | 'blank'; plain?: boolean }
 const CODE_ROW_BG = { hi: 'bg-[color-mix(in_srgb,var(--accent)_10%,transparent)]', add: 'bg-[color-mix(in_srgb,var(--ok)_11%,transparent)]', del: 'bg-[color-mix(in_srgb,var(--bad)_10%,transparent)]', hunk: 'bg-[var(--muted)] text-[var(--fg3)]', blank: 'bg-[color-mix(in_srgb,var(--muted)_60%,transparent)]' }
 
-function CodeRows({ rows, lang, wrap, numbers = true, className }: { rows: CodeRow[]; lang: CodeLanguage; wrap?: boolean; numbers?: boolean; className?: string }) {
+/** Highlighted lines are cached by language and text: re-renders, tab switches and remounts reuse the same elements. */
+const CODE_HL_CACHE = new Map<string, ReactNode[]>()
+const CODE_HL_CACHE_MAX = 3000
+function codeHighlightCached(text: string, lang: CodeLanguage): ReactNode[] {
+  const k = lang + '\u0000' + text
+  let v = CODE_HL_CACHE.get(k)
+  if (!v) { v = highlightCode(text, lang); if (CODE_HL_CACHE.size >= CODE_HL_CACHE_MAX) CODE_HL_CACHE.delete(CODE_HL_CACHE.keys().next().value!); CODE_HL_CACHE.set(k, v) }
+  return v
+}
+
+/**
+ * The rows of a code view. Memoised (by row content), and focusable with a label only while it actually scrolls,
+ * so keyboard users can scroll it without adding a Tab stop to every short snippet.
+ */
+const CodeRows = memo(function CodeRows({ rows, lang, wrap, numbers = true, label = 'Code', className }: { rows: CodeRow[]; lang: CodeLanguage; wrap?: boolean; numbers?: boolean; label?: string; className?: string }) {
+  const ref = useRef<HTMLPreElement>(null)
+  const [scrolls, setScrolls] = useState(false)
+  useLayoutEffect(() => {
+    const el = ref.current; if (!el || typeof ResizeObserver === 'undefined') return
+    const upd = () => setScrolls(el.scrollWidth > el.clientWidth + 1 || el.scrollHeight > el.clientHeight + 1)
+    upd(); const ro = new ResizeObserver(upd); ro.observe(el); return () => ro.disconnect()
+  }, [rows, wrap])
   return (
-    <pre className={cn('relative m-0 overflow-auto py-2.5 font-[family-name:var(--mono)] text-[12.5px] leading-[1.65] [contain:inline-size]', className)}>
+    <pre ref={ref} tabIndex={scrolls ? 0 : undefined} role={scrolls ? 'region' : undefined} aria-label={scrolls ? `${label}, scrolls` : undefined}
+      className={cn('relative m-0 overflow-auto py-2.5 font-[family-name:var(--mono)] text-xs leading-[1.65] [contain:inline-size] focus-visible:outline-2 focus-visible:-outline-offset-2 focus-visible:outline-[var(--accent)]', className)}>
       {rows.map((r, i) => (
         <span key={i} data-kind={r.kind} className={cn('flex min-h-[1.65em] pr-3', r.kind && CODE_ROW_BG[r.kind])}>
           {numbers && (
-            <span className={cn('relative w-[46px] flex-none pr-4 text-right whitespace-nowrap select-none', r.kind === 'hi' ? 'text-[var(--accent)]' : 'text-[var(--fg3)] opacity-60', (r.kind === 'add' || r.kind === 'del') && 'opacity-100')}>
+            <span className={cn('relative w-[46px] flex-none pr-4 text-right whitespace-nowrap select-none', r.kind === 'hi' ? 'text-[var(--accent)]' : 'text-[var(--fg3)]')}>
               {r.no ?? ''}{r.kind === 'add' && <span className="absolute right-1 text-[var(--ok)]">+</span>}{r.kind === 'del' && <span className="absolute right-1 text-[var(--bad)]">−</span>}
             </span>
           )}
-          <span className={cn('min-w-0 flex-1', wrap ? 'break-words whitespace-pre-wrap' : 'whitespace-pre')}>{r.plain ? r.text : (r.text ? highlightCode(r.text, lang) : ' ')}</span>
+          <span className={cn('min-w-0 flex-1', wrap ? 'break-words whitespace-pre-wrap' : 'whitespace-pre')}>{r.plain ? r.text : (r.text ? codeHighlightCached(r.text, lang) : ' ')}</span>
         </span>
       ))}
     </pre>
   )
-}
+}, (a, b) => a.lang === b.lang && a.wrap === b.wrap && a.numbers === b.numbers && a.label === b.label && a.className === b.className
+  && a.rows.length === b.rows.length && a.rows.every((r, i) => { const q = b.rows[i]; return r.text === q.text && r.no === q.no && r.kind === q.kind && r.plain === q.plain }))
 
 const CODE_HEAD = 'flex h-10 items-center gap-2 border-b border-[var(--line)] bg-[var(--card)] pr-1.5 pl-3 text-xs [@media(pointer:coarse)]:h-11'
 /** Header that may wrap onto a second row on narrow cards (no tabs inside, so no fixed height needed). */
@@ -165,7 +188,7 @@ function CodeHeaderTabs({ tabs, value, onChange, label }: { tabs: string[]; valu
           <button key={t} ref={el => { refs.current[k] = el }} type="button" role="tab" aria-selected={t === value} tabIndex={t === value ? 0 : -1} onClick={() => onChange(t)}
             className={cn('relative h-full min-w-8 flex-none cursor-pointer border-0 bg-transparent px-2.5 text-xs font-medium [@media(pointer:coarse)]:px-3 transition-colors focus-visible:outline-2 focus-visible:-outline-offset-2 focus-visible:outline-[var(--accent)]', t === value ? 'text-[var(--fg)]' : 'text-[var(--fg3)] hover:text-[var(--fg)]')}>
             {t}
-            {t === value && <ActiveIndicator group={group} className="top-auto bottom-0 h-0.5 rounded-sm bg-[var(--fg)]" />}
+            {t === value && <ActiveIndicator group={group} className="top-auto bottom-0 h-0.5 rounded-[var(--r-sm)] bg-[var(--fg)]" />}
           </button>
         ))}
       </div>
@@ -195,16 +218,17 @@ export function CodeBlock({ code, filename, language, lineNumbers = true, highli
   const wrap = wrapSet ?? defaultWrap ?? (boxW > 0 && boxW < 520)
   const [open, setOpen] = useState(false)
   const [inner, { height: full }] = useSize<HTMLDivElement>()
-  const rows: CodeRow[] = diffOn && diff
+  const hiKey = highlight.join(',')
+  const rows: CodeRow[] = useMemo(() => diffOn && diff
     ? diff.map(r => ({ text: r.text, no: r.type === '-' ? r.a : r.b, kind: r.type === '+' ? 'add' : r.type === '-' ? 'del' : undefined }))
-    : lines.map((text, i) => ({ text, no: i + 1, kind: highlight.includes(i + 1) ? 'hi' : undefined }))
+    : lines.map((text, i) => ({ text, no: i + 1, kind: highlight.includes(i + 1) ? 'hi' : undefined })), [diffOn, diff, lines, hiKey]) // eslint-disable-line react-hooks/exhaustive-deps
   const collapsible = collapseAt !== false && full > collapseAt + 40
   const height = !collapsible ? 'auto' : open ? full + 48 : collapseAt
   return (
     <div ref={box} className={cn(CODE_BOX, className)}>
       <div className={CODE_HEAD_WRAP}>
         <span className="flex min-w-0 items-center gap-1.5 font-medium text-[var(--fg)]"><Icon name="file" size={13} className="text-[var(--fg3)]" /><span className="truncate">{filename ?? 'snippet'}</span></span>
-        <span className="flex-none rounded-[5px] bg-[var(--muted)] px-1.5 py-0.5 font-[family-name:var(--mono)] text-[11px] font-medium text-[var(--fg3)] max-[420px]:hidden">{CODE_LANGUAGE_NAMES[lang]}</span>
+        <span className="flex-none rounded-[var(--r-sm)] bg-[var(--muted)] px-1.5 py-0.5 font-[family-name:var(--mono)] text-[11px] font-medium text-[var(--fg3)] max-[420px]:hidden">{CODE_LANGUAGE_NAMES[lang]}</span>
         <span className="flex-1" />
         {previous != null && (
           <Button size="sm" variant="ghost" className={CODE_TOOL} aria-pressed={diffOn} onClick={() => { setDiffSeen(true); setDiffOn(v => !v) }} title="Changes since the previous version">
@@ -218,7 +242,7 @@ export function CodeBlock({ code, filename, language, lineNumbers = true, highli
       <motion.div className="relative overflow-hidden" initial={false} animate={{ height }} transition={spring(0.12, 0.45)}>
         <div ref={inner}>
           <motion.div key={String(diffOn)} initial={{ opacity: 0.3 }} animate={{ opacity: 1 }} transition={{ duration: 0.2 }}>
-            <CodeRows rows={rows} lang={lang} wrap={wrap} numbers={lineNumbers} className={cn(!wrap && 'overflow-y-hidden')} />
+            <CodeRows rows={rows} lang={lang} wrap={wrap} numbers={lineNumbers} label={filename ?? 'Code'} className={cn(!wrap && 'overflow-y-hidden')} />
           </motion.div>
         </div>
         {collapsible && (
@@ -235,7 +259,7 @@ export function CodeBlock({ code, filename, language, lineNumbers = true, highli
 
 /** Inline code (`useFlow()`) for running text. */
 export function InlineCode({ children, className }: { children: ReactNode; className?: string }) {
-  return <code className={cn('rounded-[5px] border border-[var(--line)] bg-[var(--muted)] px-1.5 py-px font-[family-name:var(--mono)] text-[max(0.9em,11px)]', className)}>{children}</code>
+  return <code className={cn('rounded-[var(--r-sm)] border border-[var(--line)] bg-[var(--muted)] px-1.5 py-px font-[family-name:var(--mono)] text-[max(0.9em,11px)]', className)}>{children}</code>
 }
 
 /* ── Install command ───────────────────────────────────────────────────────── */
@@ -255,7 +279,7 @@ export function InstallCommand({ pkg, value, defaultValue = 'npm', onChange, cla
         <CodeCopy text={() => cmd} />
       </div>
       <motion.div key={pm} initial={{ opacity: 0, x: -4 }} animate={{ opacity: 1, x: 0 }} transition={{ duration: 0.2 }}>
-        <CodeRows rows={[{ text: cmd, no: null }]} lang="sh" numbers={false} className="!py-3 pl-3" />
+        <CodeRows rows={[{ text: cmd, no: null }]} lang="sh" numbers={false} label="Install command" className="!py-3 pl-3" />
       </motion.div>
     </div>
   )
@@ -269,6 +293,7 @@ export function CodeTabs({ tabs, value, defaultValue, onChange, className }: { t
   const [cur, setCur] = useControllable(value, defaultValue ?? tabs[0].label, onChange)
   const tab = tabs.find(t => t.label === cur) ?? tabs[0]
   const [inner, { height: h }] = useSize<HTMLDivElement>()
+  const rows = useMemo(() => tab.code.split('\n').map((text, i): CodeRow => ({ text, no: i + 1 })), [tab.code])
   return (
     <div className={cn(CODE_BOX, className)}>
       <div className={cn(CODE_HEAD, '!pl-1')}>
@@ -278,7 +303,7 @@ export function CodeTabs({ tabs, value, defaultValue, onChange, className }: { t
       <motion.div className="overflow-hidden" initial={false} animate={{ height: h || 'auto' }} transition={spring(0.15, 0.4)}>
         <div ref={inner} role="tabpanel" aria-label={tab.label}>
           <motion.div key={tab.label} initial={{ opacity: 0, y: 4 }} animate={{ opacity: 1, y: 0 }} transition={{ duration: 0.22 }}>
-            <CodeRows rows={tab.code.split('\n').map((text, i) => ({ text, no: i + 1 }))} lang={tab.language ?? 'ts'} />
+            <CodeRows rows={rows} lang={tab.language ?? 'ts'} label={`${tab.label} example`} />
           </motion.div>
         </div>
       </motion.div>
@@ -290,11 +315,12 @@ export function CodeTabs({ tabs, value, defaultValue, onChange, className }: { t
 
 export type TerminalLine = { cmd: string } | { out: ReactNode }
 type TerminalShown = { cmd?: string; out?: ReactNode; typing?: boolean }
-const TERM_CURSOR = 'inline-block h-3.5 w-[7px] bg-[var(--fg)] align-[-2px] animate-[ui-blink_1s_steps(1)_infinite]'
+const TERM_CURSOR = 'inline-block h-3.5 w-[7px] bg-[var(--fg)] align-[-2px] animate-[ui-blink_1s_steps(1)_infinite] motion-reduce:animate-none'
 
 /**
  * Terminal: commands type out character by character, output streams in, then a prompt waits with a
- * blinking cursor. Starts when scrolled into view; the header button replays it.
+ * blinking cursor (paused off screen, steady under reduced motion). Starts when scrolled into view; the header button
+ * replays it. The box reserves the height of the finished session up front, so typing never pushes the page.
  */
 export function Terminal({ lines, title = 'zsh', className }: { lines: TerminalLine[]; title?: string; className?: string }) {
   const { ref: box, seen: inView, visible: onScreen } = useViewport<HTMLDivElement>(null, { amount: 0.5 })
@@ -334,11 +360,18 @@ export function Terminal({ lines, title = 'zsh', className }: { lines: TerminalL
         <span className="ml-2">{title}</span>
         <IconButton icon={<Icon name="replay" size={13} />} label="Replay" onClick={play} className="ml-auto [@media(pointer:coarse)]:!h-9 [@media(pointer:coarse)]:!w-9" />
       </div>
-      <div className="m-0 min-h-[210px] p-3 font-[family-name:var(--mono)] text-xs leading-[1.6] break-words whitespace-pre-wrap" role="log" aria-live="off">
-        {shown.map((l, i) => l.cmd !== undefined
-          ? <div key={i}><span className="text-[var(--ok)]">❯</span> <span>{l.cmd}</span>{l.typing && <span className={cursor} />}</div>
-          : <motion.div key={i} initial={reduce ? false : { opacity: 0 }} animate={{ opacity: 1 }} transition={{ duration: 0.2 }}>{l.out}</motion.div>)}
-        {done && <div><span className="text-[var(--ok)]">❯</span> <span className={cursor} /></div>}
+      <div className="m-0 grid min-h-[210px] p-3 font-[family-name:var(--mono)] text-xs leading-[1.6] break-words whitespace-pre-wrap [&>*]:[grid-area:1/1]">
+        {/* the whole session, invisible, in the same cell: the box is its final height from the start */}
+        <div aria-hidden className="invisible">
+          {lines.map((l, i) => 'cmd' in l ? <div key={i}><span>❯</span> <span>{l.cmd}</span><span className="inline-block w-[7px]" /></div> : <div key={i}>{l.out}</div>)}
+          <div>❯ </div>
+        </div>
+        <div role="log" aria-live="off" className="min-w-0">
+          {shown.map((l, i) => l.cmd !== undefined
+            ? <div key={i}><span className="text-[var(--ok)]">❯</span> <span>{l.cmd}</span>{l.typing && <span className={cursor} />}</div>
+            : <motion.div key={i} initial={reduce ? false : { opacity: 0 }} animate={{ opacity: 1 }} transition={{ duration: 0.2 }}>{l.out}</motion.div>)}
+          {done && <div><span className="text-[var(--ok)]">❯</span> <span className={cursor} /></div>}
+        </div>
       </div>
     </div>
   )
@@ -387,10 +420,10 @@ export function Diff({ before, after, filename, language, hunk, defaultMode = 'u
       </div>
       <motion.div key={mode} initial={{ opacity: 0 }} animate={{ opacity: 1 }} transition={{ duration: 0.2 }}>
         {mode === 'unified'
-          ? <CodeRows lang={lang} rows={[head, ...rows.map((r): CodeRow => ({ text: r.text, no: r.type === '-' ? r.a : r.b, kind: r.type === '+' ? 'add' : r.type === '-' ? 'del' : undefined }))]} />
+          ? <CodeRows lang={lang} label={`Changes to ${filename ?? 'the file'}`} rows={[head, ...rows.map((r): CodeRow => ({ text: r.text, no: r.type === '-' ? r.a : r.b, kind: r.type === '+' ? 'add' : r.type === '-' ? 'del' : undefined }))]} />
           : <div className="grid grid-cols-2">
-              <CodeRows lang={lang} rows={[{ ...head, text: `@@ -1,${A.length} @@` }, ...pairs.map(p => p[0])]} />
-              <CodeRows lang={lang} rows={[{ ...head, text: `@@ +1,${B.length} @@` }, ...pairs.map(p => p[1])]} className="border-l border-[var(--line)]" />
+              <CodeRows lang={lang} label="Before" rows={[{ ...head, text: `@@ -1,${A.length} @@` }, ...pairs.map(p => p[0])]} />
+              <CodeRows lang={lang} label="After" rows={[{ ...head, text: `@@ +1,${B.length} @@` }, ...pairs.map(p => p[1])]} className="border-l border-[var(--line)]" />
             </div>}
       </motion.div>
     </div>

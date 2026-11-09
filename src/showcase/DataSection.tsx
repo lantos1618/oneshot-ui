@@ -1,7 +1,7 @@
 import { useState } from 'react'
 import { motion } from 'motion/react'
-import { Accordion, Avatar, AvatarStack, Badge, Button, DataGrid, DataTable, type GridColumn, Icon, InlineDatePicker, JsonViewer, type ShortcutGroup, ShortcutOverlay, ShortcutSheet, StatCard, TaskList, type Tone, gridFilter, StatGrid, useToast } from '../lib'
-import { Row, Section, Spec } from './kit'
+import { Accordion, Avatar, AvatarStack, Badge, DataGrid, DataTable, type GridColumn, Icon, InlineDatePicker, JsonViewer, Kbd, type ShortcutGroup, ShortcutOverlay, ShortcutSheet, StatCard, TaskList, type Tone, gridFilter, StatGrid, useToast } from '../lib'
+import { Row, Section, Spec, SpecAction } from './kit'
 
 type DataInvoice = { id: string; customer: string; status: string; amount: number }
 const DATA_INVOICES: DataInvoice[] = [
@@ -70,10 +70,10 @@ export function DataSection() {
   }
   return (
     <Section id="data" title="Data display" desc="When data changes, show the change: rows slide, numbers roll, panels grow.">
-      <Spec title="Stat cards" desc="KPI tiles: number, change and a sparkline. Numbers roll on update; churn is better when it falls." span={2}>
-        <Button size="sm" className="-mt-2 self-end [@media(pointer:coarse)]:!h-9" onClick={refresh} aria-label="Refresh data">
-          <motion.span key={spin} className="grid" initial={{ rotate: 0 }} animate={{ rotate: spin ? 360 : 0 }} transition={{ duration: 0.5 }}><Icon name="refresh" size={14} /></motion.span>Refresh
-        </Button>
+      <Spec title="Stat cards" desc="KPI tiles: number, change and a sparkline. Numbers roll on update; churn is better when it falls." span={2}
+        actions={<SpecAction onClick={refresh} aria-label="Refresh data">
+          <motion.span key={spin} className="grid" initial={{ rotate: 0 }} animate={{ rotate: spin ? 360 : 0 }} transition={{ duration: 0.5 }}><Icon name="refresh" size={12} /></motion.span>Refresh
+        </SpecAction>}>
         <StatGrid>
           {DATA_KPIS.map((k, i) => {
             const a = series[i]
@@ -81,7 +81,7 @@ export function DataSection() {
           })}
         </StatGrid>
       </Spec>
-      <Spec title="Sortable table" desc="Click a header; rows slide. Click a row (or Tab to it and press Enter) to open it.">
+      <Spec title="Sortable table" desc="Click a header; rows slide. Click a row to open it." keys={[[['Tab'], 'To a row'], [['↵'], 'Open']]}>
         <DataTable rows={DATA_INVOICES} rowKey={r => r.id} onRowClick={r => toast({ title: `Invoice ${r.id}`, description: `${r.customer} · ${r.status}`, tone: 'info' })} columns={[
           { key: 'customer', label: 'Customer' },
           { key: 'status', label: 'Status', render: r => <Badge tone={DATA_STATUS_TONE[r.status]} dot>{r.status}</Badge> },
@@ -93,13 +93,11 @@ export function DataSection() {
           { title: 'What is included?', content: 'All components, light and dark themes, and keyboard support.' },
           { title: 'Can I use it commercially?', content: 'Yes. Every library used here is MIT licensed.' },
           { title: 'Does it need a build step?', content: 'No. One file you drop into any React project.' },
+          { title: 'How do I theme it?', content: 'Change the CSS variables, or pick a theme in the appearance menu.' },
         ]} />
       </Spec>
       <Spec title="Animated list" desc="Type and press Enter. Tick items off; ✕ removes them smoothly.">
         <TaskList defaultValue={[{ id: 'a', text: 'Review pull request' }, { id: 'b', text: 'Book design critique' }, { id: 'c', text: 'Send weekly update' }]} />
-      </Spec>
-      <Spec title="Date picker" desc="Two modes: a single date, or a range. Type dd/mm/yyyy (slashes fill in) or pick on the calendar.">
-        <InlineDatePicker defaultValue={[today, today]} />
       </Spec>
       <Spec title="Avatars and presence" desc="Stack spreads on hover, focus or tap">
         <div className="flex flex-1 flex-col items-center justify-center gap-5">
@@ -107,19 +105,21 @@ export function DataSection() {
           <Row><Avatar name="Alex Lee" status="online" /><Avatar name="Sam Park" status="away" /><Avatar name="Mia Chen" status="offline" /></Row>
         </div>
       </Spec>
-      <Spec title="Data grid" desc="Filter as Bricks, Text or Scratch-style Blocks (all in sync), search every cell ripgrep-style, group rows with totals, sort, resize columns, shift-click row ranges, double-click a cell to edit (on touch: tap it, then tap again or its pencil). Keyboard: Tab into the cells, arrows move, Enter or F2 edits, Space selects the row." span={3}>
+      <Spec title="Data grid" desc="Filter as Bricks, Text or Scratch-style Blocks (all in sync), search every cell ripgrep-style, group rows with totals, sort, resize columns, shift-click row ranges, double-click a cell to edit (on touch: tap it, then tap again or its pencil)." span={3}
+        keys={[[['Tab'], 'Into the cells'], [['←', '↑', '↓', '→'], 'Move'], [['↵'], 'Edit (or F2)'], [['Space'], 'Select row']]}>
         <DataGrid aria-label="Customers" columns={DATA_GRID_COLS} defaultRows={DATA_CUSTOMERS} rowKey={r => r.id} rowLabel={r => r.name}
           defaultFilter={gridFilter('AND', ['status', 'is', 'Active'], ['mrr', '>', '500'])} defaultSort={{ key: 'mrr', dir: -1 }}
           groupable={['status', 'plan', 'country', 'company']}
           groupSummary={rs => { const mrr = rs.reduce((s, r) => s + r.mrr, 0), seats = rs.reduce((s, r) => s + r.seats, 0); const b = 'font-[family-name:var(--mono)] font-semibold text-[var(--fg2)]'
             return <>MRR <b className={b}>{dataEur(mrr)}</b> · Seats <b className={b}>{seats}</b> · Avg <b className={b}>{dataEur(Math.round(mrr / rs.length))}</b></> }} />
       </Spec>
+      <Spec title="Date picker" desc="Two modes: a single date, or a range. Type dd/mm/yyyy (slashes fill in) or pick on the calendar.">
+        <InlineDatePicker defaultValue={[today, today]} />
+      </Spec>
       <Spec title="JSON viewer" desc="Collapsible tree, typed colours. Filter keys; click a key to copy its path.">
         <JsonViewer data={DATA_JSON} />
       </Spec>
-      <Spec title="Keyboard shortcuts" desc="Grouped sheet. Open ? shows the full sheet as an overlay.">
-        <Button size="sm" className="-mt-2 self-end [@media(pointer:coarse)]:!h-9" onClick={() => setKeys(true)}>Open
- <kbd className="font-[family-name:var(--mono)] text-[11px] text-[var(--fg3)]">?</kbd></Button>
+      <Spec title="Keyboard shortcuts" desc="Grouped sheet. The full sheet opens as an overlay." actions={<SpecAction onClick={() => setKeys(true)}>Open all <Kbd className="leading-none">?</Kbd></SpecAction>}>
         <ShortcutSheet groups={DATA_SHORTCUTS.slice(0, 2)} />
         <ShortcutOverlay open={keys} onOpenChange={setKeys} groups={DATA_SHORTCUTS} />
       </Spec>

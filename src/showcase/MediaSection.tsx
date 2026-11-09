@@ -124,22 +124,23 @@ export function MediaSection() {
   useEffect(() => () => demo?.shared.pause(), [demo])
   return (
     <Section id="media" title="Media" desc="Players, viewers and image layouts. Everything here is generated in the page, so it all works offline.">
-      <Spec title="Video player" desc="Custom controls. Space to play, ←/→ to seek, M to mute, F for fullscreen. On touch, tap shows the controls and double-tap seeks ±5 s." span={2}><VideoDemo /></Spec>
+      <Spec title="Video player" desc="Custom controls. On touch, tap shows the controls and double-tap seeks ±5 s." span={2}
+        keys={[[['Space'], 'Play'], [['←', '→'], 'Seek'], [['M'], 'Mute'], [['F'], 'Fullscreen']]}><VideoDemo /></Spec>
       <Spec title="Audio player" desc="Waveform you can click, tap or drag to seek">
         {demo ? <AudioPlayer track={demo.shared} title="Night Drive" meta="Synth demo · 0:24" cover={demo.cover} peaks={demo.track.peaks} duration={24} /> : <Skeleton className="h-[140px]" />}
       </Spec>
+      <Spec title="Carousel" desc="Snap scrolling, arrows, dots, swipe on touch. Wraps around." span={2}><Carousel slides={demo?.slides ?? placeholderSlides} /></Spec>
+      <Spec title="Before / after" desc="Drag the handle, or use arrow keys"><CompareDemo /></Spec>
+      <Spec title="Masonry gallery" desc="Pinterest-style columns. Filter and resize to watch tiles reflow. Click to open the lightbox; on touch, swipe, pinch to zoom and swipe down to close." span={3}><GalleryDemo /></Spec>
+      <Spec title="Media cards" desc="Card grid with hover lift, save, and a skeleton while loading" span={3}><CardsDemo /></Spec>
+      <Spec title="Image with states" desc="Blur-up loading, error fallback, retry"><ImageStatesDemo /></Spec>
       <Spec title="Compact audio" desc="Slim player and a chat-style voice note. The slim one stays in sync with the full player.">
         {demo ? <>
           <MiniAudioPlayer track={demo.shared} title="Night Drive" duration={24} />
           <VoiceNote src={demo.track.url} peaks={demo.track.peaks} duration={24} />
-        </> : <><Skeleton className="h-12 !rounded-full" /><Skeleton className="ml-auto h-11 w-full max-w-[280px] !rounded-[18px]" /></>}
+        </> : <><Skeleton className="h-12 !rounded-full" /><Skeleton className="ml-auto h-11 w-full max-w-[280px] !rounded-[var(--r-lg)]" /></>}
       </Spec>
-      <Spec title="Masonry gallery" desc="Pinterest-style columns. Filter and resize to watch tiles reflow. Click to open the lightbox; on touch, swipe, pinch to zoom and swipe down to close." span={3}><GalleryDemo /></Spec>
-      <Spec title="Media cards" desc="Card grid with hover lift, save, and a skeleton while loading" span={3}><CardsDemo /></Spec>
-      <Spec title="Carousel" desc="Snap scrolling, arrows, dots, swipe on touch. Wraps around." span={2}><Carousel slides={demo?.slides ?? placeholderSlides} /></Spec>
-      <Spec title="Before / after" desc="Drag the handle, or use arrow keys"><CompareDemo /></Spec>
-      <Spec title="Image with states" desc="Blur-up loading, error fallback, retry"><ImageStatesDemo /></Spec>
-      <Spec title="Avatar upload" desc="Pick a photo, crop it to a circle, zoom with the slider or a pinch" span={2}>{demo ? <AvatarCropper src={demo.avatar} /> : <Skeleton className="h-40" />}</Spec>
+      <Spec title="Avatar upload" desc="Pick a photo, crop it to a circle, zoom with the slider or a pinch">{demo ? <AvatarCropper src={demo.avatar} /> : <Skeleton className="h-40" />}</Spec>
     </Section>
   )
 }

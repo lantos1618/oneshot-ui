@@ -83,37 +83,43 @@ const ShellSectionLink = memo(function ShellSectionLink({ id, label, on, group, 
   return (
     <a href={`#${id}`} data-chip={chip ? id : undefined} onClick={e => { e.preventDefault(); shellJump(id) }} aria-current={on ? 'true' : undefined}
       className={chip
-        ? cn('relative flex-none rounded-lg border border-[var(--line)] px-2.5 py-1.5 text-[13px] whitespace-nowrap no-underline', on ? 'font-medium text-[var(--fg)]' : 'text-[var(--fg2)]')
-        : cn('relative rounded-lg px-2.5 py-1.5 text-[13px] no-underline', on ? 'font-medium text-[var(--fg)]' : 'text-[var(--fg2)] hover:bg-[var(--muted)] hover:text-[var(--fg)]')}>
-      {on && <ActiveIndicator group={group} className={chip ? 'rounded-[7px] bg-[var(--muted)]' : 'rounded-lg bg-[var(--muted)]'} />}<span className="relative">{label}</span>
+        ? cn('relative flex-none rounded-[var(--r-md)] border border-[var(--line)] px-2.5 py-1.5 text-[13px] whitespace-nowrap no-underline', on ? 'font-medium text-[var(--fg)]' : 'text-[var(--fg2)]')
+        : cn('relative rounded-[var(--r-md)] px-2.5 py-1.5 text-[13px] no-underline', on ? 'font-medium text-[var(--fg)]' : 'text-[var(--fg2)] hover:bg-[var(--muted)] hover:text-[var(--fg)]')}>
+      {on && <ActiveIndicator group={group} className={chip ? 'rounded-[calc(var(--r-md)-2px)] bg-[var(--muted)]' : 'rounded-[var(--r-md)] bg-[var(--muted)]'} />}<span className="relative">{label}</span>
     </a>
   )
 })
 
 type ShellNavProps = { ordered: SpecEntry[]; query: string; setQuery: (q: string) => void; total: number; filterRef: RefObject<HTMLInputElement | null>; goSpec: (s: SpecEntry, flash?: boolean) => void }
 
-/** Desktop sidebar: filter box, sections, and the subnav of the section on screen (tracks the card in view). */
+/**
+ * Desktop sidebar: filter box, the section list, and below it a panel with the cards of the section on screen (it
+ * tracks the card in view). The section links never move: the panel under them swaps its content and scrolls on
+ * its own, so changing section doesn't reflow the list. While filtering, the panel lists every match instead.
+ */
 const ShellSideNav = memo(function ShellSideNav({ ordered, query, setQuery, total, filterRef, goSpec }: ShellNavProps) {
   const active = useShellActiveSection()
   const [activeSpec, setActiveSpec] = useState('')
-  const sideRef = useRef<HTMLElement>(null)
-  const group = useId()
+  const sideRef = useRef<HTMLElement>(null), subRef = useRef<HTMLDivElement>(null)
+  const group = useId(), subId = useId()
   useEffect(() => { // which card is on screen: one observer for all cards
     if (!sideRef.current?.offsetParent) return // hidden on mobile: don't track
     const io = new IntersectionObserver(es => es.forEach(e => e.isIntersecting && setActiveSpec(e.target.id)), { rootMargin: '-35% 0px -60% 0px' })
     ordered.forEach(s => { const el = document.getElementById(s.id); if (el) io.observe(el) })
     return () => io.disconnect()
   }, [ordered])
-  useEffect(() => { // keep the current subnav link in view
-    const nav = sideRef.current, a = nav?.querySelector<HTMLElement>(`[data-sub="${activeSpec}"]`)
-    if (!nav || !a) return
-    const r = a.getBoundingClientRect(), nr = nav.getBoundingClientRect()
-    if (r.top < nr.top + 20 || r.bottom > nr.bottom - 20) nav.scrollTo({ top: a.offsetTop - nav.clientHeight / 2, behavior: shellReduce() ? 'auto' : 'smooth' })
-  }, [activeSpec])
   const q = query.trim()
+  const subs = q ? ordered.filter(s => specMatches(s, query)) : ordered.filter(s => s.section === active)
+  useEffect(() => { // keep the current card's link in view, scrolling only the panel
+    const box = subRef.current, a = box?.querySelector<HTMLElement>(`[data-sub="${activeSpec}"]`)
+    if (!box || !a) return
+    const r = a.getBoundingClientRect(), br = box.getBoundingClientRect()
+    if (r.top < br.top + 8 || r.bottom > br.bottom - 8) box.scrollTo({ top: a.offsetTop - box.clientHeight / 2, behavior: shellReduce() ? 'auto' : 'smooth' })
+  }, [activeSpec, active])
+  const sectionLabel = Object.fromEntries(SECTIONS) as Record<string, string>
   return (
     <nav ref={sideRef} aria-label="Sections"
-      className="sticky top-[calc(env(safe-area-inset-top,0px)+76px)] hidden max-h-[calc(100vh-env(safe-area-inset-top,0px)-96px)] flex-col gap-0.5 self-start overflow-auto pb-5 [scrollbar-width:thin] min-[900px]:flex">
+      className="sticky top-[calc(env(safe-area-inset-top,0px)+76px)] hidden max-h-[calc(100vh-env(safe-area-inset-top,0px)-96px)] flex-col self-start overflow-auto pb-5 [scrollbar-width:thin] min-[900px]:flex">
       <div className="relative mb-2.5 flex-none">
         <Icon name="search" size={13} strokeWidth={2.2} className="pointer-events-none absolute top-[9.5px] left-[9px] text-[var(--fg3)]" />
         <input ref={filterRef} value={query} onChange={e => setQuery(e.target.value)} placeholder="Search by name or use case" aria-label="Filter components by name or use case"
@@ -121,30 +127,29 @@ const ShellSideNav = memo(function ShellSideNav({ ordered, query, setQuery, tota
           className="h-8 w-full rounded-[var(--r-md)] border border-[var(--line)] bg-[var(--card)] pr-8 pl-7 text-[13px] text-[var(--fg)] outline-none placeholder:text-xs placeholder:text-[var(--fg3)] focus:border-[var(--fg3)] focus:shadow-[0_0_0_3px_var(--muted)]" />
         <Kbd className="ui-num pointer-events-none absolute top-[7px] right-1.5" aria-live="polite">{q ? total : '/'}</Kbd>
       </div>
-      {SECTIONS.map(([id, label]) => {
-        const subs = ordered.filter(s => s.section === id)
-        const visible = q ? subs.filter(s => specMatches(s, query)) : subs
-        const on = active === id
-        return (
-          <div key={id} className={cn('flex flex-none flex-col', q && subs.length > 0 && !visible.length && 'opacity-40')}>
-            <ShellSectionLink id={id} label={label} on={on} group={group} />
-            {/* CSS grid-rows collapse, not motion's height:auto: measuring auto heights resets window scroll and would stop smooth jumps mid-way */}
-            <div className={cn('grid transition-[grid-template-rows,opacity] duration-300 ease-out motion-reduce:transition-none', on && visible.length > 0 ? 'grid-rows-[1fr] opacity-100' : 'grid-rows-[0fr] opacity-0')}>
-              <div className="min-h-0 overflow-hidden" inert={!on || undefined}>
-                {on && (
-                  <div className="my-0.5 ml-2.5 flex flex-col border-l border-[var(--line)] pl-2">
-                    {visible.map(s => (
-                      <a key={s.id} href={`#${s.id}`} data-sub={s.id} onClick={e => { e.preventDefault(); goSpec(s, false); history.replaceState(null, '', `#${s.id}`) }}
-                        className={cn('truncate rounded-md px-2 py-1 text-xs no-underline hover:bg-[var(--muted)] hover:text-[var(--fg)]',
-                          activeSpec === s.id ? 'bg-[var(--muted)] text-[var(--fg)]' : 'text-[var(--fg3)]')}>{s.title}</a>
-                    ))}
-                  </div>
-                )}
-              </div>
+      <div className="flex flex-none flex-col gap-0.5">
+        {SECTIONS.map(([id, label]) => {
+          const none = !!q && !ordered.some(s => s.section === id && specMatches(s, query))
+          return <div key={id} className={cn('flex flex-col', none && 'opacity-40')}><ShellSectionLink id={id} label={label} on={active === id} group={group} /></div>
+        })}
+      </div>
+      <div className="mt-3 flex min-h-[120px] flex-1 flex-col border-t border-[var(--line)] pt-2.5">
+        <h2 id={subId} className="m-0 mb-1 flex flex-none items-baseline justify-between px-2.5 text-[11px] font-medium tracking-wide text-[var(--fg3)] uppercase">
+          <span className="truncate">{q ? 'Matches' : sectionLabel[active]}</span><span className="ui-num w-8 flex-none text-right normal-case">{subs.length}</span>
+        </h2>
+        <div ref={subRef} role="list" aria-labelledby={subId} className="relative min-h-0 flex-1 overflow-auto overscroll-contain [scrollbar-width:thin]">
+          {subs.map((s, i) => (
+            <div key={s.id} role="listitem">
+              {q && s.section !== subs[i - 1]?.section && <span aria-hidden className="mt-1.5 block px-2.5 text-[11px] text-[var(--fg3)]">{sectionLabel[s.section]}</span>}
+              <a href={`#${s.id}`} data-sub={s.id} aria-current={activeSpec === s.id ? 'location' : undefined}
+                onClick={e => { e.preventDefault(); goSpec(s, false); history.replaceState(null, '', `#${s.id}`) }}
+                className={cn('block truncate rounded-[var(--r-md)] px-2.5 py-1 text-xs no-underline hover:bg-[var(--muted)] hover:text-[var(--fg)]',
+                  activeSpec === s.id ? 'bg-[var(--muted)] text-[var(--fg)]' : 'text-[var(--fg2)]')}>{s.title}</a>
             </div>
-          </div>
-        )
-      })}
+          ))}
+          {q && !subs.length && <span className="block px-2.5 py-1 text-xs text-[var(--fg3)]">No matches</span>}
+        </div>
+      </div>
     </nav>
   )
 })
@@ -181,7 +186,7 @@ const ShellChipNav = memo(function ShellChipNav({ query, setQuery, total, search
       ) : (
         <div ref={chipsRef} className="-mx-[max(16px,env(safe-area-inset-left))] flex gap-1.5 overflow-x-auto px-[max(16px,env(safe-area-inset-left))] [scrollbar-width:none] sm:-mx-5 sm:px-5">
           <button type="button" onClick={() => { setSearching(true); requestAnimationFrame(() => filterRef.current?.focus()) }} aria-label="Filter components"
-            className="inline-flex flex-none cursor-pointer items-center gap-1.5 rounded-lg border border-[var(--line)] bg-[var(--card)] px-2.5 py-1.5 text-[13px] whitespace-nowrap text-[var(--fg2)]">
+            className="inline-flex flex-none cursor-pointer items-center gap-1.5 rounded-[var(--r-md)] border border-[var(--line)] bg-[var(--card)] px-2.5 py-1.5 text-[13px] whitespace-nowrap text-[var(--fg2)]">
             <Icon name="search" size={14} />Filter
           </button>
           {SECTIONS.map(([id, label]) => <ShellSectionLink key={id} id={id} label={label} on={active === id} group={group} chip />)}
@@ -288,12 +293,13 @@ function ShowcaseBody() {
     <ShellContext.Provider value={shell}>
       <header className="sticky top-[env(safe-area-inset-top,0px)] z-40 border-b border-[var(--line)] bg-[color-mix(in_srgb,var(--bg)_85%,transparent)] backdrop-blur-md">
         <div className="mx-auto flex h-14 max-w-[1320px] items-center gap-2 pr-[max(16px,env(safe-area-inset-right))] pl-[max(16px,env(safe-area-inset-left))] sm:gap-3 sm:px-5">
-          <span className="flex items-center gap-2 font-semibold tracking-tight whitespace-nowrap"><i className="inline-block h-[18px] w-[18px] rounded-[5px] bg-[var(--primary)]" />UI library</span>
+          <span className="flex items-center gap-2 font-semibold tracking-tight whitespace-nowrap"><i className="inline-block h-[18px] w-[18px] rounded-[var(--r-sm)] bg-[var(--primary)]" />UI library</span>
           <span className="hidden text-xs text-[var(--fg3)] sm:inline">React · Motion · Tailwind</span>
           <span className="flex-1" />
-          <Button onClick={() => setPalette(true)} aria-label="Search components" className="max-[900px]:!w-9 max-[900px]:!px-0 min-[900px]:min-w-[220px] min-[900px]:!justify-between">
-            <span className="flex items-center gap-2 font-normal text-[var(--fg3)]"><Icon name="search" size={14} /><span className="max-[900px]:hidden">Search components</span></span>
-            <Kbd className="max-[900px]:hidden">⌘K</Kbd>
+          <Button onClick={() => setPalette(true)} className="max-[900px]:!w-9 max-[900px]:!px-0 min-[900px]:min-w-[220px] min-[900px]:!justify-between">
+            {/* the visible words are the name (no aria-label to mismatch); below 900px only the icon shows, so the words stay for screen readers */}
+            <span className="flex items-center gap-2 font-normal text-[var(--fg3)]"><Icon name="search" size={14} /><span className="max-[900px]:sr-only">Search components</span></span>
+            <span aria-hidden className="max-[900px]:hidden"><Kbd>⌘K</Kbd></span>
           </Button>
           <DesignQAButton />
           <AppearanceMenu open={appearance} onOpenChange={setAppearance} />

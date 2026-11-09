@@ -201,6 +201,36 @@ export function Scheduler({ events, defaultEvents = [], onChange, defaultView = 
     if (o && (o.start !== d.ev.start || o.duration !== d.ev.duration || !sameDay(o.date, d.ev.date))) commit(ref.current.map(x => x.id === d.ev.id ? d.ev : x))
   }
 
+  /* ---- keyboard on a focused event: ← / → move it a day, ↑ / ↓ by 15 minutes (Shift: resize); focus stays on it ---- */
+  const [said, setSaid] = useState('')
+  const refocus = useRef<string | null>(null)
+  useEffect(() => { // after a keyboard move the event may re-render in another column (or period): put focus back on it
+    const id = refocus.current; if (!id) return
+    let n = 0, raf = 0
+    const tryFocus = () => {
+      const el = root.current?.querySelector<HTMLElement>(`[data-sc-ev="${CSS.escape(id)}"]`)
+      if (el) { refocus.current = null; if (document.activeElement !== el) el.focus({ preventScroll: false }) } else if (n++ < 40) raf = requestAnimationFrame(tryFocus)
+    }
+    tryFocus()
+    return () => cancelAnimationFrame(raf)
+  })
+  const keyEvent = (e: RKeyboardEvent, ev: SchedulerEvent, days: Date[]) => {
+    if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); e.stopPropagation(); setPicked(p => p === ev.id ? null : ev.id); return }
+    const dDay = e.key === 'ArrowLeft' ? -1 : e.key === 'ArrowRight' ? 1 : 0, dMin = e.key === 'ArrowUp' ? -SC_SNAP : e.key === 'ArrowDown' ? SC_SNAP : 0
+    if (!dDay && !dMin) return
+    e.preventDefault(); e.stopPropagation() // never let the scheduler page through time while an event has focus
+    let next: SchedulerEvent
+    if (dMin && e.shiftKey) next = { ...ev, duration: Math.max(SC_SNAP, Math.min(H1 - ev.start, ev.duration + dMin)) }
+    else if (dMin) next = { ...ev, start: Math.max(H0, Math.min(H1 - ev.duration, ev.start + dMin)) }
+    else next = { ...ev, date: addDays(ev.date, dDay) }
+    if (next.start === ev.start && next.duration === ev.duration && sameDay(next.date, ev.date)) return
+    commit(ref.current.map(x => x.id === ev.id ? next : x))
+    refocus.current = ev.id
+    // moved past the visible days: page along with it
+    if (dDay && !days.some(d => sameDay(d, next.date))) { setTrans({ dir: dDay }); setCur(view === 'day' ? startOfDay(next.date) : view === '3day' ? addDays(cur, 3 * dDay) : addDays(cur, 7 * dDay)) }
+    setSaid(`${next.title}: ${scFmt(next.date, { weekday: 'long', day: 'numeric', month: 'long' })}, ${scHM(next.start)} to ${scHM(next.start + next.duration)}`)
+  }
+
   const finishName = (ev: SchedulerEvent, value: string | null) => {
     if (namingRef.current !== ev.id) return
     setNaming(null)
@@ -240,10 +270,10 @@ export function Scheduler({ events, defaultEvents = [], onChange, defaultView = 
             {days.map(d => {
               const td = sameDay(d, today), wide = view !== 'day'
               return (
-                <button key={+d} onClick={() => wide && go('day', d)} aria-label={scFmt(d, { weekday: 'long', day: 'numeric', month: 'long' })} data-sc-today={td && swipeWeek ? '' : undefined}
+                <button key={+d} onClick={() => wide && go('day', d)} aria-label={`${scFmt(d, { weekday: 'short' })} ${d.getDate()}, ${scFmt(d, { weekday: 'long', day: 'numeric', month: 'long' })}`} data-sc-today={td && swipeWeek ? '' : undefined}
                   className={cn('sticky top-0 z-[7] snap-start border-0 border-b border-[var(--line)] bg-[var(--card)] px-1.5 py-2 text-center text-xs text-[var(--fg3)]', wide && 'cursor-pointer hover:bg-[var(--muted)]')}>
-                  {scFmt(d, { weekday: 'short' })}
-                  <b className={cn('mx-auto block text-[17px] leading-tight font-semibold', td ? 'mt-0.5 h-[30px] w-[30px] rounded-full bg-[var(--bad)] leading-[30px] text-[var(--card)]' : 'text-[var(--fg)]')}>{ready ? d.getDate() : '\u00a0'}</b>
+                  {scFmt(d, { weekday: 'short' })}{' '}{/* the space keeps the visible text "Mon 9", which starts the name */}
+                  <b className={cn('mx-auto block text-base leading-tight font-semibold', td ? 'mt-0.5 h-[30px] w-[30px] rounded-full bg-[var(--bad)] leading-[30px] text-[var(--card)]' : 'text-[var(--fg)]')}>{ready ? d.getDate() : '\u00a0'}</b>
                 </button>
               )
             })}
@@ -266,10 +296,11 @@ export function Scheduler({ events, defaultEvents = [], onChange, defaultView = 
                   {evs.map(ev => {
                     const h = Math.max(18, ev.duration * hr - 2), isLive = live?.id === ev.id, people = ev.attendees ?? [], sel = picked === ev.id && !isLive
                     return (
-                      <motion.div key={ev.id} data-sc-ev layout={!isLive} initial={naming === ev.id ? { scale: 0.96 } : false} animate={{ scale: 1 }} transition={spring(0.4, 0.3)}
-                        onPointerDown={e => downEvent(e, ev)} role="button" tabIndex={0} aria-label={`${ev.title}, ${scHM(ev.start)} to ${scHM(ev.start + ev.duration)}`} aria-pressed={picked === ev.id}
-                        onKeyDown={e => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); setPicked(p => p === ev.id ? null : ev.id) } }}
-                        className={cn('absolute right-[3px] left-[3px] flex cursor-grab flex-col overflow-hidden rounded-lg px-2 py-1 text-xs leading-[1.3] outline-none [@media(pointer:coarse)]:min-h-8 select-none [-webkit-touch-callout:none] focus-visible:shadow-[inset_0_0_0_2px_var(--ec)] [@media(pointer:fine)]:touch-none',
+                      <motion.div key={ev.id} data-sc-ev={ev.id} layout={!isLive} initial={naming === ev.id ? { scale: 0.96 } : false} animate={{ scale: 1 }} transition={spring(0.4, 0.3)}
+                        onPointerDown={e => downEvent(e, ev)} role="button" tabIndex={0} aria-pressed={picked === ev.id}
+                        aria-keyshortcuts="ArrowLeft ArrowRight ArrowUp ArrowDown" aria-description="Arrows move it, Shift with up or down changes its length"
+                        onKeyDown={e => keyEvent(e, ev, days)}
+                        className={cn('absolute right-[3px] left-[3px] flex cursor-grab flex-col overflow-hidden rounded-[var(--r-md)] px-2 py-1 text-xs leading-[1.3] outline-none [@media(pointer:coarse)]:min-h-8 select-none [-webkit-touch-callout:none] focus-visible:shadow-[inset_0_0_0_2px_var(--ec)] [@media(pointer:fine)]:touch-none',
                           narrow && 'px-1.5',
                           'bg-[color-mix(in_srgb,var(--ec)_13%,var(--card))] text-[color-mix(in_srgb,var(--ec)_60%,var(--fg))] shadow-[inset_0_0_0_1px_color-mix(in_srgb,var(--ec)_30%,transparent)]',
                           sel && 'z-[5] touch-none overflow-visible shadow-[inset_0_0_0_2px_var(--ec),0_6px_16px_rgba(0,0,0,.14)]',
@@ -327,9 +358,9 @@ export function Scheduler({ events, defaultEvents = [], onChange, defaultView = 
                 <button onClick={() => go('day', d)} aria-label={`Open ${scFmt(d, { weekday: 'long', day: 'numeric', month: 'long' })}`}
                   className={cn('h-[26px] w-[26px] cursor-pointer self-end rounded-full border-0 text-xs font-medium [@media(pointer:coarse)]:h-8 [@media(pointer:coarse)]:w-8', sameDay(d, today) ? 'bg-[var(--bad)] text-[var(--card)]' : 'bg-transparent text-[var(--fg2)] hover:bg-[var(--muted)] hover:text-[var(--fg)]', out && 'opacity-45')}>{d.getDate()}</button>
                 {evs.slice(0, 3).map(e => (
-                  <div key={e.id} onPointerDown={ev => downChip(ev, e)} title={`${e.title} · ${scHM(e.start)}`} role="button" tabIndex={0}
-                    onKeyDown={k => k.key === 'Enter' && go('day', new Date(e.date))}
-                    className={cn('flex cursor-grab items-center gap-1.5 overflow-hidden rounded-md px-1.5 py-0.5 text-xs leading-tight whitespace-nowrap select-none [-webkit-touch-callout:none] hover:bg-[var(--muted)] [@media(pointer:coarse)]:min-h-8 [@media(pointer:fine)]:touch-none', out && 'opacity-45', chipDrag?.ev.id === e.id && 'opacity-30')}>
+                  <div key={e.id} data-sc-chip onPointerDown={ev => downChip(ev, e)} title={`${e.title} · ${scHM(e.start)}`} role="button" tabIndex={0}
+                    onKeyDown={k => { if (k.key === 'Enter' || k.key === ' ') { k.preventDefault(); go('day', new Date(e.date)) } }}
+                    className={cn('flex cursor-grab items-center gap-1.5 overflow-hidden rounded-[var(--r-md)] px-1.5 py-0.5 text-xs leading-tight whitespace-nowrap select-none [-webkit-touch-callout:none] hover:bg-[var(--muted)] [@media(pointer:coarse)]:min-h-8 [@media(pointer:fine)]:touch-none', out && 'opacity-45', chipDrag?.ev.id === e.id && 'opacity-30')}>
                     <i className="h-1.5 w-1.5 flex-none rounded-full" style={{ background: safeColor(e.color, 'var(--accent)') }} />
                     <span className="hidden flex-none font-[family-name:var(--mono)] text-[11px] text-[var(--fg3)] sm:inline">{scHM(e.start)}</span><span className="truncate">{e.title}</span>
                   </div>
@@ -340,7 +371,7 @@ export function Scheduler({ events, defaultEvents = [], onChange, defaultView = 
           })}
         </div>
         {chipDrag && (
-          <div className="pointer-events-none fixed z-[150] flex items-center gap-1.5 rounded-md bg-[var(--card)] px-1.5 py-0.5 text-xs whitespace-nowrap shadow-[var(--shadow)]" style={{ left: chipDrag.x, top: chipDrag.y, width: chipDrag.w }}>
+          <div className="pointer-events-none fixed z-[150] flex items-center gap-1.5 rounded-[var(--r-md)] bg-[var(--card)] px-1.5 py-0.5 text-xs whitespace-nowrap shadow-[var(--shadow)]" style={{ left: chipDrag.x, top: chipDrag.y, width: chipDrag.w }}>
             <i className="h-1.5 w-1.5 flex-none rounded-full" style={{ background: safeColor(chipDrag.ev.color, 'var(--accent)') }} />
             <span className="font-[family-name:var(--mono)] text-[11px] text-[var(--fg3)]">{scHM(chipDrag.ev.start)}</span><span className="truncate">{chipDrag.ev.title}</span>
           </div>
@@ -357,7 +388,7 @@ export function Scheduler({ events, defaultEvents = [], onChange, defaultView = 
           const first = new Date(y, m, 1), n = new Date(y, m + 1, 0).getDate(), lead = (first.getDay() + 6) % 7
           const days = Array.from({ length: n }, (_, i) => {
             const d = new Date(y, m, i + 1), c = on(d).length, td = sameDay(d, today)
-            const cls = cn('grid aspect-square place-items-center rounded p-0 text-[11px] font-medium', td ? 'bg-[var(--bad)] text-[var(--card)]' : 'text-[var(--fg2)]')
+            const cls = cn('grid aspect-square place-items-center rounded-[var(--r-sm)] p-0 text-[11px] font-medium', td ? 'bg-[var(--bad)] text-[var(--card)]' : 'text-[var(--fg2)]')
             const bg = td ? undefined : { background: `color-mix(in srgb,var(--accent) ${Math.round(Math.min(1, c / 4) * 55)}%,transparent)` }
             // phone: days are too small to tap, so the whole month is the button (opens Month view)
             return narrow ? <span key={i} className={cls} style={bg}>{i + 1}</span>
@@ -386,11 +417,14 @@ export function Scheduler({ events, defaultEvents = [], onChange, defaultView = 
     )
   }
 
+  const card = useRef<HTMLDivElement>(null)
   const onKey = (e: RKeyboardEvent) => {
-    if ((e.target as HTMLElement).closest('input,[role=group]')) return
-    if (e.key === 'ArrowLeft') { e.preventDefault(); shift(-1) }
-    if (e.key === 'ArrowRight') { e.preventDefault(); shift(1) }
-    if (e.key === 'Escape') setPicked(null)
+    if (e.key === 'Escape') { setPicked(null); return }
+    // events and chips handle their own arrows; inputs and groups keep theirs
+    if (e.defaultPrevented || (e.target as HTMLElement).closest('input,[role=group],[data-sc-ev],[data-sc-chip]')) return
+    if (e.key !== 'ArrowLeft' && e.key !== 'ArrowRight') return
+    e.preventDefault(); shift(e.key === 'ArrowLeft' ? -1 : 1)
+    card.current?.focus({ preventScroll: true }) // the focused control is replaced by the new period: keep focus in the calendar
   }
   const z = trans.zoom ?? 0, dx = trans.dir ?? 0
   const sel = picked ? list.find(x => x.id === picked) : undefined
@@ -424,7 +458,8 @@ export function Scheduler({ events, defaultEvents = [], onChange, defaultView = 
           </motion.div>
         )}
       </AnimatePresence>
-      <div onKeyDown={onKey} tabIndex={-1} className={cn(surface.card, 'overflow-hidden outline-none')}>
+      <span className="sr-only" aria-live="polite">{said}</span>
+      <div ref={card} onKeyDown={onKey} tabIndex={-1} aria-label={`Calendar, ${title}. Left and right arrows change the ${view === 'month' ? 'month' : view === 'year' ? 'year' : 'dates'}`} role="region" className={cn(surface.card, 'overflow-hidden outline-none')}>
         <AnimatePresence mode="wait" initial={false}>
           <motion.div key={`${view}:${period}`} initial={{ opacity: 0, scale: z ? (z > 0 ? 1.02 : 0.98) : 1, x: dx * 16 }} animate={{ opacity: 1, scale: 1, x: 0 }}
             exit={{ opacity: 0, scale: z ? (z > 0 ? 0.98 : 1.02) : 1, x: -dx * 16, transition: { duration: 0.12 } }} transition={spring(0.2, 0.32)}>
@@ -452,9 +487,10 @@ export type OrgNode = { id: string; name: string; role: string; children?: OrgNo
 const OC_W = 170, OC_H = 54, OC_GX = 22, OC_GY = 56
 
 /**
- * Hierarchy laid out as a tidy tree. Connectors draw themselves in after every change. Click a node's count to
- * fold its team (the badge then shows "+N" people hidden); Expand all opens everything. Wide charts scroll
- * horizontally and start centred.
+ * Hierarchy laid out as a tidy tree in a fixed-height canvas that scrolls inside (the page never moves). Connectors
+ * draw themselves in after every change. Click a node's count to fold its team (the badge then shows "+N" people
+ * hidden); Expand all opens everything. Wide charts open scaled to fit the width (down to 55%, then they scroll,
+ * centred); "Actual size" switches to 100%. Nodes move by transform.
  */
 export function OrgChart({ root, defaultCollapsed = [], height = 420, className }:
   { root: OrgNode; defaultCollapsed?: string[]; height?: number; className?: string }) {
@@ -480,8 +516,12 @@ export function OrgChart({ root, defaultCollapsed = [], height = 420, className 
   // hidden nodes tuck under their nearest visible ancestor
   all.forEach(({ n, parent }) => { if (!pos.has(n.id)) { const p = pos.get(parent!.id)!; pos.set(n.id, { x: p.x, y: p.y, shown: false, parent }) } })
   const treeW = x - OC_GX, shown = all.filter(a => pos.get(a.n.id)!.shown)
-  const innerW = Math.max(treeW, width - 2), off = Math.max(0, (width - 2 - treeW) / 2)
-  const innerH = Math.max(maxOf(shown.map(a => pos.get(a.n.id)!.y)) + OC_H + 30, height - 2)
+  const [fit, setFit] = useState(true)
+  const scale = fit && width ? Math.max(0.55, Math.min(1, (width - 26) / treeW)) : 1
+  // layout in unscaled units; the sizer below is the scaled footprint the scroller sees
+  const availW = (width - 2) / scale
+  const innerW = Math.max(treeW + 24, availW), off = Math.max(12, (availW - treeW) / 2)
+  const innerH = Math.max(maxOf(shown.map(a => pos.get(a.n.id)!.y)) + OC_H + 30, (height - 2) / scale)
 
   const [edgeRef, edges] = useScrollEdges<HTMLDivElement>()
   const setBox = useCallback((el: HTMLDivElement | null) => { box.current = el; edgeRef(el) }, []) // eslint-disable-line react-hooks/exhaustive-deps
@@ -498,19 +538,24 @@ export function OrgChart({ root, defaultCollapsed = [], height = 420, className 
   const centred = useRef(false)
 
   useEffect(() => { const el = box.current; if (el && width && !centred.current) { centred.current = true; el.scrollLeft = (el.scrollWidth - el.clientWidth) / 2 } }, [width, box])
+  useEffect(() => { const el = box.current; if (el) el.scrollLeft = (el.scrollWidth - el.clientWidth) / 2 }, [fit]) // eslint-disable-line react-hooks/exhaustive-deps
 
   return (
     <div className={cn('flex flex-col gap-2', className)}>
       <div className="flex items-center justify-between gap-2">
         <span className="hidden text-xs text-[var(--fg3)] [@media(pointer:coarse)]:inline">Drag to pan · tap a count to fold a team</span>
-        <Button size="sm" className={cn('ml-auto', TOUCH.tap36)} onClick={() => { setClosed(new Set()); setVersion(v => v + 1) }} disabled={!closed.size}>Expand all</Button>
+        <span className="ml-auto flex gap-1.5">
+          {(scale < 1 || !fit) && <Button size="sm" className={TOUCH.tap36} aria-pressed={!fit} onClick={() => setFit(f => !f)}>{fit ? 'Actual size' : 'Fit to width'}</Button>}
+          <Button size="sm" className={TOUCH.tap36} onClick={() => { setClosed(new Set()); setVersion(v => v + 1) }} disabled={!closed.size}>Expand all</Button>
+        </span>
       </div>
       <div className="relative">
       <div ref={setBox} role="tree" aria-label="Organisation chart" onPointerDown={startPan}
         className={cn(surface.card, 'relative overflow-auto overscroll-x-contain !bg-[var(--bg)] bg-[radial-gradient(circle,var(--line2)_1px,transparent_1.2px)] bg-[length:18px_18px] [@media(pointer:fine)]:cursor-grab', panning && '[@media(pointer:fine)]:cursor-grabbing select-none')}
         style={{ height }}>
         {width > 0 && (
-          <div className="relative" style={{ width: innerW, height: innerH }}>
+          <div className="relative overflow-hidden" style={{ width: innerW * scale, height: innerH * scale }}>
+          <motion.div className="absolute top-0 left-0 origin-top-left" style={{ width: innerW, height: innerH }} initial={false} animate={{ scale }} transition={spring(0.15, 0.45)}>
             <svg width={innerW} height={innerH} className="pointer-events-none absolute top-0 left-0 overflow-visible" aria-hidden>
               {shown.filter(a => a.parent).map(({ n, parent }) => {
                 const p = pos.get(parent!.id)!, c = pos.get(n.id)!
@@ -523,13 +568,13 @@ export function OrgChart({ root, defaultCollapsed = [], height = 420, className 
               const p = pos.get(n.id)!, kids = n.children?.length ?? 0, isClosed = closed.has(n.id)
               return (
                 <motion.div key={n.id} role="treeitem" aria-expanded={kids ? !isClosed : undefined} aria-hidden={!p.shown || undefined}
-                  initial={false} animate={{ left: p.x + off, top: p.y, opacity: p.shown ? 1 : 0 }} transition={spring(0.15, 0.45)}
-                  className={cn(surface.card, 'absolute flex items-center gap-2.5 px-3 py-2.5 shadow-[0_1px_2px_rgba(0,0,0,.05)]', p.shown ? 'z-[1]' : 'pointer-events-none z-0')}
+                  initial={false} animate={{ x: p.x + off, y: p.y, opacity: p.shown ? 1 : 0 }} transition={spring(0.15, 0.45)}
+                  className={cn(surface.card, 'absolute top-0 left-0 flex items-center gap-2.5 px-3 py-2.5 shadow-[0_1px_2px_rgba(0,0,0,.05)]', p.shown ? 'z-[1]' : 'pointer-events-none z-0')}
                   style={{ width: OC_W, height: OC_H }}>
                   <Avatar name={n.name} size={32} className="!border-0" />
                   <div className="min-w-0"><b className="block truncate text-[13px] leading-tight font-semibold">{n.name}</b><span className="block truncate text-[11px] text-[var(--fg3)]">{n.role}</span></div>
                   {kids > 0 && (
-                    <button onClick={() => toggle(n.id)} tabIndex={p.shown ? 0 : -1} aria-label={`${isClosed ? 'Expand' : 'Collapse'} ${n.name}’s team`}
+                    <button onClick={() => toggle(n.id)} tabIndex={p.shown ? 0 : -1} aria-label={isClosed ? `+${count(n)} hidden, expand ${n.name}’s team` : `${kids} reports, collapse ${n.name}’s team`}
                       className={cn('absolute -bottom-[11px] left-1/2 h-[22px] min-w-[22px] -translate-x-1/2 cursor-pointer rounded-full border px-1.5 font-[family-name:var(--mono)] text-[11px] font-semibold [@media(pointer:coarse)]:-bottom-4 [@media(pointer:coarse)]:h-8 [@media(pointer:coarse)]:min-w-8 [@media(pointer:coarse)]:px-2 [@media(pointer:coarse)]:text-xs',
                         isClosed ? 'border-[var(--primary)] bg-[var(--primary)] text-[var(--on-primary)]' : 'border-[var(--line)] bg-[var(--card)] text-[var(--fg2)] hover:border-[var(--fg3)] hover:text-[var(--fg)]')}>
                       {isClosed ? `+${count(n)}` : kids}
@@ -538,6 +583,7 @@ export function OrgChart({ root, defaultCollapsed = [], height = 420, className 
                 </motion.div>
               )
             })}
+          </motion.div>
           </div>
         )}
       </div>
@@ -567,10 +613,16 @@ function ScEventBody({ title, time, people, height, naming }: { title: string; t
           <span aria-hidden className="mr-1.5 inline-block h-1.5 w-1.5 rounded-full bg-[var(--ec)] align-[2px]" />{title}
         </b>
       )}
-      {fit < 2 && <span className="text-[11px] opacity-80 [overflow-wrap:anywhere]">{time}</span>}
+      {' '/* keeps "Title 09:00 – 10:00" readable as one name */}
+      {fit < 2 && <span className="text-[11px] text-[color-mix(in_srgb,var(--ec)_45%,var(--fg))] [overflow-wrap:anywhere]">{time}</span>}
+      {/* the event's accessible name comes from this content: title, time (even when hidden for space) and attendees */}
+      {fit >= 2 && <span className="sr-only">{time}</span>}
+      {people.length > 0 && <span className="sr-only">, with {people.join(', ')}</span>}
       {fit < 1 && people.length > 0 && (
-        <AvatarStack names={people} max={3} size={coarse ? 24 : 20} spread={false}
-          className="!items-start pt-1 [&_span[title]]:!border-[1.5px] [&_span[title]]:[@media(pointer:coarse)]:!text-[11px]" />
+        <div aria-hidden>
+          <AvatarStack names={people} max={3} size={coarse ? 24 : 20} spread={false}
+            className="!items-start pt-1 [&_span[title]]:!border-[1.5px] [&_span[title]]:[@media(pointer:coarse)]:!text-[11px]" />
+        </div>
       )}
     </div>
   )

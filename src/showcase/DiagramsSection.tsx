@@ -126,7 +126,7 @@ export function DiagramsSection() {
       </Spec>
       <Spec title="Sankey" desc="Flows between stages. Hover or tap a ribbon or a node to isolate it.">
         <Sankey sources={[{ label: 'Organic', color: 'var(--c2)' }, { label: 'Paid', color: 'var(--c3)' }]} targets={[{ label: 'Signed up', color: 'var(--ok)' }, { label: 'Bounced', color: 'var(--fg3)' }, { label: 'Browsing', color: 'var(--warn)' }]}
-          links={[[0, 0, 30], [0, 1, 18], [0, 2, 12], [1, 0, 15], [1, 1, 17], [1, 2, 8]]} />
+          links={[[0, 0, 30], [0, 1, 18], [0, 2, 12], [1, 0, 15], [1, 1, 17], [1, 2, 8]]} height={300} />
       </Spec>
       <Spec span={2} title="Network graph" desc="Force layout. Drag nodes, hover or tap one to see its connections.">
         <NetworkGraph nodes={NET_NODES} links={NET_LINKS} groups={NET_GROUPS} />

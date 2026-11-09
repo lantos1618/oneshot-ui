@@ -1,9 +1,9 @@
 import { useEffect, useMemo, useState } from 'react'
 import {
-  BarList, BoxViolinChart, BulletChart, Button, CalendarHeatmap, Chart, DensityHistogram, DonutChart, ForestPlot, FunnelChart, Gauge, Heatmap, Icon, IconButton, LOCALE, RadarChart,
-  RegressionChart, ScatterChart, SegmentedControl, Slider, SparkChart, SparkTile, TOUCH, TickerTable, Treemap, dayKey, describeSample, useViewport, type ChartDatum, type TickerRow,
+  BarList, BoxViolinChart, BulletChart, Button, CalendarHeatmap, Chart, DensityHistogram, DonutChart, ForestPlot, FunnelChart, Gauge, Heatmap, LOCALE, RadarChart,
+  RegressionChart, ScatterChart, SegmentedControl, Slider, SparkChart, SparkTile, Switch, TOUCH, TickerTable, Treemap, dayKey, describeSample, useViewport, type ChartDatum, type TickerRow,
 } from '../lib'
-import { Row, Section, Spec } from './kit'
+import { Row, Section, Spec, SpecAction } from './kit'
 
 /* Demo data mirrors the original page: same generators and seeds, so the shapes match. */
 const chartsLcg = (seed: number) => () => (seed = (seed * 9301 + 49297) % 233280) / 233280
@@ -43,7 +43,7 @@ const WATERFALL: ChartDatum[] = (() => {
   rows.push({ l: 'End', from: 0, to: run, text: String(run), kind: 'end' })
   return rows
 })()
-const WATERFALL_COLORS: Record<string, string> = { total: 'var(--line2)', up: 'var(--ok)', down: 'var(--bad)', end: 'var(--c1)' }
+const WATERFALL_COLORS: Record<string, string> = { total: 'var(--line2)', up: 'var(--ok)', down: 'var(--bad)', end: 'var(--c-neutral)' }
 const COMBO = CHART_DAYS.map((d, i) => ({ d, orders: [120, 150, 132, 170, 190, 90, 80][i], conv: [3.1, 3.4, 3.2, 3.9, 4.2, 2.8, 2.6][i] }))
 const HISTOGRAM = Array.from({ length: 18 }, (_, i) => ({ b: `${i * 5}ms`, n: Math.round(60 * Math.exp(-(((i - 8) / 3.6) ** 2)) + (i % 3) * 2 + 2) }))
 const CANDLES: ChartDatum[] = (() => {
@@ -63,7 +63,7 @@ const { HEAT, CALENDAR } = (() => {
   }
   return { HEAT, CALENDAR }
 })()
-const TREEMAP_START = [['Engineering', 'var(--c2)', 42], ['Sales', 'var(--c3)', 24], ['Design', 'var(--c4)', 14], ['Ops', 'var(--c1)', 11], ['Other', 'var(--fg3)', 9]].map(([label, color, value]) => ({ label: label as string, color: color as string, value: value as number }))
+const TREEMAP_START = [['Engineering', 'var(--c2)', 42], ['Sales', 'var(--c3)', 24], ['Design', 'var(--c4)', 14], ['Ops', 'var(--c-neutral)', 11], ['Other', 'var(--fg3)', 9]].map(([label, color, value]) => ({ label: label as string, color: color as string, value: value as number }))
 const TICKERS: TickerRow[] = ([['NOVA', 'Nova Systems', 142.3], ['QLX', 'Quill Labs', 58.9], ['ARC', 'Arcwise', 311.6], ['MRD', 'Meridian Co', 23.4], ['HLX', 'Helix Bio', 87.2]] as const).map(([symbol, name, p], k) => {
   const r = chartsPark(100 + k), a: number[] = []
   let x = p * 0.94
@@ -90,6 +90,8 @@ const genForest = () => FP_SEGMENTS.map(label => { const se = 0.015 + statRnd() 
 const CHART_TAP = TOUCH.tap36
 const CHART_SEG = 'self-start'
 
+// candlestick days as dates (fixed start, so server and client render the same labels)
+const candleDate = (t: unknown) => new Intl.DateTimeFormat('en-GB', { day: 'numeric', month: 'short', timeZone: 'UTC' }).format(Date.UTC(2026, 9, 1) + (Number(t) - 1) * 864e5)
 const ebNote = { sd: 'Standard deviation: spread of the data', se: 'Standard error: precision of the mean', ci: 'Non-overlapping 95% CIs suggest a real difference' }
 
 export function ChartsSection() {
@@ -113,16 +115,16 @@ export function ChartsSection() {
   return (
     <Section id="charts" title="Charts" desc="One SVG kit with shared scales, tooltip, legend and palette. Every chart draws in when it scrolls into view and morphs when its data changes.">
       <Spec title="Line with forecast band" desc="Actual, forecast and 80% range. Switch the range and the lines redraw." span={2}>
-        <SegmentedControl options={['7D', '30D', '90D']} value={range} onChange={setRange} size="sm" className={CHART_SEG} />
+        <SegmentedControl aria-label="Range" options={['7D', '30D', '90D']} value={range} onChange={setRange} size="sm" className={CHART_SEG} />
         <Chart data={FORECAST[range]} x="d" curve="monotone" zero={false} band={{ lower: 'lo', upper: 'hi', label: '80% range' }}
-          series={[{ key: 'actual', label: 'Actual', color: 'var(--c1)' }, { key: 'forecast', label: 'Forecast', dashed: true, color: 'var(--c2)' }]} />
+          series={[{ key: 'actual', label: 'Actual', color: 'var(--c-neutral)' }, { key: 'forecast', label: 'Forecast', dashed: true, color: 'var(--c2)' }]} />
       </Spec>
       <Spec title="Bar" desc="Grouped comparison">
         <Chart data={QUARTERS} x="q" series={[{ key: 'y2025', label: '2025', type: 'bar', color: 'var(--line2)' }, { key: 'y2026', label: '2026', type: 'bar', color: 'var(--c2)' }]} />
       </Spec>
       <Spec title="Doughnut" desc="Share of total">
         <DonutChart centerLabel="Traffic"
-          data={[{ label: 'Direct', value: 42, color: 'var(--c1)' }, { label: 'Search', value: 28, color: 'var(--c2)' }, { label: 'Social', value: 18, color: 'var(--c3)' }, { label: 'Referral', value: 12, color: 'var(--c4)' }]} />
+          data={[{ label: 'Direct', value: 42, color: 'var(--c-neutral)' }, { label: 'Search', value: 28, color: 'var(--c2)' }, { label: 'Social', value: 18, color: 'var(--c3)' }, { label: 'Referral', value: 12, color: 'var(--c4)' }]} />
       </Spec>
       <Spec title="Stacked area" desc="Composition over time">
         <Chart data={AREA} x="m" stacked curve="monotone"
@@ -156,24 +158,19 @@ export function ChartsSection() {
       <Spec title="Funnel" desc="Drop-off through steps. Hover or tap a step.">
         <FunnelChart format={v => v.toLocaleString(LOCALE)} steps={[{ label: 'Visits', value: 10000 }, { label: 'Signups', value: 4100 }, { label: 'Activated', value: 1900 }, { label: 'Paid', value: 820 }]} />
       </Spec>
-      <Spec title="Gauge" desc="One value against a target">
+      <Spec title="Gauge" desc="One value against a target" actions={<SpecAction onClick={() => setGauge(Math.round(20 + Math.random() * 78))}>Randomise</SpecAction>}>
         <Gauge value={gauge} color="var(--c2)" label="of quarterly target" numberFormat={{ style: 'unit', unit: 'percent', maximumFractionDigits: 0 }} />
-        <Row className="justify-center"><Button size="sm" className={CHART_TAP} onClick={() => setGauge(Math.round(20 + Math.random() * 78))}>Randomise</Button></Row>
       </Spec>
       <Spec title="Candlestick" desc="Open, high, low, close">
-        <Chart data={CANDLES} x="t" zero={false} gap={0.3} legend={false} rightFormat={v => v.toFixed(0)}
+        <Chart data={CANDLES} x="t" xFormat={candleDate} label="Candlestick: daily price" zero={false} gap={0.3} legend={false} rightFormat={v => v.toFixed(0)}
           series={[{ key: 'c', from: 'o', type: 'float', axis: 'right', label: 'Price', colorOf: d => (Number(d.c) >= Number(d.o) ? 'var(--ok)' : 'var(--bad)'), whisker: { low: 'l', high: 'h' } }]}
           tooltip={d => <>
-            <div className="mb-1 font-medium">Day {d.t}</div>
+            <div className="mb-1 font-medium">{candleDate(d.t)}</div>
             <div className="ui-num text-[var(--fg2)]">O <b className="text-[var(--fg)]">{Number(d.o).toFixed(1)}</b>  C <b className="text-[var(--fg)]">{Number(d.c).toFixed(1)}</b></div>
             <div className="ui-num text-[var(--fg2)]">H <b className="text-[var(--fg)]">{Number(d.h).toFixed(1)}</b>  L <b className="text-[var(--fg)]">{Number(d.l).toFixed(1)}</b></div>
           </>} />
       </Spec>
       <ChartsLiveSparks />
-      <Spec title="Polar area" desc="Magnitude by category, radial">
-        <DonutChart variant="polar" size={170}
-          data={[{ label: 'Email', value: 42, color: 'var(--c2)' }, { label: 'Chat', value: 30, color: 'var(--c3)' }, { label: 'Phone', value: 18, color: 'var(--c4)' }, { label: 'Social', value: 24, color: 'var(--c1)' }, { label: 'Docs', value: 12, color: 'var(--line2)' }]} />
-      </Spec>
       <Spec title="Heatmap" desc="Activity by day and hour">
         <Heatmap cell={18} rows={CHART_DAYS} cols={Array.from({ length: 12 }, (_, i) => `${8 + i}h`)} value={(r, c) => HEAT[r][c]} color="var(--c2)"
           label={(r, c) => `${CHART_DAYS[r]} ${8 + c}:00`} format={n => `${n} events`} />
@@ -185,37 +182,37 @@ export function ChartsSection() {
       <Spec title="Bullet" desc="Actual vs target, with bands">
         <BulletChart rows={[{ label: 'Revenue', value: 72, target: 85 }, { label: 'Margin', value: 58, target: 50 }, { label: 'NPS', value: 41, target: 60 }, { label: 'Retention', value: 88, target: 80 }]} />
       </Spec>
-      <Spec title="Error bars" desc="Group means with uncertainty">
-        <SegmentedControl size="sm" className={CHART_SEG} value={ebMode} onChange={v => setEbMode(v as 'sd' | 'se' | 'ci')} options={[{ value: 'sd', label: 'SD' }, { value: 'se', label: 'SE' }, { value: 'ci', label: '95% CI' }]} />
+      <Spec title="Bar list" desc="Top countries">
+        <BarList items={[{ label: '🇩🇪 Germany', value: 4210 }, { label: '🇺🇸 United States', value: 3880 }, { label: '🇬🇧 United Kingdom', value: 2140 }, { label: '🇫🇷 France', value: 1320 }, { label: '🇯🇵 Japan', value: 870 }]} />
+      </Spec>
+      <Spec title="Polar area" desc="Magnitude by category, radial">
+        <DonutChart variant="polar" size={170}
+          data={[{ label: 'Email', value: 42, color: 'var(--c2)' }, { label: 'Chat', value: 30, color: 'var(--c3)' }, { label: 'Phone', value: 18, color: 'var(--c4)' }, { label: 'Social', value: 24, color: 'var(--c-neutral)' }, { label: 'Docs', value: 12, color: 'var(--line2)' }]} />
+      </Spec>
+      <Spec title="Error bars" desc="Group means with uncertainty" actions={<SpecAction onClick={() => setEbData(genErrorBars())}>Resample</SpecAction>}>
+        <SegmentedControl aria-label="Error bar" size="sm" className={CHART_SEG} value={ebMode} onChange={v => setEbMode(v as 'sd' | 'se' | 'ci')} options={[{ value: 'sd', label: 'SD' }, { value: 'se', label: 'SE' }, { value: 'ci', label: '95% CI' }]} />
         <Chart data={ebRows} x="g" height={190} domain={[20, 75]} zero={false} gap={0.55} legend={false} format={v => v.toFixed(0)}
           series={[{ key: 'm', from: 'floor', type: 'float', label: 'Mean', colorOf: (_, i) => EB_COLORS[i], whisker: { low: 'lo', high: 'hi', caps: true } }]}
           tooltip={d => <><div className="mb-1 font-medium">{d.g}</div><div className="ui-num">{Number(d.m).toFixed(1)} ± {Number(d.e).toFixed(1)} <span className="text-[var(--fg3)]">({ebMode === 'ci' ? '95% CI' : ebMode.toUpperCase()}, n={d.n})</span></div></>} />
-        <Row className="justify-between"><span className="text-xs text-[var(--fg3)]">{ebNote[ebMode]}</span><Button size="sm" className={CHART_TAP} onClick={() => setEbData(genErrorBars())}>Resample</Button></Row>
+        <span className="block min-h-[2lh] text-xs text-[var(--fg3)]">{ebNote[ebMode]}</span>
       </Spec>
-      <Spec title="Regression with confidence band" desc="Least-squares fit, 95% band for the mean and a wider prediction interval" span={2}>
-        <Row className="justify-end gap-1.5">
-          <Button size="sm" className={CHART_TAP} variant={rgPI ? 'primary' : 'default'} aria-pressed={rgPI} onClick={() => setRgPI(p => !p)}>Prediction interval</Button>
-          <Button size="sm" className={CHART_TAP} onClick={() => setRgPts(genRegression())}>Resample</Button>
-        </Row>
-        <RegressionChart points={rgPts} prediction={rgPI} xDomain={[0, 44]} yDomain={[0, 110]} />
-      </Spec>
-      <Spec title="Box and violin" desc="Distributions per group, outliers marked">
-        <SegmentedControl size="sm" className={CHART_SEG} value={bvMode} onChange={v => setBvMode(v as 'box' | 'violin' | 'both')} options={[{ value: 'box', label: 'Box' }, { value: 'violin', label: 'Violin' }, { value: 'both', label: 'Both' }]} />
+      <Spec title="Box and violin" desc="Distributions per group, outliers marked" actions={<SpecAction onClick={() => setBvData(genBoxes())}>Resample</SpecAction>}>
+        <SegmentedControl aria-label="Show" size="sm" className={CHART_SEG} value={bvMode} onChange={v => setBvMode(v as 'box' | 'violin' | 'both')} options={[{ value: 'box', label: 'Box' }, { value: 'violin', label: 'Violin' }, { value: 'both', label: 'Both' }]} />
         <BoxViolinChart groups={bvData} mode={bvMode} domain={[0, 80]} />
-        <Row className="justify-between"><span className="text-xs text-[var(--fg3)]">Box: median, quartiles, 1.5 × IQR whiskers</span><Button size="sm" className={CHART_TAP} onClick={() => setBvData(genBoxes())}>Resample</Button></Row>
+        <span className="text-xs text-[var(--fg3)]">Box: median, quartiles, 1.5 × IQR whiskers</span>
       </Spec>
-      <Spec title="Histogram and density" desc="Kernel density, mean, median and ±1σ">
-        <Row className="justify-end"><Button size="sm" className={CHART_TAP} onClick={() => setHdData(genDensity())}>Resample</Button></Row>
+      <Spec title="Histogram and density" desc="Kernel density, mean, median and ±1σ" actions={<SpecAction onClick={() => setHdData(genDensity())}>Resample</SpecAction>}>
         <DensityHistogram values={hdData} bins={hdBins} domain={[20, 100]} />
         <Slider label="Bins" min={6} max={40} value={hdBins} onChange={setHdBins} />
       </Spec>
-      <Spec title="Forest plot" desc="Effect sizes with 95% intervals, pooled estimate">
-        <Row className="justify-end"><Button size="sm" className={CHART_TAP} onClick={() => setFpRows(genForest())}>Resample</Button></Row>
+      <Spec title="Regression with confidence band" desc="Least-squares fit, 95% band for the mean and a wider prediction interval" span={2}
+        actions={<SpecAction onClick={() => setRgPts(genRegression())}>Resample</SpecAction>}>
+        <Switch label={<span className="text-[13px] text-[var(--fg2)]">Prediction interval</span>} checked={rgPI} onChange={setRgPI} className="self-start" />
+        <RegressionChart points={rgPts} prediction={rgPI} xDomain={[0, 44]} yDomain={[0, 110]} />
+      </Spec>
+      <Spec title="Forest plot" desc="Effect sizes with 95% intervals, pooled estimate" actions={<SpecAction onClick={() => setFpRows(genForest())}>Resample</SpecAction>}>
         <ForestPlot rows={fpRows} />
         <span className="text-xs text-[var(--fg3)]">Blue = significant (interval clears 0). Square size = weight. Tap a row for its interval.</span>
-      </Spec>
-      <Spec title="Bar list" desc="Top countries">
-        <BarList items={[{ label: '🇩🇪 Germany', value: 4210 }, { label: '🇺🇸 United States', value: 3880 }, { label: '🇬🇧 United Kingdom', value: 2140 }, { label: '🇫🇷 France', value: 1320 }, { label: '🇯🇵 Japan', value: 870 }]} />
       </Spec>
     </Section>
   )
@@ -237,8 +234,8 @@ function ChartsLiveSparks() {
     return () => clearInterval(id)
   }, [paused, onScreen])
   return (
-        <Spec title="Sparklines" desc="Word-sized charts that live inside tables and tiles. Updating live." span={2}>
-          <Row className="justify-end -mt-2"><Button size="sm" className={CHART_TAP} aria-pressed={paused} onClick={() => setPaused(p => !p)}>{paused ? 'Resume' : 'Pause'}</Button></Row>
+        <Spec title="Sparklines" desc="Word-sized charts that live inside tables and tiles, updating live" span={3}
+          actions={<Switch label={<span className="text-xs text-[var(--fg2)]">Live</span>} checked={!paused} onChange={v => setPaused(!v)} />}>
           <div ref={ref} className="flex flex-col gap-3">
           <TickerTable rows={tickers} />
           <div className="grid grid-cols-2 gap-3 md:grid-cols-4">
@@ -252,31 +249,30 @@ function ChartsLiveSparks() {
   )
 }
 
-/** Treemap demo with Randomize / Grow / Shuffle and an auto-play that pauses while the card is off screen. */
+/** Treemap demo with Randomise / Grow / Shuffle and an auto-play that pauses while the card is off screen. */
 function ChartsTreemapDemo() {
   const { ref, visible: onScreen } = useViewport<HTMLDivElement>(null, { amount: 0 })
   const [tm, setTm] = useState(TREEMAP_START)
   const [tmAuto, setTmAuto] = useState(false)
   const treemapAct = {
-    randomize: () => setTm(t => t.map(x => ({ ...x, value: Math.round(4 + Math.random() * 36) }))),
+    randomise: () => setTm(t => t.map(x => ({ ...x, value: Math.round(4 + Math.random() * 36) }))),
     grow: () => setTm(t => { const k = Math.floor(Math.random() * t.length); return t.map((x, i) => ({ ...x, value: i === k ? Math.round(x.value * (1.6 + Math.random() * 0.8)) : Math.max(3, Math.round(x.value * (0.7 + Math.random() * 0.25))) })) }),
     shuffle: () => setTm(t => { const vs = t.map(x => x.value).sort(() => Math.random() - 0.5); return t.map((x, i) => ({ ...x, value: vs[i] })) }),
   }
   useEffect(() => {
     if (!tmAuto || !onScreen) return
-    const id = setInterval(() => treemapAct[(['randomize', 'grow', 'shuffle', 'grow'] as const)[Math.floor(Math.random() * 4)]](), 2200)
+    const id = setInterval(() => treemapAct[(['randomise', 'grow', 'shuffle', 'grow'] as const)[Math.floor(Math.random() * 4)]](), 2200)
     return () => clearInterval(id)
   }, [tmAuto, onScreen]) // eslint-disable-line react-hooks/exhaustive-deps
   return (
-        <Spec title="Treemap" desc="Hierarchy by area. Randomize, grow or shuffle the values, or press play, and the layout re-flows.">
+        <Spec title="Treemap" desc="Hierarchy by area. Grow or shuffle the values, or turn on auto-play, and the layout re-flows."
+          actions={<SpecAction onClick={treemapAct.randomise}>Randomise</SpecAction>}>
           <div ref={ref}><Treemap items={tm} height={170} show="percent" /></div>
           <Row className="gap-1.5">
-            <Button size="sm" className={`!px-2.5 ${CHART_TAP}`} onClick={treemapAct.randomize}>Randomize</Button>
             <Button size="sm" className={`!px-2.5 ${CHART_TAP}`} onClick={treemapAct.grow}>Grow one</Button>
             <Button size="sm" className={`!px-2.5 ${CHART_TAP}`} onClick={treemapAct.shuffle}>Shuffle</Button>
             <span className="flex-1" />
-            <IconButton icon={<Icon name={tmAuto ? 'pause' : 'play'} size={13} filled />} label="Auto-play" tone="default" className={TOUCH.tap36} variant={tmAuto ? 'primary' : 'default'}
-              aria-pressed={tmAuto} onClick={() => { setTmAuto(a => !a); if (!tmAuto) treemapAct.grow() }} />
+            <Switch label={<span className="text-xs text-[var(--fg2)]">Auto-play</span>} checked={tmAuto} onChange={v => { setTmAuto(v); if (v) treemapAct.grow() }} />
           </Row>
         </Spec>
   )

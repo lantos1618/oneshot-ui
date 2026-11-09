@@ -57,7 +57,7 @@ export function PagesSection() {
               <ul className="m-0 list-none p-0">
                 {PAGES_POSTS.map(([t, d, c]) => (
                   <li key={t} className="flex gap-2.5 border-b border-[var(--line)] py-2 last:border-0">
-                    <i className="h-12 w-12 flex-none rounded-[10px] opacity-80" style={{ background: c }} />
+                    <i className="h-12 w-12 flex-none rounded-[var(--r-md)] opacity-80" style={{ background: c }} />
                     <div><b className="font-medium text-[var(--fg)]">{t}</b><div className="text-xs text-[var(--fg3)]">{d}</div></div>
                   </li>
                 ))}

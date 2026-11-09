@@ -1,14 +1,22 @@
 import { useEffect, useRef, useState, type ReactNode } from 'react'
 import { AnimatePresence, animate, motion, useInView } from 'motion/react'
-import { Alert, Avatar, Badge, Button, CookieConsent, EmptyState, Icon, OfflineIndicator, Progress, ProgressRing, Skeleton, Spinner, confetti, sleep, spring, useToast } from '../lib'
-import { Row, Section, Spec } from './kit'
+import { Alert, Avatar, Badge, Button, CookieConsent, EmptyState, Icon, IconButton, OfflineIndicator, Progress, ProgressRing, Skeleton, Spinner, Switch, cn, confetti, floatingSurface, sleep, spring, useToast } from '../lib'
+import { Row, Section, Spec, SpecPreview } from './kit'
 
-/** Small browser-window mock used by the consent and offline demos. */
+/** Small browser-window mock used by the consent and offline demos: a page with a header, a hero and some copy. */
 function FbMockWindow({ children, className }: { children?: ReactNode; className?: string }) {
   return (
     <div className={`relative h-[190px] overflow-hidden rounded-[var(--r-md)] border border-[var(--line)] bg-[var(--bg)] ${className ?? ''}`}>
-      <div className="flex gap-1 border-b border-[var(--line)] bg-[var(--card)] px-2.5 py-2">{[0, 1, 2].map(i => <i key={i} className="h-2 w-2 rounded-full bg-[var(--line2)]" />)}</div>
-      <div className="flex flex-col gap-2 p-3">{['w-[90%]', 'w-[60%]', 'w-[90%]'].map((w, i) => <div key={i} className={`h-2 rounded bg-[var(--line)] ${w}`} />)}</div>
+      <div className="flex items-center gap-1 border-b border-[var(--line)] bg-[var(--card)] px-2.5 py-2">
+        {[0, 1, 2].map(i => <i key={i} className="h-2 w-2 rounded-full bg-[var(--line2)]" />)}
+        <span className="ml-2 h-3.5 flex-1 rounded-full bg-[var(--muted)] px-2" aria-hidden />
+      </div>
+      <div aria-hidden className="flex flex-col gap-2 p-3">
+        <div className="flex items-center gap-2"><i className="h-3 w-3 rounded-[var(--r-sm)] bg-[var(--primary)]" /><i className="h-2 w-12 rounded-full bg-[var(--line2)]" /><span className="flex-1" /><i className="h-2 w-8 rounded-full bg-[var(--line)]" /><i className="h-2 w-8 rounded-full bg-[var(--line)]" /></div>
+        <div className="mt-1 h-3 w-[70%] rounded-full bg-[var(--line2)]" />
+        {['w-[92%]', 'w-[84%]', 'w-[60%]'].map((w, i) => <div key={i} className={`h-2 rounded-full bg-[var(--line)] ${w}`} />)}
+        <div className="mt-1 grid grid-cols-3 gap-2">{[0, 1, 2].map(i => <div key={i} className="h-12 rounded-[var(--r-sm)] bg-[var(--muted)]" />)}</div>
+      </div>
       {children}
     </div>
   )
@@ -16,19 +24,25 @@ function FbMockWindow({ children, className }: { children?: ReactNode; className
 
 const FB_STAGES = ['Uploading', 'Processing', 'Finalising']
 function FbProgressDemo() {
-  const [p, setP] = useState(0)
-  const [run, setRun] = useState<'idle' | 'running' | 'done'>('idle')
+  // starts mid-upload, so the card shows the bar, the ring and a stage at a glance; Resume finishes, Again restarts
+  const [p, setP] = useState(60)
+  const [run, setRun] = useState<'paused' | 'running' | 'done'>('paused')
   const start = async () => {
     setRun('running')
-    for (let v = 0; v <= 100; v += 4) { setP(v); await sleep(55) }
+    for (let v = run === 'done' ? 0 : p; v <= 100; v += 4) { setP(v); await sleep(55) }
     setRun('done')
   }
-  const label = run === 'done' ? 'Upload complete' : run === 'running' ? `${FB_STAGES[Math.min(2, Math.floor(p / 34))]}…` : 'Ready to upload'
+  const label = run === 'done' ? 'Upload complete' : run === 'running' ? `${FB_STAGES[Math.min(2, Math.floor(p / 34))]}…` : 'Processing · paused'
   return (
     <>
-      <Row className="justify-between"><span className="text-[13px] text-[var(--fg2)]" aria-live="polite">{label}</span><span className="ui-num text-[13px] font-medium">{Math.round(p)}%</span></Row>
+      <div className="flex items-center gap-2.5 rounded-[var(--r-md)] border border-[var(--line)] px-3 py-2">
+        <Icon name="file" size={16} className="flex-none text-[var(--fg3)]" />
+        <div className="min-w-0 flex-1"><b className="block truncate text-[13px] font-medium">brand-guidelines.pdf</b><span className="text-xs text-[var(--fg3)]" aria-live="polite">{label}</span></div>
+        <span className="ui-num text-[13px] font-medium">{Math.round(p)}%</span>
+      </div>
       <Progress value={p} tone={run === 'done' ? 'ok' : 'primary'} label="Upload progress" />
-      <Row className="justify-between"><ProgressRing value={p} size={48} tone={run === 'done' ? 'ok' : 'primary'} /><Button size="sm" disabled={run === 'running'} onClick={start}>{run === 'done' ? 'Again' : 'Upload'}</Button></Row>
+      <Row className="justify-between"><ProgressRing value={p} size={48} tone={run === 'done' ? 'ok' : 'primary'} aria-label="Upload progress" />
+        <Button size="sm" disabled={run === 'running'} onClick={start}>{run === 'done' ? 'Again' : run === 'running' ? 'Uploading…' : 'Resume'}</Button></Row>
     </>
   )
 }
@@ -36,11 +50,13 @@ function FbProgressDemo() {
 function FbSkeletonDemo() {
   const [loading, setLoading] = useState(true)
   const reload = async () => { setLoading(true); await sleep(1300); setLoading(false) }
-  useEffect(() => { const t = setTimeout(() => setLoading(false), 1300); return () => clearTimeout(t) }, [])
+  // the first load plays when the card scrolls into view, so you see the shimmer hand over to content
+  const ref = useRef<HTMLDivElement>(null), seen = useInView(ref, { once: true, amount: 0.6 })
+  useEffect(() => { if (!seen) return; const t = setTimeout(() => setLoading(false), 1300); return () => clearTimeout(t) }, [seen])
   const rows = [['Alex Lee', 'Updated the roadmap'], ['Bea Kim', 'Shipped v2.4']]
   return (
     <>
-      <div className="min-h-[96px]" aria-busy={loading}>
+      <div ref={ref} className="min-h-[96px]" aria-busy={loading}>
         <AnimatePresence mode="wait">
           {loading ? (
             <motion.div key="s" exit={{ opacity: 0, transition: { duration: 0.12 } }} className="flex flex-col gap-2.5">
@@ -96,11 +112,13 @@ function FbCookieDemo() {
 }
 
 function FbOfflineDemo() {
-  const [online, setOnline] = useState(true)
+  // starts offline so the card shows the banner; it only counts down while on screen (off screen it reads as online)
+  const [online, setOnline] = useState(false)
+  const ref = useRef<HTMLDivElement>(null), inView = useInView(ref)
   return (
     <>
-      <FbMockWindow><OfflineIndicator online={online} /></FbMockWindow>
-      <Row><Button size="sm" onClick={() => setOnline(o => !o)}>{online ? 'Go offline' : 'Go online'}</Button><span className="text-xs text-[var(--fg3)]">{online ? 'Online' : 'Offline'}</span></Row>
+      <div ref={ref}><FbMockWindow><OfflineIndicator online={online || !inView} /></FbMockWindow></div>
+      <Switch label={<span className="text-[13px] text-[var(--fg2)]">Connected</span>} checked={online} onChange={setOnline} />
     </>
   )
 }
@@ -156,20 +174,55 @@ function FbUpgradeDemo() {
   )
 }
 
+function FbAlertsDemo() {
+  const [shown, setShown] = useState(true)
+  const toast = useToast()
+  return (
+    <div className="grid gap-2.5 sm:grid-cols-2">
+      <Alert title="New version available">Refresh to update.</Alert>
+      <Alert tone="ok" title="Payment received">€1,250 from Northwind.</Alert>
+      <Alert tone="warn" title="Storage almost full">You’ve used 92% of 100 GB.</Alert>
+      <Alert tone="bad" title="Sync failed" action={<Button size="xs" onClick={() => toast({ title: 'Synced', description: '3 changes uploaded', tone: 'ok' })}>Retry</Button>}>Your changes are saved locally.</Alert>
+      <div className="sm:col-span-2">
+        {shown
+          ? <Alert tone="neutral" title="Tip: press ⌘K to jump anywhere" action={<IconButton icon="x" label="Dismiss tip" size="icon-sm" onClick={() => setShown(false)} className="-my-1 -mr-1" />}>Dismissible: it stays gone until you bring it back.</Alert>
+          : <Button size="sm" onClick={() => setShown(true)}>Show the tip again</Button>}
+      </div>
+    </div>
+  )
+}
+
+function FbCelebrationDemo() {
+  return (
+    <div className="flex flex-1 flex-col items-center justify-center gap-2 rounded-[var(--r-md)] bg-[linear-gradient(160deg,var(--accent-soft),var(--card)_70%)] p-4 text-center">
+      <span className="text-[28px]" aria-hidden>🏆</span>
+      <b className="text-base font-semibold">1,000 customers</b>
+      <span className="max-w-[240px] text-xs text-[var(--fg2)]">Your team crossed a real milestone today. Confetti is for moments like this.</span>
+      <Button variant="primary" className="mt-1" onClick={e => { const r = e.currentTarget.getBoundingClientRect(); confetti({ x: r.left + r.width / 2, y: r.top }) }}>🎉 Celebrate</Button>
+      <span className="text-[11px] text-[var(--fg3)]">Respects reduced motion</span>
+    </div>
+  )
+}
+
 export function FeedbackSection() {
   const toast = useToast()
   return (
     <Section id="feedback" title="Feedback" desc="Tell people what happened, what’s happening, and what to do next.">
+      <Spec title="Alerts" desc="Tinted, icon plus text. Four tones, an action, and one you can dismiss." span={2}><FbAlertsDemo /></Spec>
       <Spec title="Toasts" desc="Stack with springs, undo inline">
         <Row>
-          <Button onClick={() => toast({ title: 'Changes saved', description: 'Just now' })}>Success</Button>
+          <Button onClick={() => toast({ title: 'Changes saved', description: 'Just now', tone: 'ok' })}>Success</Button>
           <Button onClick={() => toast({ title: 'Message archived', action: { label: 'Undo', onClick: () => toast({ title: 'Restored', tone: 'info' }) } })}>With undo</Button>
           <Button onClick={() => toast({ title: 'Couldn’t connect', description: 'Check your network and retry', tone: 'bad' })}>Error</Button>
         </Row>
-      </Spec>
-      <Spec title="Alerts" desc="Tinted, icon plus text">
-        <Alert title="New version available">Refresh to update.</Alert>
-        <Alert tone="bad" title="Sync failed">Your changes are saved locally.</Alert>
+        <SpecPreview label="A stack of toasts" className="flex flex-col items-end gap-1.5">
+          {([['Message archived', 'Undo', 'check'], ['Changes saved', 'Just now', 'check']] as const).map(([t, d], i) => (
+            <div key={t} className={cn(floatingSurface, 'flex w-full max-w-[250px] items-center gap-2 px-3 py-2 text-xs', i === 1 && 'scale-[0.96]')}>
+              <Icon name="check" size={13} className="text-[var(--ok)]" /><b className="flex-1 font-medium">{t}</b>
+              {i === 0 ? <span className="font-semibold text-[var(--accent)]">{d}</span> : <span className="text-[var(--fg3)]">{d}</span>}
+            </div>
+          ))}
+        </SpecPreview>
       </Spec>
       <Spec title="Progress" desc="Linear and ring, with percentage"><FbProgressDemo /></Spec>
       <Spec title="Skeleton loading" desc="Shimmer, then content fades up"><FbSkeletonDemo /></Spec>
@@ -178,17 +231,13 @@ export function FeedbackSection() {
       </Spec>
       <Spec title="Badges and status" desc="Never colour alone">
         <Row><Badge tone="ok" dot>Live</Badge><Badge tone="warn" dot>Pending</Badge><Badge tone="bad" dot>Failed</Badge><Badge tone="accent">New</Badge><Badge>Draft</Badge></Row>
+        <Row><Badge size="sm" tone="ok" dot>Live</Badge><Badge size="sm" tone="accent">New</Badge><Badge size="sm">12</Badge><span className="text-xs text-[var(--fg3)]">Small, for counts and dense rows</span></Row>
         <Row><FbLiveBadge /></Row>
       </Spec>
-      <Spec title="Celebration" desc="Confetti for real milestones, not every click">
-        <div className="flex min-h-[120px] flex-col items-center justify-center gap-2">
-          <Button variant="primary" onClick={e => { const r = e.currentTarget.getBoundingClientRect(); confetti({ x: r.left + r.width / 2, y: r.top }) }}>🎉 Celebrate</Button>
-          <span className="text-xs text-[var(--fg3)]">Respects reduced motion</span>
-        </div>
-      </Spec>
-      <Spec title="Cookie consent" desc="Reject is as easy as accept. Customise expands in place."><FbCookieDemo /></Spec>
-      <Spec title="Offline indicator" desc="Explains what still works and retries on its own"><FbOfflineDemo /></Spec>
+      <Spec title="Celebration" desc="Confetti for real milestones, not every click"><FbCelebrationDemo /></Spec>
       <Spec title="Upgrade prompt" desc="Appears at the limit, with the value of upgrading"><FbUpgradeDemo /></Spec>
+      <Spec title="Cookie consent" desc="Reject is as easy as accept. Customise expands in place." span={2}><FbCookieDemo /></Spec>
+      <Spec title="Offline indicator" desc="Explains what still works and retries on its own"><FbOfflineDemo /></Spec>
     </Section>
   )
 }

@@ -1,6 +1,6 @@
 import { useEffect, useId, useMemo, useRef, useState, type ReactNode } from 'react'
 import { AnimatePresence, motion } from 'motion/react'
-import { AnimatedNumber, Button, DeltaBadge, Icon, IconButton, Kbd, TOUCH, cn, fmtDate, inputClass, spring, surface, useControllable, useHotkey, SparkChart } from './core'
+import { AnimatedNumber, Button, DeltaBadge, Icon, IconButton, Kbd, TOUCH, cn, fmtDate, inputClass, spring, surface, useControllable, useHotkey, SparkChart, rowHoverClass } from './core'
 import { shake } from './motion'
 import { Collapse, useToast } from './feedback'
 import { Calendar, CheckboxBox, type DateRange, SegmentedControl, inputShellClass } from './forms'
@@ -41,7 +41,7 @@ export function StatCard({ label, value, format, delta, trend, lowerIsBetter, co
         <span className="min-w-0 text-xs leading-tight [overflow-wrap:anywhere] text-[var(--fg3)]">{label}</span>
         {d !== undefined && <DeltaBadge value={d} lowerIsBetter={lowerIsBetter} title={deltaLabel} />}
       </div>
-      <AnimatedNumber value={value} format={format} className="mt-1 text-[18px] leading-[1.2] font-semibold tracking-[-.02em] @[150px]:text-[22px]" />
+      <AnimatedNumber value={value} format={format} className="mt-1 font-[family-name:var(--font)] text-base leading-[1.2] font-semibold tracking-[-.02em] tabular-nums @[150px]:text-[22px]" />
       {spark && <SparkChart data={spark} variant="area" height={34} color={color} className="mt-1.5" />}
     </div>
   )
@@ -96,7 +96,7 @@ export function DataTable<T extends object>({ columns, rows, rowKey, initialSort
                 <td key={c.key} className={cn('border-b border-[var(--line)] px-2 py-2 first:pl-0 last:pr-0', c.align === 'right' && 'ui-num text-right', c.className)}>
                   {onRowClick && i === 0
                     ? <button data-row-open onClick={() => onRowClick(r)}
-                      className="cursor-pointer rounded-[4px] border-0 bg-transparent p-0 text-left font-[inherit] text-inherit outline-none focus-visible:shadow-[0_0_0_2px_var(--accent)]">{cell(r, c)}</button>
+                      className="cursor-pointer rounded-[var(--r-sm)] border-0 bg-transparent p-0 text-left font-[inherit] text-inherit outline-none focus-visible:shadow-[0_0_0_2px_var(--accent)]">{cell(r, c)}</button>
                     : cell(r, c)}
                 </td>
               ))}
@@ -125,7 +125,7 @@ export function Accordion({ items, multiple, defaultOpen = [], value, onValueCha
         return (
           <div key={i} className="border-b border-[var(--line)]">
             <button id={`${id}-h${i}`} aria-expanded={on} aria-controls={`${id}-p${i}`} onClick={() => toggle(i)}
-              className="flex w-full cursor-pointer items-center justify-between gap-3 border-0 bg-transparent py-3 text-left text-[13px] font-medium [@media(pointer:coarse)]:min-h-11 [@media(pointer:coarse)]:text-sm">
+              className={cn('flex w-full cursor-pointer items-center justify-between gap-3 rounded-[var(--r-md)] border-0 bg-transparent px-1.5 py-3 text-left text-[13px] font-medium transition-colors [@media(pointer:coarse)]:min-h-11 [@media(pointer:coarse)]:text-sm', rowHoverClass)}>
               {it.title}
               <motion.span animate={{ rotate: on ? 180 : 0 }} transition={spring(0.2, 0.3)} className="text-[var(--fg3)]"><Icon name="chevronDown" size={14} /></motion.span>
             </button>
@@ -322,7 +322,7 @@ function JsonNode({ k, v, path, last, ctx }: { k: string | number | null; v: unk
   const hit = k !== null && !!ctx.q && String(k).toLowerCase().includes(ctx.q)
   const key = k !== null && (
     <><button data-jv-path={path} data-hit={hit || undefined} onClick={() => ctx.copy(path)} title={`Copy path ${path}`}
-      className={cn('cursor-pointer rounded-[3px] border-0 p-0 font-[inherit] text-[var(--accent)] hover:bg-[var(--accent-soft)] [@media(pointer:coarse)]:min-h-8 [@media(pointer:coarse)]:min-w-8 [@media(pointer:coarse)]:text-left', hit ? 'bg-[var(--warn-soft)]' : 'bg-transparent')}>
+      className={cn('cursor-pointer rounded-[var(--r-sm)] border-0 p-0 font-[inherit] text-[var(--accent)] hover:bg-[var(--accent-soft)] [@media(pointer:coarse)]:min-h-8 [@media(pointer:coarse)]:min-w-8 [@media(pointer:coarse)]:text-left', hit ? 'bg-[var(--warn-soft)]' : 'bg-transparent')}>
       {typeof k === 'number' ? k : `"${k}"`}</button><span className="text-[var(--fg2)]">: </span></>
   )
   const row = 'flex items-baseline whitespace-pre'
@@ -374,8 +374,9 @@ export function JsonViewer({ data, defaultCollapsed = [], onCopyPath, maxHeight 
   const allClosed = containers.length > 0 && containers.every(p => closed.has(p))
   const copy = (p: string) => {
     if (onCopyPath) return onCopyPath(p)
-    navigator.clipboard?.writeText(p).catch(() => {})
-    toast({ title: 'Path copied', description: <code className="font-[family-name:var(--mono)]">{p}</code> })
+    const said = (ok: boolean) => toast({ title: ok ? 'Path copied' : 'Couldn’t copy the path', description: <code className="font-[family-name:var(--mono)]">{p}</code>, tone: ok ? undefined : 'bad' })
+    if (!navigator.clipboard) return said(false)
+    navigator.clipboard.writeText(p).then(() => said(true), () => said(false))
   }
   const filter = (raw: string) => {
     const s = raw.trim().toLowerCase(); setQ(s)
@@ -402,9 +403,10 @@ export function JsonViewer({ data, defaultCollapsed = [], onCopyPath, maxHeight 
         <Button size="sm" onClick={() => setClosed(allClosed ? new Set() : new Set(containers))} className={TOUCH.row}>{allClosed ? 'Expand all' : 'Collapse all'}</Button>
       </div>
       {/* touch: 32px rows so every key and toggle is a finger-sized target; the box scrolls both ways */}
-      <div ref={box} className="overflow-auto overscroll-x-contain rounded-[var(--r-md)] border border-[var(--line)] bg-[color-mix(in_srgb,var(--muted)_35%,var(--card))] px-2.5 py-2 font-[family-name:var(--mono)] text-[12.5px] leading-[1.75] [@media(pointer:coarse)]:text-[13px] [@media(pointer:coarse)]:leading-8" style={{ maxHeight }}>
+      <div ref={box} className="overflow-auto overscroll-x-contain rounded-[var(--r-md)] border border-[var(--line)] bg-[color-mix(in_srgb,var(--muted)_35%,var(--card))] px-2.5 py-2 font-[family-name:var(--mono)] text-xs leading-[1.75] [@media(pointer:coarse)]:text-[13px] [@media(pointer:coarse)]:leading-8" style={{ maxHeight }}>
 
-        <JsonNode k={null} v={safe} path="" last ctx={ctx} />
+        {/* as wide as the widest row, so long keys and values scroll with the box instead of being clipped by a branch */}
+        <div className="w-max min-w-full"><JsonNode k={null} v={safe} path="" last ctx={ctx} /></div>
       </div>
     </div>
   )
@@ -420,9 +422,10 @@ export function ShortcutSheet({ groups, columns = 1, className }: { groups: Shor
     <div className={cn('grid gap-x-5 gap-y-3', columns === 2 && 'sm:grid-cols-2', className)}>
       {groups.map(g => (
         <section key={g.title} aria-label={g.title}>
-          <h5 className="m-0 mb-1.5 text-[11px] font-semibold tracking-[.05em] text-[var(--fg3)] uppercase">{g.title}</h5>
-          {g.items.map(([label, keys]) => (
-            <div key={label} className="flex items-center justify-between border-b border-[var(--line)] py-1.5 text-[13px] last:border-0">
+          {/* not a heading: the sheet sits under card titles and dialog titles of different levels; the section carries the name */}
+          <div aria-hidden className="m-0 mb-1.5 text-[11px] font-semibold tracking-[.05em] text-[var(--fg3)] uppercase">{g.title}</div>
+          {g.items.map(([label, keys], i) => (
+            <div key={i} className="flex items-center justify-between border-b border-[var(--line)] py-1.5 text-[13px] last:border-0">
               <span>{label}</span><span className="flex gap-1">{keys.map((k, i) => <Kbd key={i}>{k}</Kbd>)}</span>
             </div>
           ))}

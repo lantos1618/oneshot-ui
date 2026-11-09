@@ -5,6 +5,7 @@ import { AutoHeight, Collapse, Progress, TypingDots, useToast } from './feedback
 import { CheckMark, Checkbox, OptionList, type Option } from './forms'
 import { FloatingPanel, MenuLabel, Tooltip, useHoverIntent } from './overlay'
 import { lcsDiff } from './code'
+import { useViewport } from './motion'
 import { Waveform } from './media'
 
 /* ════════════════════════════════════════════════════════════════════════════
@@ -57,7 +58,7 @@ export function ToolCall({ status, label, doneLabel, detail, className }:
   const [open, setOpen] = useState(false)
   return (
     <motion.div initial={{ opacity: 0, scale: 0.97 }} animate={{ opacity: 1, scale: 1 }} transition={spring(0.3, 0.4)}
-      className={cn('my-1.5 overflow-hidden rounded-[10px] border border-[var(--line)] text-xs', className)}>
+      className={cn('my-1.5 overflow-hidden rounded-[var(--r-md)] border border-[var(--line)] text-xs', className)}>
       <button aria-expanded={open} onClick={() => setOpen(!open)}
         className="flex w-full cursor-pointer items-center gap-2 border-0 bg-[var(--muted)] px-2.5 py-2 text-left text-[var(--fg2)]">
         <AnimatePresence mode="popLayout" initial={false}>
@@ -96,7 +97,7 @@ export function SendButton({ state = 'send', label, disabled, onClick, className
       <AnimatePresence mode="popLayout" initial={false}>
         <motion.span key={state} initial={{ scale: 0, rotate: -90 }} animate={{ scale: 1, rotate: 0 }} exit={{ scale: 0 }} transition={spring(0.4, 0.3)} className="grid">
           {state === 'sending' ? <Spinner size={14} label="Sending" />
-            : state === 'stop' ? <span className="block h-3 w-3 rounded-[2px] bg-current" />
+            : state === 'stop' ? <span className="block h-3 w-3 rounded-[var(--r-sm)] bg-current" />
             : <Icon name={state === 'queue' ? 'listPlus' : 'arrowUp'} size={15} strokeWidth={2.5} />}
         </motion.span>
       </AnimatePresence>
@@ -142,12 +143,50 @@ export type StepStatus = 'done' | 'active' | 'pending' | 'failed'
 
 export type ThoughtStep = { label: string; detail?: string; sources?: string[]; /** seconds this step takes when auto-playing */ duration?: number; status?: StepStatus }
 
+
+/** "Thinking… 3.2s": ticks on its own, so the step list doesn't re-render ten times a second. */
+function AiThinkClock({ clock, live }: { clock: () => number; live: boolean }) {
+  const [, tick] = useState(0)
+  useEffect(() => { if (!live) return; const t = setInterval(() => tick(n => n + 1), 100); return () => clearInterval(t) }, [live])
+  return <span className="tabular-nums">{clock().toFixed(1)}s</span>
+}
+
+/** One step row of ThinkingSteps (also used, invisible, to reserve the tallest layout). */
+function AiThoughtRow({ s, st, last, detail, srcs, time, animate, expandable, expanded, onToggle }:
+  { s: ThoughtStep; st: StepStatus; last: boolean; detail: string; srcs: number; time?: number; animate: boolean; expandable?: boolean; expanded?: boolean; onToggle?: () => void }) {
+  // one line: the label truncates and the time has its own slot, so a time appearing never wraps the row
+  const label = <><span className="min-w-0 truncate">{s.label}</span>{time !== undefined && <span className="flex-none text-[11px] font-normal tabular-nums text-[var(--fg3)]">{time.toFixed(1)}s</span>}</>
+  return (
+    <li className="grid grid-cols-[22px_1fr] gap-2.5">
+      <div className="flex flex-col items-center pt-px">
+        <StatusIcon status={st} />
+        {!last && <span className="relative my-1 min-h-3.5 w-0.5 flex-1 overflow-hidden rounded-[var(--r-sm)] bg-[var(--line)]">
+          {/* scaleY, not height: the fill never triggers layout */}
+          <motion.b className="absolute inset-0 block origin-top bg-[var(--fg3)]" initial={false} animate={{ scaleY: st === 'done' ? 1 : 0 }} transition={{ duration: 0.3 }} />
+        </span>}
+      </div>
+      <div className="min-w-0 pb-3">
+        <div className={cn('flex min-w-0 items-baseline gap-1.5 leading-5 font-medium', st === 'pending' ? 'text-[var(--fg3)]' : 'text-[var(--fg)]')}>
+          {expandable ? <button type="button" aria-pressed={expanded} onClick={onToggle} className="flex min-w-0 cursor-pointer items-baseline gap-1.5 border-0 bg-transparent p-0 text-left font-medium text-inherit hover:underline">{label}</button> : label}
+        </div>
+        {detail && <motion.div initial={animate ? { opacity: 0, y: -4 } : false} animate={{ opacity: 1, y: 0 }} className="mt-1 text-xs leading-normal text-[var(--fg2)]">{detail}</motion.div>}
+        {s.sources && srcs > 0 && <div className="mt-1.5 flex flex-wrap gap-1">{s.sources.slice(0, srcs).map(x => (
+          <motion.span key={x} initial={animate ? { opacity: 0, scale: 0.85 } : false} animate={{ opacity: 1, scale: 1 }} transition={spring(0.4, 0.3)}
+            className="inline-flex items-center gap-1 rounded-full border border-[var(--line)] px-2 py-0.5 text-[11px] text-[var(--fg2)]"><Icon name="globe" size={10} strokeWidth={2.5} />{x}</motion.span>))}</div>}
+      </div>
+    </li>
+  )
+}
+
 /**
  * Reasoning as a vertical stepper. Static (pass `status` per step) or `autoPlay`: starts when scrolled into view,
- * types each step's detail, pops in source chips, records per-step durations and fills the connector. The header counts
- * "Thinking… 3.2s", then reads "Thought for Xs · N steps" and collapses. Change `replayKey` to run it again.
+ * types the current step's detail and pops in its source chips while finished steps fold to one line (with their
+ * time; click one to read it again), and fills the connector. The list reserves the height of its tallest step up
+ * front, so playing never pushes the page. The header counts "Thinking… 3.2s", then reads "Thought for Xs · N steps";
+ * click it to fold the steps away. `autoCollapse` folds them by itself when done (it changes the height, so use it
+ * where nothing sits below, e.g. the end of a chat). Change `replayKey` to run it again. Paused while off screen.
  */
-export function ThinkingSteps({ steps, summary, defaultOpen = true, autoPlay = false, replayKey = 0, autoCollapse = true, className }:
+export function ThinkingSteps({ steps, summary, defaultOpen = true, autoPlay = false, replayKey = 0, autoCollapse = false, className }:
   { steps: ThoughtStep[]; summary?: ReactNode; defaultOpen?: boolean; autoPlay?: boolean; replayKey?: number; autoCollapse?: boolean; className?: string }) {
   const [open, setOpen] = useState(defaultOpen)
   const ref = useRef<HTMLDivElement>(null)
@@ -155,15 +194,17 @@ export function ThinkingSteps({ steps, summary, defaultOpen = true, autoPlay = f
   const onScreen = useInView(ref), vis = useRef(true); vis.current = onScreen // the run pauses while scrolled away
   const reduce = useReducedMotion()
   const [play, setPlay] = useState({ cur: autoPlay ? -1 : steps.length, words: 0, srcs: 0, times: [] as number[], elapsed: 0, running: false })
+  const [pick, setPick] = useState(-1) // after a run: the finished step whose detail is shown
+  const clock = useRef<() => number>(() => 0)
   useEffect(() => {
     if (!autoPlay || !inView) return
     let off = false, pausedFor = 0
     const now = () => performance.now() - pausedFor // clock that stands still while off screen
     const gate = async () => { if (vis.current) return; const at = performance.now(); while (!vis.current && !off) await sleep(200); pausedFor += performance.now() - at }
     const t0 = now()
-    const tick = setInterval(() => { if (vis.current) setPlay(p => ({ ...p, elapsed: (now() - t0) / 1000 })) }, 100)
+    clock.current = () => (now() - t0) / 1000
     ;(async () => {
-      setOpen(true)
+      setOpen(true); setPick(-1)
       setPlay({ cur: 0, words: 0, srcs: 0, times: [], elapsed: 0, running: true })
       const times: number[] = []
       for (let i = 0; i < steps.length; i++) {
@@ -178,18 +219,41 @@ export function ThinkingSteps({ steps, summary, defaultOpen = true, autoPlay = f
         times.push((now() - s0) / 1000)
         setPlay(p => ({ ...p, times: [...times] }))
       }
-      clearInterval(tick)
-      setPlay(p => ({ ...p, cur: steps.length, running: false, elapsed: (now() - t0) / 1000 }))
+      const total = (now() - t0) / 1000
+      clock.current = () => total
+      setPlay(p => ({ ...p, cur: steps.length, running: false, elapsed: total }))
       await sleep(reduce ? 0 : 1400)
       if (!off && autoCollapse) setOpen(false)
     })()
-    return () => { off = true; clearInterval(tick) }
+    return () => { off = true }
   }, [autoPlay, inView, replayKey]) // eslint-disable-line react-hooks/exhaustive-deps
 
   const statusOf = (s: ThoughtStep, i: number): StepStatus => !autoPlay ? s.status ?? 'pending' : i < play.cur || play.times[i] !== undefined ? 'done' : i === play.cur ? 'active' : 'pending'
+  const finished = autoPlay && play.cur >= steps.length
   const header = !autoPlay ? summary
-    : play.running ? <ShimmerText>Thinking… <span className="tabular-nums">{play.elapsed.toFixed(1)}s</span></ShimmerText>
-    : play.cur >= steps.length ? <>{summary ?? `Thought for ${Math.round(play.elapsed)}s · ${steps.length} steps`}</> : 'Thinking…'
+    : play.running ? <ShimmerText>Thinking… <AiThinkClock clock={() => clock.current()} live={onScreen} /></ShimmerText>
+    : finished ? <>{summary ?? `Thought for ${Math.round(play.elapsed)}s · ${steps.length} steps`}</> : 'Thinking…'
+  const rows = (detailed: boolean) => steps.map((s, i) => {
+    const st = statusOf(s, i)
+    return <AiThoughtRow key={i} s={s} st={st} last={i === steps.length - 1} detail={detailed ? s.detail ?? '' : ''} srcs={detailed ? Infinity : 0}
+      time={autoPlay ? play.times[i] : undefined} animate={false} expandable={finished && !!(s.detail || s.sources?.length)} expanded={i === shownStep}
+      onToggle={() => setPick(i)} />
+  })
+  // autoPlay: every step stays one line (rows never move); the live step's detail types into a panel below the list,
+  // which is as tall as the tallest step's detail from the start (every detail stacked invisibly in the same cell)
+  const shownStep = !autoPlay ? -1 : finished ? (pick >= 0 ? pick : steps.length - 1) : play.cur
+  const live = autoPlay && !finished && play.cur >= 0
+  const cur = steps[shownStep]
+  const detailOf = (s: ThoughtStep, words: number, srcs: number, animate: boolean) => <>
+    <div className="mb-1 truncate text-[11px] font-medium text-[var(--fg3)]">{s.label}</div>
+    {s.detail && <div className="text-xs leading-normal text-[var(--fg2)]">{(s.detail ?? '').split(' ').slice(0, words).join(' ')}</div>}
+    {s.sources && srcs > 0 && <div className="mt-1.5 flex flex-wrap gap-1">{s.sources.slice(0, srcs).map(x => (
+      <motion.span key={x} initial={animate ? { opacity: 0, scale: 0.85 } : false} animate={{ opacity: 1, scale: 1 }} transition={spring(0.4, 0.3)}
+        className="inline-flex items-center gap-1 rounded-full border border-[var(--line)] px-2 py-0.5 text-[11px] text-[var(--fg2)]"><Icon name="globe" size={10} strokeWidth={2.5} />{x}</motion.span>))}</div>}
+  </>
+  // the rows and the invisible sizers only change between steps, not on every typed word
+  const rowEls = useMemo(() => rows(false), [steps, play.cur, play.times, finished, pick]) // eslint-disable-line react-hooks/exhaustive-deps
+  const ghosts = useMemo(() => steps.map((s, k) => <div key={'ghost' + k} aria-hidden className="invisible min-w-0">{detailOf(s, Infinity, Infinity, false)}</div>), [steps]) // eslint-disable-line react-hooks/exhaustive-deps
   return (
     <div ref={ref} className={cn(surface.card, 'overflow-hidden text-[13px]', className)}>
       <button onClick={() => setOpen(!open)} aria-expanded={open} className="flex w-full cursor-pointer items-center gap-2 border-0 bg-transparent p-3 text-left font-medium text-[var(--fg2)] hover:text-[var(--fg)]">
@@ -197,33 +261,18 @@ export function ThinkingSteps({ steps, summary, defaultOpen = true, autoPlay = f
         <motion.span className="ml-auto grid text-[var(--fg3)]" animate={{ rotate: open ? 0 : -90 }} transition={spring(0.2, 0.3)}><Icon name="chevronDown" size={12} strokeWidth={2.5} /></motion.span>
       </button>
       <Collapse open={open}>
-        <ol className="m-0 list-none px-3 pt-0.5 pb-3">
-          {steps.map((s, i) => {
-            const st = statusOf(s, i), live = autoPlay && i === play.cur
-            const words = autoPlay ? (live ? play.words : st === 'done' ? Infinity : 0) : Infinity
-            const srcs = autoPlay ? (live ? play.srcs : st === 'done' ? Infinity : 0) : Infinity
-            const detail = (s.detail ?? '').split(' ').slice(0, words).join(' ')
-            return (
-              <li key={i} className="grid grid-cols-[22px_1fr] gap-2.5">
-                <div className="flex flex-col items-center pt-px">
-                  <StatusIcon status={st} />
-                  {i < steps.length - 1 && <span className="relative my-1 min-h-3.5 w-0.5 flex-1 overflow-hidden rounded-sm bg-[var(--line)]">
-                    <motion.b className="absolute inset-x-0 top-0 block bg-[var(--fg3)]" initial={false} animate={{ height: st === 'done' ? '100%' : '0%' }} transition={{ duration: 0.3 }} />
-                  </span>}
-                </div>
-                <div className="min-w-0 pb-3">
-                  <div className={cn('leading-5 font-medium', st === 'pending' ? 'text-[var(--fg3)]' : 'text-[var(--fg)]')}>
-                    {s.label}{autoPlay && play.times[i] !== undefined && <span className="ml-1.5 font-[family-name:var(--mono)] text-[11px] font-normal text-[var(--fg3)]">{play.times[i].toFixed(1)}s</span>}
-                  </div>
-                  {detail && <motion.div initial={autoPlay ? { opacity: 0, y: -4 } : false} animate={{ opacity: 1, y: 0 }} className="mt-1 text-xs leading-normal text-[var(--fg2)]">{detail}</motion.div>}
-                  {s.sources && srcs > 0 && <div className="mt-1.5 flex flex-wrap gap-1">{s.sources.slice(0, srcs).map(x => (
-                    <motion.span key={x} initial={autoPlay ? { opacity: 0, scale: 0.85 } : false} animate={{ opacity: 1, scale: 1 }} transition={spring(0.4, 0.3)}
-                      className="inline-flex items-center gap-1 rounded-full border border-[var(--line)] px-2 py-0.5 text-[11px] text-[var(--fg2)]"><Icon name="globe" size={10} strokeWidth={2.5} />{x}</motion.span>))}</div>}
-                </div>
-              </li>
-            )
-          })}
-        </ol>
+        {autoPlay ? (
+          <div className="px-3 pt-0.5 pb-3">
+            <ol className="m-0 list-none p-0 [&>li>div:last-child]:pb-2">{rowEls}</ol>
+            <div className={cn(surface.muted, 'grid px-2.5 py-2 [&>*]:[grid-area:1/1]')}>
+              {ghosts}
+              <div className="min-w-0" aria-live="off">
+                {cur ? detailOf(cur, live ? play.words : Infinity, live ? play.srcs : Infinity, live)
+                  : <span className="text-xs text-[var(--fg3)]">{play.cur < 0 ? 'Starts when it scrolls into view.' : ''}</span>}
+              </div>
+            </div>
+          </div>
+        ) : <ol className="m-0 list-none px-3 pt-0.5 pb-3">{rows(true)}</ol>}
       </Collapse>
     </div>
   )
@@ -247,8 +296,8 @@ export function AgentPlan({ steps, onDone, className }: { steps: (string | { lab
   const done = items.filter(s => s.status === 'done').length
   return (
     <div className={cn('flex flex-col gap-2.5', className)}>
-      <div className="flex items-center justify-between text-xs text-[var(--fg3)]"><span>Plan</span><span className="ui-num">{done}/{steps.length}</span></div>
-      <Progress value={done} max={steps.length} tone="ok" />
+      <div className="flex items-center justify-between text-xs text-[var(--fg3)]"><span>Plan</span><span className="tabular-nums">{done}/{steps.length}</span></div>
+      <Progress value={done} max={steps.length} tone="ok" label="Plan progress" />
       <ol className="m-0 flex list-none flex-col gap-2 p-0">
         {items.map((s, i) => (
           <motion.li key={i} layout className={cn('flex items-center gap-2.5 text-[13px] transition-colors', s.status === 'pending' ? 'text-[var(--fg3)]' : s.status === 'done' ? 'text-[var(--fg2)]' : 'text-[var(--fg)]')}>
@@ -257,7 +306,7 @@ export function AgentPlan({ steps, onDone, className }: { steps: (string | { lab
         ))}
       </ol>
       {!controlled && <div className="flex items-center gap-2.5">
-        <Button size="sm" variant="primary" disabled={running} onClick={run}>{ran ? 'Run again' : 'Run'}</Button>
+        <Button size="sm" variant="primary" disabled={running} onClick={run}><span className="grid [&>*]:[grid-area:1/1]"><span aria-hidden className="invisible">Run again</span><span>{ran ? 'Run again' : 'Run'}</span></span></Button>
         <span className="text-xs tabular-nums text-[var(--fg3)]" aria-live="polite">{running ? `Step ${cur + 1} of ${steps.length}` : cur >= steps.length ? 'Done' : ''}</span>
       </div>}
     </div>
@@ -273,7 +322,7 @@ function PermResult({ icon, tone, title, sub }: { icon: ReactNode; tone: 'ok' | 
   return (
     <div className="flex items-start gap-3 p-3">
       <motion.span initial={{ scale: 0.6 }} animate={{ scale: 1 }} transition={spring(0.5, 0.45)}
-        className={cn('grid h-9 w-9 flex-none place-items-center rounded-[10px]', tone === 'ok' ? 'bg-[var(--ok-soft)] text-[var(--ok)]' : 'bg-[var(--muted)] text-[var(--fg2)]')}>{icon}</motion.span>
+        className={cn('grid h-9 w-9 flex-none place-items-center rounded-[var(--r-md)]', tone === 'ok' ? 'bg-[var(--ok-soft)] text-[var(--ok)]' : 'bg-[var(--muted)] text-[var(--fg2)]')}>{icon}</motion.span>
       <div className="min-w-0 flex-1"><div className="text-sm leading-tight font-semibold">{title}</div><div className="mt-0.5 text-xs text-[var(--fg3)]">{sub}</div></div>
     </div>
   )
@@ -339,15 +388,15 @@ export function PermissionRequest({ title = 'Send an email to 12 people', app = 
     <div>
       <div className="p-3">
         <div className="flex items-start gap-3">
-          <span className="grid h-9 w-9 flex-none place-items-center rounded-[10px] bg-[var(--muted)]"><Icon name={app} size={18} /></span>
+          <span className="grid h-9 w-9 flex-none place-items-center rounded-[var(--r-md)] bg-[var(--muted)]"><Icon name={app} size={18} /></span>
           <div className="min-w-0 flex-1"><div className="text-sm leading-tight font-semibold">{title}</div><div className="mt-0.5 text-xs text-[var(--fg3)]">Assistant is asking · just now</div></div>
           <Badge tone="warn">Needs approval</Badge>
         </div>
-        <div className="mt-3 flex items-start gap-2 rounded-[9px] bg-[var(--muted)] px-2.5 py-2 text-xs leading-snug text-[var(--fg2)]"><Icon name="info" size={14} className="mt-px text-[var(--fg3)]" /><span>{reason}</span></div>
+        <div className="mt-3 flex items-start gap-2 rounded-[var(--r-md)] bg-[var(--muted)] px-2.5 py-2 text-xs leading-snug text-[var(--fg2)]"><Icon name="info" size={14} className="mt-px text-[var(--fg3)]" /><span>{reason}</span></div>
         <button aria-expanded={preview} onClick={() => setPreview(!preview)}
           className={cn(surface.md, 'mt-3 flex w-full cursor-pointer items-center gap-2.5 p-2 text-left text-[13px] hover:border-[var(--line2)]')}>
           <span className="flex flex-none">{recipients.slice(0, 3).map((n, i) => <Avatar key={n} name={n} size={24} className={cn('[@media(pointer:coarse)]:!h-7 [@media(pointer:coarse)]:!w-7 [@media(pointer:coarse)]:!text-[11px]', i ? '-ml-2' : '')} />)}
-            {total > 3 && <span className="-ml-2 grid h-6 w-6 place-items-center rounded-full border-2 border-[var(--card)] bg-[var(--muted)] text-[9px] font-semibold text-[var(--fg2)] [@media(pointer:coarse)]:h-7 [@media(pointer:coarse)]:w-7 [@media(pointer:coarse)]:text-[11px]">+{total - 3}</span>}</span>
+            {total > 3 && <span className="-ml-2 grid h-6 w-6 place-items-center rounded-full border-2 border-[var(--card)] bg-[var(--muted)] text-[11px] font-semibold text-[var(--fg2)] [@media(pointer:coarse)]:h-7 [@media(pointer:coarse)]:w-7 [@media(pointer:coarse)]:text-[11px]">+{total - 3}</span>}</span>
           <span className="min-w-0 flex-1 truncate max-sm:whitespace-normal"><b className="font-medium">{list}</b> <span className="text-xs text-[var(--fg3)]">· “{draft.subject}”</span></span>
           <motion.span className="grid text-[var(--fg3)]" animate={{ rotate: preview ? 180 : 0 }}><Icon name="chevronDown" size={12} strokeWidth={2.5} /></motion.span>
         </button>
@@ -369,7 +418,7 @@ export function PermissionRequest({ title = 'Send an email to 12 people', app = 
     <form onSubmit={e => { e.preventDefault(); send() }}>
       <div className="p-3">
         <div className="flex items-start gap-3">
-          <span className="grid h-9 w-9 flex-none place-items-center rounded-[10px] bg-[var(--muted)]"><Icon name={app} size={18} /></span>
+          <span className="grid h-9 w-9 flex-none place-items-center rounded-[var(--r-md)] bg-[var(--muted)]"><Icon name={app} size={18} /></span>
           <div><div className="text-sm leading-tight font-semibold">Edit before sending</div><div className="mt-0.5 text-xs text-[var(--fg3)]">To {list} · {total} people</div></div>
         </div>
         <label className="mt-3 mb-1 block text-xs font-medium">Subject
@@ -385,11 +434,11 @@ export function PermissionRequest({ title = 'Send an email to 12 people', app = 
   )
   else if (state === 'sending' || state === 'undoing') body = (
     <div className="flex items-start gap-3 p-3">
-      <span className="grid h-9 w-9 flex-none place-items-center rounded-[10px] bg-[var(--muted)]"><Spinner /></span>
+      <span className="grid h-9 w-9 flex-none place-items-center rounded-[var(--r-md)] bg-[var(--muted)]"><Spinner /></span>
       <div className="flex-1"><div className="text-sm font-semibold">{state === 'undoing' ? 'Undoing…' : 'Sending…'}</div>
         {state === 'sending' && progress ? <>
           <div className="mt-0.5 flex items-center gap-1 text-xs text-[var(--fg3)]"><AnimatedNumber value={sent} /> of {of} delivered</div>
-          <Progress value={sent} max={of} className="mt-2.5" /></>
+          <Progress value={sent} max={of} label={`Delivered ${sent} of ${of}`} className="mt-2.5" /></>
           : <div className="mt-0.5 text-xs text-[var(--fg3)]">{state === 'undoing' ? 'Asking the app to recall it' : `Waiting for ${app === 'inbox' ? 'the mail app' : 'the app'}`}</div>}</div>
     </div>
   )
@@ -459,7 +508,7 @@ export function Citation({ n, source, className }: { n: number; source: Source; 
       <button type="button" aria-expanded={shown} aria-describedby={shown ? id : undefined} aria-label={`Source ${n}: ${source.title}`}
         {...tap} onPointerDown={e => { pointer.current = e.pointerType }}
         onClick={() => { if (pointer.current === 'touch') return; const v = !pinned; setPinned(v); setOpen(v) }}
-        className={cn('mx-0.5 inline-grid h-4 min-w-4 cursor-pointer place-items-center rounded border-0 bg-[var(--muted)] px-1 align-[2px] text-[10px] font-semibold text-[var(--fg2)] hover:bg-[var(--accent-soft)] hover:text-[var(--accent)] aria-expanded:bg-[var(--accent-soft)] aria-expanded:text-[var(--accent)] [@media(pointer:coarse)]:text-[11px]', TOUCH.hit)}>{n}</button>
+        className={cn('mx-0.5 inline-grid h-4 min-w-4 cursor-pointer place-items-center rounded-[var(--r-sm)] border-0 bg-[var(--muted)] px-1 align-[2px] text-[11px] font-semibold text-[var(--fg2)] hover:bg-[var(--accent-soft)] hover:text-[var(--accent)] aria-expanded:bg-[var(--accent-soft)] aria-expanded:text-[var(--accent)] [@media(pointer:coarse)]:text-[11px]', TOUCH.hit)}>{n}</button>
       <AnimatePresence>
         {shown && (
           <motion.span ref={panel} id={id} role="tooltip" initial={{ opacity: 0, y: pos.up ? 4 : -4, scale: 0.97 }} animate={{ opacity: 1, y: 0, scale: 1 }} exit={{ opacity: 0, scale: 0.97, transition: { duration: 0.12 } }} transition={spring(0.25, 0.3)}
@@ -545,7 +594,7 @@ export function SuggestedEdit({ before, after, action = 'Make it concise', onRes
   return (
     <div className={cn('flex flex-col gap-2.5', className)}>
       <motion.p key={state === 'applied' ? 'a' : 'b'} animate={state === 'applied' ? { scale: [0.98, 1] } : undefined} transition={spring(0.4, 0.35)}
-        className="m-0 rounded-[10px] bg-[var(--muted)] px-3 py-2.5 text-[13px] leading-[1.75]">
+        className="m-0 rounded-[var(--r-md)] bg-[var(--muted)] px-3 py-2.5 text-[13px] leading-[1.75]">
         {state === 'review' ? segs.map((s, k) => s.t === '=' ? <span key={k}>{s.text}</span> : (
           <motion.span key={k} initial={{ opacity: 0 }} animate={{ opacity: 1 }} transition={{ duration: 0.25, delay: n++ * 0.12 }}
             className={s.t === '-' ? 'bg-[var(--bad-soft)] text-[var(--bad)] line-through' : 'bg-[var(--ok-soft)] text-[var(--ok)]'}>{s.text}</motion.span>
@@ -594,7 +643,7 @@ export function ConfidenceField({ label, value, confidence, threshold = 0.8, pro
                 if (!open) { if (e.key === 'ArrowDown' && choices.length > 1) { e.preventDefault(); roving.setActive(0); setOpen(true) } return }
                 if (e.key === 'Escape') { e.stopPropagation(); setOpen(false) } else if (e.key === 'Tab') setOpen(false); else roving.onKeyDown(e)
               }}
-              className="inline-flex cursor-pointer items-center gap-1 rounded-md border-0 bg-[var(--warn-soft)] px-2 py-0.5 text-xs text-[color-mix(in_srgb,var(--warn)_66%,var(--fg))] [@media(pointer:coarse)]:min-h-8">
+              className="inline-flex cursor-pointer items-center gap-1 rounded-[var(--r-md)] border-0 bg-[var(--warn-soft)] px-2 py-0.5 text-xs text-[color-mix(in_srgb,var(--warn)_66%,var(--fg))] [@media(pointer:coarse)]:min-h-8">
               <Icon name="alert" size={12} />{prompt ?? 'Check'}</button>
           </Tooltip>
           <FloatingPanel open={open} placement="bottom-end" role="presentation" className="min-w-[190px]">
@@ -617,14 +666,15 @@ const AI_VOICE_FLAT = AI_VOICE_BARS.map(() => 0)
 /**
  * Mic button with a live waveform. While listening, interim words appear in grey; when you stop, the transcript
  * settles into its final form. Controlled with `listening` / `onListeningChange`, or uncontrolled.
- * (Wire it to your speech API; the demo replays `transcript`.)
+ * Feed it what your speech API heard so far as `transcript` (it reveals the words as they arrive); with none it just
+ * listens and reports an empty result.
  */
-export function VoiceInput({ transcript = 'Move the meeting to three', listening: lc, onListeningChange, onResult, className }:
+export function VoiceInput({ transcript = '', listening: lc, onListeningChange, onResult, className }:
   { transcript?: string; listening?: boolean; onListeningChange?: (v: boolean) => void; onResult?: (text: string) => void; className?: string }) {
   const [listening, setListening] = useControllable(lc, false, onListeningChange)
   const [heard, setHeard] = useState(0)
   const [final, setFinal] = useState<string | null>(null)
-  const words = transcript.split(' ')
+  const words = transcript.split(' ').filter(Boolean)
   useEffect(() => {
     if (!listening) return
     setHeard(0); setFinal(null)
@@ -632,7 +682,7 @@ export function VoiceInput({ transcript = 'Move the meeting to three', listening
     return () => clearInterval(t)
   }, [listening, words.length])
   const toggle = () => {
-    if (listening) { const text = words.slice(0, Math.max(heard, words.length)).join(' '); setFinal(text); onResult?.(text) }
+    if (listening) { const text = words.join(' '); setFinal(text || null); onResult?.(text) }
     setListening(!listening)
   }
   return (
@@ -680,7 +730,7 @@ export function SourcesPanel({ answer, sources, className }: { answer: string; s
           const m = p.match(/^\[(\d+)\]$/); if (!m) return <span key={k}>{p}</span>
           const i = Number(m[1]) - 1
           return <button key={k} {...hover(i)} aria-label={`Source ${i + 1}: ${sources[i]?.title}`} onClick={() => { toggle(i, true); setPin(i); setNudge(n => ({ i, k: n.k + 1 })) }}
-            className={cn('mx-0.5 inline-grid h-[17px] min-w-[17px] cursor-pointer place-items-center rounded-[5px] border-0 px-1 align-[1px] text-[11px] font-semibold transition-colors', TOUCH.hit,
+            className={cn('mx-0.5 inline-grid h-[17px] min-w-[17px] cursor-pointer place-items-center rounded-[var(--r-sm)] border-0 px-1 align-[1px] text-[11px] font-semibold transition-colors', TOUCH.hit,
               hot === i ? 'bg-[var(--accent)] text-[var(--card)]' : 'bg-[var(--muted)] text-[var(--fg2)]')}>{i + 1}</button>
         })}
       </p>
@@ -705,7 +755,7 @@ function AiSourceCardView({ s, n, hot, open, nudge, bind, onToggle }:
       className={cn('cursor-pointer rounded-[var(--r-md)] border bg-[var(--card)] px-3 py-2.5 transition-[border-color,box-shadow] outline-none',
         hot ? 'border-[var(--accent)] shadow-[0_0_0_3px_var(--accent-soft)]' : 'border-[var(--line)]')}>
       <div className="flex items-center gap-2">
-        <span className="grid h-5 w-5 flex-none place-items-center rounded-[5px] text-[10px] font-bold text-white [@media(pointer:coarse)]:text-[11px]" style={{ background: `color-mix(in srgb, ${safeColor(s.color, 'var(--accent)')} 58%, #000)` }}>{s.letter ?? s.title[0]}</span>
+        <span className="grid h-5 w-5 flex-none place-items-center rounded-[var(--r-sm)] text-[11px] font-bold text-white [@media(pointer:coarse)]:text-[11px]" style={{ background: `color-mix(in srgb, ${safeColor(s.color, 'var(--accent)')} 58%, #000)` }}>{s.letter ?? s.title[0]}</span>
         <div className="min-w-0"><b className="block truncate text-[13px] font-medium">{s.title}</b><div className="text-[11px] text-[var(--fg3)]">{s.domain}</div></div>
         <span className="ml-auto font-[family-name:var(--mono)] text-[11px] font-semibold text-[var(--fg3)]">{n}</span>
       </div>
@@ -720,9 +770,10 @@ export type CompareModel = { name: string; tier: string; color: string; /** seco
 type McState = { phase: 'idle' | 'thinking' | 'streaming' | 'done'; words: number }
 /**
  * Same prompt, several models streamed side by side at their own speeds: thinking dots, first-token time, tokens/s
- * and cost. Vote for the best answer (a toast confirms). Run restarts all of them.
+ * and cost. Vote for the best answer (a toast confirms). Run restarts all of them. `autoRun` starts the first run by
+ * itself the first time the comparison scrolls into view.
  */
-export function ModelComparison({ prompt, models, className }: { prompt: string; models: CompareModel[]; className?: string }) {
+export function ModelComparison({ prompt, models, autoRun = false, className }: { prompt: string; models: CompareModel[]; autoRun?: boolean; className?: string }) {
   const toast = useToast()
   const [st, setSt] = useState<McState[]>(models.map(() => ({ phase: 'idle', words: 0 })))
   const [win, setWin] = useState(-1)
@@ -740,11 +791,17 @@ export function ModelComparison({ prompt, models, className }: { prompt: string;
     })
   }
   useEffect(() => () => { gen.current++ }, [])
+  const { ref: box, seen } = useViewport<HTMLDivElement>(null, { amount: 0.3 })
+  const ran = useRef(false)
+  useEffect(() => { if (autoRun && seen && !ran.current) { ran.current = true; run() } }, [autoRun, seen]) // eslint-disable-line react-hooks/exhaustive-deps
   return (
-    <div className={cn('flex flex-col gap-3', className)}>
+    <div ref={box} className={cn('flex flex-col gap-3', className)}>
       <div className={cn(surface.muted, 'flex flex-wrap items-center gap-2.5 px-3 py-2.5 text-[13px]')}>
         <span className="text-xs text-[var(--fg3)]">Prompt</span><b className="min-w-0 flex-1 basis-[200px] font-medium">{prompt}</b>
-        <Button size="sm" variant="primary" onClick={run} className="max-sm:w-full">{st.some(s => s.phase !== 'idle') ? 'Run again' : 'Run'}</Button>
+        {/* both labels share one cell, so the button keeps the width of the longer one */}
+        <Button size="sm" variant="primary" onClick={run} className="max-sm:w-full"><span className="grid [&>*]:[grid-area:1/1]">
+          <span aria-hidden className="invisible">Run again</span><span>{st.some(s => s.phase !== 'idle') ? 'Run again' : 'Run'}</span>
+        </span></Button>
       </div>
       <div className={cn(surface.card, 'grid overflow-hidden md:grid-cols-3')}>
         {models.map((m, i) => {
@@ -754,23 +811,28 @@ export function ModelComparison({ prompt, models, className }: { prompt: string;
               className={cn('flex flex-col border-[var(--line)] md:min-h-[200px] transition-[box-shadow,background] max-md:[&+&]:border-t md:[&+&]:border-l',
                 win === i && 'relative z-[1] bg-[color-mix(in_srgb,var(--ok)_6%,var(--card))] shadow-[inset_0_0_0_1.5px_var(--ok),0_0_0_3px_var(--ok-soft)]')}>
               <div className="flex items-start gap-2.5 px-3 pt-3 pb-1 text-[13px]">
-                <i className="mt-1 h-2.5 w-2.5 flex-none rounded-[3px]" style={{ background: safeColor(m.color, 'var(--accent)') }} />
+                <i className="mt-1 h-2.5 w-2.5 flex-none rounded-[var(--r-sm)]" style={{ background: safeColor(m.color, 'var(--accent)') }} />
                 <div className="min-w-0"><b className="block leading-tight">{m.name}</b><span className="text-[11px] text-[var(--fg3)]">{m.tier}</span></div>
                 <span className="flex-1" />
-                <span className="text-[11px] leading-7 text-[var(--fg3)]">{s.phase === 'thinking' ? 'Thinking…' : s.phase === 'streaming' ? 'Streaming' : ''}</span>
+                <span className="w-[60px] flex-none text-right text-[11px] leading-7 text-[var(--fg3)]">{s.phase === 'thinking' ? 'Thinking…' : s.phase === 'streaming' ? 'Streaming' : ''}</span>
                 <IconButton icon="thumbUp" label={`Mark ${m.name} as best`} aria-pressed={win === i} tone={win === i ? 'default' : 'muted'}
                   className={win === i ? '!bg-[var(--ok-soft)] text-[var(--ok)]' : ''}
                   onClick={() => { setWin(i); toast({ title: 'Vote recorded', description: `${m.name} wins this round`, tone: 'ok' }) }} />
               </div>
               <div className="flex gap-3 border-b border-[var(--line)] px-3 pb-2.5 text-[11px] text-[var(--fg3)]">
-                <span><b className="font-[family-name:var(--mono)] font-semibold text-[var(--fg)]">{started ? `${m.firstToken}s` : '–'}</b> first token</span>
-                <span><b className="font-[family-name:var(--mono)] font-semibold text-[var(--fg)]">{s.phase === 'done' ? m.tps : '–'}</b> tok/s</span>
-                <span><b className="font-[family-name:var(--mono)] font-semibold text-[var(--fg)]">{s.phase === 'done' ? m.cost : '–'}</b></span>
+                {/* fixed-width tabular cells: the numbers arriving never push the labels */}
+                <span><b className="inline-block min-w-[4ch] font-semibold tabular-nums text-[var(--fg)]">{started ? `${m.firstToken}s` : '–'}</b> first token</span>
+                <span><b className="inline-block min-w-[3.5ch] font-semibold tabular-nums text-[var(--fg)]">{s.phase === 'done' ? m.tps : '–'}</b> tok/s</span>
+                <span><b className="inline-block min-w-[7ch] font-semibold tabular-nums text-[var(--fg)]">{s.phase === 'done' ? m.cost : '–'}</b></span>
               </div>
-              <div className="flex-1 p-3 text-[13px] leading-relaxed">
-                {s.phase === 'idle' ? <span className="text-xs text-[var(--fg3)]">Press Run to stream all three.</span>
-                  : s.phase === 'thinking' ? <TypingDots />
-                  : <span className={cn(s.phase === 'streaming' && 'ui-caret')}>{m.text.split(' ').slice(0, s.words).join(' ')}</span>}
+              {/* the full answer sits invisibly in the same grid cell, so streaming fills reserved space instead of growing the card */}
+              <div className="grid flex-1 p-3 text-[13px] leading-relaxed [&>*]:[grid-area:1/1]">
+                <span aria-hidden className="invisible">{m.text}</span>
+                <div>
+                  {s.phase === 'idle' ? <span className="text-xs text-[var(--fg3)]">Press Run to stream all three.</span>
+                    : s.phase === 'thinking' ? <TypingDots />
+                    : <span className={cn(s.phase === 'streaming' && 'ui-caret')}>{m.text.split(' ').slice(0, s.words).join(' ')}</span>}
+                </div>
               </div>
             </motion.div>
           )

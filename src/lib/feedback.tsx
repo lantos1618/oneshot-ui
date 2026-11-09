@@ -19,16 +19,25 @@ export const useToast = () => useContext(ToastCtx)
  */
 export function ToastProvider({ children, max = 5 }: { children: ReactNode; max?: number }) {
   const [items, setItems] = useState<ToastItem[]>([])
-  const close = useCallback((id: number) => setItems(x => x.filter(t => t.id !== id)), [])
+  const [heights, setHeights] = useState<Record<number, number>>({})
+  const close = useCallback((id: number) => {
+    setItems(x => x.filter(t => t.id !== id))
+    setHeights(({ [id]: _gone, ...rest }) => rest) // eslint-disable-line @typescript-eslint/no-unused-vars
+  }, [])
+  const report = useCallback((id: number, h: number) => setHeights(m => m[id] === h ? m : { ...m, [id]: h }), [])
   const limit = Math.max(1, Math.floor(Number.isFinite(max) ? max : 5))
   const push = useCallback((t: ToastInput) => setItems(x => [...x, { ...t, id: Date.now() + Math.random() }].slice(-limit)), [limit])
+  // Every toast sits at the bottom of the region and is lifted by the heights of the newer toasts below it (a transform),
+  // so a toast leaving or arriving moves the others with an animated transform, never by re-flowing the layout.
+  const lift = new Map<number, number>()
+  for (let k = items.length - 1, acc = 0; k >= 0; k--) { lift.set(items[k].id, acc); acc += (heights[items[k].id] ?? 0) + 8 }
   return (
     <ToastCtx.Provider value={push}>
       {children}
       {/* one live region for all toasts (the toasts themselves carry no role, so nothing is announced twice) */}
-      <div role="region" aria-label="Notifications" data-modal-keep className="pointer-events-none fixed right-[max(16px,env(safe-area-inset-right))] bottom-[max(16px,env(safe-area-inset-bottom))] z-[80] flex flex-col items-end gap-2 max-[640px]:left-[max(12px,env(safe-area-inset-left))] max-[640px]:right-[max(12px,env(safe-area-inset-right))] max-[640px]:items-stretch" aria-live="polite">
+      <div role="region" aria-label="Notifications" data-modal-keep className="pointer-events-none fixed right-[max(16px,env(safe-area-inset-right))] bottom-[max(16px,env(safe-area-inset-bottom))] z-[80] h-0 w-[340px] max-w-[calc(100vw-32px)] max-[640px]:left-[max(12px,env(safe-area-inset-left))] max-[640px]:right-[max(12px,env(safe-area-inset-right))] max-[640px]:w-auto max-[640px]:max-w-none" aria-live="polite">
         <AnimatePresence initial={false}>
-          {items.map(t => <Toast key={t.id} t={t} onClose={() => close(t.id)} />)}
+          {items.map(t => <Toast key={t.id} t={t} lift={lift.get(t.id) ?? 0} onSize={report} onClose={close} />)}
         </AnimatePresence>
       </div>
     </ToastCtx.Provider>
@@ -37,11 +46,19 @@ export function ToastProvider({ children, max = 5 }: { children: ReactNode; max?
 
 /**
  * One toast. Dismiss with the ✕, by swiping it right (touch or mouse), or let it time out. Full width on phones.
- * The timer pauses while it is hovered, focused or being touched.
+ * The timer pauses while it is hovered, focused or being touched. `lift` is its distance above the region's bottom.
  */
-function Toast({ t, onClose }: { t: ToastItem; onClose: () => void }) {
+function Toast({ t, lift, onSize, onClose: closeById }: { t: ToastItem; lift: number; onSize: (id: number, h: number) => void; onClose: (id: number) => void }) {
   const [paused, setPaused] = useState(false)
   const left = useRef(t.duration ?? 4200)
+  const box = useRef<HTMLDivElement>(null)
+  const onClose = useCallback(() => closeById(t.id), [closeById, t.id])
+  useLayoutEffect(() => { // report the height before paint, so the stack lifts the others in the same frame
+    const el = box.current; if (!el) return
+    onSize(t.id, el.offsetHeight)
+    const ro = new ResizeObserver(() => onSize(t.id, el.offsetHeight))
+    ro.observe(el); return () => ro.disconnect()
+  }, [t.id, onSize])
   useEffect(() => {
     if (paused) return
     const start = Date.now(), timer = setTimeout(onClose, left.current)
@@ -49,12 +66,12 @@ function Toast({ t, onClose }: { t: ToastItem; onClose: () => void }) {
   }, [paused, onClose])
   const tone = t.tone ?? 'ok'
   return (
-    <motion.div layout initial={{ opacity: 0, y: 20, scale: 0.95 }} animate={{ opacity: 1, y: 0, scale: 1 }}
+    <motion.div ref={box} initial={{ opacity: 0, y: 20 - lift, scale: 0.95 }} animate={{ opacity: 1, y: -lift, scale: 1 }}
       exit={{ opacity: 0, x: 60, transition: { duration: 0.2 } }} transition={spring(0.3, 0.45)}
       drag="x" dragConstraints={{ left: 0, right: 0 }} dragElastic={{ left: 0.1, right: 0.9 }}
       onDragStart={() => setPaused(true)} onDragEnd={(_, i) => { if (i.offset.x > 80 || i.velocity.x > 500) onClose(); else setPaused(false) }}
       onPointerEnter={() => setPaused(true)} onPointerLeave={() => setPaused(false)} onPointerDown={() => setPaused(true)} onFocus={() => setPaused(true)} onBlur={() => setPaused(false)}
-      className={cn(floatingSurface, 'pointer-events-auto flex max-w-[340px] min-w-[260px] cursor-grab touch-pan-y items-center gap-3 rounded-xl p-3 pr-2 text-[13px] active:cursor-grabbing max-[640px]:max-w-none max-[640px]:min-w-0')}>
+      className={cn(floatingSurface, 'pointer-events-auto absolute right-0 bottom-0 flex max-w-full min-w-[260px] cursor-grab touch-pan-y items-center gap-3 p-3 pr-2 text-[13px] active:cursor-grabbing max-[640px]:left-0 max-[640px]:min-w-0')}>
       <span className={cn('grid h-5 w-5 flex-none place-items-center rounded-full', tone === 'bad' ? TONE_SOFT.bad : tone === 'info' ? TONE_SOFT.accent : TONE_SOFT.ok)}>
         <Icon name={tone === 'bad' ? 'alert' : tone === 'info' ? 'info' : 'check'} size={11} strokeWidth={3} />
       </span>
@@ -70,7 +87,7 @@ const ALERT_ICON: Record<Tone, IconName> = { neutral: 'info', accent: 'info', ok
 export function Alert({ tone = 'accent', title, children, action, className }:
   { tone?: Tone; title: ReactNode; children?: ReactNode; action?: ReactNode; className?: string }) {
   return (
-    <div role={tone === 'bad' ? 'alert' : 'status'} className={cn('flex items-start gap-2.5 rounded-[10px] p-3 text-[13px]', TONE_SOFT[tone], className)}>
+    <div role={tone === 'bad' ? 'alert' : 'status'} className={cn('flex items-start gap-2.5 rounded-[var(--r-md)] p-3 text-[13px]', TONE_SOFT[tone], className)}>
       <Icon name={ALERT_ICON[tone]} size={16} className="mt-0.5" />
       <p className="m-0 flex-1 text-[var(--fg)]"><b className="block font-semibold">{title}</b>{children && <span className="text-[var(--fg2)]">{children}</span>}</p>
       {action}
@@ -79,19 +96,22 @@ export function Alert({ tone = 'accent', title, children, action, className }:
 }
 
 const PROGRESS_TONE = { primary: 'bg-[var(--primary)]', ok: 'bg-[var(--ok)]', warn: 'bg-[var(--warn)]', bad: 'bg-[var(--bad)]', accent: 'bg-[var(--accent)]' } as const
-/** Linear progress bar; the fill springs to each new value. */
-export function Progress({ value, max = 100, tone = 'primary', className, label }:
+/** Linear progress bar; the fill springs to each new value. `label` names it for screen readers (default "Progress"; say what is progressing). */
+export function Progress({ value, max = 100, tone = 'primary', className, label = 'Progress' }:
   { value: number; max?: number; tone?: keyof typeof PROGRESS_TONE; className?: string; label?: string }) {
   return (
-    <div role="progressbar" aria-label={label} aria-valuenow={Math.round(value)} aria-valuemin={0} aria-valuemax={max} className={cn('h-1.5 overflow-hidden rounded-[3px] bg-[var(--muted)]', className)}>
-      <motion.div className={cn('h-full rounded-[3px] transition-colors duration-300', PROGRESS_TONE[tone])} initial={false} animate={{ width: `${Math.min(100, (value / max) * 100)}%` }} transition={spring(0.1, 0.5)} />
+    <div role="progressbar" aria-label={label} aria-valuenow={Math.round(value)} aria-valuemin={0} aria-valuemax={max} className={cn('h-1.5 overflow-hidden rounded-full bg-[var(--muted)]', className)}>
+      <motion.div className={cn('h-full rounded-full transition-colors duration-300', PROGRESS_TONE[tone])} initial={false} animate={{ width: `${Math.min(100, (value / max) * 100)}%` }} transition={spring(0.1, 0.5)} />
     </div>
   )
 }
 
-/** Circular progress with a percentage in the middle. Pulses once when it reaches 100. */
-export function ProgressRing({ value, size = 56, stroke = 5, label, tone = 'primary', className }:
-  { value: number; size?: number; stroke?: number; label?: ReactNode; tone?: 'primary' | 'ok'; className?: string }) {
+/**
+ * Circular progress with a percentage in the middle (or `label`). Pulses once when it reaches 100. `aria-label` names the
+ * progressbar for screen readers (default "Progress").
+ */
+export function ProgressRing({ value, size = 56, stroke = 5, label, tone = 'primary', className, 'aria-label': ariaLabel = 'Progress' }:
+  { value: number; size?: number; stroke?: number; label?: ReactNode; tone?: 'primary' | 'ok'; className?: string; 'aria-label'?: string }) {
   const r = (size - stroke) / 2, c = 2 * Math.PI * r
   const [scope, animate] = useAnimate()
   const prev = useRef(value)
@@ -100,7 +120,7 @@ export function ProgressRing({ value, size = 56, stroke = 5, label, tone = 'prim
     prev.current = value
   }, [value, animate, scope])
   return (
-    <div ref={scope} className={cn('relative inline-grid place-items-center', className)} style={{ width: size, height: size }} role="progressbar" aria-valuenow={Math.round(value)} aria-valuemin={0} aria-valuemax={100}>
+    <div ref={scope} className={cn('relative inline-grid place-items-center', className)} style={{ width: size, height: size }} role="progressbar" aria-label={ariaLabel} aria-valuenow={Math.round(value)} aria-valuemin={0} aria-valuemax={100}>
       <svg width={size} height={size} className="-rotate-90">
         <circle cx={size / 2} cy={size / 2} r={r} fill="none" stroke="var(--muted)" strokeWidth={stroke} />
         <motion.circle cx={size / 2} cy={size / 2} r={r} fill="none" stroke={tone === 'ok' ? 'var(--ok)' : 'var(--primary)'} strokeWidth={stroke} strokeLinecap="round"
@@ -117,7 +137,7 @@ export function EmptyState({ icon = 'inbox', title, description, action, bob = t
   return (
     <div className={cn('flex flex-col items-center gap-3 py-4 text-center', className)}>
       <motion.span initial={{ scale: 0.8, opacity: 0 }} animate={{ scale: 1, opacity: 1 }} transition={spring(0.4, 0.5)}
-        className="grid h-12 w-12 place-items-center rounded-2xl bg-[var(--muted)] text-[var(--fg3)]">
+        className="grid h-12 w-12 place-items-center rounded-[var(--r-lg)] bg-[var(--muted)] text-[var(--fg3)]">
         <motion.span className="grid" animate={bob ? { y: [0, -5, 0] } : undefined} transition={{ duration: 2.6, repeat: Infinity, ease: 'easeInOut' }}><Icon name={icon} size={22} /></motion.span>
       </motion.span>
       <div><div className="font-semibold">{title}</div>{description && <div className="text-xs text-[var(--fg3)]">{description}</div>}</div>
@@ -261,23 +281,39 @@ export function useCopy(text?: string | (() => string), ms = 1300) {
 }
 
 /**
- * Copies `text`; the icon swaps to a check once the clipboard accepted it (or to a warning if it refused). Icon-only for
- * the icon sizes unless `iconOnly={false}`; otherwise shows `label` → "Copied". The result is announced.
+ * Copies `text`. On success the icon swaps to a check and the label (or, icon-only, the accessible name and tooltip) to
+ * `copiedLabel` for `duration` ms (default 1.5 s); a refusal shows a warning and `failedLabel`. Either result is announced
+ * in a polite live region next to the button. Icon-only for the icon sizes unless `iconOnly={false}`. The label keeps the
+ * width of the longer of `label`/`copiedLabel`, so the button doesn't change size. Takes every other button prop.
  */
-export function CopyButton({ text, label = 'Copy', size = 'icon', iconOnly = size === 'icon' || size === 'icon-sm', variant, className, onCopy }:
-  { text: string | (() => string); label?: string; size?: ButtonProps['size']; iconOnly?: boolean; variant?: ButtonProps['variant']; className?: string; onCopy?: (ok: boolean) => void }) {
-  const { copied, failed, copy } = useCopy(text)
+export function CopyButton({ text, label = 'Copy', copiedLabel = 'Copied', failedLabel = 'Couldn’t copy', duration = 1500, size = 'icon', iconOnly = size === 'icon' || size === 'icon-sm' || size === 'icon-xs', variant, className, onCopy, ...rest }:
+  Omit<ButtonProps, 'onClick' | 'children' | 'size' | 'variant'> & {
+    text: string | (() => string); label?: string; copiedLabel?: string; failedLabel?: string; duration?: number
+    size?: ButtonProps['size']; iconOnly?: boolean; variant?: ButtonProps['variant']; className?: string; onCopy?: (ok: boolean) => void
+  }) {
+  const { copied, failed, copy } = useCopy(text, duration)
   const state = copied ? 'copied' : failed ? 'failed' : 'idle'
-  const said = copied ? 'Copied' : failed ? 'Couldn’t copy' : label
+  const said = copied ? copiedLabel : failed ? failedLabel : label
+  const small = size === 'icon-sm' || size === 'sm' || size === 'xs' || size === 'icon-xs'
   return (
-    <Button size={size} variant={variant} aria-label={iconOnly ? label : undefined} title={iconOnly ? label : undefined} className={className} onClick={async () => { const ok = await copy(); onCopy?.(ok) }}>
-      <AnimatePresence mode="popLayout" initial={false}>
-        <motion.span key={state} initial={{ scale: 0.5, opacity: 0 }} animate={{ scale: 1, opacity: 1 }} exit={{ scale: 0.5, opacity: 0 }} transition={spring(0.5, 0.4)}
-          className={copied ? 'text-[var(--ok)]' : failed ? 'text-[var(--bad)]' : ''}><Icon name={copied ? 'check' : failed ? 'alert' : 'copy'} size={size === 'icon-sm' || size === 'sm' ? 14 : 16} strokeWidth={copied ? 3 : 2} /></motion.span>
-      </AnimatePresence>
-      {!iconOnly && said}
-      <span className="sr-only" aria-live="polite">{state === 'idle' ? '' : said}</span>
-    </Button>
+    <>
+      <Button size={size} variant={variant} aria-label={iconOnly ? said : undefined} title={iconOnly ? said : undefined} className={className} {...rest}
+        onClick={async () => { const ok = await copy(); onCopy?.(ok) }}>
+        <AnimatePresence mode="popLayout" initial={false}>
+          <motion.span key={state} initial={{ scale: 0.5, opacity: 0 }} animate={{ scale: 1, opacity: 1 }} exit={{ scale: 0.5, opacity: 0 }} transition={spring(0.5, 0.4)}
+            className={cn('grid', copied ? 'text-[var(--ok)]' : failed ? 'text-[var(--bad)]' : '')}><Icon name={copied ? 'check' : failed ? 'alert' : 'copy'} size={small ? 14 : 16} strokeWidth={copied ? 3 : 2} /></motion.span>
+        </AnimatePresence>
+        {!iconOnly && (
+          <span className="grid text-left [&>span]:col-start-1 [&>span]:row-start-1">
+            {failed ? <span>{failedLabel}</span> : <>
+              <span className={cn(copied && 'invisible')}>{label}</span>
+              <span className={cn(!copied && 'invisible')}>{copiedLabel}</span>
+            </>}
+          </span>
+        )}
+      </Button>
+      <span role="status" aria-live="polite" className="sr-only">{state === 'idle' ? '' : said}</span>
+    </>
   )
 }
 

@@ -27,3 +27,8 @@ demo-dist
 dist-single
 *.tsbuildinfo
 react-ui-library.html
+
+# Test output
+test-results
+playwright-report
+blob-report

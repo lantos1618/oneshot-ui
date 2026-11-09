@@ -1,6 +1,6 @@
 import { useEffect, useId, useLayoutEffect, useRef, useState, type ReactNode } from 'react'
 import { AnimatePresence, motion } from 'motion/react'
-import { AnimatedNumber, Avatar, Badge, Button, Icon, IconButton, type IconName, LOCALE, TOUCH, cn, fmt, spring, surface, useControllable, useRoving, useWidth } from './core'
+import { AnimatedNumber, Avatar, Badge, Button, Icon, IconButton, type IconName, LOCALE, ScrollEdges, TOUCH, cn, fmt, spring, surface, useControllable, useRoving, useScrollEdges, useWidth } from './core'
 import { shake } from './motion'
 import { ActiveIndicator, CheckboxBox, Field, Input, NumberStepper, SegmentedControl, Select, Switch, type Option } from './forms'
 import { Steps, Tabs, type TabItem } from './navigation'
@@ -34,11 +34,11 @@ export function PricingTable({ plans, currency = 'EUR', yearlyDiscount = 0.2, on
           return (
             <motion.div key={p.name} whileHover={{ y: -3, boxShadow: 'var(--shadow)' }} transition={spring(0.3, 0.3)}
               className={cn(surface.card, 'relative flex flex-col gap-3 p-5', p.featured && 'border-[var(--primary)] shadow-[0_0_0_1px_var(--primary)]')}>
-              {p.featured && <span className="absolute -top-[11px] left-5 rounded-full bg-[var(--primary)] px-2.5 py-1 text-[11px] font-semibold text-[var(--on-primary)]">Most popular</span>}
-              <div><h4 className="m-0 text-[15px] font-semibold">{p.name}</h4><p className="m-0 mt-0.5 min-h-[38px] text-[13px] text-[var(--fg2)]">{p.blurb}</p></div>
+              {p.featured && <Badge className="absolute -top-2.5 left-5 !bg-[var(--primary)] font-semibold !text-[var(--on-primary)]">Most popular</Badge>}
+              <div><h4 className="m-0 text-sm font-semibold">{p.name}</h4><p className="m-0 mt-0.5 min-h-[38px] text-[13px] text-[var(--fg2)]">{p.blurb}</p></div>
               <div>
                 <div className="flex items-baseline gap-1">
-                  <AnimatedNumber value={price} format={{ style: 'currency', currency, maximumFractionDigits: 0 }} className="font-[family-name:var(--font)] text-4xl font-bold tracking-tight" />
+                  <AnimatedNumber value={price} format={{ style: 'currency', currency, maximumFractionDigits: 0 }} className="font-[family-name:var(--font)] text-[28px] font-bold tracking-tight" />
                   <span className="text-[13px] text-[var(--fg3)]">/ month</span>
                 </div>
                 <AnimatePresence mode="wait" initial={false}>
@@ -91,7 +91,7 @@ function CheckoutDone({ email, total, currency, onRestart }: { email: string; to
       <motion.span ref={ring} initial={{ scale: 0.4 }} animate={{ scale: 1 }} transition={spring(0.5, 0.5)} className="grid h-16 w-16 place-items-center rounded-full bg-[var(--ok-soft)] text-[var(--ok)]">
         <Icon name="check" size={30} strokeWidth={2.6} />
       </motion.span>
-      <b className="text-[17px]">Payment successful</b>
+      <b className="text-base">Payment successful</b>
       <span className="text-[13px] text-[var(--fg2)]">{fmt.money(total, currency)} paid · receipt sent to {email}</span>
       <Button size="sm" onClick={onRestart}><Icon name="refresh" size={13} />Start over</Button>
     </div>
@@ -166,7 +166,7 @@ export function Checkout({ items: initialItems, currency = 'EUR', vatRate = 0.08
       <ul className="m-0 list-none p-0">
         {items.map(it => (
           <li key={it.id} className="flex flex-wrap items-center gap-3 border-b border-[var(--line)] py-2.5 text-[13px]">
-            <i className="h-11 w-11 flex-none rounded-[10px]" style={{ background: it.swatch ?? 'var(--muted)' }} />
+            <i className="h-11 w-11 flex-none rounded-[var(--r-md)]" style={{ background: it.swatch ?? 'var(--muted)' }} />
             <div className="min-w-[120px] flex-1"><b className="block font-medium">{it.name}</b><span className="text-xs text-[var(--fg3)]">{it.detail}</span></div>
             <NumberStepper value={it.qty} min={1} max={20} label={`${it.name} quantity`} onChange={n => setItems(l => l.map(x => x.id === it.id ? { ...x, qty: n } : x))} />
             <AnimatedNumber value={it.price * it.qty} format={{ ...money, maximumFractionDigits: 0 }} className="min-w-[80px] justify-end font-medium" />
@@ -196,7 +196,7 @@ export function Checkout({ items: initialItems, currency = 'EUR', vatRate = 0.08
           <AnimatePresence>
             {brand && (
               <motion.span key={brand.name} initial={{ opacity: 0, scale: 0.7 }} animate={{ opacity: 1, scale: 1 }} exit={{ opacity: 0, scale: 0.7, transition: { duration: 0.1 } }} transition={spring(0.5, 0.3)}
-                className="absolute top-1/2 right-2.5 -mt-[10px] rounded px-1.5 py-[3px] font-[family-name:var(--mono)] text-[11px] leading-[14px] font-bold tracking-wider text-white uppercase" style={{ background: brand.bg }}>
+                className="absolute top-1/2 right-2.5 -mt-[10px] rounded-[var(--r-sm)] px-1.5 py-[3px] font-[family-name:var(--mono)] text-[11px] leading-[14px] font-bold tracking-wider text-white uppercase" style={{ background: brand.bg }}>
                 {brand.name}
               </motion.span>
             )}
@@ -234,7 +234,7 @@ export function Checkout({ items: initialItems, currency = 'EUR', vatRate = 0.08
         <div className={row}><span>Subtotal</span><AnimatedNumber value={sub} format={money} /></div>
         <Collapse open={!!promo}><div className={cn(row, '!text-[var(--ok)]')}><span>Promo {promo?.code}</span><AnimatedNumber value={-disc} format={money} /></div></Collapse>
         <div className={row}><span>VAT {(vatRate * 100).toLocaleString(LOCALE, { maximumFractionDigits: 2 })}%</span><AnimatedNumber value={tax} format={money} /></div>
-        <div className="flex justify-between border-t border-[var(--line)] pt-2.5 text-[15px] font-semibold"><span>Total</span><AnimatedNumber value={total} format={money} /></div>
+        <div className="flex justify-between border-t border-[var(--line)] pt-2.5 text-sm font-semibold"><span>Total</span><AnimatedNumber value={total} format={money} className="font-[family-name:var(--font)] tabular-nums" /></div>
         <form className="flex gap-1.5" data-co-promo onSubmit={e => { e.preventDefault(); apply() }}>
           <Input value={code} onChange={e => { setCode(e.target.value); if (promoMsg && !promoMsg.ok) setPromoMsg(null) }} placeholder="Promo code" aria-label="Promo code"
             aria-invalid={promoMsg?.ok === false || undefined} disabled={step === 3} className={cn('!h-8 uppercase placeholder:normal-case', TOUCH.row)} />
@@ -263,7 +263,7 @@ export type SettingsSection = { id: string; label: string; icon: IconName; descr
  * Settings page: section nav on the left (pill slides; ↑/↓, Home/End move between sections), the panel
  * slides in from the direction you moved. Every change autosaves: toggles and selects at once, text
  * after a pause or on blur, then a "Saved ✓" flash instead of a Save button. Under ~600px the nav becomes
- * a scrolling row (←/→). `onSave` may return a promise; the flash waits for it.
+ * a scrolling row (←/→) with edge fades, keeping the open section in view. `onSave` may return a promise; the flash waits for it.
  */
 export function SettingsPage({ sections, section, defaultSection, onSectionChange, onSave, className }:
   { sections: SettingsSection[]; section?: string; defaultSection?: string; onSectionChange?: (id: string) => void
@@ -283,6 +283,13 @@ export function SettingsPage({ sections, section, defaultSection, onSectionChang
   const row = w !== 0 && w < 600
   const group = useId()
   const i = Math.max(0, sections.findIndex(s => s.id === cur)), sec = sections[i]
+  const [navEdges, edges] = useScrollEdges<HTMLElement>()
+  const navEl = useRef<HTMLElement | null>(null)
+  useEffect(() => { // the row scrolls: keep the open section in view (scrolling the strip only, never the page)
+    const el = navEl.current, t = navRefs.current[i]; if (!row || !el || !t) return
+    if (t.offsetLeft < el.scrollLeft) el.scrollLeft = t.offsetLeft - 24
+    else if (t.offsetLeft + t.offsetWidth > el.scrollLeft + el.clientWidth) el.scrollLeft = t.offsetLeft + t.offsetWidth - el.clientWidth + 24
+  }, [i, row])
   useEffect(() => () => { // leaving the page: stop the timers, but save what was still waiting for its pause
     Object.values(timers.current).forEach(clearTimeout)
     Object.entries(pending.current).forEach(([id, v]) => { void save.current?.(id, v) })
@@ -316,8 +323,9 @@ export function SettingsPage({ sections, section, defaultSection, onSectionChang
 
   return (
     <div ref={wrap} className={cn(surface.card, 'grid min-h-[400px] overflow-hidden', row ? 'grid-cols-1' : 'grid-cols-[200px_minmax(0,1fr)]', className)}>
-      <nav aria-label="Settings sections" onKeyDown={nav.onKeyDown} role="tablist" aria-orientation={row ? 'horizontal' : 'vertical'}
-        className={cn('flex gap-0.5 bg-[color-mix(in_srgb,var(--muted)_35%,var(--card))] p-2.5', row ? 'flex-row overflow-x-auto border-b border-[var(--line)]' : 'flex-col border-r border-[var(--line)]')}>
+      <div className={cn('relative min-w-0', row ? 'border-b border-[var(--line)]' : 'border-r border-[var(--line)]')}>
+      <nav ref={el => { navEl.current = el; navEdges(el) }} aria-label="Settings sections" onKeyDown={nav.onKeyDown} role="tablist" aria-orientation={row ? 'horizontal' : 'vertical'}
+        className={cn('flex h-full gap-0.5 bg-[color-mix(in_srgb,var(--muted)_35%,var(--card))] p-2.5', row ? 'flex-row overflow-x-auto overscroll-x-contain [scrollbar-width:none] [&::-webkit-scrollbar]:hidden' : 'flex-col')}>
         {sections.map((s, k) => (
           <button key={s.id} ref={el => { navRefs.current[k] = el }} role="tab" aria-selected={k === i} tabIndex={k === i ? 0 : -1} onClick={() => select(k)}
             className={cn('relative flex h-[34px] flex-none cursor-pointer items-center gap-2.5 rounded-[var(--r-md)] border-0 bg-transparent px-2.5 text-left text-[13px] whitespace-nowrap transition-colors',
@@ -327,6 +335,8 @@ export function SettingsPage({ sections, section, defaultSection, onSectionChang
           </button>
         ))}
       </nav>
+      {row && <ScrollEdges {...edges} hint={null} />}
+      </div>
       <div className={cn('relative min-w-0 overflow-hidden', row ? 'px-4 py-4' : 'px-6 py-5')} role="tabpanel" aria-label={sec?.label}>
         <span aria-live="polite" className={cn('absolute', row ? 'top-5 right-4' : 'top-6 right-6')}>
           <AnimatePresence>
@@ -336,7 +346,7 @@ export function SettingsPage({ sections, section, defaultSection, onSectionChang
         </span>
         {sec && (
           <motion.div key={sec.id} initial={dir ? { opacity: 0, x: row ? 16 * dir : 0, y: row ? 0 : 12 * dir } : false} animate={{ opacity: 1, x: 0, y: 0 }} transition={spring(0.2, 0.35)}>
-            <h4 className="m-0 mb-1 pr-20 text-[17px] font-semibold">{sec.label}</h4>
+            <h4 className="m-0 mb-1 pr-20 text-base font-semibold">{sec.label}</h4>
             {sec.description && <p className="m-0 mb-4 text-[13px] text-[var(--fg3)]">{sec.description}</p>}
             {sec.rows.map(r => {
               const text = <span className="block min-w-0"><b className="block text-[13px] font-medium">{r.label}</b>{r.description && <span className="mt-0.5 block text-xs text-[var(--fg3)]">{r.description}</span>}</span>
@@ -387,13 +397,13 @@ export function ProfileCard({ name, bio, pro, followers, following, projects, ta
           </div>
         </div>
         <div className="mt-2">
-          <div className="flex items-center gap-2"><b className="text-lg">{name}</b>{pro && <Badge tone="accent">Pro</Badge>}</div>
+          <div className="flex items-center gap-2"><b className="text-base">{name}</b>{pro && <Badge tone="accent">Pro</Badge>}</div>
           {bio && <p className="m-0 mt-1 text-[13px] text-[var(--fg2)]">{bio}</p>}
         </div>
         <div className="mt-3 mb-1 flex flex-wrap gap-5 text-[13px] text-[var(--fg2)]">
-          <span className="flex items-baseline gap-1" title={`${count.toLocaleString(LOCALE)} followers`}><AnimatedNumber value={count} format={{ notation: 'compact', maximumFractionDigits: 1 }} className="text-[15px] font-semibold text-[var(--fg)]" />followers</span>
-          <span className="flex items-baseline gap-1"><b className="ui-num text-[15px] text-[var(--fg)]">{following.toLocaleString(LOCALE)}</b>following</span>
-          <span className="flex items-baseline gap-1"><b className="ui-num text-[15px] text-[var(--fg)]">{projects}</b>projects</span>
+          <span className="flex items-baseline gap-1" title={`${count.toLocaleString(LOCALE)} followers`}><AnimatedNumber value={count} format={{ notation: 'compact', maximumFractionDigits: 1 }} className="font-[family-name:var(--font)] text-sm font-semibold tabular-nums text-[var(--fg)]" />followers</span>
+          <span className="flex items-baseline gap-1"><b className="text-sm tabular-nums text-[var(--fg)]">{following.toLocaleString(LOCALE)}</b>following</span>
+          <span className="flex items-baseline gap-1"><b className="text-sm tabular-nums text-[var(--fg)]">{projects}</b>projects</span>
         </div>
         {tabs && <Tabs items={tabs} className="mt-2.5 [&_[role=tabpanel]]:min-h-[90px] [&_[role=tabpanel]]:text-[var(--fg2)]" />}
       </div>

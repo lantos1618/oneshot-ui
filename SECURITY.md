@@ -71,7 +71,7 @@ The library makes no network requests of its own unless `UIProvider fonts` is on
 ## Verifying releases
 
 - **npm**: `npm audit signatures` checks the registry signatures of what you installed. Releases published through
-  CI with npm provenance (the plan once CI exists; see the README's "Recommended CI") also show the source commit
+  CI with npm provenance (see the README's "CI" section) also show the source commit
   on the npm page: compare it with the tag.
 - **Single files**: each `dist-single/*.tsx` starts with a stamp naming the version, the commit it was built from
   and the sha256 of the rest of the file. `dist-single/SHA256SUMS` lists the sha256 of each whole file:

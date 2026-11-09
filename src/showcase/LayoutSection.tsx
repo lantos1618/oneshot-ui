@@ -1,6 +1,6 @@
 import { Fragment, useState, type ReactNode } from 'react'
-import { Button, Kanban, type KanbanColumn, OrgChart, type OrgNode, highlightCode, Scheduler, type SchedulerEvent, SortableList, SplitPane, Timeline, type TimelineItem, TreeView, useToast } from '../lib'
-import { Section, Spec } from './kit'
+import { Kanban, type KanbanColumn, OrgChart, type OrgNode, highlightCode, Scheduler, type SchedulerEvent, SortableList, SplitPane, Timeline, type TimelineItem, type TreeNode, TreeView, useToast } from '../lib'
+import { Section, Spec, SpecAction } from './kit'
 
 const LAYOUT_PEOPLE: Record<string, string> = { AL: 'Alex Lee', BK: 'Bea Kim', CM: 'Chris Moe', DN: 'Dana Ng', EP: 'Eli Park' }
 const lp = (...k: string[]) => k.map(x => LAYOUT_PEOPLE[x])
@@ -82,11 +82,20 @@ const LAYOUT_ORG: OrgNode = { id: 'ceo', name: 'Alex Lee', role: 'CEO', children
 
 const LAYOUT_EDITOR = ['import { useFlow } from "./hooks";', '', 'export function App() {', '  const flow = useFlow("csv-import");', '  return <Dashboard flow={flow} />;', '}']
 
-function LayoutPane({ title, children }: { title: string; children: ReactNode }) {
+const LAYOUT_EXPLORER: TreeNode[] = [
+  { id: 'src', label: 'src', children: [
+    { id: 'components', label: 'components', children: [{ id: 'button', label: 'Button.tsx' }, { id: 'dialog', label: 'Dialog.tsx' }] },
+    { id: 'main', label: 'main.tsx' },
+  ] },
+  { id: 'public', label: 'public', children: [{ id: 'favicon', label: 'favicon.svg' }] },
+  { id: 'pkg', label: 'package.json' },
+]
+
+function LayoutPane({ title, children, plain }: { title: string; children: ReactNode; plain?: boolean }) {
   return (
     <div className="flex h-full min-h-0 flex-col">
       <div className="flex h-8 flex-none items-center border-b border-[var(--line)] bg-[color-mix(in_srgb,var(--muted)_40%,var(--card))] px-3 text-[11px] font-semibold tracking-[.05em] whitespace-nowrap text-[var(--fg3)] uppercase">{title}</div>
-      <div className="min-h-0 flex-1 overflow-auto px-3 py-2.5 font-[family-name:var(--mono)] text-xs leading-[1.7] whitespace-pre text-[var(--fg2)]">{children}</div>
+      <div className={plain ? 'min-h-0 flex-1 overflow-auto p-1.5' : 'min-h-0 flex-1 overflow-auto px-3 py-2.5 font-[family-name:var(--mono)] text-xs leading-[1.7] whitespace-pre text-[var(--fg2)]'}>{children}</div>
     </div>
   )
 }
@@ -95,7 +104,8 @@ export function LayoutSection() {
   const toast = useToast()
   const [list, setList] = useState([
     { id: '1', t: 'Onboarding email', color: 'var(--accent)' }, { id: '2', t: 'Pricing experiment', color: 'var(--c3)' }, { id: '3', t: 'Referral program', color: 'var(--c4)' },
-    { id: '4', t: 'Annual plan discount', color: 'var(--warn)' }, { id: '5', t: 'In-app tour', color: 'var(--fg3)' },
+    { id: '4', t: 'Annual plan discount', color: 'var(--warn)' }, { id: '5', t: 'In-app tour', color: 'var(--fg3)' }, { id: '6', t: 'Win-back email', color: 'var(--ok)' },
+    { id: '7', t: 'Pricing page FAQ', color: 'var(--c2)' },
   ])
   const [feed, setFeed] = useState(LAYOUT_TIMELINE)
   const [events] = useState(layoutEvents)
@@ -109,24 +119,25 @@ export function LayoutSection() {
   }
   return (
     <Section id="layout" title="Layout" desc="Boards, lists, trees and panes. Everything drags, reflows, and works with a keyboard.">
-      <Spec title="Kanban board" desc="Drag cards between columns and drag a column header to reorder columns. Tab to a card’s ⠿ handle: arrows move between cards, Alt + arrows move the card, Alt + Shift + ← / → move its column. On touch, press and hold a card to pick it up. In progress has a WIP limit of 3." span={3}>
+      <Spec title="Kanban board" desc="Drag cards between columns and drag a column header to reorder columns. On touch, press and hold a card to pick it up. In progress has a WIP limit of 3." span={3}
+        keys={[[['Tab'], 'To a card’s ⠿ handle'], [['←', '↑', '↓', '→'], 'Between cards'], [['Alt', '←', '→'], 'Move the card'], [['Alt', '⇧', '←', '→'], 'Move its column']]}>
         <Kanban defaultValue={LAYOUT_BOARD} doneColumn="done" newCard={() => ({ tag: { label: 'Eng', tone: 'accent' }, assignees: ['Alex Lee'], priority: 'Med', due: 'Nov 20' })} />
       </Spec>
-      <Spec title="Sortable list" desc="Drag the handle, or focus a row and use Alt + ↑ / ↓">
+      <Spec title="Sortable list" desc="Drag the handle to reorder" keys={[[['Alt', '↑', '↓'], 'Move the focused row']]}>
         <SortableList items={list} onChange={setList} render={i => i.t} label="Growth experiments" />
       </Spec>
-      <Spec title="Tree view" desc="Arrow keys to move, Enter to open, F2 to rename a file or folder (or double-click a file)">
-        <TreeView nodes={LAYOUT_TREE} defaultExpanded={['my-app', 'src', 'components']} aria-label="Project files"
+      <Spec title="Tree view" desc="Double-click a file to rename it" keys={[[['↑', '↓'], 'Move'], [['←', '→'], 'Fold'], [['↵'], 'Open'], [['F2'], 'Rename']]}>
+        <TreeView nodes={LAYOUT_TREE} defaultExpanded={['my-app', 'src', 'components', 'hooks']} aria-label="Project files"
           onOpen={n => toast({ title: 'Opened', description: n.label })} onRename={(_, v, prev) => toast({ title: 'Renamed', description: `${prev} → ${v}` })} />
       </Spec>
-      <Spec title="Activity timeline" desc="Grouped by day, new events slide in">
-        <Button size="sm" className="-mt-2 self-end [@media(pointer:coarse)]:!h-9" onClick={simulate}>Simulate</Button>
+      <Spec title="Activity timeline" desc="Grouped by day, new events slide in" actions={<SpecAction onClick={simulate}>Simulate event</SpecAction>}>
         <Timeline items={feed} />
       </Spec>
-      <Spec title="Split panes" desc="Drag a divider to resize, double-click it (or focus it and press Enter) to reset. Arrow keys nudge, Shift + arrows take big steps. Panes snap closed below their minimum." span={3}>
+      <Spec title="Split panes" desc="Drag a divider to resize, double-click it to reset. Panes snap closed below their minimum." span={3}
+        keys={[[['←', '→'], 'Nudge the focused divider'], [['⇧', '←', '→'], 'Big steps'], [['↵'], 'Reset']]}>
         <div className="overflow-hidden rounded-[var(--r-lg)] border border-[var(--line)] bg-[var(--card)]">
-          <SplitPane style={{ height: 340 }} defaultSize={26} min={14} label="Resize explorer"
-            first={<LayoutPane title="Explorer">{'▾ src\n   ▾ components\n      Button.tsx\n      Dialog.tsx\n   main.tsx\n▸ public\n  package.json'}</LayoutPane>}
+          <SplitPane className="h-[340px] max-sm:h-[560px]" defaultSize={26} min={14} label="Resize explorer"
+            first={<LayoutPane title="Explorer" plain><TreeView compact nodes={LAYOUT_EXPLORER} defaultExpanded={['src', 'components']} aria-label="Explorer" /></LayoutPane>}
             second={
               <SplitPane direction="vertical" defaultSize={62} min={18} label="Resize terminal"
                 first={<LayoutPane title="editor.ts">{LAYOUT_EDITOR.map((l, i) => <Fragment key={i}>{i > 0 && '\n'}{highlightCode(l, 'ts')}</Fragment>)}</LayoutPane>}

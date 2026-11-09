@@ -26,7 +26,7 @@ export function Tabs({ items, value, defaultValue, onChange, className }:
             className={cn('relative flex cursor-pointer items-center gap-1.5 border-0 bg-transparent px-0 py-2 text-[13px] font-medium whitespace-nowrap transition-colors [@media(pointer:coarse)]:py-2.5',
               t.value === v ? 'text-[var(--fg)]' : 'text-[var(--fg2)] hover:text-[var(--fg)]')}>
             {t.label}{t.badge}
-            {t.value === v && <ActiveIndicator group={group} className="top-auto -bottom-px h-0.5 rounded-sm bg-[var(--fg)]" />}
+            {t.value === v && <ActiveIndicator group={group} className="top-auto -bottom-px h-0.5 rounded-full bg-[var(--fg)]" />}
           </button>
         ))}
       </div>
@@ -51,9 +51,9 @@ export function NavList({ items, value, defaultValue, onChange, collapsed, class
     <nav className={cn('flex flex-col gap-0.5', className)}>
       {items.map(it => (
         <button key={it.value} onClick={() => set(it.value)} aria-current={it.value === v ? 'page' : undefined} title={collapsed ? it.label : undefined}
-          className={cn('relative flex h-8 cursor-pointer items-center gap-2.5 rounded-lg border-0 bg-transparent px-2.5 text-left text-[13px] transition-colors [@media(pointer:coarse)]:h-10',
+          className={cn('relative flex h-8 cursor-pointer items-center gap-2.5 rounded-[var(--r-md)] border-0 bg-transparent px-2.5 text-left text-[13px] transition-colors [@media(pointer:coarse)]:h-10',
             it.value === v ? 'font-medium text-[var(--fg)]' : 'text-[var(--fg2)] hover:bg-[var(--muted)] hover:text-[var(--fg)]')}>
-          {it.value === v && <ActiveIndicator group={group} className="rounded-lg bg-[var(--muted)]" />}
+          {it.value === v && <ActiveIndicator group={group} className="rounded-[var(--r-md)] bg-[var(--muted)]" />}
           {it.icon && <Icon name={it.icon} size={16} className="relative" />}
           <AnimatePresence initial={false}>
             {!collapsed && <motion.span initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0, transition: { duration: 0.08 } }} className="relative flex-1 truncate">{it.label}</motion.span>}
@@ -126,7 +126,7 @@ export function CollapsibleSidebar({ items, title = 'Northwind', user, value, de
         className={cn('flex flex-none flex-col gap-1.5 overflow-hidden border-r border-[var(--line)] bg-[var(--card)] p-2.5',
           over && 'absolute inset-y-0 left-0 z-10', over && !col && 'shadow-[var(--shadow)]')}>
         <div className="flex h-9 items-center gap-2 px-1 whitespace-nowrap">
-          <motion.span initial={false} animate={{ opacity: col ? 0 : 1, width: col ? 0 : 22 }} transition={sbFade} className="h-[22px] flex-none rounded-[7px] bg-[linear-gradient(135deg,var(--accent),var(--c4))]" />
+          <motion.span initial={false} animate={{ opacity: col ? 0 : 1, width: col ? 0 : 22 }} transition={sbFade} className="h-[22px] flex-none rounded-[var(--r-md)] bg-[linear-gradient(135deg,var(--accent),var(--c4))]" />
           <motion.b initial={false} animate={{ opacity: col ? 0 : 1 }} transition={sbFade} className="min-w-0 flex-1 truncate text-sm font-semibold">{title}</motion.b>
           <Tooltip content={<>{col ? 'Expand' : 'Collapse'} <kbd className="font-[family-name:var(--mono)] opacity-70 [@media(hover:none)]:hidden">{hotkey || ''}</kbd></>} placement={col ? 'right' : 'bottom-center'} portal delay={300} disabled={coarse}>
             <IconButton icon="panel" label={col ? 'Expand sidebar' : 'Collapse sidebar'} aria-expanded={!col} onClick={toggle} />
@@ -139,7 +139,7 @@ export function CollapsibleSidebar({ items, title = 'Northwind', user, value, de
           ) : (
             <Tooltip key={it.value} content={it.label} placement="right" portal disabled={!col} delay={80}>
               <button onClick={() => { setV(it.value); if (over && !col) setCol(true) }} aria-current={it.value === v ? 'page' : undefined} aria-label={col ? it.label : undefined}
-                className={cn('relative flex h-[34px] w-full cursor-pointer items-center gap-3 rounded-[var(--r-md)] border-0 bg-transparent px-2.5 text-left text-[13px] whitespace-nowrap transition-colors [@media(pointer:coarse)]:h-9',
+                className={cn('relative flex h-8 w-full cursor-pointer items-center gap-3 rounded-[var(--r-md)] border-0 bg-transparent px-2.5 text-left text-[13px] whitespace-nowrap transition-colors [@media(pointer:coarse)]:h-9',
                   it.value === v ? 'font-medium text-[var(--fg)]' : 'text-[var(--fg2)] hover:text-[var(--fg)]')}>
                 {it.value === v && <ActiveIndicator group={group} className="rounded-[var(--r-md)] bg-[var(--muted)]" />}
                 {it.icon && <Icon name={it.icon} size={16} className="relative" />}
@@ -206,10 +206,9 @@ export function MobileTabBar({ items, value, defaultValue, onChange, onAction, a
         </span>
       ) : (
         <button key={it.value} onClick={() => { touched.current = true; set(it.value) }} aria-current={it.value === v ? 'page' : undefined}
-          aria-label={it.count ? `${it.label}, ${it.count} new` : it.label}
           className={cn('relative flex h-full min-w-0 cursor-pointer flex-col items-center justify-center gap-1 border-0 bg-transparent text-[11px] font-medium transition-colors',
             it.value === v ? 'text-[var(--accent)]' : 'text-[var(--fg3)] hover:text-[var(--fg2)]')}>
-          {it.value === v && <motion.span layoutId={group} className="absolute top-0 left-[calc(50%-14px)] h-[3px] w-7 rounded-b-[3px] bg-[var(--accent)]" transition={spring(0.25, 0.4)} />}
+          {it.value === v && <motion.span layoutId={group} className="absolute top-0 left-[calc(50%-14px)] h-[3px] w-7 rounded-b-[var(--r-sm)] bg-[var(--accent)]" transition={spring(0.25, 0.4)} />}
           <span className="relative inline-flex">
             <motion.span key={it.value === v ? 'on' : 'off'} className="inline-flex" initial={false}
               animate={it.value === v && touched.current ? { y: [0, -4, 0] } : { y: 0 }} transition={{ duration: 0.35, ease: 'easeOut' }}>
@@ -217,12 +216,13 @@ export function MobileTabBar({ items, value, defaultValue, onChange, onAction, a
             </motion.span>
             <AnimatePresence>
               {(it.count ?? 0) > 0 && (
-                <motion.span initial={{ scale: 0 }} animate={{ scale: 1 }} exit={{ scale: 0, transition: { duration: 0.2 } }} transition={spring(0.5, 0.35)}
+                <motion.span aria-hidden initial={{ scale: 0 }} animate={{ scale: 1 }} exit={{ scale: 0, transition: { duration: 0.2 } }} transition={spring(0.5, 0.35)}
                   className="absolute -top-2 left-[calc(100%-7px)] grid h-[18px] min-w-[18px] place-items-center rounded-full border-2 border-[var(--card)] bg-[var(--bad)] px-1 text-[11px] leading-none font-bold text-[var(--card)]">{it.count}</motion.span>
               )}
             </AnimatePresence>
           </span>
-          {it.label}
+          {/* the name is the visible label plus the count ("Inbox, 3 new"), so it matches what is on screen */}
+          <span>{it.label}{(it.count ?? 0) > 0 && <span className="sr-only">, {it.count} new</span>}</span>
         </button>
       ))}
     </nav>
@@ -255,19 +255,59 @@ const megaSlide: Variants = {
   exit: (d: number) => ({ opacity: 0, x: -40 * d, transition: { duration: 0.2 } }),
 }
 
+/** The focusable links and buttons of the mega menu panel's current content, in DOM order. */
+const megaFocusables = (root: Element | null | undefined) =>
+  root ? [...root.querySelectorAll<HTMLElement>('a[href],button:not([disabled]),[tabindex]:not([tabindex="-1"])')].filter(el => el.getClientRects().length > 0) : []
+/**
+ * Spatial arrow-key step through a panel laid out as a grid: the nearest item in the arrow's direction, scored by distance
+ * along the arrow plus twice the sideways offset. Returns null at the grid's edge.
+ */
+function megaStep(items: HTMLElement[], from: HTMLElement, key: string): HTMLElement | null {
+  const r = from.getBoundingClientRect(), cx = r.left + r.width / 2, cy = r.top + r.height / 2
+  let best: HTMLElement | null = null, score = Infinity
+  for (const el of items) {
+    if (el === from) continue
+    const b = el.getBoundingClientRect(), x = b.left + b.width / 2, y = b.top + b.height / 2
+    const sameRow = b.top < r.bottom - 2 && b.bottom > r.top + 2
+    const ok = key === 'ArrowDown' ? b.top >= r.bottom - 2 : key === 'ArrowUp' ? b.bottom <= r.top + 2
+      : key === 'ArrowRight' ? x > cx + 1 && b.left >= r.left + 4 && (sameRow || b.left >= r.right - 2) : x < cx - 1 && b.right <= r.right - 4 && (sameRow || b.right <= r.left + 2)
+    if (!ok) continue
+    const vertical = key === 'ArrowDown' || key === 'ArrowUp'
+    const s = vertical ? Math.abs(y - cy) + 2 * Math.abs(b.left - r.left) : Math.abs(x - cx) + 2 * Math.abs(y - cy)
+    if (s < score) { score = s; best = el }
+  }
+  return best
+}
+
 /**
  * Site header whose menus share one panel. Hover or focus a top item to open it (it waits `closeDelay` ms
  * before closing, so you can travel to the panel); moving to another item morphs the panel's size and
- * position while the content slides in from that side. Escape closes, ↓ moves into the panel.
+ * position while the content slides in from that side.
+ * Keyboard: ←/→ move between the top items (Home/End jump to the ends) and ↓ (or ↑ for the last link) moves into the
+ * open panel. Inside the panel ↑↓←→ move through its links as a grid, Home/End jump to the first/last link, ←/→ at
+ * the grid's edge go to the neighbouring top item, ↑ from the first row returns to the trigger, and Escape closes the
+ * panel and returns focus to its trigger.
  * Items with `href` and no `content` are plain links (`href` passes through safeUrl: http(s), mailto, tel or relative).
  * `children` is the page under the header.
+ * Open state: uncontrolled with `defaultOpen` (a top item's label or index, open on mount), or controlled with `open`
+ * (label, index, or null for closed) + `onOpenChange(label | null)`, which fires on every open, switch and close.
  */
-export function MegaMenu({ items, brand, actions, children, closeDelay = 160, className }:
-  { items: MegaMenuItem[]; brand?: ReactNode; actions?: ReactNode; children?: ReactNode; closeDelay?: number; className?: string }) {
+export function MegaMenu({ items, brand, actions, children, closeDelay = 160, defaultOpen, open: openProp, onOpenChange, className }:
+  { items: MegaMenuItem[]; brand?: ReactNode; actions?: ReactNode; children?: ReactNode; closeDelay?: number
+    /** top item (label or index) whose panel is open on mount */ defaultOpen?: string | number
+    /** controlled: the open top item (label or index), or null for closed */ open?: string | number | null
+    onOpenChange?: (label: string | null) => void; className?: string }) {
   const host = useRef<HTMLDivElement>(null), measures = useRef<(HTMLDivElement | null)[]>([]), triggers = useRef<(HTMLButtonElement | null)[]>([])
   const panel = useRef<HTMLDivElement>(null)
-  const [cur, setCur] = useState(-1)
-  const [shown, setShown] = useState(-1) // what the panel shows; outlives `cur` while the panel fades out
+  const megaIndex = (v: string | number | null | undefined) => {
+    const i = typeof v === 'number' ? v : typeof v === 'string' ? items.findIndex(it => it.label === v) : -1
+    return i >= 0 && i < items.length && items[i].content ? i : -1
+  }
+  const [cur, setCurState] = useState(() => megaIndex(openProp !== undefined ? openProp : defaultOpen))
+  const curRef = useRef(cur); curRef.current = cur
+  const notify = useRef(onOpenChange); notify.current = onOpenChange
+  const setCur = (i: number) => { if (i !== curRef.current) { curRef.current = i; setCurState(i); notify.current?.(i >= 0 ? items[i].label : null) } }
+  const [shown, setShown] = useState(cur) // what the panel shows; outlives `cur` while the panel fades out
   const [dir, setDir] = useState(1)
   const openedAt = useRef(0)
   const [sizes, setSizes] = useState<{ w: number; h: number }[]>([])
@@ -317,10 +357,47 @@ export function MegaMenu({ items, brand, actions, children, closeDelay = 160, cl
     const go = () => { wasOpen.current = false; setCur(-1) }
     if (now) go(); else closeT.current = setTimeout(go, closeDelay)
   }
+  useEffect(() => { // controlled: follow `open` from outside (without echoing it back through onOpenChange)
+    if (openProp === undefined) return
+    const i = megaIndex(openProp)
+    if (i === curRef.current) return
+    const echo = notify.current; notify.current = undefined
+    if (i >= 0) open(i); else close(true)
+    notify.current = echo
+  }, [openProp]) // eslint-disable-line react-hooks/exhaustive-deps
   const size = sizes[shown] ?? { w: 0, h: 0 }
   const left = shown >= 0 ? Math.max(8, Math.min(hostW - size.w - 8, (lefts[shown] ?? 0) - 20)) : 0
   const morph = wasOpen.current ? spring(0.12, 0.4) : { duration: 0 }
   const maxW = Math.max(200, hostW - 16)
+  const topItems = () => [...(host.current?.querySelectorAll<HTMLElement>('[data-mega-top]') ?? [])]
+  const content = () => panel.current?.querySelector(`[data-mega="${cur}"]`)
+  const enterPanel = (i: number, last = false) => {
+    open(i)
+    requestAnimationFrame(() => { const all = megaFocusables(panel.current?.querySelector(`[data-mega="${i}"]`)); (last ? all[all.length - 1] : all[0])?.focus() })
+  }
+  const onTopKey = (e: React.KeyboardEvent<HTMLElement>, i: number) => {
+    const tops = topItems(), at = tops.indexOf(e.currentTarget)
+    const go = (n: number) => { e.preventDefault(); tops[(n + tops.length) % tops.length]?.focus() }
+    if (e.key === 'ArrowRight') go(at + 1)
+    else if (e.key === 'ArrowLeft') go(at - 1)
+    else if (e.key === 'Home') go(0)
+    else if (e.key === 'End') go(tops.length - 1)
+    else if (items[i]?.content && (e.key === 'ArrowDown' || e.key === 'ArrowUp')) { e.preventDefault(); enterPanel(i, e.key === 'ArrowUp') }
+  }
+  const onPanelKey = (e: React.KeyboardEvent) => {
+    if (cur < 0 || !['ArrowDown', 'ArrowUp', 'ArrowLeft', 'ArrowRight', 'Home', 'End'].includes(e.key)) return
+    const all = megaFocusables(content()), from = document.activeElement as HTMLElement | null
+    if (!all.length || !from || !all.includes(from)) return
+    e.preventDefault()
+    if (e.key === 'Home' || e.key === 'End') return all[e.key === 'Home' ? 0 : all.length - 1].focus()
+    const next = megaStep(all, from, e.key)
+    if (next) return next.focus()
+    if (e.key === 'ArrowUp') return triggers.current[cur]?.focus()
+    if (e.key === 'ArrowLeft' || e.key === 'ArrowRight') { // at the edge: the neighbouring top item
+      const tops = topItems(), at = tops.indexOf(triggers.current[cur] as HTMLElement)
+      tops[(at + (e.key === 'ArrowRight' ? 1 : -1) + tops.length) % tops.length]?.focus()
+    }
+  }
 
   return (
     <div ref={host} className={cn('relative h-[420px] overflow-hidden rounded-[var(--r-lg)] border border-[var(--line)] bg-[var(--bg)]', className)}
@@ -332,14 +409,14 @@ export function MegaMenu({ items, brand, actions, children, closeDelay = 160, cl
             <button key={it.label} ref={el => { triggers.current[i] = el }} aria-expanded={cur === i} aria-controls={pid}
               onPointerEnter={e => { if (e.pointerType === 'mouse') open(i) }} onPointerLeave={e => { if (e.pointerType === 'mouse') close() }}
               onFocus={() => open(i)} onClick={() => { if (cur !== i) open(i); else if (Date.now() - openedAt.current > 350) close(true) }}
-              onKeyDown={e => { if (e.key === 'ArrowDown') { e.preventDefault(); open(i); requestAnimationFrame(() => panel.current?.querySelector<HTMLElement>('a,button')?.focus()) } }}
-              className={cn('inline-flex h-[34px] flex-none cursor-pointer items-center gap-1 rounded-[var(--r-md)] border-0 px-3 text-[13px] font-medium transition-colors [@media(pointer:coarse)]:h-10',
+              data-mega-top onKeyDown={e => onTopKey(e, i)}
+              className={cn('inline-flex h-9 flex-none cursor-pointer items-center gap-1 rounded-[var(--r-md)] border-0 px-3 text-[13px] font-medium transition-colors [@media(pointer:coarse)]:h-10',
                 cur === i ? 'bg-[var(--muted)] text-[var(--fg)]' : 'bg-transparent text-[var(--fg2)] hover:text-[var(--fg)]')}>
               {it.label}<Icon name="chevronDown" size={12} className={cn('opacity-60 transition-transform duration-200', cur === i && 'rotate-180')} />
             </button>
           ) : (
-            <a key={it.label} href={safeUrl(it.href)} onFocus={() => close(true)}
-              className="inline-flex h-[34px] flex-none items-center rounded-[var(--r-md)] px-3 text-[13px] font-medium text-[var(--fg2)] no-underline hover:text-[var(--fg)] [@media(pointer:coarse)]:h-10">{it.label}</a>
+            <a key={it.label} href={safeUrl(it.href)} onFocus={() => close(true)} data-mega-top onKeyDown={e => onTopKey(e, i)}
+              className="inline-flex h-9 flex-none items-center rounded-[var(--r-md)] px-3 text-[13px] font-medium text-[var(--fg2)] no-underline hover:text-[var(--fg)] [@media(pointer:coarse)]:h-10">{it.label}</a>
           ))}
         </nav>
         <span className="flex-1" />
@@ -351,10 +428,10 @@ export function MegaMenu({ items, brand, actions, children, closeDelay = 160, cl
         animate={cur >= 0 ? { opacity: 1, y: 0, scale: 1, left, width: size.w, height: hostH ? Math.min(size.h, hostH - 72) : size.h } : { opacity: 0, y: -4, scale: 0.98 }}
         onAnimationComplete={() => { if (cur < 0) setShown(-1) }}
         transition={{ default: cur >= 0 ? spring(0.2, 0.3) : { duration: 0.15 }, left: morph, width: morph, height: morph }}
-        onPointerEnter={() => clearTimeout(closeT.current)} onPointerLeave={e => { if (e.pointerType === 'mouse') close() }}>
+        onKeyDown={onPanelKey} onPointerEnter={() => clearTimeout(closeT.current)} onPointerLeave={e => { if (e.pointerType === 'mouse') close() }}>
         <AnimatePresence initial={false} custom={dir}>
           {shown >= 0 && (
-            <motion.div key={shown} custom={dir} variants={megaSlide} initial={wasOpen.current ? 'enter' : false} animate="center" exit="exit"
+            <motion.div key={shown} data-mega={shown} custom={dir} variants={megaSlide} initial={wasOpen.current ? 'enter' : false} animate="center" exit="exit"
               className="absolute top-0 left-0 w-max p-4" style={{ maxWidth: maxW }}>{items[shown]?.content}</motion.div>
           )}
         </AnimatePresence>
@@ -396,13 +473,13 @@ export function Pagination({ page, total, onChange, className }: { page: number;
     else if (nums[nums.length - 1] !== '…') nums.push('…')
   }
   const group = useId()
-  const cell = 'relative grid h-8 min-w-8 cursor-pointer place-items-center rounded-lg border-0 bg-transparent px-1 text-[13px] hover:bg-[var(--muted)] disabled:opacity-40 disabled:cursor-default'
+  const cell = 'relative grid h-8 min-w-8 cursor-pointer place-items-center rounded-[var(--r-md)] border-0 bg-transparent px-1 text-[13px] hover:bg-[var(--muted)] disabled:opacity-40 disabled:cursor-default'
   return (
     <nav aria-label="Pagination" className={cn('flex items-center gap-1', className)}>
       <button className={cell} aria-label="Previous page" disabled={page <= 1} onClick={() => onChange(page - 1)}><Icon name="chevronLeft" size={14} /></button>
       {nums.map((n, i) => n === '…' ? <span key={`e${i}`} className="px-1 text-[var(--fg3)]">…</span> : (
         <button key={n} className={cn(cell, n === page && 'font-semibold')} aria-current={n === page ? 'page' : undefined} onClick={() => onChange(n)}>
-          {n === page && <ActiveIndicator group={group} className="rounded-lg border border-[var(--line)] bg-[var(--card)]" />}
+          {n === page && <ActiveIndicator group={group} className="rounded-[var(--r-md)] border border-[var(--line)] bg-[var(--card)]" />}
           <span className="relative">{n}</span>
         </button>
       ))}
@@ -424,7 +501,7 @@ export function Steps({ steps, current, className }: { steps: string[]; current:
             <span className={cn(i === current ? 'whitespace-nowrap' : 'hidden sm:inline')}>{s}</span>
           </span>
           {i < steps.length - 1 && (
-            <span className="relative h-0.5 min-w-4 flex-1 overflow-hidden rounded-sm bg-[var(--line)]">
+            <span className="relative h-0.5 min-w-4 flex-1 overflow-hidden rounded-full bg-[var(--line)]">
               <motion.b className="absolute inset-0 origin-left bg-[var(--primary)]" initial={false} animate={{ scaleX: i < current ? 1 : 0 }} transition={spring(0.1, 0.4)} />
             </span>
           )}

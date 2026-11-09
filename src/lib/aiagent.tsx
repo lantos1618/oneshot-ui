@@ -1,6 +1,6 @@
 import { Fragment, useEffect, useMemo, useRef, useState, type ReactNode } from 'react'
 import { AnimatePresence, motion, useReducedMotion } from 'motion/react'
-import { Button, Chip, FONT_CSS, Icon, IconButton, Spinner, TOUCH, cn, fmt, LOCALE, ScrollEdges, sleep, spring, surface, themeCSS, useMediaQuery, useRoving, useScrollEdges, useTheme, useWidth } from './core'
+import { Badge, Button, Chip, FONT_CSS, Icon, IconButton, Spinner, TOUCH, cn, fmt, LOCALE, ScrollEdges, sleep, spring, surface, themeCSS, useMediaQuery, useRoving, useScrollEdges, useTheme, useWidth } from './core'
 import { CopyButton, TypingDots } from './feedback'
 import { SegmentedControl, Slider, Switch } from './forms'
 import { SendButton } from './ai'
@@ -73,16 +73,28 @@ function aiPricingCard(btnRadius: string | null, toggle: boolean, dark: boolean)
 </div>`
 }
 export type CanvasEdit = { prompt: string; reply: string; code: string }
-const AI_CANVAS_EDITS: CanvasEdit[] = [
+const AI_CANVAS_DEMO_EDITS: CanvasEdit[] = [
   { prompt: 'Make the button rounder', reply: 'Rounded the button into a pill and gave it a bit more padding so it reads as the main action.', code: aiPricingCard('999px', false, false) },
   { prompt: 'Add a monthly / yearly toggle', reply: 'Added a segmented toggle. It is pure CSS, so it works without JavaScript, and the yearly price shows the discount.', code: aiPricingCard('999px', true, false) },
   { prompt: 'Make it dark', reply: 'Inverted the card onto the theme’s primary surface. It still uses theme tokens, so it adapts to every theme.', code: aiPricingCard('999px', true, true) },
 ]
-const aiExplainLine = (n: number, ln: string) => /border-radius/.test(ln) ? 'This sets how round the corners are. 999px makes a full pill; smaller values give softer rectangles.'
+const aiDemoExplain = (n: number, ln: string) => /border-radius/.test(ln) ? 'This sets how round the corners are. 999px makes a full pill; smaller values give softer rectangles.'
   : /:checked/.test(ln) ? 'This highlights whichever toggle option is checked. Hidden radio inputs hold the state, so no JavaScript is needed.'
   : /background/.test(ln) ? 'This sets the fill colour, which changes between the light and dark versions so text keeps enough contrast.'
   : /<button/.test(ln) ? 'This is the call to action. It stretches to the card width so it is easy to hit on mobile.'
   : `Line ${n} is part of the card’s ${/[{}]|:/.test(ln) ? 'styles' : 'markup'}. Ask me to change it and I’ll edit it in place.`
+/** The default explainer: says whether a line is style or markup. */
+const aiExplainLine = (n: number, ln: string) => `Line ${n} is part of the document’s ${/[{}]|:\s/.test(ln) ? 'styles' : 'markup'}. Ask me to change it and I’ll edit it in place.`
+/**
+ * The showcase's canvas content: a pricing card, three scripted edits and an explainer. Spread it into the
+ * component to get the demo: <AICanvas {...AI_CANVAS_SAMPLE} />. The component itself starts empty.
+ */
+export const AI_CANVAS_SAMPLE = {
+  file: 'pricing-card.html', initial: aiPricingCard(null, false, false), edits: AI_CANVAS_DEMO_EDITS, explain: aiDemoExplain,
+  intro: 'I made a pricing card in the canvas. Ask me to change it, or tap a line of code to ask about it.',
+}
+/** What AICanvas's `respond` may return: an edit to stream in (`code` is the whole new document), a plain reply, or nothing. */
+export type CanvasReply = { reply: string; code?: string } | string | null | undefined
 
 type CvMsg = { id: number; role: 'u' | 'a'; text: string; tool?: { state: 'run' | 'done'; add: number; del: number; ver: number }; dots?: boolean; stream?: boolean }
 type CvDiff = { lines: ['=' | '+' | '-', string][]; typing: number; chars: number; collapsing: boolean }
@@ -90,18 +102,32 @@ type CvDiff = { lines: ['=' | '+' | '-', string][]; typing: number; chars: numbe
 /** The page's Google Fonts stylesheets, matched by exact host (https://fonts.googleapis.com only). */
 const aiFontLink = (href: string) => { try { const u = new URL(href); return u.protocol === 'https:' && u.hostname === 'fonts.googleapis.com' } catch { return false } }
 const aiAttr = (s: string) => s.replace(/[&"<>]/g, c => ({ '&': '&amp;', '"': '&quot;', '<': '&lt;', '>': '&gt;' })[c]!)
+const AI_STRIP_TAGS = 'script,noscript,iframe,frame,object,embed,base,meta,link'
+/**
+ * Removes what could only ever be blocked in the sandbox anyway (so the console stays quiet): <script> and other active
+ * elements, on* handler attributes, and javascript: URLs. Uses an inert <template> in the browser; a regex pass on the
+ * server (the frame only renders in the browser). The sandbox and CSP stay the real defence.
+ */
+function aiStripActive(html: string): string {
+  if (typeof document === 'undefined') return html.replace(/<(script|noscript)\b[\s\S]*?(<\/\1\s*>|$)/gi, '').replace(/\son[a-z]+\s*=\s*("[^"]*"|'[^']*'|[^\s>]+)/gi, '')
+  const t = document.createElement('template'); t.innerHTML = html
+  t.content.querySelectorAll(AI_STRIP_TAGS).forEach(n => n.remove())
+  t.content.querySelectorAll('*').forEach(el => {
+    for (const a of [...el.attributes]) if (/^on/i.test(a.name) || (/^(href|src|action|formaction|xlink:href)$/i.test(a.name) && /^\s*javascript:/i.test(a.value))) el.removeAttribute(a.name)
+  })
+  return t.innerHTML
+}
 
 /**
  * Renders the document in a sandboxed iframe (srcdoc, scripts off), so markup from a model can't run handlers in the page.
  * A Content-Security-Policy meta comes first in the frame's head: nothing remote loads (no images, CSS imports,
  * url() backgrounds; Google Fonts only when the provider's `fonts` is on), so model HTML can't call home.
  * `allowRemote` lets https images in. `<base target="_blank">` without allow-popups makes links inert.
- * The theme tokens and the page's web fonts are copied in, so the preview follows the theme; it grows to its content.
+ * The theme tokens and the page's web fonts are copied in, so the preview follows the theme. Scripts and on* handlers are
+ * stripped first (they could never run). The frame fills its pane at a fixed size and scrolls inside, so it never shifts.
  */
 function AiPreview({ html, title, allowRemote = false }: { html: string; title: string; allowRemote?: boolean }) {
   const { tokens, dark, fonts: fontsOn } = useTheme()
-  const ref = useRef<HTMLIFrameElement>(null)
-  const [h, setH] = useState(320)
   const [fonts, setFonts] = useState('')
   useEffect(() => { // only when the provider allows Google Fonts: the Geist import plus the page's font links (exact host)
     if (!fontsOn) { setFonts(''); return }
@@ -113,22 +139,15 @@ function AiPreview({ html, title, allowRemote = false }: { html: string; title: 
       `img-src data: blob:${allowRemote ? ' https:' : ''}`, "form-action 'none'", "base-uri 'none'"].join('; ')
     return `<!doctype html><html><head><meta http-equiv="Content-Security-Policy" content="${csp}"><meta charset="utf-8"><base target="_blank">${fonts}<style>${themeCSS(tokens)}
 :root{color-scheme:${dark ? 'dark' : 'light'}}html,body{margin:0;background:transparent}
-body{display:flex;justify-content:center;padding:16px 12px 24px;font:14px/1.5 var(--font);color:var(--fg)}</style></head><body>${html}</body></html>`
+body{box-sizing:border-box;min-height:100vh;display:flex;align-items:center;justify-content:center;padding:24px 12px;font:14px/1.5 var(--font);color:var(--fg)}
+@media (max-width:420px){body{padding:12px 8px}}</style></head><body>${aiStripActive(html)}</body></html>`
   }, [html, tokens, dark, fonts, allowRemote])
-  useEffect(() => {
-    const f = ref.current; if (!f) return
-    let ro: ResizeObserver | null = null
-    // the body's own height (the document's scrollHeight never drops below the frame, so it could only grow)
-    const fit = () => { const d = f.contentDocument; if (!d?.body) return; const m = () => setH(Math.ceil(d.body.getBoundingClientRect().height)); m(); ro?.disconnect(); ro = new ResizeObserver(m); ro.observe(d.body) }
-    f.addEventListener('load', fit); fit()
-    return () => { f.removeEventListener('load', fit); ro?.disconnect() }
-  }, [doc])
   return (
-    <motion.div initial={{ opacity: 0, scale: 0.97 }} animate={{ opacity: 1, scale: 1 }} transition={spring(0.25, 0.35)} className="w-full max-w-[360px]">
-      {/* allow-same-origin without allow-scripts: nothing in the document can run, and the frame can still be measured.
+    <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} transition={{ duration: 0.2 }} className="absolute inset-0">
+      {/* allow-same-origin without allow-scripts: nothing in the document can run.
           Never add allow-scripts alongside allow-same-origin: together they let the document remove its own sandbox
           and script the host page. No allow-popups either, so <base target="_blank"> leaves links doing nothing. */}
-      <iframe ref={ref} title={title} srcDoc={doc} sandbox="allow-same-origin" className="block w-full border-0" style={{ height: h, colorScheme: dark ? 'dark' : 'light' }} />
+      <iframe title={title} srcDoc={doc} sandbox="allow-same-origin" className="block h-full w-full border-0" style={{ colorScheme: dark ? 'dark' : 'light' }} />
     </motion.div>
   )
 }
@@ -139,15 +158,17 @@ body{display:flex;justify-content:center;padding:16px 12px 24px;font:14px/1.5 va
  * iframe), step through versions, copy, click or tap a line (or arrow to it and press Enter) to "Ask about line N",
  * or use the suggestion chips. Below 768px chat and document stack, rows grow to finger height on touch, and the
  * document scrolls into view while an edit streams in. A pill shows line count and version. The preview loads nothing
- * remote (CSP in the frame); `allowRemote` lets https images in.
+ * remote (CSP in the frame); `allowRemote` lets https images in. Starts empty: pass `initial`, and either `respond`
+ * (your model: return the new document and a reply) or scripted `edits` (matched by prompt, else offered in order).
+ * The showcase content is `AI_CANVAS_SAMPLE`.
  */
-export function AICanvas({ file = 'pricing-card.html', initial = aiPricingCard(null, false, false), edits = AI_CANVAS_EDITS, explain = aiExplainLine, intro = 'I made a pricing card in the canvas. Ask me to change it, or tap a line of code to ask about it.', allowRemote = false, className }:
-  { file?: string; initial?: string; edits?: CanvasEdit[]; explain?: (n: number, line: string) => string; intro?: string; allowRemote?: boolean; className?: string }) {
+export function AICanvas({ file = 'untitled.html', initial = '', edits = [], respond, explain = aiExplainLine, intro, allowRemote = false, className }:
+  { file?: string; initial?: string; edits?: CanvasEdit[]; respond?: (prompt: string, code: string) => CanvasReply | Promise<CanvasReply>; explain?: (n: number, line: string) => string; intro?: string; allowRemote?: boolean; className?: string }) {
   const reduce = useReducedMotion()
   const [V, setV] = useState([initial])
   const [cur, setCur] = useState(0)
   const [view, setView] = useState<'code' | 'prev'>('code')
-  const [msgs, setMsgs] = useState<CvMsg[]>([{ id: 0, role: 'a', text: intro }])
+  const [msgs, setMsgs] = useState<CvMsg[]>(intro ? [{ id: 0, role: 'a', text: intro }] : [])
   const [step, setStep] = useState(0)
   const [busy, setBusy] = useState(false)
   const [text, setText] = useState('')
@@ -199,8 +220,20 @@ export function AICanvas({ file = 'pricing-card.html', initial = aiPricingCard(n
       const n = Number(m[1]), ln = V[cur].split('\n')[n - 1] ?? ''
       patch(id, { dots: false }); await streamInto(id, explain(n, ln)); setBusy(false); return
     }
+    if (respond) {
+      let r: CanvasReply
+      try { r = await respond(t, V[V.length - 1]) } catch { r = 'Something went wrong. Try again.' }
+      if (!alive.current) return
+      const reply = typeof r === 'string' ? r : r?.reply ?? ''
+      if (r && typeof r === 'object' && typeof r.code === 'string') {
+        patch(id, { dots: false, tool: { state: 'run', add: 0, del: 0, ver: 0 } })
+        const done = await apply(r.code); if (!done || !alive.current) return
+        patch(id, { tool: { state: 'done', ...done } })
+      } else patch(id, { dots: false })
+      await streamInto(id, reply || 'No change.'); setBusy(false); return
+    }
     const idx = edits.findIndex(e => e.prompt.toLowerCase() === t.toLowerCase()), e = edits[idx >= 0 ? idx : step]
-    if (!e) { patch(id, { dots: false, text: `That’s all the demo edits I have. Use the version arrows to step back through v1 to v${V.length}.` }); setBusy(false); return }
+    if (!e) { patch(id, { dots: false, text: V.length > 1 ? `I have no more edits. Use the version arrows to step back through v1 to v${V.length}.` : 'I can’t edit this document yet.' }); setBusy(false); return }
     patch(id, { dots: false, tool: { state: 'run', add: 0, del: 0, ver: 0 } })
     const r = await apply(e.code); if (!r || !alive.current) return
     setStep(s => Math.max(s, (idx >= 0 ? idx : step) + 1))
@@ -218,6 +251,8 @@ export function AICanvas({ file = 'pricing-card.html', initial = aiPricingCard(n
   }
   const lineAt = (i: number) => codeRef.current?.querySelector<HTMLElement>(`[data-line="${i}"]`)
   const roving = useRoving(lineCount, i => pickLine(i, lineAt(i)), { loop: false, onMove: i => lineAt(i)?.focus() })
+  const [edgeRef, edges] = useScrollEdges<HTMLDivElement>()
+  const empty = !shown && !diff
   let num = 0
   return (
     <div className={cn('grid overflow-hidden md:h-[480px] md:grid-cols-[minmax(260px,340px)_minmax(0,1fr)]', surface.card, className)}>
@@ -264,8 +299,12 @@ export function AICanvas({ file = 'pricing-card.html', initial = aiPricingCard(n
           <CopyButton text={shown} size="icon-sm" label="Copy code" className={TOUCH.tap} />
         </div>
         <div className="relative min-h-0 flex-1">
-          {view === 'code' ? (
-            <div ref={codeRef} onScroll={() => setSelLine(null)} className="absolute inset-0 overflow-auto bg-[var(--card)] [contain:inline-size]">
+          {empty ? (
+            <div className="absolute inset-0 grid place-items-center bg-[var(--card)] p-6 text-center text-[13px] text-[var(--fg3)]">
+              <span><Icon name="file" size={18} className="mx-auto mb-2 block" />Nothing here yet. Ask for something and it will appear here.</span>
+            </div>
+          ) : view === 'code' ? (
+            <div ref={el => { codeRef.current = el; edgeRef(el) }} onScroll={() => setSelLine(null)} className="absolute inset-0 overflow-auto overscroll-x-contain bg-[var(--card)] [contain:inline-size]">
               <motion.pre key={diff ? 'diff' : `v${cur}-${flash}`} initial={diff ? false : { opacity: 0.3 }} animate={{ opacity: 1 }} transition={{ duration: 0.2 }}
                 className="m-0 min-w-max pt-3 pb-12 font-[family-name:var(--mono)] text-xs leading-[1.65]" onKeyDown={diff ? undefined : roving.onKeyDown}>
                 {diff ? diff.lines.map(([t, l], i) => {
@@ -276,7 +315,7 @@ export function AICanvas({ file = 'pricing-card.html', initial = aiPricingCard(n
                       {!(t === '-' && diff.collapsing) && (
                         <motion.div data-i={i} data-changed={t !== '=' ? '' : undefined} exit={{ opacity: 0, height: 0 }} transition={{ duration: 0.18 }}
                           className={cn('flex px-3', t === '-' && 'bg-[color-mix(in_srgb,var(--bad)_14%,transparent)] line-through opacity-70', t === '+' && i <= diff.typing && 'bg-[color-mix(in_srgb,var(--ok)_16%,transparent)]')}>
-                          <span className="mr-4 w-6 flex-none text-right text-[var(--fg3)] opacity-60 select-none">{n}</span><span className="whitespace-pre">{t === '+' && i === diff.typing && diff.chars !== Infinity ? txt : aiHighlight(txt)}{txt ? '' : ' '}</span>
+                          <span className="mr-4 w-6 flex-none text-right text-[var(--fg3)] select-none">{n}</span><span className="whitespace-pre">{t === '+' && i === diff.typing && diff.chars !== Infinity ? txt : aiHighlight(txt)}{txt ? '' : ' '}</span>
                         </motion.div>)}
                     </AnimatePresence>
                   )
@@ -285,16 +324,17 @@ export function AICanvas({ file = 'pricing-card.html', initial = aiPricingCard(n
                     onFocus={() => roving.setActive(i)} onClick={e => { roving.setActive(i); pickLine(i, e.currentTarget) }}
                     className={cn('flex w-full cursor-pointer border-0 bg-transparent px-3 text-left [font:inherit] text-inherit outline-none [@media(pointer:coarse)]:min-h-8 [@media(pointer:coarse)]:items-center',
                       selLine?.n === i + 1 ? 'bg-[color-mix(in_srgb,var(--accent)_14%,transparent)]' : 'hover:bg-[color-mix(in_srgb,var(--muted)_70%,transparent)] focus-visible:bg-[color-mix(in_srgb,var(--muted)_70%,transparent)] focus-visible:shadow-[inset_2px_0_0_var(--accent)]')}>
-                    <span className="mr-4 w-6 flex-none text-right text-[var(--fg3)] opacity-60 select-none">{i + 1}</span><span className="whitespace-pre">{aiHighlight(l)}{l ? '' : ' '}</span>
+                    <span className="mr-4 w-6 flex-none text-right text-[var(--fg3)] select-none">{i + 1}</span><span className="whitespace-pre">{aiHighlight(l)}{l ? '' : ' '}</span>
                   </button>
                 ))}
               </motion.pre>
             </div>
           ) : (
-            <div className="absolute inset-0 grid place-items-center overflow-auto bg-[var(--bg)] bg-[radial-gradient(circle,var(--line2)_1px,transparent_1.2px)] bg-[length:16px_16px] p-6 max-sm:p-3">
+            <div className="absolute inset-0 bg-[var(--bg)] bg-[radial-gradient(circle,var(--line2)_1px,transparent_1.2px)] bg-[length:16px_16px]">
               <AiPreview key={`${cur}-${flash}`} html={shown} allowRemote={allowRemote} title={`Preview of ${file}, version ${cur + 1}`} />
             </div>
           )}
+          {view === 'code' && !empty && <ScrollEdges {...edges} at="top" hint="Scroll for more" />}
           <AnimatePresence>
             {selLine && view === 'code' && (
               <motion.button key={selLine.n} initial={{ opacity: 0, x: 6 }} animate={{ opacity: 1, x: 0 }} exit={{ opacity: 0 }} transition={{ duration: 0.18 }}
@@ -302,7 +342,7 @@ export function AICanvas({ file = 'pricing-card.html', initial = aiPricingCard(n
                 className="absolute right-4 z-[3] h-7 cursor-pointer rounded-full border border-[var(--line)] bg-[var(--card)] px-2.5 text-xs font-medium shadow-[var(--shadow)] [@media(pointer:coarse)]:-mt-1.5 [@media(pointer:coarse)]:h-10 [@media(pointer:coarse)]:px-3.5 [@media(pointer:coarse)]:text-[13px]">Ask about line {selLine.n}</motion.button>
             )}
           </AnimatePresence>
-          <span className="absolute tabular-nums bottom-3 left-3 rounded-full border border-[var(--line)] bg-[var(--card)] px-2.5 py-1 text-[11px] text-[var(--fg3)]">{lineCount} lines · v{cur + 1} of {V.length}</span>
+          <Badge size="sm" className="absolute bottom-3 left-3 border border-[var(--line)] !bg-[var(--card)] font-normal tabular-nums !text-[var(--fg3)]">{lineCount} lines · v{cur + 1} of {V.length}</Badge>
         </div>
       </div>
     </div>
@@ -440,7 +480,7 @@ type AtDisp = { line: string; s: number; tr: string }
 
 // the track is a 6px band painted in the middle, so on touch the input itself can be a 32px target
 const AT_RANGE = 'min-w-[90px] max-w-[200px] flex-1'
-const AT_JOB_DOT = 'grid h-[18px] w-[18px] flex-none place-items-center rounded-full text-[10px] font-bold text-white [@media(pointer:coarse)]:text-[11px]'
+const AT_JOB_DOT = 'grid h-[18px] w-[18px] flex-none place-items-center rounded-full text-[11px] font-bold text-white [@media(pointer:coarse)]:text-[11px]'
 const AT_TRACE_COLS = 'grid-cols-[minmax(150px,26%)_1fr_64px_64px_72px] gap-3'
 /** A mouse hovering a row follows its job; a click or tap pins it (touch has no hover). Buttons inside keep their own clicks. */
 const atFollow = (id: number, setHover: (h: number | null) => void, setPin: (f: (p: number | null) => number | null) => void) => ({
@@ -559,10 +599,11 @@ export function AgentTransitMap({ machines = AGENT_WORKFLOWS, order = AGENT_WORK
     const [line, stn] = k.split('|'), q = eng.waiting.filter(tk => tk.line === line && machines[tk.job.type].states[tk.state].at[1] === stn)
     return { k, ...stationXY(line, stn), n: q.length, frac: Math.max(0, q[0].t / eng.hitlWait) }
   })
-  const maxCards = narrow ? 1 : AT_CARDS // phones: one card over the map, the rest counted
-  const stageH = stageW * (AT_H / AT_W), cardW = narrow ? Math.min(AT_CARD_W, Math.max(200, stageW - 16)) : AT_CARD_W
+  const maxCards = narrow ? 1 : AT_CARDS // phones: one card in a strip above the map, the rest counted
+  const stageH = stageW * (AT_H / AT_W), cardW = narrow ? stageW : AT_CARD_W
+  const fs = narrow ? 1.2 : 1 // phones: the map is drawn at ~0.8 scale, so labels grow to stay ≥ 11px on screen
   const anchorOf = (k: string) => {
-    if (k === '*') return { left: 8, top: 8 }
+    if (k === '*') return { left: 0, top: 0 }
     const [line, stn] = k.split('|'), p = stationXY(line, stn), lab = AT_ST.find(x => x[0] === stn)
     const past = lab && lab[3] > 0 ? lab[3] + stn.length * 8 + 14 : 30 // clear of the station's label when it sits to the right
     return { left: Math.max(4, Math.min(((p.x + past) / AT_W) * stageW, stageW - cardW - 4)), top: Math.max(4, (p.y / AT_H) * stageH - 26) }
@@ -577,14 +618,45 @@ export function AgentTransitMap({ machines = AGENT_WORKFLOWS, order = AGENT_WORK
   const strip = { transform: `translateX(${((AT_WIN - eng.clock) / AT_WIN) * 100}%)` } // the trace window slides by transform, not layout
   const tx = (t: number) => `${(t / AT_WIN) * 100}%`
 
+  /** The approval cards waiting at one station (or, on phones, all of them): fixed-size, stacked by transform. */
+  const atCards = (k: string, q: WorkflowToken[]) => (
+    <div key={k} className={cn(k === '*' && 'pointer-events-none absolute inset-x-0 top-0')}>
+      <AnimatePresence initial={false}>
+        {q.slice(0, maxCards).map((tk, i) => { const st = machines[tk.job.type].states[tk.state], amount = Number(tk.job.data.amount) || 0, y = i * (AT_CARD_H + AT_CARD_GAP); return (
+          <motion.div key={tk.uid} role="group" aria-label={`${tk.job.name} needs your approval`} initial={{ opacity: 0, x: -8, y }} animate={{ opacity: 1, x: 0, y }} exit={{ opacity: 0, x: -8 }} transition={spring(0.25, 0.35)}
+            {...atFollow(tk.job.id, setHover, setPin)}
+            className={cn('pointer-events-auto absolute top-0 left-0 flex w-full flex-col justify-between overflow-hidden rounded-[var(--r-md)] border bg-[color-mix(in_srgb,var(--warn)_5%,var(--card))] px-2.5 py-2 text-[13px] shadow-[0_6px_20px_-8px_rgba(0,0,0,.28)]',
+              hover === tk.job.id ? 'border-[var(--warn)]' : 'border-[color-mix(in_srgb,var(--warn)_45%,var(--line))]')} style={{ height: AT_CARD_H }}>
+            <div className="flex items-center gap-2">
+              <span className={AT_JOB_DOT} style={{ background: `color-mix(in srgb, ${AT_C(tk.line)} 70%, #000)` }}>{tk.job.id}</span>
+              <b className="min-w-0 flex-1 truncate font-medium">{tk.job.name}</b>
+              <span className={cn('w-8 flex-none font-[family-name:var(--mono)] text-xs whitespace-pre', tk.t < 6 ? 'text-[var(--warn)]' : 'text-[var(--fg3)]')} title="Approved by policy when it runs out">{atPad(`${Math.ceil(tk.t)}s`, 3)}</span>
+            </div>
+            <div className="flex items-center gap-1.5 [@media(pointer:coarse)]:[&>button]:min-h-9">
+              <span className="min-w-0 flex-1 truncate text-xs text-[var(--fg3)]">{st.label}{amount ? ` · CHF ${amount.toLocaleString(LOCALE)}` : ''}</span>
+              <Button size="sm" onClick={() => { eng.resolve(tk, 'reject'); setHover(null); setPin(null); rerender() }}>Reject</Button>
+              <Button size="sm" variant="primary" onClick={() => { eng.resolve(tk, 'approve'); setHover(null); setPin(null); rerender() }}>Approve</Button>
+            </div>
+          </motion.div>) })}
+        {q.length > maxCards && <motion.div key="more" initial={{ opacity: 0, y: maxCards * (AT_CARD_H + AT_CARD_GAP) }} animate={{ opacity: 1, y: maxCards * (AT_CARD_H + AT_CARD_GAP) }} exit={{ opacity: 0 }}
+          className="absolute top-0 left-0"><Badge className="border border-[var(--line)] !bg-[var(--card)] font-normal">+{q.length - maxCards} more waiting</Badge></motion.div>}
+      </AnimatePresence>
+    </div>
+  )
+
   return (
     <div ref={host} className={cn('flex flex-col', className)}>
       <div ref={stageRef} className="relative">
+      {/* phones: approvals get their own fixed-height strip above the map, so they never cover stations or shift anything */}
+      {narrow && <div className="relative mb-2" style={{ height: AT_CARD_H + 26 }}>
+        {!eng.waiting.length && <div className="grid h-[80px] place-items-center rounded-[var(--r-md)] border border-dashed border-[var(--line2)] text-xs text-[var(--fg3)]">No approvals waiting</div>}
+        {stageW > 0 && waitBy.has('*') && atCards('*', waitBy.get('*')!)}
+      </div>}
       <div ref={mapScrollRef} className={cn(narrow && '-mx-1 overflow-x-auto overscroll-x-contain rounded-[var(--r-md)] px-1 [contain:inline-size] [scrollbar-width:thin]')} tabIndex={narrow ? 0 : undefined} aria-label={narrow ? 'Transit map, scrolls sideways' : undefined}>
-      <svg viewBox={`0 0 ${AT_W} ${AT_H}`} role="img" aria-label="Transit map of agent teams" className={cn('block h-auto w-full', narrow && 'min-w-[760px]')}>
+      <svg viewBox={`0 0 ${AT_W} ${AT_H}`} role="img" aria-label="Transit map of agent teams" className={cn('block h-auto w-full', narrow && 'min-w-[820px]')}>
         {AT_ZONES.map(([x, y, w, h, l, pos]) => <g key={l}>
           <rect x={x} y={y} width={w} height={h} fill="var(--muted)" stroke="var(--line2)" strokeDasharray="5 4" />
-          <text x={pos.includes('l') ? x + 14 : x + w - 14} y={pos.includes('t') ? y + 22 : y + h - 12} textAnchor={pos.includes('l') ? 'start' : 'end'} fill="var(--fg)" style={{ font: '500 12px var(--font)' }}>{l}</text>
+          <text x={pos.includes('l') ? x + 14 : x + w - 14} y={pos.includes('t') ? y + 22 : y + h - 12} textAnchor={pos.includes('l') ? 'start' : 'end'} fill="var(--fg)" style={{ font: `500 ${12 * fs}px var(--font)` }}>{l}</text>
         </g>)}
         <g fill="none" strokeLinecap="round" strokeLinejoin="round" aria-hidden>
           {AT_SEGS.map(sg => { const [c, o, w] = AT_HEAT[Math.min(3, heat[sg.key] ?? 0)]; return (
@@ -610,7 +682,7 @@ export function AgentTransitMap({ machines = AGENT_WORKFLOWS, order = AGENT_WORK
         <g transform={`translate(${AT_EQ[0]},${AT_EQ[1]})`} aria-label={`Event queue, ${eng.queue.length} waiting`}>
           <rect width={AT_EQ_W} height={44 + AT_EQ_ROWS * AT_EQ_ROW + 46} rx={12} fill="var(--card)" stroke="var(--line2)" />
           <text x={14} y={26} fill="var(--fg)" style={{ font: '600 15px var(--font)' }}>Event queue</text>
-          <text x={AT_EQ_W - 14} y={26} textAnchor="end" fill="var(--fg3)" style={{ font: '13px var(--mono)' }}>{eng.queue.length}/{eng.queueMax}</text>
+          <text x={AT_EQ_W - 14} y={26} textAnchor="end" fill="var(--fg3)" style={{ font: `${narrow ? 14 : 13}px var(--mono)` }}>{eng.queue.length}/{eng.queueMax}</text>
           <AnimatePresence initial={false}>
             {eng.queue.slice(0, AT_EQ_ROWS).map((q, i) => (
               <motion.g key={q.id} initial={{ opacity: 0, x: -10, y: 40 + i * AT_EQ_ROW }} animate={{ opacity: 1, x: 0, y: 40 + i * AT_EQ_ROW }} exit={{ opacity: 0, x: 10 }} transition={spring(0.25, 0.35)}>
@@ -620,7 +692,7 @@ export function AgentTransitMap({ machines = AGENT_WORKFLOWS, order = AGENT_WORK
               </motion.g>))}
           </AnimatePresence>
           {!eng.queue.length && <text x={14} y={62} fill="var(--fg3)" style={{ font: '14px var(--font)' }}>empty</text>}
-          {eng.queue.length > AT_EQ_ROWS && <text x={AT_EQ_W - 14} y={40 + AT_EQ_ROWS * AT_EQ_ROW + 4} textAnchor="end" fill="var(--fg3)" style={{ font: '13px var(--font)' }}>+{eng.queue.length - AT_EQ_ROWS} more</text>}
+          {eng.queue.length > AT_EQ_ROWS && <text x={AT_EQ_W - 14} y={40 + AT_EQ_ROWS * AT_EQ_ROW + 4} textAnchor="end" fill="var(--fg3)" style={{ font: `${narrow ? 14 : 13}px var(--font)` }}>+{eng.queue.length - AT_EQ_ROWS} more</text>}
           <g transform={`translate(14,${44 + AT_EQ_ROWS * AT_EQ_ROW + 22})`}>
             {Array.from({ length: eng.maxJobs }, (_, i) => <circle key={i} cx={6 + i * 15} cy={0} r={5} fill={i < tokens.filter(t => !t.parent).length ? 'var(--fg2)' : 'none'} stroke="var(--fg3)" strokeWidth={1.5} />)}
             <text x={14 + eng.maxJobs * 15} y={5} fill="var(--fg2)" style={{ font: '14px var(--font)' }}>{eng.jobs.filter(j => !j.done).length}/{eng.maxJobs} jobs{eng.dropped ? ` · ${eng.dropped} dropped` : ''}</text>
@@ -660,54 +732,33 @@ export function AgentTransitMap({ machines = AGENT_WORKFLOWS, order = AGENT_WORK
             <circle r={f.small ? 8 : 10} fill={AT_C(f.line)} stroke="var(--card)" strokeWidth={2.5} /><text y={3.6} textAnchor="middle" fill="#fff" style={{ font: '700 10px var(--font)' }}>{f.jid}</text>
           </motion.g>)}
         </g>
-        <g style={{ font: '13px var(--font)' }} fill="var(--fg2)">
+        <g style={{ font: `${13 * fs}px var(--font)` }} fill="var(--fg2)">
           {AT_ST.map(([n, , pt, dx, dy, anc]) => <text key={n} x={pt[0] + dx} y={pt[1] + dy} textAnchor={anc}>{n}</text>)}
           {AT_LOOPST.map(([n, dx, dy, anc, ang]) => { const a = ang * Math.PI / 180; return <text key={n} x={AT_LC[0] + Math.cos(a) * AT_LR + dx + Math.cos(a) * 6} y={AT_LC[1] + Math.sin(a) * AT_LR + dy} textAnchor={anc}>{n}</text> })}
           <text x={AT_LC[0] - AT_LR - 18} y={AT_LC[1] + 5} textAnchor="end" fill="var(--fg)" fontWeight={600}>Index</text>
-          {AT_HUBS.map(([n, [x, y], dx, dy, anc]) => <text key={n} x={x + dx} y={y + dy} textAnchor={anc} fill="var(--fg)" style={{ font: '600 15px var(--font)' }}>{n}</text>)}
+          {AT_HUBS.map(([n, [x, y], dx, dy, anc]) => <text key={n} x={x + dx} y={y + dy} textAnchor={anc} fill="var(--fg)" style={{ font: `600 ${15 * fs}px var(--font)` }}>{n}</text>)}
           {F.evLabel.text && <motion.text key={F.evLabel.n} x={AT_LC[0]} y={AT_LC[1] + 5} textAnchor="middle" style={{ font: '600 11px var(--mono)' }} initial={{ opacity: 0 }} animate={{ opacity: [0, 1, 1, 0.35] }} transition={{ duration: 1.6 }}>{F.evLabel.text}</motion.text>}
         </g>
         {/* queue counters beside each agent's line-up */}
         <g aria-hidden>
-          {queueTags.map(t => { const w = 26 + String(t.n).length * 8; return (
+          {queueTags.map(t => { const w = (26 + String(t.n).length * 8) * fs; return (
             <g key={t.stn} transform={atTranslate(t)}>
-              <rect x={-w / 2} y={-11} width={w} height={22} rx={11} fill="var(--card)" stroke="var(--warn)" strokeWidth={1.5} />
-              <text y={5} textAnchor="middle" fill="var(--fg)" style={{ font: '600 13px var(--font)' }}>+{t.n}</text>
+              <rect x={-w / 2} y={-11 * fs} width={w} height={22 * fs} rx={11 * fs} fill="var(--card)" stroke="var(--warn)" strokeWidth={1.5} />
+              <text y={5 * fs} textAnchor="middle" fill="var(--fg)" style={{ font: `600 ${13 * fs}px var(--font)` }}>+{t.n}</text>
             </g>) })}
         </g>
       </svg>
       </div>
-      {narrow && <ScrollEdges {...mapEdges} hint="Swipe the map" />}
+      {narrow && <ScrollEdges {...mapEdges} hint="Swipe the map" className="!top-[114px]" />}
       {/* approvals float over the map beside the waiting station (pinned top-left on phones); fixed-size cards stacked
           by transform, so neither the page nor the other cards ever shift */}
       <span className="sr-only" aria-live="polite">{eng.waiting.length ? `${eng.waiting.length} waiting for your approval` : ''}</span>
-      {stageW > 0 && [...waitBy].map(([k, q]) => { const a = anchorOf(k); return (
-        <div key={k} className="pointer-events-none absolute z-[2]" style={{ left: a.left, top: a.top, width: cardW }}>
-          <AnimatePresence initial={false}>
-            {q.slice(0, maxCards).map((tk, i) => { const st = machines[tk.job.type].states[tk.state], amount = Number(tk.job.data.amount) || 0, y = i * (AT_CARD_H + AT_CARD_GAP); return (
-              <motion.div key={tk.uid} role="group" aria-label={`${tk.job.name} needs your approval`} initial={{ opacity: 0, x: -8, y }} animate={{ opacity: 1, x: 0, y }} exit={{ opacity: 0, x: -8 }} transition={spring(0.25, 0.35)}
-                {...atFollow(tk.job.id, setHover, setPin)}
-                className={cn('pointer-events-auto absolute top-0 left-0 flex w-full flex-col justify-between overflow-hidden rounded-[var(--r-md)] border bg-[color-mix(in_srgb,var(--warn)_5%,var(--card))] px-2.5 py-2 text-[13px] shadow-[0_6px_20px_-8px_rgba(0,0,0,.28)]',
-                  hover === tk.job.id ? 'border-[var(--warn)]' : 'border-[color-mix(in_srgb,var(--warn)_45%,var(--line))]')} style={{ height: AT_CARD_H }}>
-                <div className="flex items-center gap-2">
-                  <span className={AT_JOB_DOT} style={{ background: `color-mix(in srgb, ${AT_C(tk.line)} 70%, #000)` }}>{tk.job.id}</span>
-                  <b className="min-w-0 flex-1 truncate font-medium">{tk.job.name}</b>
-                  <span className={cn('w-8 flex-none font-[family-name:var(--mono)] text-xs whitespace-pre', tk.t < 6 ? 'text-[var(--warn)]' : 'text-[var(--fg3)]')} title="Approved by policy when it runs out">{atPad(`${Math.ceil(tk.t)}s`, 3)}</span>
-                </div>
-                <div className="flex items-center gap-1.5 [@media(pointer:coarse)]:[&>button]:min-h-9">
-                  <span className="min-w-0 flex-1 truncate text-xs text-[var(--fg3)]">{st.label}{amount ? ` · CHF ${amount.toLocaleString(LOCALE)}` : ''}</span>
-                  <Button size="sm" onClick={() => { eng.resolve(tk, 'reject'); setHover(null); setPin(null); rerender() }}>Reject</Button>
-                  <Button size="sm" variant="primary" onClick={() => { eng.resolve(tk, 'approve'); setHover(null); setPin(null); rerender() }}>Approve</Button>
-                </div>
-              </motion.div>) })}
-            {q.length > maxCards && <motion.div key="more" initial={{ opacity: 0, y: maxCards * (AT_CARD_H + AT_CARD_GAP) }} animate={{ opacity: 1, y: maxCards * (AT_CARD_H + AT_CARD_GAP) }} exit={{ opacity: 0 }}
-              className="absolute top-0 left-0 rounded-full border border-[var(--line)] bg-[var(--card)] px-2.5 py-0.5 text-xs text-[var(--fg2)]">+{q.length - maxCards} more waiting</motion.div>}
-          </AnimatePresence>
-        </div>) })}
+      {stageW > 0 && [...waitBy].filter(([k]) => k !== '*').map(([k, q]) => { const a = anchorOf(k); return (
+        <div key={k} className="pointer-events-none absolute z-[2]" style={{ left: a.left, top: a.top, width: cardW }}>{atCards(k, q)}</div>) })}
       </div>
 
       <div className="mt-1.5 mb-3 flex flex-wrap justify-center gap-x-5 gap-y-2 text-[13px] text-[var(--fg2)] max-sm:justify-start max-sm:gap-x-4">
-        {Object.values(AT_LINES).map(([n, c]) => <span key={n} className="inline-flex items-center gap-2"><i className="inline-block h-[7px] w-5 rounded-[2px]" style={{ background: c }} />{n}</span>)}
+        {Object.values(AT_LINES).map(([n, c]) => <span key={n} className="inline-flex items-center gap-2"><i className="inline-block h-[7px] w-5 rounded-[var(--r-sm)]" style={{ background: c }} />{n}</span>)}
         <span className="inline-flex items-center gap-2"><i className="inline-block h-2.5 w-2.5 rounded-full bg-[var(--bad)]" />Routing decision</span>
         <span className="inline-flex items-center gap-2"><i className="inline-block h-3 w-3 rounded-full bg-[var(--card)] shadow-[inset_0_0_0_2.5px_var(--fg)]" />Orchestrator</span>
         <span className="inline-flex items-center gap-2"><i className="inline-block h-3.5 w-3.5 rounded-full bg-[var(--fg2)]" />Job (numbered, matches the trace)</span>
@@ -775,7 +826,7 @@ export function AgentTransitMap({ machines = AGENT_WORKFLOWS, order = AGENT_WORK
                       <div className="relative h-3.5 overflow-x-clip">
                         <div className="absolute inset-0" style={strip}>
                           {j.segs.map((s, k) => { const b = s.t1 ?? eng.clock; if (b < eng.clock - AT_WIN) return null; const c = AT_C(s.line); return (
-                            <span key={k} title={s.label} className={cn('absolute rounded', s.sub ? 'top-[3px] h-2 opacity-80' : 'top-0 h-3.5', s.kind === 'move' && 'opacity-45', s.kind === 'wait' && 'opacity-90')}
+                            <span key={k} title={s.label} className={cn('absolute rounded-[var(--r-sm)]', s.sub ? 'top-[3px] h-2 opacity-80' : 'top-0 h-3.5', s.kind === 'move' && 'opacity-45', s.kind === 'wait' && 'opacity-90')}
                               style={{ left: tx(s.t0), width: `max(1px, ${tx(b - s.t0)})`, background: s.kind === 'wait' ? `repeating-linear-gradient(135deg, ${c} 0 3px, transparent 3px 7px)` : c }} />) })}
                         </div>
                       </div>

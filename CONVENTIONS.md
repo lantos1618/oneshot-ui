@@ -17,7 +17,17 @@
 
 ## Style (match what's there)
 
-- Colours only through tokens: `bg-[var(--card)]`, `text-[var(--fg2)]`, `border-[var(--line)]`, `var(--accent)`, `var(--ok|warn|bad)` and their `-soft` tints, `var(--c1..c4)` for chart series. Never hard-code a colour that only works in one theme. Radius: `rounded-[var(--r-md)]` / `rounded-[var(--r-lg)]`. Fonts: `var(--font)`, `var(--mono)`.
+- Colours only through tokens: `bg-[var(--card)]`, `text-[var(--fg2)]`, `border-[var(--line)]`, `var(--accent)`, `var(--ok|warn|bad)` and their `-soft` tints, `var(--c1..c4)` for chart series. Never hard-code a colour that only works in one theme. Radius, type and heights: see Scales below. Fonts: `var(--font)`, `var(--mono)`.
+- **Scales (0.2.1).** Pick from these; anything else is token debt.
+  - Radius: `rounded-[var(--r-sm)]` (theme radius ÷ 2, 4px by default: kbd, chips in fields, checkboxes, thin inner shapes), `rounded-[var(--r-md)]` (the theme radius, 8px: buttons, fields, menu rows, tiles), `rounded-[var(--r-lg)]` (≈1.6× + 1, 14px: cards, popovers, dialogs, sheets, toasts), `rounded-full` / `rounded-[var(--r-full)]` (pills, badges, avatars, dots, thin bars). Nested shapes may use `calc(var(--r-md)-2px)`. Not: `rounded`, `rounded-sm/md/lg/xl/2xl`, `rounded-[3px|5px|7px|9px|10px|12px]`.
+  - Type (`--t-*`): 11px `text-[11px]` (xs: meta, captions, counts) · 12px `text-xs` (sm: secondary text, badges, small buttons) · 13px `text-[13px]` (md: control and component body text) · 14px `text-sm` (base: prose) · 16px `text-base` (lg: titles, dialog headings, touch inputs) · 22px `text-[22px]` (xl: stat values, OTP digits) · 28px `text-[28px]` (2xl: display/KPI). Chart tick labels may be 10px. Not: 10/11.5/12.5/15/17/18/20/24/36px, `text-lg/xl/2xl/4xl`.
+  - Control heights (`--h-*`): 24 `h-6` (xs) · 30 `h-[30px]` (sm) · 36 `h-9` (md: buttons, every field and trigger) · 40 `h-10` (lg); icon buttons 24/28/36 (`icon-xs`/`icon-sm`/`icon`); list and nav rows 32 (`h-8`). On touch, xs/sm grow to 32. Use `Button`/`IconButton` `size` (`xs | sm | md | lg | icon-xs | icon-sm | icon`) rather than your own heights.
+  - Badges: `Badge` is the one pill primitive, `size="sm"` (18px, 11px text: counts, deltas, dense rows) or `"md"` (20px, 12px text, default). Don't hand-roll pill spans.
+  - Hover: fields and field triggers get `fieldHoverClass` (border → `--line2`; already in `inputClass`/`inputShellClass`), rows/accordion triggers get `rowHoverClass` (muted background).
+  - Tiny controls (a chip's ×): add `ui-target` (`TOUCH.target`) for an invisible ≥24×24 hit area on desktop and 36 on touch.
+  - Copy actions: use `CopyButton` (icon + label turn into "Copied" for 1.5 s, announced politely); don't build your own.
+  - Infinite CSS animations (spinners, shimmer, carets) pause off screen: `Spinner`, `Skeleton` and `StatusIcon` do it themselves; elsewhere set `animation-play-state` (or `--ui-play` for `.ui-shimmer`/`.ui-caret`) from `useViewport().visible`.
+  - Chart neutral series: `var(--c-neutral)` (≥4.5:1 on cards in every theme, light and dark), never `--fg`.
 - Tailwind class strings must be literal (no `bg-[var(--${x})]`); pick from maps of full class strings.
 - No tailwind-merge: to override a class a component already sets, use the `!` prefix (`className="!h-8"`).
 - Animation: `motion/react` with `spring(bounce, duration)` from core. Use `initial={false}` where mount animation isn't wanted. Keyframe arrays that must replay on every change need a changing `key` (or `useAnimate`), because the same array on re-render does nothing. `MotionConfig reducedMotion="user"` already wraps everything.
@@ -50,3 +60,23 @@ Test with Playwright device emulation: `devices['iPhone 13']` (390px, touch) and
   clamp to the screen edges), respect safe areas, and keep inputs ≥ 16px so iOS doesn't zoom on focus.
 - **Gestures:** drags use pointer events with `touch-action` set so vertical page scrolling still works outside the
   drag handle; pinch/scroll-zoom areas don't trap page scroll.
+
+## Testing
+
+- **Unit and interaction tests** (`tests/unit/*.test.ts(x)`, Vitest + Testing Library + jsdom): `pnpm test`, or
+  `pnpm test:watch`. Import from `src/lib`. Query by role and accessible name (`getByRole('tab', { name: 'Billing' })`),
+  never by class names, so styling changes don't break tests. jsdom has no layout: `tests/setup.ts` stubs
+  `matchMedia` (reduced motion on), `ResizeObserver`, `IntersectionObserver`, `innerText` and `execCommand`.
+- **E2E** (`tests/e2e`, Playwright, Chromium): `pnpm test:e2e` builds the showcase and serves it with `vite preview`;
+  `E2E_BASE_URL=http://localhost:5173 pnpm test:e2e` uses the dev server instead (a test that sees a hot reload
+  skips itself). Every section on desktop light, desktop dark and iPhone 13 must log no console errors, stay inside
+  its layout-shift budget, add no axe violations beyond the baseline, and (phone) not make the page scroll sideways.
+  `--project desktop-light` or `-g "section charts"` narrows a run.
+- **axe baseline:** `tests/e2e/axe-baseline.json` holds today's known violations (profile → section → rule → node
+  count). A test fails only on a new rule or a higher count. After fixing violations run
+  `pnpm test:e2e:update-baseline` (accepts the same filters) and commit the smaller file; never raise a count to make
+  a new violation pass.
+- **Budgets:** `tests/e2e/budgets.ts`: the CLS budget (0.05 per section), per-section overrides with a reason, and
+  tolerated console errors. Remove an override when the fix lands.
+- **Before a PR:** `pnpm check` (types, tests' types, build, single files, SSR, unit tests), `pnpm test:pack` after a
+  build, and `pnpm test:e2e`. CI runs the same (README, "CI").

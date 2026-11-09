@@ -20,6 +20,10 @@ Open: on phones the approval card covers the top-left of the map; station labels
 
 ## 1. Now: polish, measured defects (mostly S effort)
 
+**Status: landed in 0.2.1.** Every item below is fixed; see CHANGELOG.md for the measured results. Two remain open:
+- 16 axe `label-content-name-mismatch` nodes in the Media section on iPhone (baselined in tests/e2e/axe-baseline.json).
+- Missing `disabled` on the custom inputs moves to 0.3, as part of the form-native controls item.
+
 ### Layout shift
 1. **Sidebar subnav** reflows the section list. It is the largest shift source on the page: 0.24 total, and Design QA reports 0.167 "Needs work". The old subnav unmounts instantly while the new one animates open. Fix: fixed section positions, with a capped and scrolling subnav. (H/S)
 2. **Masonry gallery:** images have no width or height. Tiles overflow 272 px over Media cards, then the card jumps 351 px. Fix: reserve aspect ratios. (H/S)

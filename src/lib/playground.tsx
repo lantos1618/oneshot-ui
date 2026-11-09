@@ -68,7 +68,7 @@ export function MotionPlayground({ defaultType = 'spring', defaultBounce = 0.25,
       </div>
       <div ref={scope} className="flex min-w-0 flex-col justify-center gap-5 rounded-[var(--r-lg)] border border-[var(--line)] bg-[var(--bg)] bg-[radial-gradient(circle,var(--line2)_1px,transparent_1.2px)] bg-[length:18px_18px] p-6 max-sm:gap-4 max-sm:p-4">
         <div data-mp="track" className="relative flex h-16 items-center rounded-[var(--r-md)] border border-[var(--line)] bg-[var(--card)] px-4">
-          <motion.span data-mp="box" className="block h-10 w-10 rounded-[10px] bg-[var(--accent)]" />
+          <motion.span data-mp="box" className="block h-10 w-10 rounded-[var(--r-md)] bg-[var(--accent)]" />
         </div>
         <div className="relative flex h-16 items-center gap-5 rounded-[var(--r-md)] border border-[var(--line)] bg-[var(--card)] px-4">
           <motion.div data-mp="card" className="flex flex-col rounded-[var(--r-md)] border border-[var(--line)] bg-[var(--card)] px-3 py-2 shadow-[var(--shadow)]">

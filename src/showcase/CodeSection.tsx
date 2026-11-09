@@ -88,13 +88,6 @@ export function CodeSection() {
       <Spec title="Code block" desc="File name, language, line numbers, highlighted lines, wrap, copy, expand" span={2}>
         <CodeBlock code={IMPORT_CODE} previous={IMPORT_PREV} filename="run-import.ts" highlight={[7, 8]} />
       </Spec>
-      <Spec title="Install command" desc="Package manager tabs, one-click copy">
-        <InstallCommand pkg="motion number-flow" />
-        <p className="m-0 text-xs leading-[1.7] text-[var(--fg2)]">Inline code looks like <InlineCode>useFlow()</InlineCode> and keys look like <Kbd>⌘</Kbd> <Kbd>K</Kbd>.</p>
-      </Spec>
-      <Spec title="Tabbed example" desc="Same request in three languages, height animates between tabs" span={2}>
-        <CodeTabs tabs={EXAMPLES} />
-      </Spec>
       <Spec title="Terminal" desc="Commands type out, output streams in">
         <Terminal lines={[
           { cmd: 'npm create flow@latest my-app' },
@@ -105,7 +98,17 @@ export function CodeSection() {
           { out: <><span className={acc}>▲</span> Ready in 640 ms</> },
           { out: <>  Local:   <span className={acc}>http://localhost:3000</span></> },
           { out: <><span className="text-[var(--warn)]">!</span> 1 flow has no retries set <span className={dim}>(csv-import)</span></> },
+          { cmd: 'npm test' },
+          { out: <><span className={ok}>✔</span> 48 passed <span className={dim}>· 3 files · 1.2s</span></> },
+          { out: <><span className={dim}>Coverage</span> 91.4%</> },
         ]} />
+      </Spec>
+      <Spec title="Tabbed example" desc="Same request in three languages, height animates between tabs" span={2}>
+        <CodeTabs tabs={EXAMPLES} />
+      </Spec>
+      <Spec title="Install command" desc="Package manager tabs, one-click copy">
+        <InstallCommand pkg="motion number-flow" />
+        <p className="m-0 text-xs leading-[1.7] text-[var(--fg2)]">Inline code looks like <InlineCode>useFlow()</InlineCode> and keys look like <Kbd>⌘</Kbd> <Kbd>K</Kbd>.</p>
       </Spec>
       <Spec title="Diff" desc="Unified or split view, added and removed lines, hunk header" span={3}>
         <Diff before={DIFF_BEFORE} after={DIFF_AFTER} filename="flow.config.ts" hunk="createFlow" />

@@ -1,6 +1,6 @@
 import { useEffect, useId, useLayoutEffect, useRef, useState, type CSSProperties, type ReactNode, type RefObject, type KeyboardEvent as RKeyboardEvent, type PointerEvent as RPointerEvent } from 'react'
 import { AnimatePresence, LayoutGroup, motion } from 'motion/react'
-import { AvatarStack, Badge, DeltaBadge, Icon, type IconName, ScrollEdges, StatusIcon, type StatusIconStatus, TOUCH, type Tone, clamp, cn, prefersReducedMotion, safeColor, spring, surface, useCoarsePointer, useControllable, useLongPress, usePointerDrag, useScrollEdges, SparkChart } from './core'
+import { AvatarStack, Badge, DeltaBadge, Icon, type IconName, ScrollEdges, StatusIcon, type StatusIconStatus, TOUCH, type Tone, clamp, cn, prefersReducedMotion, safeColor, spring, surface, useCoarsePointer, useControllable, useLongPress, usePointerDrag, useScrollEdges, useWidth, SparkChart } from './core'
 import { Collapse, useToast } from './feedback'
 
 /* ════════════════════════════════════════════════════════════════════════════
@@ -242,7 +242,7 @@ function KanbanMetric({ m }: { m: NonNullable<KanbanCard['metric']> }) {
       <div className="min-w-0">
         <span className="block text-[11px] text-[var(--fg3)]">{m.label}</span>
         <span className="flex items-center gap-1.5">
-          <b className="font-[family-name:var(--mono)] text-sm font-semibold tracking-[-.01em]">{m.value}</b>
+          <b className="text-sm font-semibold tracking-[-.01em] tabular-nums">{m.value}</b>
           <DeltaBadge value={m.delta} lowerIsBetter={m.lowerIsBetter} digits={Number.isInteger(m.delta) ? 0 : 1} className="font-semibold" />
         </span>
       </div>
@@ -337,7 +337,7 @@ export function Kanban({ value, defaultValue = [], onChange, doneColumn, newCard
                   <span className="-ml-0.5 text-[var(--fg3)] opacity-35 transition-opacity group-hover:opacity-100"><Icon name="grip" size={12} strokeWidth={3.2} /></span>
                   <i className="h-2 w-2 rounded-full" style={{ background: safeColor(col.color, 'var(--fg3)') }} />{col.title}
                   <motion.span key={col.cards.length} initial={{ scale: 1.3 }} animate={{ scale: 1 }} transition={spring(0.5, 0.3)}
-                    className={cn('ui-num rounded-full px-2 py-px text-[11px] font-medium', over ? 'bg-[var(--bad-soft)] text-[var(--bad)]' : 'bg-[var(--card)] text-[var(--fg3)]')}>{col.cards.length}</motion.span>
+                    className="inline-flex"><Badge size="sm" tone={over ? 'bad' : 'neutral'} className={cn('tabular-nums', !over && '!bg-[var(--card)] !text-[var(--fg3)]')}>{col.cards.length}</Badge></motion.span>
                   {col.limit && <span className="ml-auto text-[11px] font-normal text-[var(--fg3)]">Limit {col.limit}</span>}
                 </div>
                 <div {...cards.listProps(col.id)} role="list" aria-label={`${col.title} cards`} className="flex min-h-10 flex-1 flex-col gap-2">
@@ -385,7 +385,7 @@ function KanbanCardView({ card, dragging, sortProps, label, hint, open, onToggle
         {card.tag && <Badge tone={card.tag.tone}>{card.tag.label}</Badge>}
         {card.blocked && <Badge tone="bad"><Icon name="lock" size={10} />Blocked</Badge>}
         <button data-kb-card={card.id} aria-label={label} aria-describedby={hint} aria-roledescription="drag handle" onKeyDown={onKeyDown}
-          className="ui-hit [--hit:40px] -my-1 -mr-1.5 ml-auto grid h-6 w-6 cursor-grab place-items-center rounded-[5px] border-0 bg-transparent p-0 text-[var(--fg3)] opacity-40 outline-none hover:bg-[var(--muted)] hover:opacity-100 focus-visible:opacity-100 active:cursor-grabbing">
+          className="ui-hit [--hit:40px] -my-1 -mr-1.5 ml-auto grid h-6 w-6 cursor-grab place-items-center rounded-[var(--r-sm)] border-0 bg-transparent p-0 text-[var(--fg3)] opacity-40 outline-none hover:bg-[var(--muted)] hover:opacity-100 focus-visible:opacity-100 active:cursor-grabbing">
           <Icon name="grip" size={12} strokeWidth={3.2} />
         </button>
       </div>
@@ -407,11 +407,13 @@ function KanbanCardView({ card, dragging, sortProps, label, hint, open, onToggle
       )}
       {card.checklist && (
         <>
-          <button onClick={onToggleOpen} aria-expanded={open} aria-label={`Checklist, ${done} of ${total} done`} data-no-drag
-            className={cn('-mt-0.5 mb-1.5 flex w-full cursor-pointer items-center gap-2 border-0 bg-transparent px-0 py-0.5 font-[family-name:var(--mono)] text-[11px] font-medium text-[var(--fg2)]', TOUCH.tap)}>
-            <span className="h-[5px] flex-1 overflow-hidden rounded-full bg-[var(--muted)]">
-              <motion.span className={cn('block h-full rounded-full', total && done === total ? 'bg-[var(--ok)]' : 'bg-[var(--accent)]')} initial={false} animate={{ width: `${total ? (done / total) * 100 : 0}%` }} transition={spring(0.2, 0.4)} />
-            </span>{done}/{total}
+          {/* the name reads "Checklist 2/4 done": it contains the visible "2/4" */}
+          <button onClick={onToggleOpen} aria-expanded={open} data-no-drag
+            className={cn('-mt-0.5 mb-1.5 flex w-full cursor-pointer items-center gap-2 border-0 bg-transparent px-0 py-0.5 text-[11px] font-medium tabular-nums text-[var(--fg2)]', TOUCH.tap)}>
+            <span className="sr-only">Checklist </span>
+            <span aria-hidden className="h-[5px] flex-1 overflow-hidden rounded-full bg-[var(--muted)]">
+              <motion.span className={cn('block h-full rounded-full', total && done === total ? 'bg-[var(--ok)]' : 'bg-[var(--accent)]')} initial={false} animate={{ scaleX: total ? done / total : 0 }} style={{ originX: 0 }} transition={spring(0.2, 0.4)} />
+            </span>{done}/{total}<span className="sr-only"> done</span>
           </button>
           <Collapse open={open}>
             <div className="pb-1.5">
@@ -425,8 +427,9 @@ function KanbanCardView({ card, dragging, sortProps, label, hint, open, onToggle
           </Collapse>
         </>
       )}
-      <div className="flex items-center gap-2 text-[11px] whitespace-nowrap text-[var(--fg3)]">
-        {card.priority && <span role="img" aria-label={`${card.priority} priority`} title={`${card.priority} priority`} className="h-[7px] w-[7px] flex-none rounded-[2px]" style={{ background: KB_PRI[card.priority] }} />}
+      {/* wraps (avatars drop to their own line) rather than spilling out of a narrow column */}
+      <div className="flex min-w-0 flex-wrap items-center gap-x-2 gap-y-1 text-[11px] whitespace-nowrap text-[var(--fg3)]">
+        {card.priority && <span role="img" aria-label={`${card.priority} priority`} title={`${card.priority} priority`} className="h-[7px] w-[7px] flex-none rounded-[var(--r-sm)]" style={{ background: KB_PRI[card.priority] }} />}
         {card.due && <span className="inline-flex items-center gap-1"><Icon name="calendar" size={11} />{card.due}</span>}
         {!!card.comments && <span className="inline-flex items-center gap-1" title={`${card.comments} comments`}><Icon name="message" size={11} />{card.comments}</span>}
         {!!card.attachments && <span className="inline-flex items-center gap-1" title={`${card.attachments} attachments`}><Icon name="paperclip" size={11} />{card.attachments}</span>}
@@ -473,7 +476,7 @@ export function SortableList<T extends { id: string; color?: string }>({ items, 
               sort.dragging === it.id ? 'border-dashed border-[var(--line2)] bg-transparent [&>*]:invisible' : 'border-[var(--line)] bg-[var(--card)]',
               lifted === it.id && 'shadow-[0_0_0_2px_var(--accent),0_8px_20px_rgba(0,0,0,.12)]')}>
             <span {...sort.handleProps(it.id)} aria-hidden title="Drag to reorder"
-              className="grid h-[22px] w-[18px] flex-none cursor-grab touch-none place-items-center rounded-[5px] text-[var(--fg3)] hover:bg-[var(--muted)] hover:text-[var(--fg)] active:cursor-grabbing [@media(pointer:coarse)]:-my-1.5 [@media(pointer:coarse)]:-ml-1 [@media(pointer:coarse)]:h-9 [@media(pointer:coarse)]:w-9"><Icon name="grip" size={12} strokeWidth={3.2} /></span>
+              className="grid h-[22px] w-[18px] flex-none cursor-grab touch-none place-items-center rounded-[var(--r-sm)] text-[var(--fg3)] hover:bg-[var(--muted)] hover:text-[var(--fg)] active:cursor-grabbing [@media(pointer:coarse)]:-my-1.5 [@media(pointer:coarse)]:-ml-1 [@media(pointer:coarse)]:h-9 [@media(pointer:coarse)]:w-9"><Icon name="grip" size={12} strokeWidth={3.2} /></span>
             {it.color && <span className="h-2 w-2 flex-none rounded-full" style={{ background: safeColor(it.color) }} />}
             <span className="min-w-0 flex-1 truncate">{render(it)}</span>
             {ranked && <span className="ui-num text-[11px] font-medium text-[var(--fg3)]">#{i + 1}</span>}
@@ -496,11 +499,12 @@ function TreeIcon({ name, dir, open }: { name: string; dir: boolean; open: boole
 /**
  * File tree with roving focus: ↑ / ↓ move, → opens or steps into a folder, ← closes or jumps to the parent,
  * Enter opens (folders toggle, files call `onOpen`). F2 renames any row (file or folder) in place; double-click renames a file.
- * Folders show their item count, files their size; icons are coloured by extension.
+ * Folders show their item count, files their size; icons are coloured by extension. `compact` gives denser rows
+ * without the counts (for side panels such as an IDE explorer).
  */
-export function TreeView({ nodes, defaultExpanded = [], onSelect, onOpen, onRename, className, 'aria-label': ariaLabel = 'Files' }:
+export function TreeView({ nodes, defaultExpanded = [], onSelect, onOpen, onRename, compact, className, 'aria-label': ariaLabel = 'Files' }:
   { nodes: TreeNode[]; defaultExpanded?: string[]; onSelect?: (n: TreeNode) => void; onOpen?: (n: TreeNode) => void
-    onRename?: (n: TreeNode, name: string, previous: string) => void; className?: string; 'aria-label'?: string }) {
+    onRename?: (n: TreeNode, name: string, previous: string) => void; compact?: boolean; className?: string; 'aria-label'?: string }) {
   const [open, setOpen] = useState(() => new Set(defaultExpanded))
   const [names, setNames] = useState<Record<string, string>>({})
   const [sel, setSel] = useState<string>(nodes[0]?.id ?? '')
@@ -530,9 +534,9 @@ export function TreeView({ nodes, defaultExpanded = [], onSelect, onOpen, onRena
     return (
       <li key={n.id} role="none">
         <div ref={el => { if (el) rows.current.set(n.id, el); else rows.current.delete(n.id) }} role="treeitem" aria-level={depth + 1} aria-selected={sel === n.id}
-          aria-expanded={dir ? isOpen : undefined} tabIndex={sel === n.id ? 0 : -1} style={{ paddingLeft: 8 + depth * 16 }}
+          aria-expanded={dir ? isOpen : undefined} tabIndex={sel === n.id ? 0 : -1} style={{ paddingLeft: (compact ? 4 : 8) + depth * (compact ? 12 : 16) }}
           onClick={() => { select(n); if (dir) toggle(n.id) }} onDoubleClick={() => !dir && setEditing(n.id)} onKeyDown={e => onKey(e, n, i, parent)}
-          className={cn('flex h-7 cursor-pointer items-center gap-1.5 rounded-md pr-2 text-[13px] whitespace-nowrap outline-none focus-visible:shadow-[inset_0_0_0_2px_var(--accent)] [@media(pointer:coarse)]:h-9 [@media(pointer:coarse)]:text-sm',
+          className={cn('flex cursor-pointer items-center gap-1.5 rounded-[var(--r-md)] pr-2 whitespace-nowrap outline-none focus-visible:shadow-[inset_0_0_0_2px_var(--accent)] [@media(pointer:coarse)]:h-9 [@media(pointer:coarse)]:text-sm', compact ? 'h-6 text-xs' : 'h-7 text-[13px]',
             sel === n.id ? 'bg-[var(--accent-soft)] text-[color-mix(in_srgb,var(--accent)_78%,var(--fg))]' : 'hover:bg-[var(--muted)]')}>
           <span className="grid w-3.5 flex-none place-items-center text-[var(--fg3)]">
             {dir && <motion.span initial={false} animate={{ rotate: isOpen ? 90 : 0 }} transition={spring(0.2, 0.25)} className="grid"><Icon name="chevronRight" size={11} strokeWidth={3} /></motion.span>}
@@ -552,9 +556,9 @@ export function TreeView({ nodes, defaultExpanded = [], onSelect, onOpen, onRena
                 setEditing(null); rows.current.get(n.id)?.focus()
                 if (v && v !== prev) { setNames(m => ({ ...m, [n.id]: v })); onRename?.(n, v, prev) }
               }}
-              className={cn('w-[140px] min-w-0 rounded border border-[var(--accent)] bg-[var(--card)] px-1 py-px text-[13px] text-[var(--fg)] outline-none [@media(pointer:coarse)]:flex-1', TOUCH.input)} />
+              className={cn('w-[140px] min-w-0 rounded-[var(--r-sm)] border border-[var(--accent)] bg-[var(--card)] px-1 py-px text-[13px] text-[var(--fg)] outline-none [@media(pointer:coarse)]:flex-1', TOUCH.input)} />
             : <motion.span key={name(n)} initial={{ opacity: names[n.id] ? 0.3 : 1 }} animate={{ opacity: 1 }} className="truncate">{name(n)}</motion.span>}
-          <span className="ui-num ml-auto pl-2 text-[11px] text-[var(--fg2)]">{dir ? n.children!.length : n.size}</span>
+          {!compact && <span className="ml-auto pl-2 text-[11px] tabular-nums text-[var(--fg2)]">{dir ? n.children!.length : n.size}</span>}
         </div>
         {dir && <Collapse open={isOpen}><ul role="group" className="m-0 list-none p-0">{render(n.children!, depth + 1, n)}</ul></Collapse>}
       </li>
@@ -633,13 +637,14 @@ export function Timeline({ items, className }: { items: TimelineItem[]; classNam
  * Two resizable panes, side by side or stacked (nest one inside another for IDE layouts). Drag the divider,
  * or focus it and use the arrow keys (Shift for big steps); Enter or double-click resets with a spring.
  * Releasing the first pane below `min` snaps it closed; drag the divider back out to reopen it.
+ * Side-by-side panes stack (first on top) while the pane is narrower than `stackBelow` px (640 by default; 0 never stacks).
  */
-export function SplitPane({ first, second, direction = 'horizontal', defaultSize = 40, min = 15, max = 85, label = 'Resize panes', className, style }:
+export function SplitPane({ first, second, direction = 'horizontal', defaultSize = 40, min = 15, max = 85, stackBelow = 640, label = 'Resize panes', className, style }:
   { first: ReactNode; second: ReactNode; direction?: 'horizontal' | 'vertical'; /** first pane, % */ defaultSize?: number; min?: number; max?: number
-    label?: string; className?: string; style?: CSSProperties }) {
+    stackBelow?: number; label?: string; className?: string; style?: CSSProperties }) {
   const [state, setState] = useState({ size: defaultSize, spring: false })
-  const box = useRef<HTMLDivElement>(null)
-  const h = direction === 'horizontal'
+  const [box, boxW] = useWidth<HTMLDivElement>()
+  const h = direction === 'horizontal' && !(boxW > 0 && boxW < stackBelow)
   const drag = usePointerDrag({
     cursor: h ? 'col-resize' : 'row-resize',
     onMove: p => {

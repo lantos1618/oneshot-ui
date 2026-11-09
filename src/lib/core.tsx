@@ -47,20 +47,24 @@ import { AnimatePresence, motion, useInView } from 'motion/react'
 
 const LIGHT = `--bg:#FAFAFA;--card:#FFFFFF;--muted:#F4F4F5;--line:#E4E4E7;--line2:#D4D4D8;--fg:#09090B;--fg2:#52525B;--fg3:#68686F;
 --primary:#18181B;--on-primary:#FAFAFA;--accent:#2563EB;--accent-soft:#EFF4FF;--ok:#15803D;--ok-soft:#ECFDF3;--warn:#B45309;--warn-soft:#FFF7E6;
---bad:#DC2626;--bad-soft:#FEF2F2;--c1:#18181B;--c2:#2563EB;--c3:#F97316;--c4:#16A34A;--band:rgba(37,99,235,.12);
+--bad:#DC2626;--bad-soft:#FEF2F2;--c1:#18181B;--c2:#2563EB;--c3:#F97316;--c4:#16A34A;--c-neutral:#6B6B6D;--band:rgba(37,99,235,.12);
 --shadow:0 1px 2px rgba(0,0,0,.04),0 10px 30px rgba(0,0,0,.08);color-scheme:light;`
 const DARK = `--bg:#09090B;--card:#111113;--muted:#1A1A1D;--line:#27272A;--line2:#3F3F46;--fg:#FAFAFA;--fg2:#A1A1AA;--fg3:#8E8E98;
 --primary:#FAFAFA;--on-primary:#09090B;--accent:#60A5FA;--accent-soft:#132036;--ok:#4ADE80;--ok-soft:#0F2417;--warn:#FBBF24;--warn-soft:#2A1F08;
---bad:#F87171;--bad-soft:#2A1111;--c1:#FAFAFA;--c2:#60A5FA;--c3:#FB923C;--c4:#4ADE80;--band:rgba(96,165,250,.16);
+--bad:#F87171;--bad-soft:#2A1111;--c1:#FAFAFA;--c2:#60A5FA;--c3:#FB923C;--c4:#4ADE80;--c-neutral:#9D9D9E;--band:rgba(96,165,250,.16);
 --shadow:0 1px 2px rgba(0,0,0,.3),0 10px 30px rgba(0,0,0,.5);color-scheme:dark;`
 
 /**
  * The whole theme. Edit these values to re-skin every component. Also holds the touch rules: on coarse pointers text
  * fields are 16px (no iOS zoom on focus), and `.ui-hit` gives any element an invisible hit area of at least 36px
- * (set `--hit` to change it) without changing how it looks. Nothing here styles `html` or `body`: text styles are
+ * (set `--hit` to change it) without changing how it looks. `.ui-target` does the same on every pointer: at least 24×24px
+ * with a mouse (WCAG 2.5.8) and 36px on touch, for tiny controls such as a chip's remove ×.
+ * Scales (see CONVENTIONS.md): radius --r-sm/md/lg/full (from the theme radius), type --t-xs…--t-2xl
+ * (11/12/13/14/16/22/28px) and control heights --h-xs/sm/md/lg (24/30/36/40px). Nothing here styles `html` or `body`: text styles are
  * scoped to `.ui-root` (see PAGE_CSS for the page background, FONT_CSS for the Google Fonts import).
  */
-export const TOKENS = `:root{${LIGHT}--font:"Geist",ui-sans-serif,system-ui,-apple-system,"Segoe UI",sans-serif;--mono:"Geist Mono",ui-monospace,"SF Mono",Menlo,monospace;--r-md:8px;--r-lg:14px}
+export const TOKENS = `:root{${LIGHT}--font:"Geist",ui-sans-serif,system-ui,-apple-system,"Segoe UI",sans-serif;--mono:"Geist Mono",ui-monospace,"SF Mono",Menlo,monospace;--r-sm:4px;--r-md:8px;--r-lg:14px;--r-full:9999px;
+--t-xs:11px;--t-sm:12px;--t-md:13px;--t-base:14px;--t-lg:16px;--t-xl:22px;--t-2xl:28px;--h-xs:24px;--h-sm:30px;--h-md:36px;--h-lg:40px}
 @media (prefers-color-scheme:dark){:root:not([data-theme="light"]){${DARK}}}
 :root[data-theme="dark"]{${DARK}}
 @layer base{.ui-root{font:14px/1.5 var(--font);color:var(--fg);-webkit-font-smoothing:antialiased;-webkit-text-size-adjust:100%;text-size-adjust:100%}
@@ -70,15 +74,17 @@ export const TOKENS = `:root{${LIGHT}--font:"Geist",ui-sans-serif,system-ui,-app
 ::view-transition-old(root),::view-transition-new(root){animation:none;mix-blend-mode:normal}
 html.ui-theming *,html.ui-theming *::before,html.ui-theming *::after{transition:background-color .35s ease,color .35s ease,border-color .35s ease,fill .35s ease,stroke .35s ease!important}
 .ui-shimmer{position:relative;overflow:hidden}
-.ui-shimmer::after{content:"";position:absolute;inset:0;transform:translateX(-100%);background:linear-gradient(90deg,transparent,color-mix(in srgb,var(--card) 70%,transparent),transparent);animation:ui-shim 1.3s infinite}
+.ui-shimmer::after{content:"";position:absolute;inset:0;transform:translateX(-100%);background:linear-gradient(90deg,transparent,color-mix(in srgb,var(--card) 70%,transparent),transparent);animation:ui-shim 1.3s infinite;animation-play-state:var(--ui-play,running)}
 @keyframes ui-shim{to{transform:translateX(100%)}}
 @keyframes ui-blink{50%{opacity:0}}
-.ui-caret::after{content:"▍";margin-left:1px;animation:ui-blink 1s steps(1) infinite;color:var(--fg3)}
+.ui-caret::after{content:"▍";margin-left:1px;animation:ui-blink 1s steps(1) infinite;animation-play-state:var(--ui-play,running);color:var(--fg3)}
 @media (prefers-reduced-motion:reduce){.ui-shimmer::after,.ui-caret::after{animation:none}}
 @media (pointer:coarse){
 .ui-root input:not([type=checkbox],[type=radio],[type=range],[type=color],[type=file],[type=button],[type=submit]),.ui-root select,.ui-root textarea,.ui-root [contenteditable="true"],.ui-root [contenteditable=""]{font-size:16px}
 .ui-root button,.ui-root a,.ui-root [role=button],.ui-root [role=option],.ui-root [role=menuitem],.ui-root [role=tab]{-webkit-tap-highlight-color:transparent}}
-@layer base{@media (pointer:coarse){.ui-hit{position:relative}.ui-hit::after{content:"";position:absolute;left:50%;top:50%;width:max(100%,var(--hit,36px));height:max(100%,var(--hit,36px));transform:translate(-50%,-50%)}}}`
+@layer base{@media (pointer:coarse){.ui-hit{position:relative}.ui-hit::after{content:"";position:absolute;left:50%;top:50%;width:max(100%,var(--hit,36px));height:max(100%,var(--hit,36px));transform:translate(-50%,-50%)}}
+.ui-target{position:relative}.ui-target::after{content:"";position:absolute;left:50%;top:50%;width:max(100%,24px);height:max(100%,24px);transform:translate(-50%,-50%)}
+@media (pointer:coarse){.ui-target::after{width:max(100%,var(--hit,36px));height:max(100%,var(--hit,36px))}}}`
 /** Page background and text colour from the theme, on `html`. UIProvider adds it when the theme targets `<html>`. */
 export const PAGE_CSS = 'html{background:var(--bg);color:var(--fg)}'
 /** The Google Fonts import for Geist and Geist Mono. UIProvider adds it unless `fonts={false}`. */
@@ -86,7 +92,8 @@ export const FONT_CSS = "@import url('https://fonts.googleapis.com/css2?family=G
 
 /* Themes ─────────────────────────────────────────────────────────────────────
  * A theme is two palettes of 15 base colours (light and dark). derive() fills in the rest:
- * soft tints, chart colours, band and shadow, and nudges secondary text until it reads at 4.5:1. */
+ * soft tints, chart colours (c1–c4 plus c-neutral, a mid-grey series colour that reads at 4.5:1 on cards in light and
+ * dark), band and shadow, and nudges secondary text until it reads at 4.5:1. */
 
 const BASE = ['bg', 'card', 'muted', 'line', 'line2', 'fg', 'fg2', 'fg3', 'primary', 'on-primary', 'accent', 'ok', 'warn', 'bad', 'c3'] as const
 export type Palette = Record<(typeof BASE)[number], string>
@@ -136,14 +143,47 @@ const THEME_SHADOW_LIGHT = '0 1px 2px rgba(0,0,0,.04),0 10px 30px rgba(0,0,0,.08
 const THEME_SHADOW_DARK = '0 1px 2px rgba(0,0,0,.3),0 10px 30px rgba(0,0,0,.5)'
 const THEME_FONT_TAIL = ',ui-sans-serif,system-ui,-apple-system,"Segoe UI",sans-serif'
 
-/** Expand a palette into every token the components use. */
+/**
+ * Text on a filled background (primary buttons): the pair that reaches 4.5:1 while changing the look least. In order:
+ * keep both; push the ink to pure white/black on its own side; darken or lighten the fill by up to 25% (mixing toward
+ * black or white keeps its hue); switch to the palette's ink on the other side (nudged until it reads); black or white.
+ */
+function themeOnFill(fill: string, ink: string, lightInk: string, darkInk: string): { fill: string; ink: string } {
+  const ok = (i: string, f: string) => contrast(i, f) >= 4.5
+  if (ok(ink, fill)) return { fill, ink }
+  const inkLight = luminance(ink) > luminance(fill), extreme = inkLight ? '#FFFFFF' : '#000000'
+  const pushed = readable(ink, fill, extreme)
+  if (ok(pushed, fill)) return { fill, ink: pushed }
+  for (let t = 0.04; t <= 0.25 + 1e-9; t += 0.03) { const f = mix(fill, inkLight ? '#000000' : '#FFFFFF', t); if (ok(ink, f)) return { fill: f, ink } }
+  const other = inkLight ? readable(darkInk, fill, '#000000') : readable(lightInk, fill, '#FFFFFF')
+  if (ok(other, fill)) return { fill, ink: other }
+  return { fill, ink: contrast('#000000', fill) >= contrast('#FFFFFF', fill) ? '#000000' : '#FFFFFF' }
+}
+/** A colour used both as text on card/bg and as a fill under card-coloured text: nudged (hue kept) until it reads 4.5:1 on both. */
+const themeReadableOn = (c: string, card: string, bg: string) => {
+  const toward = luminance(card) < 0.2 ? '#FFFFFF' : '#000000'
+  for (let i = 0; i < 16 && Math.min(contrast(c, card), contrast(c, bg)) < 4.5; i++) c = mix(c, toward, 0.08)
+  return Math.min(contrast(c, card), contrast(c, bg)) < 4.5 ? mix(c, toward, 0.85) : c // last resort for odd custom palettes
+}
+
+/**
+ * Expand a palette into every token the components use. Guarantees 4.5:1 for: fg, fg2, fg3 and c-neutral on card;
+ * on-primary on primary (see themeOnFill); and accent, ok, warn and bad against card and bg, which covers both their use as
+ * text (links, errors) and as fills under card-coloured text (accent and danger buttons, done ticks). Palettes that
+ * already pass are returned unchanged.
+ */
 export function derive(p: Palette, dark: boolean): Record<string, string> {
   const soft = (c: string) => mix(c, p.card, dark ? 0.82 : 0.88)
-  const [r, g, b] = rgb(p.accent)
+  const [lightInk, darkInk] = luminance(p.fg) > luminance(p.card) ? [p.fg, p.card] : [p.card, p.fg]
+  const onP = themeOnFill(p.primary, p['on-primary'], lightInk, darkInk)
+  const accent = themeReadableOn(p.accent, p.card, p.bg), ok = themeReadableOn(p.ok, p.card, p.bg), bad = themeReadableOn(p.bad, p.card, p.bg)
+  const warn = themeReadableOn(p.warn, p.card, p.bg)
+  const [r, g, b] = rgb(accent)
   return {
-    ...p, fg2: readable(p.fg2, p.card, p.fg), fg3: readable(p.fg3, p.card, p.fg),
-    'accent-soft': soft(p.accent), 'ok-soft': soft(p.ok), 'warn-soft': soft(p.warn), 'bad-soft': soft(p.bad),
-    c1: p.fg, c2: p.accent, c3: p.c3, c4: p.ok, band: `rgba(${r},${g},${b},${dark ? 0.18 : 0.13})`,
+    ...p, primary: onP.fill, 'on-primary': onP.ink, accent, ok, bad, warn,
+    fg2: readable(p.fg2, p.card, p.fg), fg3: readable(p.fg3, p.card, p.fg),
+    'accent-soft': soft(accent), 'ok-soft': soft(ok), 'warn-soft': soft(p.warn), // the tint comes from the palette's own amber, so it stays light even when --warn is darkened to read as text 'bad-soft': soft(bad),
+    c1: p.fg, c2: accent, c3: p.c3, c4: ok, 'c-neutral': readable(mix(p.fg, p.card, 0.4), p.card, p.fg), band: `rgba(${r},${g},${b},${dark ? 0.18 : 0.13})`,
     shadow: dark ? THEME_SHADOW_DARK : THEME_SHADOW_LIGHT,
   }
 }
@@ -230,11 +270,11 @@ export function themePalette(s: ThemeSettings, dark: boolean): { v: Palette; dar
 /** Every CSS variable for a set of theme settings. Never throws; a radius or font it can't use falls back to the default. */
 export function themeTokens(s: ThemeSettings, dark: boolean): Record<string, string> {
   const p = themePalette(s, dark), radius = themeRadius(s?.radius, DEFAULT_THEME.radius), font = themeFontName(s?.font) ? s.font : DEFAULT_THEME.font
-  return { ...derive(p.v, p.dark), 'r-md': `${radius}px`, 'r-lg': `${Math.round(radius * 1.6 + 1)}px`, font: `"${font}"${THEME_FONT_TAIL}` }
+  return { ...derive(p.v, p.dark), 'r-sm': `${Math.round(radius / 2)}px`, 'r-md': `${radius}px`, 'r-lg': `${Math.round(radius * 1.6 + 1)}px`, font: `"${font}"${THEME_FONT_TAIL}` }
 }
 
 /** Every token name themeTokens produces. ThemeScript and themeCSS accept no others. */
-export const THEME_TOKEN_NAMES: readonly string[] = [...BASE, 'accent-soft', 'ok-soft', 'warn-soft', 'bad-soft', 'c1', 'c2', 'c4', 'band', 'shadow', 'r-md', 'r-lg', 'font']
+export const THEME_TOKEN_NAMES: readonly string[] = [...BASE, 'accent-soft', 'ok-soft', 'warn-soft', 'bad-soft', 'c1', 'c2', 'c4', 'c-neutral', 'band', 'shadow', 'r-sm', 'r-md', 'r-lg', 'font']
 /**
  * The values themeTokens can produce: hex colours, rgba() with plain numbers, numbers and px lengths, the two
  * shadows, and the font stack with a plain family name. As one regex source, so ThemeScript can reuse it.
@@ -995,22 +1035,32 @@ export const surface = {
 /** Shared surface for every floating panel (same as surface.floating). */
 export const floatingSurface = 'rounded-[var(--r-lg)] border border-[var(--line)] bg-[var(--card)] shadow-[var(--shadow)]'
 /** Row look shared by menus, listboxes and the palette. Rows are at least 40px tall on touch screens. */
-export const menuItemClass = 'flex w-full cursor-pointer items-center justify-between gap-3 rounded-[7px] border-0 bg-transparent px-2 py-2 text-left text-[13px] [@media(pointer:coarse)]:min-h-10 ' +
+export const menuItemClass = 'flex w-full cursor-pointer items-center justify-between gap-3 rounded-[var(--r-md)] border-0 bg-transparent px-2 py-2 text-left text-[13px] [@media(pointer:coarse)]:min-h-10 ' +
   'outline-none hover:bg-[var(--muted)] focus-visible:bg-[var(--muted)] data-[active=true]:bg-[var(--muted)]'
-/** Shared field look: every text-like control uses this. */
+/**
+ * The shared hover for fields and field triggers (Select, pickers, Combobox, MultiSelect, Phone, Currency…): the border
+ * darkens to --line2. Hover-capable pointers only; focus and invalid borders still win. Rows and list items use
+ * `rowHoverClass` (muted background) instead.
+ */
+export const fieldHoverClass = 'hover:border-[var(--line2)]'
+/** Row hover for accordions, list rows and menu-like triggers: a muted background (hover-capable pointers only). */
+export const rowHoverClass = 'hover:bg-[var(--muted)]'
+/** Shared field look: every text-like control uses this (with the shared hover border). */
 export const inputClass =
-  'h-9 w-full rounded-[var(--r-md)] border border-[var(--line)] bg-[var(--card)] px-3 text-[13px] outline-none transition-[border-color,box-shadow] ' +
+  'h-9 w-full rounded-[var(--r-md)] border border-[var(--line)] bg-[var(--card)] px-3 text-[13px] outline-none transition-[border-color,box-shadow] ' + fieldHoverClass + ' ' +
   'placeholder:text-[var(--fg3)] focus:border-[var(--fg3)] focus:shadow-[0_0_0_3px_var(--muted)] ' +
   'aria-[invalid=true]:border-[var(--bad)] aria-[invalid=true]:shadow-[0_0_0_3px_var(--bad-soft)] disabled:opacity-60'
 /**
  * Touch-only sizing (desktop look unchanged): `tap` ≥32px, `tap36` ≥36px, `row` ≥40px rows, `hit` an invisible 36px hit
- * area around something small, `input` 16px text so iOS doesn't zoom on focus.
+ * area around something small, `input` 16px text so iOS doesn't zoom on focus. `target` (every pointer): an invisible hit
+ * area of at least 24×24px with a mouse and 36px on touch, for tiny buttons like a chip's ×.
  */
 export const TOUCH = {
   tap: '[@media(pointer:coarse)]:min-h-8 [@media(pointer:coarse)]:min-w-8',
   tap36: '[@media(pointer:coarse)]:min-h-9 [@media(pointer:coarse)]:min-w-9',
   row: '[@media(pointer:coarse)]:min-h-10',
   hit: 'ui-hit',
+  target: 'ui-target',
   input: '[@media(pointer:coarse)]:text-base',
 } as const
 
@@ -1026,17 +1076,20 @@ export const buttonVariants = variants(
       danger: 'bg-[var(--bad)] text-[var(--card)] border-[var(--bad)] hover:opacity-90',
       'outline-danger': 'bg-[var(--card)] text-[var(--bad)] border-[var(--line)] hover:bg-[var(--bad-soft)]',
     },
-    // coarse pointers (touch): small sizes grow to a 32px hit area; desktop sizes are unchanged
+    // heights follow the control scale (--h-xs/sm/md/lg = 24/30/36/40). Coarse pointers (touch): xs and sm sizes grow to
+    // a 32px hit area; desktop sizes are unchanged
     size: {
-      sm: 'h-[30px] px-3 text-xs [@media(pointer:coarse)]:h-8', md: 'h-9 px-3 text-[13px]', lg: 'h-10 px-4 text-sm', icon: 'h-9 w-9 p-0',
-      'icon-sm': 'h-7 w-7 p-0 rounded-[7px] [@media(pointer:coarse)]:h-8 [@media(pointer:coarse)]:w-8',
+      xs: 'h-6 gap-1 px-2 text-[11px] [@media(pointer:coarse)]:h-8', sm: 'h-[30px] px-3 text-xs [@media(pointer:coarse)]:h-8', md: 'h-9 px-3 text-[13px]', lg: 'h-10 px-4 text-sm',
+      icon: 'h-9 w-9 p-0', 'icon-sm': 'h-7 w-7 p-0 [@media(pointer:coarse)]:h-8 [@media(pointer:coarse)]:w-8',
+      'icon-xs': 'h-6 w-6 p-0 [@media(pointer:coarse)]:h-8 [@media(pointer:coarse)]:w-8',
     },
   },
   { variant: 'default', size: 'md' },
 )
 export type ButtonProps = Omit<ButtonHTMLAttributes<HTMLButtonElement>, 'onAnimationStart' | 'onDrag' | 'onDragStart' | 'onDragEnd' | 'onDragOver' | 'onDrop'> & {
   variant?: 'default' | 'primary' | 'accent' | 'ghost' | 'danger' | 'outline-danger'
-  size?: 'sm' | 'md' | 'lg' | 'icon' | 'icon-sm'
+  /** xs 24px · sm 30px · md 36px (default) · lg 40px; icon 36², icon-sm 28², icon-xs 24² (xs/sm sizes are 32px on touch). */
+  size?: 'xs' | 'sm' | 'md' | 'lg' | 'icon' | 'icon-sm' | 'icon-xs'
   loading?: boolean
   ref?: React.Ref<HTMLButtonElement>
 }
@@ -1067,15 +1120,29 @@ export function IconButton({ icon, label, className, size = 'icon-sm', variant =
   return (
     <Button aria-label={label} title={label} size={size} variant={variant}
       className={cn(ICON_BUTTON_TONE[tone], className)} {...p}>
-      {isIconName(icon) ? <Icon name={icon} size={size === 'icon-sm' ? 15 : 16} /> : icon}
+      {isIconName(icon) ? <Icon name={icon} size={size === 'icon-xs' ? 13 : size === 'icon-sm' ? 15 : 16} /> : icon}
     </Button>
   )
+}
+
+/**
+ * `animation-play-state` for an infinite CSS animation (spinners): paused while the element is off screen, so nothing
+ * keeps repainting where nobody can see it. One shared IntersectionObserver per element via motion's useInView.
+ * (Components outside core can use motion's `useViewport().visible` the same way.)
+ */
+function useSpinPause<T extends Element>() {
+  const ref = useRef<T>(null)
+  const visible = useInView(ref, { margin: '64px' })
+  const play = visible ? 'running' : 'paused'
+  // --ui-play reaches the ::after animations of .ui-shimmer and .ui-caret (play-state itself doesn't inherit)
+  return { ref, style: { animationPlayState: play, '--ui-play': play } as CSSProperties }
 }
 
 const SPINNER_TONE = { current: 'border-current', accent: 'border-[var(--accent)]', ok: 'border-[var(--ok)]', warn: 'border-[var(--warn)]', bad: 'border-[var(--bad)]' } as const
 /** Spinning ring (role=status, "Loading"). `tone` colours it; default is the text colour. */
 export function Spinner({ size = 14, tone = 'current', label = 'Loading', className }: { size?: number; tone?: keyof typeof SPINNER_TONE; label?: string; className?: string }) {
-  return <span role="status" aria-label={label} style={{ width: size, height: size }}
+  const pause = useSpinPause<HTMLSpanElement>() // stops spinning while off screen
+  return <span ref={pause.ref} role="status" aria-label={label} style={{ width: size, height: size, ...pause.style }}
     className={cn('inline-block flex-none animate-spin rounded-full border-2 border-r-transparent', SPINNER_TONE[tone], className)} />
 }
 
@@ -1089,10 +1156,15 @@ export const TONE_SOFT = {
 } as const
 export type Tone = keyof typeof TONE_SOFT
 
-/** Status pill. Pair colour with a dot or word: never colour alone. */
-export function Badge({ tone = 'neutral', dot, className, children }: { tone?: Tone; dot?: boolean; className?: string; children: ReactNode }) {
+/** The two badge geometries every pill, tag and count on the page uses: sm 18px / 11px text, md 20px / 12px text. */
+export const BADGE_SIZE = { sm: 'h-[18px] gap-1 px-1.5 text-[11px]', md: 'h-5 gap-1 px-2 text-xs' } as const
+/**
+ * Status pill, tag or count: the one badge primitive. `size` sm (18px, for counts, deltas and dense rows) or md (20px,
+ * default). Pair colour with a dot or word: never colour alone.
+ */
+export function Badge({ tone = 'neutral', size = 'md', dot, className, children }: { tone?: Tone; size?: keyof typeof BADGE_SIZE; dot?: boolean; className?: string; children: ReactNode }) {
   return (
-    <span className={cn('inline-flex items-center gap-1 rounded-full px-2 py-0.5 text-xs font-medium whitespace-nowrap', TONE_SOFT[tone], className)}>
+    <span className={cn('inline-flex flex-none items-center rounded-full leading-none font-medium whitespace-nowrap', BADGE_SIZE[size], TONE_SOFT[tone], className)}>
       {dot && <span className="h-1.5 w-1.5 rounded-full bg-current" />}{children}
     </span>
   )
@@ -1109,7 +1181,7 @@ export function DeltaBadge({ value, lowerIsBetter, digits = 1, suffix = '%', tit
   return (
     <motion.span key={`${value >= 0}${good}`} initial={{ scale: 0.85 }} animate={{ scale: 1 }} transition={spring(0.5, 0.35)}
       title={title ?? `${good ? 'Better' : 'Worse'} than the previous period`}
-      className={cn('ui-num inline-flex rounded-full px-1.5 py-px text-[11px] font-medium whitespace-nowrap',
+      className={cn('ui-num inline-flex items-center rounded-full leading-none font-medium whitespace-nowrap', BADGE_SIZE.sm,
         good ? 'bg-[var(--ok-soft)] text-[color-mix(in_srgb,var(--ok)_72%,var(--fg))]' : 'bg-[var(--bad-soft)] text-[color-mix(in_srgb,var(--bad)_78%,var(--fg))]', className)}>
       {value >= 0 ? '▲' : '▼'} {Math.abs(value).toFixed(digits)}{suffix}<span className="sr-only">{good ? ' (better)' : ' (worse)'}</span>
     </motion.span>
@@ -1126,8 +1198,9 @@ export type StatusIconStatus = 'done' | 'active' | 'pending' | 'failed'
 export function StatusIcon({ status, size = 18, number, tone = 'primary', label, className }:
   { status: StatusIconStatus; size?: number; number?: number; tone?: 'primary' | 'ok'; label?: string; className?: string }) {
   const spin = status === 'active' && number === undefined
+  const pause = useSpinPause<HTMLSpanElement>() // the active ring stops spinning while off screen
   return (
-    <span role={label ? 'img' : undefined} aria-label={label} aria-hidden={label ? undefined : true} style={{ width: size, height: size, fontSize: Math.max(10, Math.round(size * 0.5)) }}
+    <span ref={pause.ref} role={label ? 'img' : undefined} aria-label={label} aria-hidden={label ? undefined : true} style={{ width: size, height: size, fontSize: Math.max(10, Math.round(size * 0.5)), ...(spin ? pause.style : null) }}
       className={cn('relative z-[1] grid flex-none place-items-center rounded-full border-[1.5px] font-semibold leading-none not-italic transition-colors',
         status === 'done' ? (tone === 'ok' ? 'border-[var(--ok)] bg-[var(--ok)] text-[var(--card)]' : 'border-[var(--primary)] bg-[var(--primary)] text-[var(--on-primary)]')
           : status === 'failed' ? 'border-[var(--bad)] bg-[var(--bad)] text-[var(--card)]'
@@ -1157,7 +1230,7 @@ export function Chip({ pressed, icon, className, children, type = 'button', ...p
 }
 
 export function Kbd({ children, className }: { children: ReactNode; className?: string }) {
-  return <kbd className={cn('rounded-[5px] border border-[var(--line)] bg-[var(--muted)] px-1 font-[family-name:var(--mono)] text-[11px] text-[var(--fg2)]', className)}>{children}</kbd>
+  return <kbd className={cn('rounded-[var(--r-sm)] border border-[var(--line)] bg-[var(--muted)] px-1 font-[family-name:var(--mono)] text-[11px] text-[var(--fg2)]', className)}>{children}</kbd>
 }
 
 /** Surface for grouping content. */
@@ -1169,8 +1242,10 @@ export function Separator({ vertical, className }: { vertical?: boolean; classNa
   return <div role="separator" className={cn(vertical ? 'w-px self-stretch' : 'h-px w-full', 'bg-[var(--line)]', className)} />
 }
 
+/** Loading placeholder with a shimmer sweep (paused while off screen; off for reduced motion). */
 export function Skeleton({ className }: { className?: string }) {
-  return <div className={cn('ui-shimmer rounded-md bg-[var(--muted)]', className)} />
+  const pause = useSpinPause<HTMLDivElement>()
+  return <div ref={pause.ref} style={pause.style} className={cn('ui-shimmer rounded-[var(--r-md)] bg-[var(--muted)]', className)} />
 }
 
 const AV_COLORS = ['#DBEAFE:#1E40AF', '#FCE7F3:#9D174D', '#DCFCE7:#166534', '#FEF3C7:#92400E', '#EDE9FE:#5B21B6', '#E0F2FE:#075985']
@@ -1218,28 +1293,40 @@ export function AvatarGroup({ names, max = 4, size = 32, className }: { names: s
   return <AvatarStack names={names} max={max} size={size} spread={false} className={cn('!items-start', className)} />
 }
 
+/** The CSS transition AnimatedNumber's digit columns and SparkChart's marks use (off for reduced motion). */
+const ROLL_EASE = 'cubic-bezier(.22,1,.36,1)'
 /**
  * Rolling number (replaces the NumberFlow web component): each digit rolls to its new value.
- * format: Intl.NumberFormat options, e.g. { style: 'currency', currency: 'EUR' }.
+ * format: Intl.NumberFormatOptions, e.g. { style: 'currency', currency: 'EUR' }.
+ * Screen readers get the formatted value as visually hidden text (the rolling columns are aria-hidden). Digits are
+ * tabular and each takes one fixed column, so the number never shifts the layout around it while it rolls.
+ * Cheap enough for live tickers: each digit is one CSS transform transition (one style write per change, none per
+ * frame), nothing is written when a digit is unchanged, and the roll is skipped (the digit jumps) for reduced motion
+ * and while the number is off screen.
  */
 export function AnimatedNumber({ value, format, locale = LOCALE, className }:
   { value: number; format?: Intl.NumberFormatOptions; locale?: string; className?: string }) {
   const str = useMemo(() => new Intl.NumberFormat(locale, format).format(value), [value, format, locale])
+  const ref = useRef<HTMLSpanElement>(null)
+  const visible = useInView(ref, { margin: '64px' })
   const chars = [...str]
   return (
-    <span className={cn('ui-num inline-flex leading-none', className)} aria-label={str}>
-      {chars.map((c, i) => {
-        const key = chars.length - i // key from the right so digits keep their column as the number grows
-        if (!/\d/.test(c)) return <span key={`s${key}`} aria-hidden>{c}</span>
-        return (
-          <span key={key} aria-hidden className="relative inline-block h-[1em] overflow-hidden" style={{ width: '1ch' }}>
-            <motion.span className="absolute left-0 top-0 flex flex-col" initial={false}
-              animate={{ y: `${-Number(c)}em` }} transition={spring(0.15, 0.6)}>
-              {'0123456789'.split('').map(d => <span key={d} className="h-[1em] leading-none">{d}</span>)}
-            </motion.span>
-          </span>
-        )
-      })}
+    <span ref={ref} className={cn('ui-num inline-flex leading-none whitespace-nowrap', className)}>
+      <span className="sr-only">{str}</span>
+      <span aria-hidden className="inline-flex">
+        {chars.map((c, i) => {
+          const key = chars.length - i // key from the right so digits keep their column as the number grows
+          if (!/\d/.test(c)) return <span key={`s${key}`}>{c}</span>
+          return (
+            <span key={key} className="relative inline-block h-[1em] overflow-hidden text-center" style={{ width: '1ch' }}>
+              <span className={cn('absolute inset-x-0 top-0 flex flex-col motion-reduce:!transition-none', !visible && '!transition-none')}
+                style={{ transform: `translateY(${-Number(c)}em)`, transition: `transform .6s ${ROLL_EASE}` }}>
+                {'0123456789'.split('').map(d => <span key={d} className="h-[1em] leading-none">{d}</span>)}
+              </span>
+            </span>
+          )
+        })}
+      </span>
     </span>
   )
 }
@@ -1290,31 +1377,40 @@ export function SparkChart({ data, variant = 'line', width, height = 36, color =
   const n = data.length, Y = (v: number) => H - pad - ((v - lo) / (hi - lo || 1)) * (H - pad * 2)
   const pts = data.map((v, i) => [(i / Math.max(1, n - 1)) * W, Y(v)] as [number, number])
   const flat = pts.map(p => [p[0], H - pad] as [number, number])
-  const P = seen ? pts : flat, line = chartPath(P, curve), t = spring(0.05, 0.45)
+  const P = seen ? pts : flat, line = chartPath(P, curve)
   const bw = W / n, mi = data.indexOf(minOf(data)), ma = data.indexOf(maxOf(data))
+  // Every mark moves by CSS transitions (paths through the CSS `d` property, dots and bars by transform), so a live
+  // update is one style write per mark and the browser interpolates: no per-frame attribute writes. Reduced motion jumps.
+  const ease = `.45s ${ROLL_EASE}`
+  const path = (d: string): CSSProperties => ({ d: `path("${d}")`, transition: `d ${ease}` } as CSSProperties)
+  const dot = (x: number, y: number): CSSProperties => ({ transform: `translate(${sparkP1(x)}px,${sparkP1(y)}px)`, transition: `transform ${ease}, fill ${ease}` })
+  const bar = (k: number, originY: number): CSSProperties => ({ transform: `scaleY(${k})`, transformOrigin: `0 ${originY}px`, transition: `transform ${ease}` })
+  const still = 'motion-reduce:!transition-none'
   return (
     <div ref={ref} className={cn('min-w-0', className)} style={{ width: width ?? '100%', height: H }}>
       {W > 0 && (
         <svg width={W} height={H} className="block overflow-visible" aria-hidden>
-          {variant === 'area' && <motion.path initial={false} animate={{ d: `${line}L${sparkP1(W)},${H}L0,${H}Z` }} fill={color} fillOpacity={0.15} transition={t} />}
+          {variant === 'area' && <path className={still} d={`${line}L${sparkP1(W)},${H}L0,${H}Z`} style={path(`${line}L${sparkP1(W)},${H}L0,${H}Z`)} fill={color} fillOpacity={0.15} />}
           {variant === 'area' && target !== undefined && <line x1={0} x2={W} y1={Y(target)} y2={Y(target)} stroke="var(--fg3)" strokeDasharray="3 3" />}
-          {(variant === 'line' || variant === 'area') && <motion.path initial={false} animate={{ d: line }} fill="none" stroke={color} strokeWidth={1.6} strokeLinejoin="round" strokeLinecap="round" transition={t} />}
+          {(variant === 'line' || variant === 'area') && <path className={still} d={line} style={path(line)} fill="none" stroke={color} strokeWidth={1.6} strokeLinejoin="round" strokeLinecap="round" />}
           {variant === 'line' && minMax && seen && <>
-            <motion.circle initial={false} animate={{ cx: pts[mi][0], cy: pts[mi][1] }} r={2.6} fill="var(--bad)" transition={t} />
-            <motion.circle initial={false} animate={{ cx: pts[ma][0], cy: pts[ma][1] }} r={2.6} fill="var(--ok)" transition={t} />
+            <circle className={still} r={2.6} fill="var(--bad)" style={dot(pts[mi][0], pts[mi][1])} />
+            <circle className={still} r={2.6} fill="var(--ok)" style={dot(pts[ma][0], pts[ma][1])} />
           </>}
-          {(variant === 'line' || variant === 'area') && (endDot || minMax) && <motion.circle initial={false} animate={{ cx: P[n - 1][0], cy: P[n - 1][1], fill: minMax ? 'var(--accent)' : color }} r={2.6} transition={t} />}
+          {(variant === 'line' || variant === 'area') && (endDot || minMax) && <circle className={still} r={2.6} fill={minMax ? 'var(--accent)' : color} style={dot(P[n - 1][0], P[n - 1][1])} />}
           {variant === 'bars' && data.map((v, i) => {
-            const h = seen ? 4 + ((v - lo) / (hi - lo || 1)) * (H - 6) : 0
-            return <motion.rect key={i} x={i * bw + 0.6} width={Math.max(0.5, bw - 1.2)} rx={1} fill={i === n - 1 ? color : 'var(--line2)'} initial={{ y: H, height: 0 }} animate={{ y: H - h, height: h }} transition={{ ...t, delay: seen ? 0 : 0 }} />
+            // a full-height bar scaled from the bottom edge: its attributes never change, only its transform
+            const k = seen ? (4 + ((v - lo) / (hi - lo || 1)) * (H - 6)) / (H - 2) : 0
+            return <rect key={i} className={still} x={i * bw + 0.6} y={2} width={Math.max(0.5, bw - 1.2)} height={H - 2} fill={i === n - 1 ? color : 'var(--line2)'} style={bar(k, H)} />
           })}
           {variant === 'winloss' && <>
             <line x1={0} x2={W} y1={H / 2} y2={H / 2} stroke="var(--line2)" />
             {data.map((v, i) => {
               if (!i) return null
-              const up = v >= data[i - 1], h = seen ? H * 0.3 : 0
-              return <motion.rect key={i} x={i * bw + 0.6} width={Math.max(0.5, bw - 1.2)} rx={1.5} fill={up ? 'var(--ok)' : 'var(--bad)'} opacity={0.85}
-                initial={{ y: H / 2, height: 0 }} animate={{ y: up ? H / 2 - 1 - h : H / 2 + 1, height: h }} transition={t} />
+              // drawn above the baseline and mirrored below it with scaleY(-1): a change of direction flips through 0
+              const up = v >= data[i - 1], h = H * 0.3
+              return <rect key={i} className={still} x={i * bw + 0.6} y={H / 2 - 1 - h} width={Math.max(0.5, bw - 1.2)} height={h} fill={up ? 'var(--ok)' : 'var(--bad)'} opacity={0.85}
+                style={bar(seen ? (up ? 1 : -1) : 0, H / 2)} />
             })}
           </>}
         </svg>

@@ -1,6 +1,6 @@
-import { useState } from 'react'
-import { AnimatePresence, motion } from 'motion/react'
-import { Breadcrumbs, Button, CollapsibleSidebar, ContextMenu, type ContextMenuEntry, Icon, type IconName, MegaMenu, type MegaMenuItem, MobileTabBar, Pagination, PhoneFrame,
+import { useRef, useState } from 'react'
+import { AnimatePresence, motion, useInView } from 'motion/react'
+import { Badge, Breadcrumbs, Button, CollapsibleSidebar, ContextMenu, type ContextMenuEntry, Icon, type IconName, MegaMenu, type MegaMenuItem, MobileTabBar, Pagination, PhoneFrame,
   type SidebarEntry, type TabBarItem, Tabs, Wizard, cn, spring, useToast } from '../lib'
 import { Section, Spec } from './kit'
 
@@ -39,10 +39,10 @@ function NavPhoneDemo() {
           <motion.div key={tab} custom={dir} className="absolute inset-0 px-4 pt-7 pb-2.5"
             variants={{ enter: (d: number) => ({ opacity: 0, x: 24 * d }), center: { opacity: 1, x: 0 }, exit: (d: number) => ({ opacity: 0, x: -24 * d }) }}
             initial="enter" animate="center" exit="exit" transition={spring(0.2, 0.35)}>
-            <h4 className="m-0 mb-3 text-xl font-bold tracking-tight">{title}</h4>
+            <h4 className="m-0 mb-3 text-[22px] font-bold tracking-tight">{title}</h4>
             {rows.map(([t, d, c]) => (
               <div key={t} className="flex items-center gap-2.5 border-b border-[var(--line)] py-2.5 text-[13px]">
-                <i className={cn('h-[34px] w-[34px] flex-none rounded-[10px] opacity-85', c)} />
+                <i className={cn('h-[34px] w-[34px] flex-none rounded-[var(--r-md)] opacity-85', c)} />
                 <div className="min-w-0"><b className="block truncate font-medium">{t}</b><span className="block truncate text-[11px] text-[var(--fg3)]">{d}</span></div>
               </div>
             ))}
@@ -64,7 +64,7 @@ const NAV_TILE: Record<string, string> = {
 function NavMegaTile({ title, desc, icon, tone }: { title: string; desc: string; icon: IconName; tone: string }) {
   return (
     <a href="#navigation" className="flex gap-3 rounded-[var(--r-md)] p-2.5 text-[var(--fg)] no-underline hover:bg-[var(--muted)] focus-visible:bg-[var(--muted)] focus-visible:outline-none">
-      <i className={cn('grid h-[34px] w-[34px] flex-none place-items-center rounded-[9px]', NAV_TILE[tone])}><Icon name={icon} size={16} /></i>
+      <i className={cn('grid h-[34px] w-[34px] flex-none place-items-center rounded-[var(--r-md)]', NAV_TILE[tone])}><Icon name={icon} size={16} /></i>
       <div><b className="block text-[13px] font-semibold">{title}</b><span className="text-xs leading-snug text-[var(--fg3)]">{desc}</span></div>
     </a>
   )
@@ -80,7 +80,7 @@ const NAV_MEGA: MegaMenuItem[] = [
           .map(([t, d, ic, tone]) => <NavMegaTile key={t} title={t} desc={d} icon={ic} tone={tone} />)}
       </div>
       <a href="#navigation" className="flex min-h-[180px] w-[200px] max-w-full flex-col justify-end rounded-[var(--r-md)] bg-[linear-gradient(140deg,color-mix(in_srgb,var(--accent)_85%,#000),var(--c4))] p-3 text-white no-underline">
-        <b className="text-[15px]">New: Flows 2.0</b><span className="text-xs opacity-85">Branching, retries and live traces.</span>
+        <b className="text-base">New: Flows 2.0</b><span className="text-xs opacity-85">Branching, retries and live traces.</span>
       </a>
     </div>
   ) },
@@ -104,6 +104,24 @@ const NAV_MEGA: MegaMenuItem[] = [
   ) },
   { label: 'Pricing', href: '#pages' },
 ]
+
+/** The mega menu opens its first panel once it scrolls into view, so the card shows the menu, not an empty header. */
+function NavMegaDemo() {
+  const ref = useRef<HTMLDivElement>(null), seen = useInView(ref, { once: true, amount: 0.6 })
+  return (
+    <div ref={ref}>
+      <MegaMenu items={NAV_MEGA} open={seen ? 0 : null}
+        brand={<><span className="h-[22px] w-[22px] rounded-[var(--r-sm)] bg-[linear-gradient(135deg,var(--accent),var(--c4))]" />Northwind</>}
+        actions={<><Button size="sm">Sign in</Button><Button size="sm" variant="primary">Get started</Button></>}>
+        <div className="flex h-full flex-col items-start justify-end gap-2 p-5">
+          <Badge tone="accent" size="sm">Flows 2.0 is live</Badge>
+          <b className="max-w-[420px] text-[22px] leading-tight font-bold tracking-tight text-balance">Build faster with one UI kit</b>
+          <span className="max-w-[420px] text-[13px] text-[var(--fg2)]">Components, charts and agent views that share one set of tokens.</span>
+        </div>
+      </MegaMenu>
+    </div>
+  )
+}
 
 /* Context menu */
 function NavContextDemo() {
@@ -156,24 +174,17 @@ export function NavigationSection() {
         <Breadcrumbs items={[{ label: 'Home', href: '#navigation' }, { label: 'Projects', href: '#navigation' }, { label: 'Website redesign' }]} />
         <Pagination page={page} total={20} onChange={setPage} />
       </Spec>
-      <Spec title="Collapsible sidebar" desc="App navigation that folds to icons. Labels become tooltips when collapsed. Press [ to toggle." span={2}>
+      <Spec title="Collapsible sidebar" desc="App navigation that folds to icons. Labels become tooltips when collapsed." span={2} keys={[[["["], "Toggle"]]}>
         <CollapsibleSidebar items={NAV_SIDEBAR} user={{ name: 'Alex Lee', detail: 'Pro plan' }} />
       </Spec>
       <Spec title="Mobile tab bar" desc="Sliding indicator, centre action, badge">
         <NavPhoneDemo />
       </Spec>
-      <Spec title="Mega menu" desc="Hover or focus a top item. The panel morphs between menus instead of closing and reopening." span={3}>
-        <MegaMenu items={NAV_MEGA}
-          brand={<><span className="h-[22px] w-[22px] rounded-[7px] bg-[linear-gradient(135deg,var(--accent),var(--c4))]" />Northwind</>}
-          actions={<><Button size="sm">Sign in</Button><Button size="sm" variant="primary">Get started</Button></>}>
-          <div className="flex h-full flex-col items-center justify-center gap-1.5 bg-[radial-gradient(circle,var(--line2)_1px,transparent_1.2px)] bg-[length:18px_18px] px-4 text-center">
-            <b className="text-2xl font-bold tracking-tight text-balance">Build faster with one UI kit</b>
-            <span className="text-[13px] text-[var(--fg2)] [@media(hover:none)]:hidden">Hover the menu above</span>
-            <span className="hidden text-[13px] text-[var(--fg2)] [@media(hover:none)]:inline">Tap a menu above; tap again or outside to close</span>
-          </div>
-        </MegaMenu>
+      <Spec title="Mega menu" desc="Hover, tap or focus a top item. The panel morphs between menus instead of closing and reopening." span={3}
+        keys={[[['←', '→'], 'Top items'], [['↓'], 'Into the panel'], [['Esc'], 'Close']]}>
+        <NavMegaDemo />
       </Spec>
-      <Spec title="Context menu" desc="Right-click, or long-press on touch. Submenus, shortcuts, keyboard.">
+      <Spec title="Context menu" desc="Right-click, or long-press on touch. Submenus, shortcuts, keyboard." keys={[[['⇧', 'F10'], 'Open menu'], [['↑', '↓'], 'Move'], [['→'], 'Submenu']]}>
         <NavContextDemo />
       </Spec>
     </Section>

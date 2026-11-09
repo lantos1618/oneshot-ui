@@ -28,9 +28,9 @@ export function ChatSources({ items, className }: { items: { name: string; desc:
     <div className={cn('flex flex-wrap gap-1.5', className)}>
       {items.map((s, i) => (
         <a key={s.name} href={safeUrl(s.href ?? '#ai')} className={cn(surface.md, 'flex items-center gap-2 py-1.5 pr-2.5 pl-1.5 text-xs text-[var(--fg)] no-underline hover:border-[var(--fg3)]')}>
-          <span className="grid h-[22px] w-[22px] flex-none place-items-center rounded-md text-[11px] font-bold text-white" style={{ background: `color-mix(in srgb, ${safeColor(s.color, 'var(--accent)')} 80%, #000)` }}>{s.name[0]}</span>
+          <span className="grid h-[22px] w-[22px] flex-none place-items-center rounded-[var(--r-md)] text-[11px] font-bold text-white" style={{ background: `color-mix(in srgb, ${safeColor(s.color, 'var(--accent)')} 80%, #000)` }}>{s.name[0]}</span>
           <span><b className="block font-medium">{s.name}</b><span className="text-[var(--fg3)]">{s.desc}</span></span>
-          <span className="ml-1 font-[family-name:var(--mono)] text-[10px] font-semibold text-[var(--fg3)] [@media(pointer:coarse)]:text-[11px]">{i + 1}</span>
+          <span className="ml-1 font-[family-name:var(--mono)] text-[11px] font-semibold text-[var(--fg3)] [@media(pointer:coarse)]:text-[11px]">{i + 1}</span>
         </a>
       ))}
     </div>
@@ -102,10 +102,11 @@ type ChatTurn = { id: number; q: string; s: ChatScript; phase: 'dots' | 'tool' |
  * word-by-word streaming with Stop (which also works before the first word), generated UI parts under the answer,
  * follow-up chips, and an action row (copy, thumbs up/down, regenerate with version ‹ 1/2 ›). `respond(question)` returns
  * the script for a turn. Screen readers hear a short summary of each answer once it is done, not every word.
+ * `defaultTurns` opens mid-conversation: each question is shown already answered (through `respond`, no streaming).
  */
-export function AssistantChat({ starters = [], commands = [], respond, placeholder = 'Ask anything, or type / for commands', className }:
-  { starters?: string[]; commands?: SlashCommand[]; respond: (q: string) => ChatScript; placeholder?: string; className?: string }) {
-  const [turns, setTurns] = useState<ChatTurn[]>([])
+export function AssistantChat({ starters = [], commands = [], respond, defaultTurns = [], placeholder = 'Ask anything, or type / for commands', className }:
+  { starters?: string[]; commands?: SlashCommand[]; respond: (q: string) => ChatScript; /** questions already asked and answered when it mounts */ defaultTurns?: string[]; placeholder?: string; className?: string }) {
+  const [turns, setTurns] = useState<ChatTurn[]>(() => defaultTurns.map((q, i) => ({ id: -1 - i, q, s: respond(q), phase: 'done', v: 0, run: 0, stopped: false, shown: '', rating: 0 })))
   const [text, setText] = useState('')
   const [slashOpen, setSlashOpen] = useState(true)
   const [said, setSaid] = useState('') // what the live region announces
@@ -149,7 +150,7 @@ export function AssistantChat({ starters = [], commands = [], respond, placehold
   return (
     <div className={cn('flex flex-col gap-2.5', className)}>
       <span className="sr-only" aria-live="polite">{said}</span>
-      <div ref={log} role="log" aria-live="off" aria-busy={streaming} aria-label="Conversation" className="flex max-h-[min(460px,62dvh)] min-h-[220px] flex-col gap-2.5 overflow-auto p-0.5">
+      <div ref={log} role="log" aria-live="off" aria-busy={streaming} aria-label="Conversation" className="flex h-[min(420px,62dvh)] flex-col gap-2.5 overflow-auto p-0.5">
         <AnimatePresence>
           {!turns.length && starters.length > 0 && (
             <motion.div key="starters" exit={{ opacity: 0, y: -6, transition: { duration: 0.15 } }} className="flex flex-wrap gap-1.5" role="group" aria-label="Suggestions">
@@ -202,7 +203,8 @@ export function AssistantChat({ starters = [], commands = [], respond, placehold
         })}
       </div>
       <div className="relative">
-        <FloatingPanel open={popup} placement="top-start" flip={false} role="presentation" className="max-h-[min(300px,45dvh)] w-[min(280px,calc(100vw-32px))] overflow-y-auto overscroll-contain">
+        {/* sized for the full command list, so filtering never makes the panel above the field jump */}
+        <FloatingPanel open={popup} placement="top-start" flip={false} role="presentation" style={{ minHeight: `min(${40 + commands.length * 36}px, 300px, 45dvh)` }} className="max-h-[min(300px,45dvh)] w-[min(280px,calc(100vw-32px))] overflow-y-auto overscroll-contain">
           <MenuLabel className="font-semibold tracking-wide uppercase">Commands</MenuLabel>
           <OptionList id={listId} label="Commands" query={text.split(' ')[0]} active={roving.active} onHover={roving.setActive} isSelected={() => false} onPick={i => go(matches[i])}
             options={matches.map(c => ({ value: c.cmd, label: c.cmd, hint: c.hint }))} className="[&_[role=option]]:[@media(pointer:coarse)]:min-h-11" />
@@ -285,7 +287,7 @@ function AcApprovalCard({ action, demo, busy, onDecide }: { action: ComposerActi
     <motion.div initial={{ opacity: 0, y: 6 }} animate={{ opacity: 1, y: 0 }} transition={spring(0.3, 0.35)} role="group" aria-label="Approval needed"
       className="flex flex-col gap-2 rounded-[var(--r-md)] border border-[color-mix(in_srgb,var(--warn)_40%,var(--line))] bg-[color-mix(in_srgb,var(--warn)_6%,var(--card))] py-2 pr-2 pl-3 text-[13px]">
       <div className="flex flex-wrap items-center gap-1.5"><Icon name="shield" size={14} className="text-[var(--warn)]" /><b className="font-medium">Approve this action?</b>
-        <code className="rounded-[5px] bg-[var(--muted)] px-1.5 font-[family-name:var(--mono)] text-[11.5px] break-all">{action.tool}</code>{demo && <Badge>demo</Badge>}</div>
+        <code className="rounded-[var(--r-sm)] bg-[var(--muted)] px-1.5 font-[family-name:var(--mono)] text-[11px] break-all">{action.tool}</code>{demo && <Badge>demo</Badge>}</div>
       <span className="break-words">{action.summary}</span>
       {!!action.recipients?.length && <span className="text-xs text-[var(--fg2)]">To: {action.recipients.join(', ')}</span>}
       {args.length > 0 && <dl className="m-0 grid grid-cols-[auto_minmax(0,1fr)] gap-x-2 gap-y-0.5 text-xs">{args.flatMap(([k, v]) => [<dt key={`k${k}`} className="font-[family-name:var(--mono)] text-[var(--fg3)]">{k}</dt>, <dd key={`v${k}`} className="m-0 break-words text-[var(--fg2)]">{acArg(v)}</dd>])}</dl>}
@@ -337,7 +339,7 @@ function AcPanel({ id, open, wide, narrow, label, menu, children, onClose }:
         if (e.key === 'Escape') { e.stopPropagation(); onClose(); document.querySelector<HTMLElement>(`[aria-controls="${id}"]`)?.focus(); return }
         if (menu) roving.onKeyDown(e)
       }}
-      className={cn('max-h-[min(440px,70dvh)] cursor-default overflow-y-auto overscroll-contain !rounded-[14px]', narrow ? '!w-full' : wide ? 'w-[300px]' : 'min-w-[240px]')}>
+      className={cn('max-h-[min(440px,70dvh)] cursor-default overflow-y-auto overscroll-contain !rounded-[var(--r-lg)]', narrow ? '!w-full' : wide ? 'w-[300px]' : 'min-w-[240px]')}>
       {children}
     </FloatingPanel>
   )
@@ -346,7 +348,7 @@ function AcPanel({ id, open, wide, narrow, label, menu, children, onClose }:
 /** Icon tile, title and description: the body of a composer menu row. */
 function AcRowBody({ icon, title, desc, warn }: { icon: IconName; title: string; desc: string; warn?: boolean }) {
   return <>
-    <span className={cn('grid h-7 w-7 flex-none place-items-center rounded-lg bg-[var(--muted)]', warn ? 'text-[var(--warn)]' : 'text-[var(--fg)]')}><Icon name={icon} size={15} /></span>
+    <span className={cn('grid h-7 w-7 flex-none place-items-center rounded-[var(--r-md)] bg-[var(--muted)]', warn ? 'text-[var(--warn)]' : 'text-[var(--fg)]')}><Icon name={icon} size={15} /></span>
     <span className="flex min-w-0 flex-1 flex-col"><b className={cn('text-[13px] font-medium', warn && 'text-[var(--warn)]')}>{title}</b><span className="text-xs leading-snug text-[var(--fg3)]">{desc}</span></span>
   </>
 }
@@ -542,7 +544,7 @@ export function AgentComposer({ onSend, onApprovalRequest, items = [], doc, mode
             return (
               <button key={it.label} type="button" aria-pressed={on} onClick={() => toggleCtx(it.label)}
                 className={cn('flex cursor-pointer items-center gap-2.5 rounded-[var(--r-md)] border p-2 text-left transition-colors', on ? 'border-[var(--accent)] bg-[var(--accent-soft)]' : 'border-transparent bg-transparent hover:bg-[var(--muted)]')}>
-                <span className="grid h-7 w-7 flex-none place-items-center rounded-lg border border-[var(--line)] bg-[var(--card)] text-[13px]">{it.icon}</span>
+                <span className="grid h-7 w-7 flex-none place-items-center rounded-[var(--r-md)] border border-[var(--line)] bg-[var(--card)] text-[13px]">{it.icon}</span>
                 <span className="min-w-0"><b className="block text-[13px] font-medium">{it.title}</b><span className="block truncate text-xs text-[var(--fg3)]">{it.sub}</span></span>
               </button>
             )
@@ -555,7 +557,7 @@ export function AgentComposer({ onSend, onApprovalRequest, items = [], doc, mode
       <div className={cn('relative flex min-w-0 flex-col gap-3', !chat && 'items-center justify-center max-sm:pt-4')}>
         <AnimatePresence>{!chat && (
           <motion.div key="hero" exit={{ opacity: 0, y: -8, transition: { duration: 0.15 } }} className="flex flex-col items-center gap-1 text-center">
-            <h4 className="m-0 text-[22px] font-semibold tracking-tight max-sm:text-xl">{hero}</h4>{hint && <span className="text-xs text-[var(--fg3)]">{hint}</span>}
+            <h4 className="m-0 text-[22px] font-semibold tracking-tight max-sm:text-base">{hero}</h4>{hint && <span className="text-xs text-[var(--fg3)]">{hint}</span>}
           </motion.div>)}</AnimatePresence>
         {chat && (
           <motion.div ref={logRef} role="log" aria-live="off" aria-busy={streaming} aria-label="Conversation" initial={{ opacity: 0, y: 12 }} animate={{ opacity: 1, y: 0 }} transition={{ duration: 0.4, delay: 0.15 }}
@@ -594,9 +596,9 @@ export function AgentComposer({ onSend, onApprovalRequest, items = [], doc, mode
           onDragOver={e => { if (e.dataTransfer.types.includes('Files')) e.preventDefault() }}
           onDragLeave={() => { depth.current = Math.max(0, depth.current - 1); if (!depth.current) setOver(false) }}
           onDrop={e => { e.preventDefault(); depth.current = 0; setOver(false); if (e.dataTransfer.files.length) addFiles(e.dataTransfer.files) }}
-          className={cn('relative w-full cursor-text rounded-[20px] border bg-[var(--card)] px-3 pt-3 pb-2 transition-[border-color,box-shadow]',
+          className={cn('relative w-full cursor-text rounded-[var(--r-lg)] border bg-[var(--card)] px-3 pt-3 pb-2 transition-[border-color,box-shadow]',
             !chat && 'max-w-[600px]', over ? 'border-[var(--accent)] shadow-[0_0_0_4px_var(--accent-soft)]' : 'border-[var(--line)] shadow-[0_1px_2px_rgba(0,0,0,.04),0_4px_16px_rgba(0,0,0,.04)] focus-within:border-[var(--line2)] focus-within:shadow-[0_0_0_4px_var(--muted)]')}>
-          <div aria-hidden className={cn('pointer-events-none absolute inset-1 z-[4] flex flex-col items-center justify-center gap-1 rounded-2xl border-2 border-dashed border-[var(--accent)] bg-[color-mix(in_srgb,var(--accent-soft)_92%,transparent)] text-[var(--accent)] transition-opacity', over ? 'opacity-100' : 'opacity-0')}>
+          <div aria-hidden className={cn('pointer-events-none absolute inset-1 z-[4] flex flex-col items-center justify-center gap-1 rounded-[var(--r-lg)] border-2 border-dashed border-[var(--accent)] bg-[color-mix(in_srgb,var(--accent-soft)_92%,transparent)] text-[var(--accent)] transition-opacity', over ? 'opacity-100' : 'opacity-0')}>
             <Icon name="upload" size={22} /><b className="text-[13px]">Drop files to attach</b><span className="text-xs">Images, PDFs, code, anything</span>
           </div>
           <motion.div layout="position">
@@ -612,8 +614,8 @@ export function AgentComposer({ onSend, onApprovalRequest, items = [], doc, mode
             {files.length > 0 && <div className="mb-2 flex flex-wrap gap-1.5">
               <AnimatePresence initial={false}>{files.map(f => (
                 <motion.div key={f.id} initial={{ opacity: 0, scale: 0.85 }} animate={{ opacity: 1, scale: 1 }} exit={{ opacity: 0, scale: 0.85, transition: { duration: 0.15 } }} transition={spring(0.4, 0.3)}
-                  className="group/f relative flex h-12 max-w-[min(220px,100%)] items-center gap-2 overflow-hidden rounded-xl border border-[var(--line)] bg-[var(--bg)] py-1 pr-3 pl-1">
-                  <span className="grid h-10 w-10 flex-none place-items-center rounded-lg bg-[var(--muted)] bg-cover bg-center font-[family-name:var(--mono)] text-[10px] font-bold text-[var(--fg2)]" style={f.url ? { backgroundImage: cssUrl(f.url) } : undefined}>
+                  className="group/f relative flex h-12 max-w-[min(220px,100%)] items-center gap-2 overflow-hidden rounded-[var(--r-lg)] border border-[var(--line)] bg-[var(--bg)] py-1 pr-3 pl-1">
+                  <span className="grid h-10 w-10 flex-none place-items-center rounded-[var(--r-md)] bg-[var(--muted)] bg-cover bg-center font-[family-name:var(--mono)] text-[11px] font-bold text-[var(--fg2)]" style={f.url ? { backgroundImage: cssUrl(f.url) } : undefined}>
                     {f.url ? '' : (f.file.name.split('.').pop() || 'file').slice(0, 4).toUpperCase()}</span>
                   <span className="flex min-w-0 flex-col text-xs leading-tight"><b className="truncate font-medium">{f.file.name}</b><span className="text-[var(--fg3)]">{fmt.bytes(f.file.size)}</span></span>
                   <motion.i className="absolute bottom-0 left-0 h-0.5 bg-[var(--accent)]" initial={{ width: '0%', opacity: 1 }} animate={{ width: '100%', opacity: [1, 1, 0] }} transition={{ duration: 0.6 + (f.id % 4) * 0.2, ease: 'easeOut', opacity: { duration: 0.6 + (f.id % 4) * 0.2 + 0.3, times: [0, 0.75, 1] } }} />
@@ -644,15 +646,15 @@ export function AgentComposer({ onSend, onApprovalRequest, items = [], doc, mode
               </span>
               {cons.length > 0 && <span className="sm:relative">
                 <AcBarButton compact={narrow} controls={panelId('con')} haspopup="dialog" icon={<Icon name="plug" size={16} />} label="Connectors" expanded={pop === 'con'} onClick={() => toggle('con')} className={onCount ? '!text-[var(--accent)]' : ''}>
-                  Connectors{onCount > 0 && <span className="inline-grid h-4 min-w-4 place-items-center rounded-full bg-[var(--accent)] px-1 text-[10px] font-semibold text-[var(--card)] [@media(pointer:coarse)]:text-[11px]">{onCount}</span>}
+                  Connectors{onCount > 0 && <Badge size="sm" className="ml-1 min-w-[18px] justify-center !bg-[var(--accent)] font-semibold tabular-nums !text-[var(--card)]">{onCount}</Badge>}
                 </AcBarButton>
                 <AcPanel id={panelId('con')} open={pop === 'con'} wide narrow={narrow} label="Connectors" onClose={close}>
                   <div className="p-1"><input autoFocus={!coarse} value={conQ} onChange={e => setConQ(e.target.value)} placeholder="Search connectors and MCP servers" aria-label="Search connectors" className={cn(inputClass, '!h-8 text-xs [@media(pointer:coarse)]:!h-10', TOUCH.input)} /></div>
                   <div className="flex max-h-[240px] flex-col overflow-auto overscroll-contain p-1">
                     {shownCons.length ? shownCons.map(c => (
                       <div key={c.name} onClick={e => { if (!(e.target as Element).closest('[role=switch]')) setCons(cs => cs.map(x => x.name === c.name ? { ...x, on: !x.on } : x)) }}
-                        className={cn('flex cursor-pointer items-center gap-2.5 rounded-lg px-1.5 py-1.5 hover:bg-[var(--muted)] [@media(pointer:coarse)]:min-h-12')}>
-                        <span className="grid h-7 w-7 flex-none place-items-center rounded-lg text-[10px] font-bold text-white [@media(pointer:coarse)]:text-[11px]" style={{ background: safeColor(c.color, 'var(--fg3)') }}>{c.name.slice(0, 2)}</span>
+                        className={cn('flex cursor-pointer items-center gap-2.5 rounded-[var(--r-md)] px-1.5 py-1.5 hover:bg-[var(--muted)] [@media(pointer:coarse)]:min-h-12')}>
+                        <span className="grid h-7 w-7 flex-none place-items-center rounded-[var(--r-md)] text-[11px] font-bold text-white [@media(pointer:coarse)]:text-[11px]" style={{ background: safeColor(c.color, 'var(--fg3)') }}>{c.name.slice(0, 2)}</span>
                         <span className="flex min-w-0 flex-1 flex-col"><b className="text-[13px] font-medium">{c.name}</b><span className="truncate text-[11px] text-[var(--fg3)]">{c.desc}</span></span>
                         <Switch checked={c.on} onChange={v => setCons(cs => cs.map(x => x.name === c.name ? { ...x, on: v } : x))} label={<span className="sr-only">{c.name}</span>} />
                       </div>)) : <span className="p-2 text-xs text-[var(--fg3)]">No connectors match</span>}

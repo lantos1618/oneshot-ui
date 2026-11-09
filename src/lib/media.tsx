@@ -1,6 +1,6 @@
 import { useEffect, useLayoutEffect, useRef, useState, useSyncExternalStore, type KeyboardEvent as RKeyboardEvent, type PointerEvent as RPointerEvent, type ReactNode, type RefObject } from 'react'
 import { AnimatePresence, animate, motion, useInView, useMotionValue, useReducedMotion } from 'motion/react'
-import { Avatar, Button, Chip, Icon, IconButton, TOUCH, clamp, cn, cssUrl, fmt, mix, safeMediaUrl, seeded, spring, surface, useFocusTrap, useWidth } from './core'
+import { Avatar, Badge, Button, Chip, Icon, IconButton, TOUCH, clamp, cn, cssUrl, fmt, mix, safeMediaUrl, seeded, Spinner, spring, surface, useFocusTrap, useWidth } from './core'
 import { Slider } from './forms'
 import { useToast } from './feedback'
 import { OverlayPortal, useScrollLock } from './overlay'
@@ -269,7 +269,7 @@ export function Waveform({ peaks, played = 0, hover, bars, tone = 'primary', min
       {pk.map((p, i) => {
         const h = Math.max(minHeight, p * 100)
         return (
-          <motion.i key={i} className={cn('rounded-sm transition-colors', barWidth ? 'flex-none rounded-full' : 'min-w-px flex-1', i < on ? cPlayed : i < hov ? cHover : cRest)}
+          <motion.i key={i} className={cn('rounded-[var(--r-sm)] transition-colors', barWidth ? 'flex-none rounded-full' : 'min-w-px flex-1', i < on ? cPlayed : i < hov ? cHover : cRest)}
             style={{ width: barWidth, height: live ? undefined : `${h}%` }}
             initial={intro ? { scaleY: 0.1 } : false}
             animate={live ? { height: [`${minHeight}%`, `${h}%`, `${minHeight}%`] } : intro ? { scaleY: seen ? 1 : 0.1 } : { height: `${h}%` }}
@@ -341,7 +341,9 @@ const VIDEO_BTN = '!h-[34px] !w-[34px] [@media(pointer:coarse)]:!h-10 [@media(po
  * Keys (when the player itself is focused): Space / K play, ← / → seek 2 s, M mute, F fullscreen. Its controls keep their
  * own keys (the seek bar: ← / → and Home / End), so nothing fires twice.
  * Touch: tap shows or hides the controls (tap while paused plays), double-tap the left or right half to seek ∓5 s,
- * and the seek bar and buttons grow to finger size.
+ * and the seek bar and buttons grow to finger size. Clicking the picture toggles playback.
+ * While `preparing` (no `src` yet) the poster shows with Play enabled: pressing it shows "Starting…" and playback
+ * begins as soon as the source arrives (press again to cancel).
  */
 export function VideoPlayer({ src, poster, title, meta, duration: fallback = 0, preparing, className }:
   { src?: string | null; poster?: string; title?: ReactNode; meta?: ReactNode; duration?: number; preparing?: boolean; className?: string }) {
@@ -353,6 +355,7 @@ export function VideoPlayer({ src, poster, title, meta, duration: fallback = 0, 
   const [idle, setIdle] = useState(false), [isFs, setFs] = useState(false)
   const idleT = useRef<ReturnType<typeof setTimeout>>(undefined)
   const fixing = useRef(false), wantPlay = useRef(false)
+  const [pending, setPending] = useState(false) // Play pressed before the source was ready
   const tap = useRef<{ t: number; side: -1 | 1 } | null>(null), tapT = useRef<ReturnType<typeof setTimeout>>(undefined), touched = useRef(0)
   const [seekFx, setSeekFx] = useState<{ side: -1 | 1; n: number } | null>(null)
   const d = dur || fallback || 1
@@ -363,7 +366,13 @@ export function VideoPlayer({ src, poster, title, meta, duration: fallback = 0, 
   }
   const seekTo = (s: number) => { const v = vid.current; if (v) { v.currentTime = clamp(s, 0, d); sync() } }
   const wake = () => { clearTimeout(idleT.current); setIdle(false); idleT.current = setTimeout(() => setIdle(true), 2200) }
-  const toggle = () => { const v = vid.current; if (!v || !src) return; if (fixing.current) { wantPlay.current = !wantPlay.current; return } if (v.paused) v.play().catch(() => toast({ title: 'Couldn’t play video', description: 'Your browser blocked playback', tone: 'bad' })); else v.pause() }
+  const want = (on: boolean) => { wantPlay.current = on; setPending(on) }
+  const toggle = () => {
+    const v = vid.current; if (!v) return
+    if (!src || fixing.current) { if (src || preparing) want(!wantPlay.current); return } // queue it until the source is ready
+    want(false)
+    if (v.paused) v.play().catch(() => toast({ title: 'Couldn’t play video', description: 'Your browser blocked playback', tone: 'bad' })); else v.pause()
+  }
   const seek = useSeekSlider({ time: t, duration: d, onSeek: s => { seekTo(s); wake() }, onToggle: toggle })
   useEffect(() => () => { clearTimeout(idleT.current); clearTimeout(tapT.current) }, [])
   useEffect(() => { if (vid.current) vid.current.volume = 0.8 }, [])
@@ -418,9 +427,9 @@ export function VideoPlayer({ src, poster, title, meta, duration: fallback = 0, 
           // a recorded WebM reports Infinity until it has been seeked to the end once
           if (v.duration === Infinity) {
             fixing.current = true; v.currentTime = 1e6
-            const back = () => { v.removeEventListener('timeupdate', back); v.currentTime = 0; fixing.current = false; sync(); if (wantPlay.current) { wantPlay.current = false; toggle() } }
+            const back = () => { v.removeEventListener('timeupdate', back); v.currentTime = 0; fixing.current = false; sync(); if (wantPlay.current) toggle() }
             v.addEventListener('timeupdate', back)
-          }
+          } else if (wantPlay.current) toggle()
         }} />
       <AnimatePresence>
         {seekFx && (
@@ -431,13 +440,14 @@ export function VideoPlayer({ src, poster, title, meta, duration: fallback = 0, 
           </motion.span>
         )}
       </AnimatePresence>
-      {(preparing || !src) && <span className="absolute top-3 right-3 z-[3] rounded-full bg-black/45 px-2.5 py-1 text-xs font-medium text-white">{preparing ? 'Preparing preview…' : 'Video preview isn’t supported in this browser'}</span>}
+      {!src && !preparing && <Badge className="absolute top-3 right-3 z-[3] !bg-black/45 !text-white">Video preview isn’t supported in this browser</Badge>}
+      <span className="sr-only" aria-live="polite">{pending ? 'Starting…' : ''}</span>
       <AnimatePresence>
         {!playing && (
-          <motion.button key="big" type="button" aria-label="Play" onClick={toggle} disabled={!src}
+          <motion.button key="big" type="button" aria-label={pending ? 'Starting… press to cancel' : 'Play'} aria-busy={pending || undefined} onClick={toggle} disabled={!src && !preparing}
             initial={{ opacity: 0, scale: 0.8 }} animate={{ opacity: 1, scale: 1, transition: spring(0.4, 0.35) }} exit={{ opacity: 0, scale: 1.3, transition: { duration: 0.25 } }}
-            className="absolute top-1/2 left-1/2 -mt-8 -ml-8 grid h-16 w-16 cursor-pointer place-items-center rounded-full border-0 bg-white/20 pl-1 text-white backdrop-blur-md hover:bg-white/30 disabled:cursor-default">
-            {icon('play', 26, true)}
+            className={cn('absolute top-1/2 left-1/2 -mt-8 -ml-8 grid h-16 w-16 cursor-pointer place-items-center rounded-full border-0 bg-white/20 text-white backdrop-blur-md hover:bg-white/30 disabled:cursor-default disabled:opacity-50', !pending && 'pl-1')}>
+            {pending ? <Spinner size={24} label="Starting" className="!border-[3px]" /> : icon('play', 26, true)}
           </motion.button>
         )}
       </AnimatePresence>
@@ -450,12 +460,12 @@ export function VideoPlayer({ src, poster, title, meta, duration: fallback = 0, 
       <motion.div initial={false} animate={{ opacity: hideControls ? 0 : 1 }} transition={{ duration: 0.2 }}
         // the gradient itself lets taps through to the video (only the seek bar and buttons catch them)
         className={cn('pointer-events-none absolute inset-x-0 bottom-0 bg-gradient-to-b from-transparent to-black/65 px-3 pt-6 pb-2 text-white max-sm:px-2 max-sm:pt-4 max-sm:pb-1 [&>*]:pointer-events-auto', hideControls && '[&>*]:!pointer-events-none')}>
-        <div {...seek.bind} className="group relative flex h-4 cursor-pointer touch-pan-y items-center rounded-sm outline-none focus-visible:shadow-[0_0_0_2px_#fff] [@media(pointer:coarse)]:h-8">
-          <span className="absolute inset-x-0 h-1 rounded-sm bg-white/25 transition-[height] group-hover:h-1.5" />
-          <span className="absolute left-0 h-1 rounded-sm bg-white/35 transition-[height] group-hover:h-1.5" style={{ width: `${Math.min(100, buf / d * 100)}%` }} />
-          <span className="absolute left-0 h-1 rounded-sm bg-white transition-[height] group-hover:h-1.5" style={{ width: `${t / d * 100}%` }} />
+        <div {...seek.bind} className="group relative flex h-4 cursor-pointer touch-pan-y items-center rounded-[var(--r-sm)] outline-none focus-visible:shadow-[0_0_0_2px_#fff] [@media(pointer:coarse)]:h-8">
+          <span className="absolute inset-x-0 h-1 rounded-[var(--r-sm)] bg-white/25 transition-[height] group-hover:h-1.5" />
+          <span className="absolute left-0 h-1 rounded-[var(--r-sm)] bg-white/35 transition-[height] group-hover:h-1.5" style={{ width: `${Math.min(100, buf / d * 100)}%` }} />
+          <span className="absolute left-0 h-1 rounded-[var(--r-sm)] bg-white transition-[height] group-hover:h-1.5" style={{ width: `${t / d * 100}%` }} />
           <span className={cn('absolute -ml-1.5 h-[13px] w-[13px] rounded-full bg-white shadow-[0_1px_4px_rgba(0,0,0,.4)] transition-transform group-hover:scale-100 group-focus-visible:scale-100 [@media(pointer:coarse)]:scale-100', seek.drag ? 'scale-100 [@media(pointer:coarse)]:scale-125' : 'scale-0')} style={{ left: `${t / d * 100}%` }} />
-          {seek.hover != null && <span className="pointer-events-none absolute bottom-5 -translate-x-1/2 rounded-[5px] bg-black/75 px-1.5 py-1 font-[family-name:var(--mono)] text-[11px] font-medium" style={{ left: `${seek.hover * 100}%` }}>{fmt.clock(seek.hover * d)}</span>}
+          {seek.hover != null && <span className="pointer-events-none absolute bottom-5 -translate-x-1/2 rounded-[var(--r-sm)] bg-black/75 px-1.5 py-1 font-[family-name:var(--mono)] text-[11px] font-medium" style={{ left: `${seek.hover * 100}%` }}>{fmt.clock(seek.hover * d)}</span>}
         </div>
         <div className="mt-0.5 flex items-center gap-0.5">
           <IconButton tone="onDark" size="icon" className={VIDEO_BTN} label={playing ? 'Pause' : 'Play'} onClick={toggle} icon={icon(playing ? 'pause' : 'play', 18, true)} />
@@ -526,7 +536,7 @@ export function AudioPlayer({ track: shared, src, title, meta, cover, peaks, dur
           </div>
         </div>
       </div>
-      <div {...seek.bind} className="h-12 cursor-pointer touch-pan-y rounded-md outline-none select-none focus-visible:shadow-[0_0_0_2px_var(--accent)]">
+      <div {...seek.bind} className="h-12 cursor-pointer touch-pan-y rounded-[var(--r-md)] outline-none select-none focus-visible:shadow-[0_0_0_2px_var(--accent)]">
         <Waveform peaks={peaks} played={s.time / d} hover={seek.hover} className="h-full" />
       </div>
       <div className="ui-num -mt-1 flex justify-between text-[11px] text-[var(--fg3)]"><span>{fmt.clock(s.time)}</span><span>{fmt.clock(d)}</span></div>
@@ -547,8 +557,8 @@ export function MiniAudioPlayer({ track: shared, src, title, duration = 0, class
       <div className="flex min-w-0 flex-1 flex-col gap-1">
         <b className="truncate text-xs leading-none font-semibold">{title}</b>
         <motion.div {...seek.bind} animate={{ scaleY: seek.drag ? 1.6 : 1 }} transition={{ duration: 0.12 }}
-          className="relative h-1 cursor-pointer touch-pan-y rounded-sm bg-[var(--muted)] outline-none before:absolute before:inset-x-0 before:-inset-y-1.5 before:content-[''] focus-visible:shadow-[0_0_0_2px_var(--accent)] [@media(pointer:coarse)]:before:-inset-y-3.5">
-          <i className="absolute inset-y-0 left-0 rounded-sm bg-[var(--primary)]" style={{ width: `${s.time / d * 100}%` }} />
+          className="relative h-1 cursor-pointer touch-pan-y rounded-[var(--r-sm)] bg-[var(--muted)] outline-none before:absolute before:inset-x-0 before:-inset-y-1.5 before:content-[''] focus-visible:shadow-[0_0_0_2px_var(--accent)] [@media(pointer:coarse)]:before:-inset-y-3.5">
+          <i className="absolute inset-y-0 left-0 rounded-[var(--r-sm)] bg-[var(--primary)]" style={{ width: `${s.time / d * 100}%` }} />
         </motion.div>
       </div>
       <span className="ui-num flex-none text-[11px] text-[var(--fg3)] [@media(pointer:coarse)]:text-xs">{fmt.clock(!s.playing && !s.time ? d : s.time)}</span>
@@ -568,12 +578,12 @@ export function VoiceNote({ track: shared, src, peaks, duration = 0, bars = 34, 
     <div ref={box} className={cn('flex w-full max-w-[280px] items-center gap-2 self-end rounded-[18px_18px_4px_18px] bg-[var(--primary)] py-2 pr-2.5 pl-2 text-[var(--on-primary)]', className)}>
       <MediaPlayButton playing={s.playing} label={s.playing ? 'Pause voice note' : 'Play voice note'} onClick={() => track.toggle()} iconSize={12}
         size="h-7 w-7 [@media(pointer:coarse)]:h-9 [@media(pointer:coarse)]:w-9" className="bg-[color-mix(in_srgb,var(--on-primary)_18%,transparent)] text-inherit" />
-      <div {...seek.bind} className="h-[22px] min-w-0 flex-1 cursor-pointer touch-pan-y rounded outline-none select-none focus-visible:shadow-[0_0_0_2px_var(--on-primary)] [@media(pointer:coarse)]:h-8">
+      <div {...seek.bind} className="h-[22px] min-w-0 flex-1 cursor-pointer touch-pan-y rounded-[var(--r-sm)] outline-none select-none focus-visible:shadow-[0_0_0_2px_var(--on-primary)] [@media(pointer:coarse)]:h-8">
         <Waveform peaks={peaks} bars={bars} played={s.time / d} tone="current" minHeight={14} className="h-full" />
       </div>
       <span className="ui-num flex-none text-[11px] opacity-80">{fmt.clock(s.time || d)}</span>
       <button type="button" aria-label={`Playback speed ${s.rate}×`} onClick={() => track.setRate(VOICE_SPEEDS[(VOICE_SPEEDS.indexOf(s.rate) + 1) % VOICE_SPEEDS.length])}
-        className="h-5 flex-none cursor-pointer rounded-full border-0 bg-[color-mix(in_srgb,var(--on-primary)_16%,transparent)] px-1.5 font-[family-name:var(--mono)] text-[10px] font-semibold text-inherit [@media(pointer:coarse)]:h-8 [@media(pointer:coarse)]:min-w-9 [@media(pointer:coarse)]:text-[11px]">
+        className="h-5 flex-none cursor-pointer rounded-full border-0 bg-[color-mix(in_srgb,var(--on-primary)_16%,transparent)] px-1.5 font-[family-name:var(--mono)] text-[11px] font-semibold text-inherit [@media(pointer:coarse)]:h-8 [@media(pointer:coarse)]:min-w-9 [@media(pointer:coarse)]:text-[11px]">
         <motion.span key={s.rate} className="inline-block" initial={{ scale: 0.8 }} animate={{ scale: 1 }} transition={spring(0.5, 0.3)}>{s.rate}×</motion.span>
       </button>
     </div>
@@ -707,7 +717,7 @@ function LightboxView({ items, index, onIndexChange, onClose, originFor }:
         <motion.div ref={frame} style={{ x: fx, y: fy, scale: fs, opacity: fo, width: w, height: h }} className="relative flex-none">
           <motion.img src={safeMediaUrl(hiSrc ?? it.src) || undefined} alt={it.title} draggable={false} style={{ x: zx, y: zy, scale: zs, backgroundImage: cssUrl(it.src) }}
             onClick={() => { if (ptrType.current === 'mouse' && zoomRef.current === 1 && !moved.current) setZoom(2.2) }} onDoubleClick={() => { if (ptrType.current === 'mouse') setZoom(zoomRef.current > 1 ? 1 : 2.2) }}
-            className={cn('block h-full w-full rounded-[10px] bg-cover object-cover shadow-[0_20px_60px_rgba(0,0,0,.5)] select-none', zoom > 1 ? 'cursor-grab active:cursor-grabbing' : 'cursor-zoom-in')} />
+            className={cn('block h-full w-full rounded-[var(--r-md)] bg-cover object-cover shadow-[0_20px_60px_rgba(0,0,0,.5)] select-none', zoom > 1 ? 'cursor-grab active:cursor-grabbing' : 'cursor-zoom-in')} />
         </motion.div>
       </div>
       <motion.div {...chrome} className="absolute top-1/2 left-4 z-[2] -mt-6 max-sm:hidden"><IconButton tone="default" size="icon" className={LB_NAV} label="Previous" onClick={() => go(index - 1)} icon={<Icon name="chevronLeft" size={24} />} /></motion.div>
@@ -718,7 +728,7 @@ function LightboxView({ items, index, onIndexChange, onClose, originFor }:
       <motion.div {...chrome} ref={thumbs} className="absolute inset-x-0 bottom-0 flex gap-1.5 overflow-x-auto overscroll-x-contain p-3 pb-[max(12px,env(safe-area-inset-bottom))] [scrollbar-width:none] [&>:first-child]:ml-auto [&>:last-child]:mr-auto">
         {items.map((t, k) => (
           <button key={t.id} type="button" aria-label={t.title} aria-current={k === index} onClick={() => go(k)}
-            className={cn('h-[52px] w-[52px] flex-none cursor-pointer overflow-hidden rounded-lg border-0 bg-[#222] p-0 transition-[opacity,transform] duration-200', k === index ? '-translate-y-0.5 opacity-100 shadow-[0_0_0_2px_#fff]' : 'opacity-45 hover:opacity-80')}>
+            className={cn('h-[52px] w-[52px] flex-none cursor-pointer overflow-hidden rounded-[var(--r-md)] border-0 bg-[#222] p-0 transition-[opacity,transform] duration-200', k === index ? '-translate-y-0.5 opacity-100 shadow-[0_0_0_2px_#fff]' : 'opacity-45 hover:opacity-80')}>
             <img src={safeMediaUrl(t.src) || undefined} alt="" className="block h-full w-full object-cover" />
           </button>
         ))}
@@ -742,7 +752,7 @@ function MasonryTile({ it, x, y, width, imgH, delay, saved, onSave, onOpen, imgR
       className="group absolute top-0 left-0" style={{ width }}>
       <div className="relative overflow-hidden rounded-[var(--r-lg)] bg-[var(--muted)] has-[button:focus-visible]:shadow-[0_0_0_2px_var(--accent)]" style={{ height: imgH }}>
         <button type="button" onClick={onOpen} aria-label={`Open ${it.title} by ${it.author}`} className="absolute inset-0 block cursor-zoom-in border-0 bg-transparent p-0 outline-none">
-          <img ref={imgRef} src={safeMediaUrl(it.src) || undefined} alt="" draggable={false} className="block h-full w-full object-cover transition-transform duration-500 ease-[cubic-bezier(.22,1,.36,1)] group-hover:scale-[1.04]" />
+          <img ref={imgRef} src={safeMediaUrl(it.src) || undefined} alt="" draggable={false} width={Math.round(width)} height={Math.round(imgH)} decoding="async" className="block h-full w-full object-cover transition-transform duration-500 ease-[cubic-bezier(.22,1,.36,1)] group-hover:scale-[1.04]" />
           <span aria-hidden className="absolute inset-0 flex items-end justify-between gap-2 bg-gradient-to-b from-transparent from-55% to-black/55 p-2.5 text-xs font-medium text-white opacity-0 transition-opacity group-hover:opacity-100 group-focus-within:opacity-100 [@media(pointer:coarse)]:opacity-100 max-sm:p-2">
             <span className="min-w-0 truncate">{it.title}</span><span className="flex-none">♥ {it.likes}</span>
           </span>
@@ -764,7 +774,8 @@ function MasonryTile({ it, x, y, width, imgH, delay, saved, onSave, onOpen, imgR
  * On touch screens the Save button and the title overlay are always visible (no hover there).
  * Category chips filter with a reflow, "Load more" staggers new tiles in (and says "That’s everything"
  * when `hasMore` is false), Save toggles per tile, and clicking opens the Lightbox from the tile.
- * Tiles appear when the gallery scrolls into view.
+ * The layout comes from each item's `ratio` (height / width), so the full height is reserved before any image loads
+ * and nothing below moves; tiles fade in when the gallery scrolls into view.
  */
 export function MasonryGallery({ items, categories, onLoadMore, hasMore = true, minColumn = 210, className }:
   { items: GalleryItem[]; categories?: string[]; onLoadMore?: () => void; hasMore?: boolean; minColumn?: number; className?: string }) {
@@ -777,7 +788,8 @@ export function MasonryGallery({ items, categories, onLoadMore, hasMore = true, 
   const imgs = useRef(new Map<GalleryItem['id'], HTMLImageElement>())
   const prevIds = useRef(new Set<GalleryItem['id']>())
   const cats = categories ?? ['All', ...new Set(items.map(i => i.category))]
-  const visible = inView ? items.filter(it => filter === 'All' || it.category === filter) : []
+  const visible = items.filter(it => filter === 'All' || it.category === filter)
+  const userResize = useRef(false) // only a filter or Load more animates the height; data arriving on its own just takes its place
   const gap = W < 480 ? 8 : 12, cols = Math.max(2, Math.min(5, Math.floor((W + gap) / minColumn))), cw = W ? (W - gap * (cols - 1)) / cols : 0
   const hs = new Array<number>(cols).fill(0)
   let fresh = 0
@@ -788,18 +800,18 @@ export function MasonryGallery({ items, categories, onLoadMore, hasMore = true, 
     const delay = prevIds.current.has(it.id) ? 0 : Math.min(12, fresh++) * 0.04
     return { it, x, y, imgH, delay }
   })
-  useEffect(() => { prevIds.current = new Set(visible.map(v => v.id)) })
+  useEffect(() => { if (inView) prevIds.current = new Set(visible.map(v => v.id)); userResize.current = false })
   let tallest = 0; for (const v of hs) if (v > tallest) tallest = v
   const height = visible.length ? tallest - gap : 240
   const lbItems = visible.map(it => ({ ...it, meta: `${it.author} · ${it.category} · ♥ ${it.likes}` }))
   return (
     <div className={cn('flex flex-col gap-3', className)}>
       <div className="flex flex-wrap gap-1.5" role="group" aria-label="Filter by category">
-        {cats.map(c => <Chip key={c} pressed={c === filter} onClick={() => setFilter(c)} className="font-normal">{c}</Chip>)}
+        {cats.map(c => <Chip key={c} pressed={c === filter} onClick={() => { userResize.current = true; setFilter(c) }} className="font-normal">{c}</Chip>)}
       </div>
-      <motion.div ref={host} role="list" aria-label="Gallery" className="relative" initial={false} animate={{ height }} transition={{ duration: 0.35, ease: 'easeOut' }}>
+      <motion.div ref={host} role="list" aria-label="Gallery" className="relative" initial={false} animate={{ height }} transition={userResize.current ? { duration: 0.35, ease: 'easeOut' } : { duration: 0 }}>
         <AnimatePresence>
-          {cw > 0 && placed.map(({ it, x, y, imgH, delay }, k) => (
+          {cw > 0 && inView && placed.map(({ it, x, y, imgH, delay }, k) => (
             <MasonryTile key={it.id} it={it} x={x} y={y} width={cw} imgH={imgH} delay={delay} saved={saved.has(it.id)}
               imgRef={el => { if (el) imgs.current.set(it.id, el); else imgs.current.delete(it.id) }}
               onOpen={() => setOpen(k)}
@@ -811,7 +823,7 @@ export function MasonryGallery({ items, categories, onLoadMore, hasMore = true, 
           ))}
         </AnimatePresence>
       </motion.div>
-      {onLoadMore && <Button className="self-center" disabled={!hasMore} onClick={onLoadMore}>{hasMore ? 'Load more' : 'That’s everything'}</Button>}
+      {onLoadMore && <Button className="self-center" disabled={!hasMore} onClick={() => { userResize.current = true; onLoadMore() }}>{hasMore ? 'Load more' : 'That’s everything'}</Button>}
       {open != null && lbItems[open] && <Lightbox items={lbItems} index={open} onIndexChange={setOpen} onClose={() => setOpen(null)} originFor={id => imgs.current.get(id)} />}
     </div>
   )
@@ -822,11 +834,17 @@ export function MasonryGallery({ items, categories, onLoadMore, hasMore = true, 
 /** Loading placeholder for MediaCard. The shimmer only animates while the card is on screen. */
 function MediaCardSkeleton({ className }: { className: string }) {
   const { ref, visible: onScreen } = useViewport<HTMLDivElement>(null, { amount: 0 })
-  const bone = cn('rounded-md bg-[var(--muted)]', onScreen && 'ui-shimmer')
+  const bone = cn('rounded-[var(--r-sm)] bg-[var(--muted)]', onScreen && 'ui-shimmer')
   return (
-    <div ref={ref} className={className} aria-busy="true" aria-label="Loading">
+    <div ref={ref} className={className} role="status" aria-busy="true" aria-label="Loading">
       <div className={cn(bone, 'aspect-[4/3] !rounded-none')} />
-      <div className="flex flex-col gap-2 p-3"><div className={cn(bone, 'h-3 w-2/5')} /><div className={cn(bone, 'h-3.5 w-[85%]')} /><div className={cn(bone, 'h-2.5 w-[95%]')} /><div className={cn(bone, 'h-2.5 w-3/5')} /></div>
+      {/* the same line boxes as the loaded card (date, title, two lines of description, author row), so swapping in the content doesn't move anything */}
+      <div className="flex flex-1 flex-col gap-1.5 p-3">
+        <div className="flex h-[16.5px] items-center"><div className={cn(bone, 'h-2.5 w-2/5')} /></div>
+        <div className="flex h-[17.5px] items-center"><div className={cn(bone, 'h-3.5 w-[85%]')} /></div>
+        <div className="flex h-[35px] flex-col justify-around"><div className={cn(bone, 'h-2.5 w-[95%]')} /><div className={cn(bone, 'h-2.5 w-3/5')} /></div>
+        <div className="mt-auto flex items-center gap-2 pt-1.5"><div className={cn(bone, 'h-[22px] w-[22px] !rounded-full')} /><div className={cn(bone, 'h-2.5 w-1/3')} /></div>
+      </div>
     </div>
   )
 }
@@ -848,8 +866,8 @@ export function MediaCard({ image, title, description, tag, duration, date, auth
       className={cn(shell, 'transition-shadow hover:shadow-[var(--shadow)]', className)}>
       <div className="relative aspect-[4/3] overflow-hidden bg-[var(--muted)]">
         {image && <img src={safeMediaUrl(image) || undefined} alt={title} className="block h-full w-full object-cover" />}
-        {tag && <span className="absolute top-2.5 left-2.5 rounded-full bg-black/50 px-2 py-1 text-[11px] font-medium text-white backdrop-blur-sm">{tag}</span>}
-        {duration && <span className="absolute right-2.5 bottom-2.5 rounded-[5px] bg-black/65 px-1.5 py-0.5 font-[family-name:var(--mono)] text-[11px] font-medium text-white">{duration}</span>}
+        {tag && <Badge size="sm" className="absolute top-2.5 left-2.5 !bg-black/50 !text-white backdrop-blur-sm">{tag}</Badge>}
+        {duration && <span className="absolute right-2.5 bottom-2.5 rounded-[var(--r-sm)] bg-black/65 px-1.5 py-0.5 font-[family-name:var(--mono)] text-[11px] font-medium text-white">{duration}</span>}
       </div>
       <div className="flex flex-1 flex-col gap-1.5 p-3">
         {date && <span className="text-[11px] text-[var(--fg3)]">{date}</span>}
@@ -1019,7 +1037,7 @@ export function Carousel({ slides, aspect = '16/8', className }: { slides: { con
               {(s.title || s.caption) && (
                 <motion.div initial={{ opacity: 0, y: 10 }} animate={k === i ? { opacity: 1, y: 0 } : { opacity: 0, y: 10 }} transition={{ duration: 0.4 }}
                   className="absolute inset-x-0 bottom-0 bg-gradient-to-b from-transparent to-black/60 px-4 pt-10 pb-4 text-white max-sm:px-3 max-sm:pt-8 max-sm:pb-2.5">
-                  <b className="block text-[17px] font-semibold max-sm:text-[15px]">{s.title}</b><span className="text-xs opacity-80">{s.caption}</span>
+                  <b className="block text-base font-semibold max-sm:text-sm">{s.title}</b><span className="text-xs opacity-80">{s.caption}</span>
                 </motion.div>
               )}
             </div>
@@ -1034,7 +1052,7 @@ export function Carousel({ slides, aspect = '16/8', className }: { slides: { con
           <button key={k} type="button" aria-label={`Go to slide ${k + 1}`} aria-current={k === i} onClick={() => go(k)}
             className="group/dot grid h-6 min-w-6 cursor-pointer place-items-center rounded-full border-0 bg-transparent px-[3px] outline-none focus-visible:shadow-[0_0_0_2px_var(--accent)] [@media(pointer:coarse)]:h-8 [@media(pointer:coarse)]:min-w-8">
             <motion.span initial={false} animate={{ width: k === i ? 22 : 7 }} transition={spring(0.2, 0.35)}
-              className={cn('block h-[7px] rounded transition-colors', k === i ? 'bg-[var(--primary)]' : 'bg-[var(--line2)] group-hover/dot:bg-[var(--fg3)]')} />
+              className={cn('block h-[7px] rounded-[var(--r-sm)] transition-colors', k === i ? 'bg-[var(--primary)]' : 'bg-[var(--line2)] group-hover/dot:bg-[var(--fg3)]')} />
           </button>
         ))}
       </div>
@@ -1078,9 +1096,11 @@ export function ImageCompare({ before, after, aspect = '4/3', className }: { bef
       onPointerUp={e => { if (start.current) set(e.clientX); start.current = null; dragging.current = false }} onPointerCancel={() => { start.current = null; dragging.current = false }}>
       <div className="absolute inset-0">{after}</div>
       <div className="absolute inset-0" style={{ clipPath: `inset(0 ${100 - pos}% 0 0)` }}>{before}</div>
-      <span className="pointer-events-none absolute top-2.5 left-2.5 rounded-full bg-black/45 px-2 py-1 text-[11px] font-semibold text-white">Before</span>
-      <span className="pointer-events-none absolute top-2.5 right-2.5 rounded-full bg-black/45 px-2 py-1 text-[11px] font-semibold text-white">After</span>
-      <div className="absolute inset-y-0 w-0.5 -translate-x-1/2 bg-white shadow-[0_0_8px_rgba(0,0,0,.4)]" style={{ left: `${pos}%` }}>
+      <Badge size="sm" className="pointer-events-none absolute top-2.5 left-2.5 !bg-black/45 font-semibold !text-white">Before</Badge>
+      <Badge size="sm" className="pointer-events-none absolute top-2.5 right-2.5 !bg-black/45 font-semibold !text-white">After</Badge>
+      {/* the divider moves by transform (a full-width layer shifted by pos%), never by `left`, so dragging and the intro sweep skip layout */}
+      <div className="pointer-events-none absolute inset-0" style={{ transform: `translateX(${pos}%)` }}>
+      <div className="pointer-events-auto absolute inset-y-0 left-0 w-0.5 -translate-x-1/2 bg-white shadow-[0_0_8px_rgba(0,0,0,.4)]">
         <button type="button" role="slider" aria-label="Comparison position" aria-valuenow={Math.round(pos)} aria-valuemin={0} aria-valuemax={100}
           onKeyDown={e => {
             const k: Record<string, (p: number) => number> = { ArrowLeft: p => p - 5, ArrowRight: p => p + 5, Home: () => 0, End: () => 100 }
@@ -1089,6 +1109,7 @@ export function ImageCompare({ before, after, aspect = '4/3', className }: { bef
           className="absolute top-1/2 left-1/2 flex h-[34px] w-[34px] -translate-1/2 cursor-ew-resize touch-none items-center justify-center rounded-full border-0 bg-white text-[#111] [@media(pointer:coarse)]:h-11 [@media(pointer:coarse)]:w-11 shadow-[0_2px_8px_rgba(0,0,0,.3)] focus-visible:shadow-[0_0_0_3px_var(--accent)] focus-visible:outline-none">
           <Icon name="chevronsLeftRight" size={14} strokeWidth={2.5} />
         </button>
+      </div>
       </div>
     </div>
   )

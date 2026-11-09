@@ -14,7 +14,7 @@ import { Progress } from './feedback'
  * has focus, red ring when `invalid`. Add height and layout yourself: cn(inputShellClass(bad), 'flex h-9 items-stretch').
  */
 export const inputShellClass = (invalid?: boolean) => cn('rounded-[var(--r-md)] border bg-[var(--card)] transition-[border-color,box-shadow]',
-  invalid ? 'border-[var(--bad)] shadow-[0_0_0_3px_var(--bad-soft)]' : 'border-[var(--line)] focus-within:border-[var(--fg3)] focus-within:shadow-[0_0_0_3px_var(--muted)]')
+  invalid ? 'border-[var(--bad)] shadow-[0_0_0_3px_var(--bad-soft)]' : 'border-[var(--line)] hover:[&:not(:focus-within)]:border-[var(--line2)] focus-within:border-[var(--fg3)] focus-within:shadow-[0_0_0_3px_var(--muted)]')
 
 /** Native range inputs: a thin track on desktop; on touch the input grows to a 32px hit area (padding, track drawn in the content box). */
 export const rangeInputClass = 'w-full cursor-pointer appearance-none rounded-full bg-clip-content [@media(pointer:coarse)]:box-content [@media(pointer:coarse)]:py-[13px] [@media(pointer:coarse)]:-my-[13px]'
@@ -148,7 +148,7 @@ export function PasswordInput({ strength, rules = strength, className, onChange,
       {strength && (
         <div className="grid grid-cols-4 gap-1" aria-hidden>
           {[0, 1, 2, 3].map(i => (
-            <div key={i} className="h-1 overflow-hidden rounded-sm bg-[var(--muted)]">
+            <div key={i} className="h-1 overflow-hidden rounded-full bg-[var(--muted)]">
               <motion.div className={cn('h-full origin-left transition-colors', PW_BAR[Math.max(0, score - 1)])} initial={false}
                 animate={{ scaleX: i < score ? 1 : 0 }} transition={{ duration: 0.25, delay: i < score && i >= from ? (i - from) * 0.05 : 0 }} />
             </div>
@@ -225,7 +225,7 @@ export function CheckboxBox({ checked, size = 18, pop = true, className }: { che
   return (
     <motion.span key={pop ? String(checked) : undefined} initial={false} animate={pop ? { scale: [1, 0.85, 1] } : undefined} transition={spring(0.5, 0.3)} aria-hidden
       style={{ width: size, height: size }}
-      className={cn('grid flex-none place-items-center border-[1.5px] text-[var(--on-primary)] transition-colors', size < 18 ? 'rounded' : 'rounded-[5px]',
+      className={cn('grid flex-none place-items-center border-[1.5px] text-[var(--on-primary)] transition-colors', size < 18 ? 'rounded-[var(--r-sm)]' : 'rounded-[var(--r-sm)]',
         checked ? 'border-[var(--primary)] bg-[var(--primary)]' : 'border-[var(--line2)]', className)}>
       <CheckMark checked={checked} size={Math.round(size * 0.66)} strokeWidth={size < 18 ? 4 : 3.5} duration={checked ? (size < 18 ? 0.25 : 0.3) : (size < 18 ? 0.12 : 0.15)} />
     </motion.span>
@@ -288,20 +288,29 @@ export function ActiveIndicator({ group, className }: { group: string; className
   return <motion.span layoutId={group} className={cn('absolute inset-0', className)} transition={spring(0.2, 0.45)} />
 }
 
-/** Segmented control with a sliding pill. */
-export function SegmentedControl({ options, value, defaultValue, onChange, className, size = 'md' }:
-  { options: (Option | string)[]; value?: string; defaultValue?: string; onChange?: (v: string) => void; className?: string; size?: 'sm' | 'md' }) {
-  const opts = options.map(o => typeof o === 'string' ? { value: o, label: o } : o)
+/**
+ * Segmented control with a sliding pill: a single choice, so it is a radiogroup (role=radio + aria-checked). One Tab
+ * stop (the chosen segment); ←/→ (and ↑/↓) move and select, Home/End jump. Name the group with `aria-label`.
+ */
+export function SegmentedControl({ options, value, defaultValue, onChange, className, size = 'md', 'aria-label': ariaLabel }:
+  { options: (Option | string)[]; value?: string; defaultValue?: string; onChange?: (v: string) => void; className?: string; size?: 'sm' | 'md'; 'aria-label'?: string }) {
+  const opts = options.map(o => typeof o === 'string' ? { value: o, label: o } as Option : o)
   const [v, set] = useControllable(value, defaultValue ?? opts[0].value, onChange)
   const group = useId()
+  const refs = useRef<(HTMLButtonElement | null)[]>([])
+  const sel = opts.findIndex(o => o.value === v && !o.disabled)
+  const tabStop = sel >= 0 ? sel : Math.max(0, opts.findIndex(o => !o.disabled))
+  const { onKeyDown } = useRoving(opts.length, () => {}, { orientation: 'both', isDisabled: i => !!opts[i].disabled, index: tabStop,
+    onMove: n => { set(opts[n].value); refs.current[n]?.focus() } })
   return (
-    <div role="group" className={cn('relative inline-flex rounded-[calc(var(--r-md)+1px)] bg-[var(--muted)] p-1', className)}>
-      {opts.map(o => (
-        <button type="button" key={o.value} aria-pressed={o.value === v} aria-label={o.label || o.value} onClick={() => set(o.value)}
-          className={cn('relative flex-1 cursor-pointer rounded-[calc(var(--r-md)-2px)] border-0 bg-transparent px-3 font-medium whitespace-nowrap transition-colors',
-            size === 'sm' ? 'h-[26px] text-xs [@media(pointer:coarse)]:h-8' : 'h-[30px] text-[13px] [@media(pointer:coarse)]:h-9', o.value === v ? 'text-[var(--fg)]' : 'text-[var(--fg2)] hover:text-[var(--fg)]')}>
+    <div role="radiogroup" aria-label={ariaLabel} onKeyDown={onKeyDown} className={cn('relative inline-flex rounded-[calc(var(--r-md)+1px)] bg-[var(--muted)] p-1', className)}>
+      {opts.map((o, i) => (
+        <button type="button" key={o.value} ref={el => { refs.current[i] = el }} role="radio" aria-checked={o.value === v} tabIndex={i === tabStop ? 0 : -1} disabled={o.disabled}
+          aria-label={o.label ? undefined : o.value} onClick={() => set(o.value)}
+          className={cn('relative flex-1 cursor-pointer rounded-[calc(var(--r-md)-2px)] border-0 bg-transparent px-3 font-medium whitespace-nowrap transition-colors disabled:cursor-default disabled:opacity-50',
+            size === 'sm' ? 'h-[22px] text-xs [@media(pointer:coarse)]:h-8' : 'h-7 text-[13px] [@media(pointer:coarse)]:h-9', o.value === v ? 'text-[var(--fg)]' : 'text-[var(--fg2)] hover:text-[var(--fg)]')}>
           {o.value === v && <ActiveIndicator group={group} className="rounded-[calc(var(--r-md)-2px)] bg-[var(--card)] shadow-[0_1px_2px_rgba(0,0,0,.08)]" />}
-          <span className="relative flex items-center justify-center gap-1.5">{o.icon && <Icon name={o.icon} size={14} />}{o.label}{o.hint && <Badge tone="ok" className="!px-1.5 !py-0 !text-[10px]">{o.hint}</Badge>}</span>
+          <span className="relative flex items-center justify-center gap-1.5">{o.icon && <Icon name={o.icon} size={14} />}{o.label}{o.hint && <Badge tone="ok" size="sm">{o.hint}</Badge>}</span>
         </button>
       ))}
     </div>
@@ -309,9 +318,9 @@ export function SegmentedControl({ options, value, defaultValue, onChange, class
 }
 
 /**
- * Range slider with live value. Native input: keyboard and screen readers for free, a 32px hit area on touch.
+ * Range slider with live value. `disabled` fades only the track (label and value stay legible in --fg3; the group gets aria-disabled). Native input: keyboard and screen readers for free, a 32px hit area on touch.
  * `steps` makes it a stepped picker over named stops (value = index; the names show under the track and can be tapped).
- * `compact` uses a smaller grey readout (settings panels); `disabled` dims label and track.
+ * `compact` uses a smaller grey readout (settings panels).
  */
 export function Slider({ value, defaultValue, onChange, min: minProp = 0, max: maxProp = 100, step: stepProp = 1, label, format, disabled, compact, steps, id, className }:
   { value?: number; defaultValue?: number; onChange?: (v: number) => void; min?: number; max?: number; step?: number; label?: string; format?: (v: number) => ReactNode
@@ -322,23 +331,24 @@ export function Slider({ value, defaultValue, onChange, min: minProp = 0, max: m
   const pct = clamp(((v - min) / (max - min || 1)) * 100, 0, 100)
   const shown = named ? steps[clamp(Math.round(v), 0, steps.length - 1)] : format ? format(v) : v
   return (
-    <div className={cn('transition-opacity', disabled && 'opacity-40', className)}>
+    // disabled: only the track and thumb fade; the label and value switch to --fg3 (still ≥4.5:1, never faded with opacity)
+    <div role="group" aria-label={label} aria-disabled={disabled || undefined} className={className}>
       {label && (
         <div className={cn('flex justify-between text-[13px]', compact ? 'mb-1.5' : 'mb-2')}>
-          <span className="text-[var(--fg2)]">{label}</span>
-          <span className={cn('ui-num', compact ? 'text-xs text-[var(--fg3)]' : 'font-medium')}>{shown}</span>
+          <span className={disabled ? 'text-[var(--fg3)]' : 'text-[var(--fg2)]'}>{label}</span>
+          <span className={cn('ui-num', compact || disabled ? 'text-[var(--fg3)]' : 'font-medium', compact && 'text-xs')}>{shown}</span>
         </div>
       )}
       <input type="range" id={id} min={min} max={max} step={step} value={v} disabled={disabled} aria-label={label} aria-valuetext={named ? String(shown) : undefined}
         onChange={e => set(Number(e.target.value))}
-        className={cn(rangeInputClass, 'h-1.5 accent-[var(--primary)] disabled:cursor-default')}
+        className={cn(rangeInputClass, 'h-1.5 accent-[var(--primary)] transition-opacity disabled:cursor-default disabled:opacity-40')}
         style={{ backgroundImage: `linear-gradient(to right, var(--primary) ${pct}%, var(--muted) ${pct}%)` }} />
       {named && (
         <span className="relative mt-1.5 block h-4 [@media(pointer:coarse)]:mt-1 [@media(pointer:coarse)]:h-8">
           {steps.map((x, k) => (
             <button key={x} type="button" tabIndex={-1} disabled={disabled} onClick={() => set(k)} style={{ left: `${(k / (steps.length - 1)) * 100}%` }}
               className={cn('absolute top-0 cursor-pointer border-0 bg-transparent p-0 text-[11px] whitespace-nowrap disabled:cursor-default [@media(pointer:coarse)]:h-8 [@media(pointer:coarse)]:min-w-8',
-                k === 0 ? '' : k === steps.length - 1 ? '-translate-x-full' : '-translate-x-1/2', k === Math.round(v) ? 'font-semibold text-[var(--fg)]' : 'text-[var(--fg3)]')}>{x}</button>
+                k === 0 ? '' : k === steps.length - 1 ? '-translate-x-full' : '-translate-x-1/2', k === Math.round(v) && !disabled ? 'font-semibold text-[var(--fg)]' : k === Math.round(v) ? 'font-semibold text-[var(--fg3)]' : 'text-[var(--fg3)]')}>{x}</button>
           ))}
         </span>
       )}
@@ -359,11 +369,11 @@ export function NumberStepper({ value, defaultValue = 0, onChange, min = -Infini
     if (c === v) return shake(root.current, 4)
     set(c)
   }
-  const btn = 'h-9 w-9 cursor-pointer border-0 bg-[var(--card)] text-base hover:bg-[var(--muted)] aria-disabled:opacity-40 aria-disabled:cursor-default grid place-items-center'
+  const btn = 'h-[34px] w-9 cursor-pointer border-0 bg-[var(--card)] text-base hover:bg-[var(--muted)] aria-disabled:opacity-40 aria-disabled:cursor-default grid place-items-center'
   return (
     <div ref={root} role="spinbutton" tabIndex={0} aria-label={label} aria-valuenow={v} aria-valuetext={new Intl.NumberFormat(LOCALE, format).format(v)}
       aria-valuemin={Number.isFinite(min) ? min : undefined} aria-valuemax={Number.isFinite(max) ? max : undefined}
-      className={cn('inline-flex items-center overflow-hidden rounded-[9px] border border-[var(--line)] outline-none focus-visible:border-[var(--fg3)] focus-visible:shadow-[0_0_0_3px_var(--muted)]', className)}
+      className={cn('inline-flex items-center overflow-hidden rounded-[var(--r-md)] border border-[var(--line)] outline-none focus-visible:border-[var(--fg3)] focus-visible:shadow-[0_0_0_3px_var(--muted)]', className)}
       onKeyDown={e => {
         const d = ({ ArrowUp: 1, ArrowRight: 1, ArrowDown: -1, ArrowLeft: -1 } as Record<string, number>)[e.key]
         if (d) { e.preventDefault(); change(v + d * step) }
@@ -372,7 +382,7 @@ export function NumberStepper({ value, defaultValue = 0, onChange, min = -Infini
       }}>
       <button type="button" tabIndex={-1} className={btn} aria-label={`Decrease ${label}`} aria-disabled={v <= min || undefined}
         onPointerDown={e => { e.preventDefault(); root.current?.focus() }} onClick={() => change(v - step)}><Icon name="minus" size={14} /></button>
-      <span className="grid min-w-14 place-items-center text-[15px] font-medium"><AnimatedNumber value={v} format={format} /></span>
+      <span className="grid min-w-14 place-items-center text-base font-medium"><AnimatedNumber value={v} format={format} /></span>
       <button type="button" tabIndex={-1} className={btn} aria-label={`Increase ${label}`} aria-disabled={v >= max || undefined}
         onPointerDown={e => { e.preventDefault(); root.current?.focus() }} onClick={() => change(v + step)}><Icon name="plus" size={14} /></button>
     </div>
@@ -423,9 +433,9 @@ export function TagInput({ value, defaultValue = [], onChange, placeholder = 'Ad
         {tags.map(t => (
           <motion.span key={t} layout initial={{ scale: 0.6, opacity: 0 }} animate={{ scale: 1, opacity: 1, x: dupe === t ? [0, -4, 4, 0] : 0 }}
             exit={{ scale: 0.6, opacity: 0, transition: { duration: 0.15 } }} transition={spring(0.4, 0.35)}
-            className="inline-flex items-center gap-1 rounded-md bg-[var(--muted)] py-1 pr-1 pl-2 text-xs">
+            className="inline-flex items-center gap-1 rounded-[var(--r-md)] bg-[var(--muted)] py-1 pr-1 pl-2 text-xs">
             {t}
-            <button type="button" aria-label={`Remove ${t}`} onClick={() => set(tags.filter(x => x !== t))} className="cursor-pointer border-0 bg-transparent px-1 leading-none text-[var(--fg3)] hover:text-[var(--fg)] [@media(pointer:coarse)]:-my-2 [@media(pointer:coarse)]:-mr-1 [@media(pointer:coarse)]:min-h-8 [@media(pointer:coarse)]:min-w-8 [@media(pointer:coarse)]:text-base">×</button>
+            <button type="button" aria-label={`Remove ${t}`} onClick={() => set(tags.filter(x => x !== t))} className="ui-target cursor-pointer rounded-[var(--r-sm)] border-0 bg-transparent px-1 leading-none text-[var(--fg3)] hover:bg-[var(--line)] hover:text-[var(--fg)] [@media(pointer:coarse)]:-my-2 [@media(pointer:coarse)]:-mr-1 [@media(pointer:coarse)]:min-h-8 [@media(pointer:coarse)]:min-w-8 [@media(pointer:coarse)]:text-base">×</button>
           </motion.span>
         ))}
       </AnimatePresence>
@@ -486,7 +496,7 @@ export function OTPInput({ length = 6, value, defaultValue = '', onComplete, onC
             const d = e.clipboardData.getData('text').replace(/\D/g, '').slice(0, length); if (!d) return
             e.preventDefault(); const n = [...vals]; d.split('').forEach((ch, k) => { n[k] = ch }); update(n); refs.current[Math.min(d.length, length - 1)]?.focus()
           }}
-          className={cn('h-12 w-10 min-w-0 rounded-[9px] border bg-[var(--card)] text-center font-[family-name:var(--mono)] text-lg font-medium outline-none transition-colors focus:border-[var(--fg3)] focus:shadow-[0_0_0_3px_var(--muted)]',
+          className={cn('h-12 w-10 min-w-0 rounded-[var(--r-md)] border bg-[var(--card)] text-center font-[family-name:var(--mono)] text-[22px] font-medium outline-none transition-colors focus:border-[var(--fg3)] focus:shadow-[0_0_0_3px_var(--muted)]',
             status === 'ok' ? 'border-[var(--ok)] text-[var(--ok)]' : status === 'bad' ? 'border-[var(--bad)]' : 'border-[var(--line)]')} />
       ))}
     </div>
@@ -508,7 +518,9 @@ export function OptionList({ options, active, isSelected, onPick, onHover, id, m
       {options.map((o, i) => {
         const sel = isSelected(o)
         return (
-          <motion.div key={o.value} id={`${id}-${i}`} role="option" initial={{ opacity: 0, y: -3 }} animate={{ opacity: 1, y: 0 }} transition={{ duration: 0.18, delay: Math.min(i, 8) * 0.018 }} aria-selected={sel} aria-disabled={o.disabled} data-active={i === active}
+          // keyed by position: while a filter narrows the list the rows stay put and only their text changes, so nothing
+          // slides up under the finger (no layout shift); rows added at the end still fade in
+          <motion.div key={i} id={`${id}-${i}`} role="option" initial={{ opacity: 0, y: -3 }} animate={{ opacity: 1, y: 0 }} transition={{ duration: 0.18, delay: Math.min(i, 8) * 0.018 }} aria-selected={sel} aria-disabled={o.disabled} data-active={i === active}
             onPointerMove={() => onHover(i)} onPointerDown={e => e.preventDefault()} onClick={() => !o.disabled && onPick(i)}
             className={cn(menuItemClass, o.disabled && 'cursor-default opacity-50')}>
             <span className="flex min-w-0 items-center gap-2">
@@ -631,7 +643,8 @@ export function Combobox({ options, value, defaultValue, onChange, placeholder =
           if (!open) setOpen(true)
           onKeyDown(e)
         }} />
-      <FloatingPanel open={open} matchWidth className="max-h-[220px] overflow-auto" role="presentation">
+      {/* never flips above the field: the list shrinks as you type, and above it would jump and cover the label */}
+      <FloatingPanel open={open} matchWidth flip="scroll" className="max-h-[220px] overflow-auto" role="presentation">
         <OptionList id={lid} options={list} query={filter} active={active} isSelected={o => o.value === v} onPick={pick} onHover={setActive} empty={empty(q)} />
       </FloatingPanel>
     </div>
@@ -666,10 +679,10 @@ export function MultiSelect({ options, value, defaultValue = [], onChange, place
             const o = options.find(p => p.value === x)
             return (
               <motion.span key={x} layout initial={{ scale: 0.6, opacity: 0 }} animate={{ scale: 1, opacity: 1 }} exit={{ scale: 0.6, opacity: 0, transition: { duration: 0.12 } }} transition={spring(0.4, 0.35)}
-                className="inline-flex items-center gap-1.5 rounded-md bg-[var(--muted)] py-0.5 pr-1 pl-2 text-xs">
+                className="inline-flex items-center gap-1.5 rounded-[var(--r-md)] bg-[var(--muted)] py-0.5 pr-1 pl-2 text-xs">
                 {o?.dot && <span className="h-2 w-2 flex-none rounded-full" style={{ background: o.dot }} />}
                 {o?.label ?? x}
-                <button type="button" tabIndex={-1} aria-label={`Remove ${o?.label ?? x}`} className="cursor-pointer border-0 bg-transparent px-0.5 leading-none text-[var(--fg3)] hover:text-[var(--fg)] [@media(pointer:coarse)]:-my-2 [@media(pointer:coarse)]:-mr-1 [@media(pointer:coarse)]:min-h-8 [@media(pointer:coarse)]:min-w-8 [@media(pointer:coarse)]:text-base"
+                <button type="button" tabIndex={-1} aria-label={`Remove ${o?.label ?? x}`} className="ui-target cursor-pointer rounded-[var(--r-sm)] border-0 bg-transparent px-0.5 leading-none hover:bg-[var(--line)] text-[var(--fg3)] hover:text-[var(--fg)] [@media(pointer:coarse)]:-my-2 [@media(pointer:coarse)]:-mr-1 [@media(pointer:coarse)]:min-h-8 [@media(pointer:coarse)]:min-w-8 [@media(pointer:coarse)]:text-base"
                   onClick={e => { e.stopPropagation(); set(v.filter(y => y !== x)) }}>×</button>
               </motion.span>
             )
@@ -854,9 +867,10 @@ export function Calendar({ selected, onSelect, range, onRangeChange, month: init
                   onClick={e => onClick(d, e)} onPointerDown={e => onDown(d, e)} onPointerEnter={e => e.pointerType === 'mouse' && setHover(d)}
                   aria-pressed={isSel} aria-current={sameDay(d, today) ? 'date' : undefined} aria-label={fmtDate(d, { weekday: 'long', day: 'numeric', month: 'long', year: 'numeric' })}
                   className={cn('h-8 cursor-pointer border-0 text-[13px] transition-colors focus-visible:relative focus-visible:z-10 [@media(pointer:coarse)]:h-10 [@media(pointer:coarse)]:text-sm',
-                    isSel ? cn('bg-[var(--primary)] font-semibold text-[var(--on-primary)]', !joined ? 'rounded-lg' : isStart ? 'rounded-l-lg' : 'rounded-r-lg', joined && onRangeChange && b && 'cursor-ew-resize', onRangeChange && atRangeEnd(d) && 'touch-none')
-                      : inRange ? 'bg-[var(--muted)]' : 'rounded-lg bg-transparent hover:bg-[var(--muted)]',
-                    outside && !isSel && 'text-[var(--fg3)] opacity-50', sameDay(d, today) && !isSel && 'font-semibold text-[var(--accent)]')}>
+                    isSel ? cn('bg-[var(--primary)] font-semibold text-[var(--on-primary)]', !joined ? 'rounded-[var(--r-md)]' : isStart ? 'rounded-l-[var(--r-md)]' : 'rounded-r-[var(--r-md)]', joined && onRangeChange && b && 'cursor-ew-resize', onRangeChange && atRangeEnd(d) && 'touch-none')
+                      : inRange ? 'bg-[var(--muted)]' : 'rounded-[var(--r-md)] bg-transparent hover:bg-[var(--muted)]',
+                    // outside-month days: secondary text (≥4.5:1 in every theme), not faded with opacity
+                    outside && !isSel && 'text-[var(--fg3)]', sameDay(d, today) && !isSel && 'font-semibold text-[var(--accent)]')}>
                   {d.getDate()}
                 </button>
               )
@@ -977,11 +991,11 @@ function FormsFileRow({ f, upload, onRemove }: { f: FormsFile; upload?: FormsUpl
       exit={{ height: 0, opacity: 0, x: 20, transition: { opacity: { duration: 0.15 }, x: { duration: 0.15 }, height: { duration: 0.18, delay: 0.12 } } }}
       transition={spring(0.2, 0.35)} className="overflow-hidden">
       <div className="flex items-center gap-2.5 border-b border-[var(--line)] py-2 text-[13px]">
-        <span className="grid h-8 w-8 flex-none place-items-center rounded-lg bg-[var(--muted)] font-[family-name:var(--mono)] text-[11px] font-semibold text-[var(--fg2)] uppercase">{(f.name.split('.').pop() || 'file').slice(0, 4)}</span>
+        <span className="grid h-8 w-8 flex-none place-items-center rounded-[var(--r-md)] bg-[var(--muted)] font-[family-name:var(--mono)] text-[11px] font-semibold text-[var(--fg2)] uppercase">{(f.name.split('.').pop() || 'file').slice(0, 4)}</span>
         <span className="min-w-0 flex-1">
           <span className="block truncate font-medium">{f.name}</span>
           <span className={cn('block text-xs transition-colors', done ? 'text-[var(--ok)]' : failed ? 'text-[var(--bad)]' : 'text-[var(--fg3)]')} aria-live="polite">{size && `${size} · `}{done ? 'Uploaded' : failed ? 'Upload failed' : `Uploading ${Math.round(pct)}%`}</span>
-          <Progress value={pct} tone={done ? 'ok' : failed ? 'bad' : 'primary'} className="mt-1 !h-1" />
+          <Progress value={pct} tone={done ? 'ok' : failed ? 'bad' : 'primary'} label={`Upload of ${f.name}`} className="mt-1 !h-1" />
         </span>
         <IconButton icon="x" label={`Remove ${f.name}`} onClick={onRemove} />
       </div>
@@ -1066,7 +1080,7 @@ export function ColorPicker({ value, defaultValue = '#2563EB', onChange, swatche
     <div className={cn('flex flex-col gap-3', className)}>
       <div className="flex items-center gap-3">
         <motion.span key={pops} initial={pops ? { scale: 0.85, rotate: -8 } : false} animate={{ scale: 1, rotate: 0 }} transition={spring(0.5, 0.4)}
-          className="h-10 w-10 flex-none rounded-[12px] shadow-[inset_0_0_0_1px_rgba(0,0,0,.08)]" style={{ background: c }} aria-hidden />
+          className="h-10 w-10 flex-none rounded-[var(--r-lg)] shadow-[inset_0_0_0_1px_rgba(0,0,0,.08)]" style={{ background: c }} aria-hidden />
         <Input value={text} onChange={e => { setText(e.target.value); const v = e.target.value.trim(); if (formsHexOk(v)) apply(v, 'hex') }}
           invalid={!formsHexOk(text.trim())} spellCheck={false} className="!h-8 font-[family-name:var(--mono)]" aria-label="Hex colour" />
       </div>
@@ -1126,8 +1140,8 @@ export function RangeSlider({ value, defaultValue = [20, 80], onChange, min = 0,
     <div className={className}>
       {label && <div className="mb-2 flex justify-between text-[13px]"><span className="text-[var(--fg2)]">{label}</span><span className="font-medium">{format(v[0])} to {format(v[1])}</span></div>}
       <div ref={track} className="relative h-5 cursor-pointer touch-none [@media(pointer:coarse)]:-my-1.5 [@media(pointer:coarse)]:h-8" onPointerDown={onTrackDown}>
-        <div className="absolute inset-x-0 top-2 h-1 rounded bg-[var(--muted)] [@media(pointer:coarse)]:top-3.5" />
-        <div className="absolute top-2 h-1 rounded bg-[var(--primary)] [@media(pointer:coarse)]:top-3.5" style={{ left: `${pct(v[0])}%`, right: `${100 - pct(v[1])}%` }} />
+        <div className="absolute inset-x-0 top-2 h-1 rounded-full bg-[var(--muted)] [@media(pointer:coarse)]:top-3.5" />
+        <div className="absolute top-2 h-1 rounded-full bg-[var(--primary)] [@media(pointer:coarse)]:top-3.5" style={{ left: `${pct(v[0])}%`, right: `${100 - pct(v[1])}%` }} />
         {([0, 1] as const).map(k => (
           <motion.button type="button" key={k} ref={el => { thumbs.current[k] = el }} role="slider" aria-label={thumbLabel(k)} aria-valuemin={min} aria-valuemax={max} aria-valuenow={v[k]} aria-valuetext={valueText(v[k])}
             animate={{ scale: dragging === k ? 1.15 : 1 }} transition={spring(0.4, 0.3)}
@@ -1246,7 +1260,7 @@ export function PhoneInput({ countries = PHONE_COUNTRIES, value, defaultCountry 
             if (e.key.length === 1) { const k = countries.findIndex(c => c.name.toLowerCase().startsWith(e.key.toLowerCase())); if (k >= 0) setActive(k); return }
             onKeyDown(e)
           }}
-          className="flex flex-none cursor-pointer items-center gap-1 border-0 border-r border-[var(--line)] bg-[var(--muted)] px-2.5 text-sm outline-none focus-visible:bg-[var(--line)]">
+          className="flex flex-none cursor-pointer items-center gap-1 border-0 border-r border-[var(--line)] bg-[var(--muted)] px-2.5 text-sm outline-none hover:bg-[var(--line)] focus-visible:bg-[var(--line)]">
           <motion.span key={`f${swaps}`} initial={swaps ? { scale: 0.5, rotate: -20 } : false} animate={{ scale: 1, rotate: 0 }} transition={spring(0.5, 0.4)} className="leading-none">{country.flag}</motion.span>
           <motion.span key={`c${swaps}`} initial={swaps ? { y: -6, opacity: 0 } : false} animate={{ y: 0, opacity: 1 }} transition={spring(0.4, 0.3)} className="ui-num text-xs text-[var(--fg2)]">{country.dial}</motion.span>
           <Icon name="chevronDown" size={10} strokeWidth={3} className="text-[var(--fg3)]" />
@@ -1315,7 +1329,7 @@ export function CurrencyInput({ currencies = CURRENCIES, defaultCurrency, value,
     <div className={cn('flex flex-col gap-1.5', className)}>
       <div className={cn(inputShellClass(invalid), 'flex h-9 items-stretch overflow-hidden')}>
         <button type="button" aria-label={`Currency ${code}, change currency`} onClick={() => { const n = (ci + 1) % currencies.length; setCi(n); emit(plain, n) }}
-          className="flex w-14 flex-none cursor-pointer items-center justify-center overflow-hidden border-0 border-r border-[var(--line)] bg-[var(--muted)] text-[13px] outline-none focus-visible:bg-[var(--line)]">
+          className="flex w-14 flex-none cursor-pointer items-center justify-center overflow-hidden border-0 border-r border-[var(--line)] bg-[var(--muted)] text-[13px] outline-none hover:bg-[var(--line)] focus-visible:bg-[var(--line)]">
           <motion.b key={code} initial={{ y: -8, opacity: 0 }} animate={{ y: 0, opacity: 1 }} transition={spring(0.4, 0.3)} className="font-semibold">{code}</motion.b>
         </button>
         <input ref={input} id={id} value={currencyShow(plain, seps)} inputMode="decimal" autoComplete="off" placeholder={`0${seps.decimal}00`} aria-label={`Amount in ${code}`} aria-invalid={invalid || undefined}

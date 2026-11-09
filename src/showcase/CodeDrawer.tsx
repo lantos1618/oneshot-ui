@@ -1,6 +1,6 @@
-import { useSyncExternalStore } from 'react'
+import { useEffect, useMemo, useState, useSyncExternalStore } from 'react'
 import { motion, useDragControls } from 'motion/react'
-import { CodeBlock, IconButton, ModalLayer, cn, spring, useMediaQuery } from '../lib'
+import { CodeBlock, IconButton, ModalLayer, SegmentedControl, cn, spring, useMediaQuery } from '../lib'
 
 /* View code: the `</>` button on every card opens this drawer with a copy-pasteable usage example built from the
  * card's own JSX in the showcase source (its <Spec> children, plus the state, helpers and imports they use). */
@@ -190,7 +190,7 @@ const codePascal = (t: string) => t.replace(/[^A-Za-z0-9]+/g, ' ').trim().split(
 const CODE_ROW_CLASS = 'flex flex-wrap items-center gap-2'
 
 /** A usage example for one card: imports, the helpers and state its JSX needs, and the JSX itself. */
-export function codeExampleFor(title: string): { code: string; file: string } | null {
+export function codeExampleFor(title: string): { code: string; file: string; components: string[] } | null {
   for (const [path, src] of Object.entries(codeSources)) {
     const found = codeFindSpec(src, title)
     if (!found) continue
@@ -244,9 +244,150 @@ export function codeExampleFor(title: string): { code: string; file: string } | 
       : `return (\n    <>\n${codeIndent(jsx, 6)}\n    </>\n  )`
     const fn = [`export function ${codePascal(title)}Example(${usesParams ? comp!.params : ''}) {`, ...body.map(b => codeIndent(b, 2)), `  ${ret}`, '}'].join('\n')
     const code = [importLines.join('\n'), ...helpers, fn].filter(Boolean).join('\n\n')
-    return { code, file: path.replace(/^\.\//, 'src/showcase/') }
+    // the library components it renders, in order of first use (for the Props tab)
+    const libNames = new Set(imports.filter(i => /from '\.\.\/lib'/.test(i)).flatMap(i => (i.match(/\{([\s\S]*)\}/)?.[1] ?? '').split(',').map(n => n.trim()).filter(n => /^[A-Z]/.test(n))))
+    const components = [...new Set([...code.matchAll(/<([A-Z][\w]*)[\s/>]/g)].map(m => m[1]).filter(n => libNames.has(n)))]
+    return { code, file: path.replace(/^\.\//, 'src/showcase/'), components }
   }
   return null
+}
+
+/* Props, read from the library's own source ─────────────────────────────────── */
+
+/** The library modules as raw text, loaded on demand the first time the Props tab opens (not bundled up front). */
+const codeLibLoaders: Record<string, () => Promise<string>> = (() => {
+  try { return import.meta.glob('../lib/*.tsx', { query: '?raw', import: 'default' }) as Record<string, () => Promise<string>> } catch { return {} }
+})()
+let codeLibText: Promise<string[]> | null = null
+const codeLib = () => (codeLibText ??= Promise.all(Object.values(codeLibLoaders).map(l => l())))
+
+export type CodeProp = { name: string; type: string; optional: boolean; def?: string; doc?: string }
+export type CodePropsDoc = { name: string; doc?: string; props: CodeProp[]; extendsFrom: string[] }
+
+/** Index after the bracket that closes the one at `i` (strings and nested brackets skipped). */
+function codeClose(s: string, i: number) {
+  const open = s[i], close = ({ '(': ')', '{': '}', '[': ']', '<': '>' } as Record<string, string>)[open]
+  let depth = 0
+  for (; i < s.length; i++) {
+    const c = s[i]
+    if (c === '"' || c === "'" || c === '`') { const q = c; for (i++; i < s.length && s[i] !== q; i++) if (s[i] === '\\') i++; continue }
+    if (open === '<' && c === '=' && s[i + 1] === '>') { i++; continue } // an arrow inside a generic isn't a close
+    if (c === open) depth++
+    else if (c === close && --depth === 0) return i + 1
+  }
+  return s.length
+}
+/** Split at a separator that sits outside every bracket and string. */
+function codeSplitTop(s: string, sep: (c: string, i: number) => boolean) {
+  const out: string[] = []
+  let depth = 0, from = 0
+  for (let i = 0; i < s.length; i++) {
+    const c = s[i]
+    if (c === '"' || c === "'" || c === '`') { const q = c; for (i++; i < s.length && s[i] !== q; i++) if (s[i] === '\\') i++; continue }
+    if (c === '/' && s[i + 1] === '*') { const e = s.indexOf('*/', i + 2); i = e < 0 ? s.length : e + 1; continue }
+    if (c === '=' && s[i + 1] === '>') { i++; continue }
+    if ('({['.includes(c)) depth++
+    else if (')}]'.includes(c)) depth--
+    else if (depth === 0 && sep(c, i)) { out.push(s.slice(from, i)); from = i + 1 }
+  }
+  out.push(s.slice(from))
+  return out.map(x => x.trim()).filter(Boolean)
+}
+const codeDoc = (c?: string) => c?.replace(/^\/\*\*?|\*\/$/g, '').split('\n').map(l => l.replace(/^\s*\*\s?/, '')).join(' ').replace(/\s+/g, ' ').trim() || undefined
+
+/** Members of a `{ … }` type literal, with the JSDoc in front of each. */
+function codeMembers(lit: string): CodeProp[] {
+  const body = lit.trim().replace(/^\{|\}$/g, '')
+  return codeSplitTop(body, (c, i) => c === ';' || (c === '\n' && !/^\s*[|&]/.test(body.slice(i + 1)))).flatMap(m => {
+    const doc = m.match(/^\s*(\/\*\*[\s\S]*?\*\/)/)?.[1]
+    const rest = m.replace(/^\s*\/\*[\s\S]*?\*\/\s*/, '').replace(/^\s*\/\/.*$/gm, '').trim()
+    const mm = rest.match(/^(?:readonly\s+)?['"]?([\w$-]+)['"]?(\?)?\s*:\s*([\s\S]+)$/)
+    return mm ? [{ name: mm[1], optional: !!mm[2], type: mm[3].replace(/\s+/g, ' ').replace(/[;,]$/, '').trim(), doc: codeDoc(doc) }] : []
+  })
+}
+
+/** Props of an exported component, read from its signature: a destructured parameter and its type (literal, named type or intersection). */
+function codePropsOf(name: string, files: string[]): CodePropsDoc | null {
+  for (const src of files) {
+    const at = src.search(new RegExp(`export (?:function ${name}\\b|const ${name}\\s*=)`))
+    if (at < 0) continue
+    // the JSDoc right above the export
+    const before = src.slice(0, at), docAt = before.lastIndexOf('/**'), docEnd = before.lastIndexOf('*/')
+    const doc = docAt >= 0 && docEnd > docAt && !before.slice(docEnd + 2).trim() ? codeDoc(before.slice(docAt, docEnd + 2)) : undefined
+    let i = at + src.slice(at).search(/[(<]/)
+    if (src[i] === '<') i = codeClose(src, i)
+    while (src[i] !== '(' && i < src.length) i++
+    const params = src.slice(i + 1, codeClose(src, i) - 1)
+    const [pattern, ...typeParts] = codeSplitTop(params, c => c === ':')
+    const type = typeParts.join(':').trim()
+    const defs = new Map<string, string>()
+    if (pattern?.startsWith('{')) for (const b of codeSplitTop(pattern.slice(1, -1), c => c === ',')) {
+      const m = b.match(/^['"]?([\w$-]+)['"]?(?:\s*:\s*[\w$]+)?(?:\s*=\s*([\s\S]+))?$/)
+      if (m?.[2]) defs.set(m[1], m[2].replace(/\s+/g, ' ').trim())
+    }
+    const props: CodeProp[] = [], extendsFrom: string[] = []
+    const take = (t: string, depth: number) => {
+      for (const part of codeSplitTop(t, c => c === '&')) {
+        if (part.startsWith('{')) props.push(...codeMembers(part))
+        else if (/^[A-Z][\w$]*$/.test(part) && depth < 3) {
+          const tm = files.map(f => f.match(new RegExp(`(?:type ${part}(?:<[^=]*>)?\\s*=\\s*|interface ${part}\\s*)`))?.index !== undefined ? f : null).find(Boolean)
+          if (!tm) { extendsFrom.push(part); continue }
+          const k = tm.search(new RegExp(`(?:type ${part}(?:<[^=]*>)?\\s*=\\s*|interface ${part}\\s*)`)), j = tm.indexOf(tm.slice(k).match(/[={]/)![0] === '=' ? '=' : '{', k)
+          const rhsStart = tm[j] === '=' ? j + 1 : j, rhs = tm.slice(rhsStart).trimStart()
+          // the type's right-hand side runs to the end of its first top-level statement
+          const end = codeSplitTop(rhs, (c, x) => c === '\n' && !/^\s*[|&{]/.test(rhs.slice(x + 1)) && !/[&|=,(]\s*$/.test(rhs.slice(0, x)))[0] ?? ''
+          take(end.replace(/;$/, ''), depth + 1)
+        } else extendsFrom.push(part.replace(/\s+/g, ' '))
+      }
+    }
+    if (type) take(type, 0)
+    props.forEach(p => { p.def = defs.get(p.name) })
+    return { name, doc, props, extendsFrom }
+  }
+  return null
+}
+
+/** The Props tab: every library component the card renders, with its props, types, defaults and notes. */
+function CodePropsPanel({ components }: { components: string[] }) {
+  const [docs, setDocs] = useState<CodePropsDoc[] | null | 'none'>(null)
+  const key = components.join(',')
+  useEffect(() => {
+    let live = true
+    if (!Object.keys(codeLibLoaders).length) { setDocs('none'); return }
+    codeLib().then(files => { if (live) setDocs(key.split(',').filter(Boolean).map(n => codePropsOf(n, files)).filter((d): d is CodePropsDoc => !!d)) }, () => live && setDocs('none'))
+    return () => { live = false }
+  }, [key])
+  if (docs === null) return <p className="m-0 text-[13px] text-[var(--fg3)]">Reading the component signatures…</p>
+  if (docs === 'none' || !docs.length) return <p className="m-0 rounded-[var(--r-md)] border border-dashed border-[var(--line2)] p-4 text-[13px] text-[var(--fg2)]">No props to show: the library source isn’t bundled in this build, or this card only uses page markup.</p>
+  return (
+    <div className="flex flex-col gap-5">
+      {docs.map(d => (
+        <section key={d.name} className="flex flex-col gap-1.5">
+          <h5 className="m-0 font-[family-name:var(--mono)] text-[13px] font-semibold">{`<${d.name}>`}</h5>
+          {d.doc && <p className="m-0 text-xs leading-relaxed text-[var(--fg2)]">{d.doc}</p>}
+          {d.props.length > 0 && (
+            <div className="-mx-1 overflow-x-auto px-1">
+              <table className="w-full border-collapse text-left text-xs">
+                <thead><tr className="text-[11px] text-[var(--fg3)]">{['Prop', 'Type', 'Default'].map(h => <th key={h} scope="col" className="border-b border-[var(--line)] py-1.5 pr-3 font-medium">{h}</th>)}</tr></thead>
+                <tbody>
+                  {d.props.map(p => (
+                    <tr key={p.name} className="align-top [&>td]:border-b [&>td]:border-[var(--line)] [&>td]:py-1.5 [&>td]:pr-3">
+                      <td className="font-[family-name:var(--mono)] whitespace-nowrap text-[var(--fg)]">{p.name}{!p.optional && <span className="text-[var(--bad)]" title="Required">*</span>}
+                        {p.doc && <div className="mt-0.5 max-w-[220px] font-[family-name:var(--font)] whitespace-normal text-[11px] text-[var(--fg3)]">{p.doc}</div>}</td>
+                      <td className="font-[family-name:var(--mono)] break-words text-[var(--fg2)] [overflow-wrap:anywhere]">{p.type}</td>
+                      <td className="font-[family-name:var(--mono)] text-[var(--fg2)] [overflow-wrap:anywhere]">{p.def ?? <span className="text-[var(--fg3)]">–</span>}</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          )}
+          {d.extendsFrom.length > 0 && <p className="m-0 text-[11px] text-[var(--fg3)]">Also takes <code className="font-[family-name:var(--mono)]">{d.extendsFrom.join(' & ')}</code></p>}
+        </section>
+      ))}
+      <p className="m-0 text-[11px] text-[var(--fg3)]">Read from the TypeScript signatures in <code className="font-[family-name:var(--mono)]">src/lib</code>. <span className="text-[var(--bad)]">*</span> required.</p>
+    </div>
+  )
 }
 
 /* Drawer ────────────────────────────────────────────────────────────────────── */
@@ -259,7 +400,9 @@ const codeSubscribe = (l: () => void) => { codeDrawerListeners.add(l); return ()
  */
 export function CodeDrawer() {
   const title = useSyncExternalStore(codeSubscribe, () => codeDrawerTitle, () => '')
-  const ex = title ? codeExampleFor(title) : null
+  const ex = useMemo(() => title ? codeExampleFor(title) : null, [title])
+  const [tab, setTab] = useState<'usage' | 'props'>('usage')
+  useEffect(() => { if (title) setTab('usage') }, [title])
   const close = () => codeDrawerSet('')
   const sheet = useMediaQuery('(max-width: 639px)') // same breakpoint as Sheet's bottom-sheet switch
   const drag = useDragControls()
@@ -272,17 +415,18 @@ export function CodeDrawer() {
         drag={sheet ? 'y' : false} dragListener={false} dragControls={drag} dragConstraints={{ top: 0, bottom: 0 }} dragElastic={{ top: 0, bottom: 0.9 }}
         onDragEnd={(_, i) => { if (i.offset.y > 90 || i.velocity.y > 500) close() }}
         className={cn('fixed z-[71] flex flex-col bg-[var(--card)] shadow-[var(--shadow)]', sheet
-          ? 'inset-x-0 bottom-0 max-h-[88dvh] rounded-t-2xl pb-[env(safe-area-inset-bottom,0px)]'
+          ? 'inset-x-0 bottom-0 max-h-[88dvh] rounded-t-[var(--r-lg)] pb-[env(safe-area-inset-bottom,0px)]'
           : 'top-0 right-0 bottom-0 w-[min(620px,94vw)] pt-[env(safe-area-inset-top,0px)]')}>
         {sheet && <div aria-hidden onPointerDown={grab} className="flex flex-none cursor-grab touch-none justify-center pt-2 pb-1"><span className="h-1 w-9 rounded-full bg-[var(--line2)]" /></div>}
         <div onPointerDown={grab} className={cn('flex flex-none items-center gap-2 border-b border-[var(--line)] py-3 pr-3 pl-4', sheet && 'touch-none !pt-1')}>
-          <h4 className="m-0 min-w-0 truncate text-[15px] font-semibold">{title}</h4>
-          <span className="text-xs text-[var(--fg3)]">usage</span>
+          <h4 className="m-0 min-w-0 truncate text-base font-semibold">{title}</h4>
           <span className="flex-1" />
+          {ex && ex.components.length > 0 && <SegmentedControl size="sm" aria-label="Show" value={tab} onChange={v => setTab(v as 'usage' | 'props')} options={[{ value: 'usage', label: 'Usage' }, { value: 'props', label: 'Props' }]}
+            className="flex-none" />}
           <IconButton icon="x" label="Close" onClick={close} onPointerDown={e => e.stopPropagation()} />
         </div>
         <div className="flex min-h-0 flex-1 flex-col gap-2 overflow-auto overscroll-contain p-4 max-sm:p-3">
-          {ex ? (
+          {ex && tab === 'props' ? <CodePropsPanel components={ex.components} /> : ex ? (
             <>
               <CodeBlock code={ex.code} filename={`${codePascal(title)}.tsx`} language="ts" collapseAt={false} defaultWrap={matchMedia('(max-width: 640px)').matches} />
               <p className="m-0 text-xs text-[var(--fg3)]">From <code className="font-[family-name:var(--mono)]">{ex.file}</code>. Imports point at <code className="font-[family-name:var(--mono)]">./ui</code>, the single-file build.</p>
