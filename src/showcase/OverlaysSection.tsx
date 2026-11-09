@@ -24,7 +24,7 @@ function OvTourDemo() {
         <div className="flex flex-col">
           {([['Website redesign', '2 h ago', 'bg-[var(--c2)]'], ['Mobile app', 'Yesterday', 'bg-[var(--c3)]'], ['Brand refresh', '3 days ago', 'bg-[var(--c4)]']] as const).map(([n, t, c], i) => (
             <div key={n} className={`flex items-center gap-2.5 px-1 py-2 text-[13px] ${i ? 'border-t border-[var(--line)]' : ''}`}>
-              <span className={`h-2 w-2 flex-none rounded-[var(--r-sm)] ${c}`} />{n}<span className="ml-auto text-xs text-[var(--fg3)]">{t}</span>
+              <span className={`h-2 w-2 flex-none rounded-[var(--r-sm)] ${c}`} />{n}<span className="ms-auto text-xs text-[var(--fg3)]">{t}</span>
             </div>
           ))}
         </div>
@@ -208,7 +208,7 @@ function OvPartsDemo() {
         </Dialog.Root>
         <Sheet.Root>
           <Sheet.Trigger>Details</Sheet.Trigger>
-          <Sheet.Content side="left">
+          <Sheet.Content side="start">
             <Sheet.Header><Sheet.Title>{name}</Sheet.Title><Sheet.Close /></Sheet.Header>
             <Sheet.Description>Created by Bea Kim · 24 files · 3 automations</Sheet.Description>
             <div className="flex flex-1 flex-col gap-3">
@@ -303,7 +303,7 @@ export function OverlaysSection({ openPalette }: { openPalette: () => void }) {
         <SpecPreview className="!p-0 !pt-0">
           <div className="flex h-[132px] bg-[color-mix(in_srgb,var(--fg)_14%,var(--bg))]">
             <div className="flex-1" />
-            <div className="flex w-[58%] flex-col gap-2 border-l border-[var(--line)] bg-[var(--card)] p-3 shadow-[var(--shadow)]">
+            <div className="flex w-[58%] flex-col gap-2 border-s border-[var(--line)] bg-[var(--card)] p-3 shadow-[var(--shadow)]">
               <b className="text-[13px]">Filters</b>
               {['Status', 'Date range'].map(l => <div key={l}><span className="text-[11px] text-[var(--fg3)]">{l}</span><div className="mt-0.5 h-5 rounded-[var(--r-sm)] border border-[var(--line)]" /></div>)}
               <div className="mt-auto flex justify-end gap-1"><i className="h-4 w-10 rounded-[var(--r-sm)] bg-[var(--muted)]" /><i className="h-4 w-10 rounded-[var(--r-sm)] bg-[var(--primary)]" /></div>
@@ -342,7 +342,7 @@ export function OverlaysSection({ openPalette }: { openPalette: () => void }) {
           <Tooltip content="Insert link"><Button size="icon" aria-label="Link"><Icon name="link" /></Button></Tooltip>
         </Row>
         <SpecPreview className="flex flex-col items-start gap-1.5">
-          <span className="ml-1 rounded-[var(--r-md)] bg-[var(--primary)] px-2 py-1 text-xs text-[var(--on-primary)] shadow-[var(--shadow)]">Insert link</span>
+          <span className="ms-1 rounded-[var(--r-md)] bg-[var(--primary)] px-2 py-1 text-xs text-[var(--on-primary)] shadow-[var(--shadow)]">Insert link</span>
           <Button size="icon" tabIndex={-1} aria-hidden><Icon name="link" /></Button>
         </SpecPreview>
       </Spec>

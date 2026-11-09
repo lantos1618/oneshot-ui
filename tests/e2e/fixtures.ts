@@ -5,7 +5,8 @@ import { dirname, join } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { test as base, expect, type Page } from '@playwright/test'
 
-export type ShowcaseOptions = { themeMode: 'light' | 'dark' }
+/** Per-project options: the theme mode, and a showcase locale (set through the page's own switcher storage, e.g. 'ar-EG'). */
+export type ShowcaseOptions = { themeMode: 'light' | 'dark'; showcaseLocale: string | null }
 
 const ROOT = join(dirname(fileURLToPath(import.meta.url)), '..', '..')
 const AXE_PATH = createRequire(join(ROOT, 'package.json')).resolve('axe-core/axe.min.js')
@@ -40,8 +41,11 @@ const INSTRUMENT = () => {
 
 export const test = base.extend<ShowcaseOptions & { showcase: Showcase }>({
   themeMode: ['light', { option: true }],
-  showcase: async ({ page, themeMode }, provide) => {
+  showcaseLocale: [null, { option: true }],
+  showcase: async ({ page, themeMode, showcaseLocale: locale }, provide) => {
     await page.addInitScript(mode => { try { localStorage.setItem('ui-theme:v1', JSON.stringify({ mode })) } catch { /* ignore */ } }, themeMode)
+    // the showcase's language menu persists here (src/showcase/index.tsx, SHELL_LOCALE_KEY) and applies it before the first paint
+    if (locale) await page.addInitScript(locale => { try { localStorage.setItem('ui-showcase-locale', JSON.stringify({ locale, dir: 'auto' })) } catch { /* ignore */ } }, locale)
     await page.addInitScript(INSTRUMENT)
     // Web fonts are not under test and would add network flake and font-swap shifts: serve them empty.
     await page.route(/^https:\/\/fonts\.(googleapis|gstatic)\.com\//, route => route.fulfill({ status: 200, contentType: route.request().url().includes('gstatic') ? 'font/woff2' : 'text/css', body: '' }))
@@ -156,7 +160,10 @@ export class Showcase {
       const se = document.scrollingElement as HTMLElement
       const vw = document.documentElement.clientWidth
       const wide = se.scrollWidth > vw + 1
-      const x0 = scrollX; scrollBy({ left: 200, behavior: 'instant' }); const moved = scrollX !== x0; scrollTo({ left: x0, behavior: 'instant' })
+      // both ways: in RTL the page overflows (and scrolls) to the left, with scrollX running negative
+      const x0 = scrollX
+      scrollBy({ left: 200, behavior: 'instant' }); let moved = scrollX !== x0; scrollTo({ left: x0, behavior: 'instant' })
+      scrollBy({ left: -200, behavior: 'instant' }); moved ||= scrollX !== x0; scrollTo({ left: x0, behavior: 'instant' })
       const clipped = (el: Element) => {
         for (let p = el.parentElement; p && p !== document.body; p = p.parentElement) {
           const o = getComputedStyle(p).overflowX
@@ -168,9 +175,9 @@ export class Showcase {
       const out: string[] = []
       if (wide || moved) for (const el of root?.querySelectorAll('*') ?? []) {
         const r = el.getBoundingClientRect()
-        if (r.width && r.right > vw + 1 && !clipped(el)) {
+        if (r.width && (r.right > vw + 1 || r.left < -1) && !clipped(el)) {
           const card = el.closest('[id^="c-"]')?.id
-          out.push(`${card ?? ''} <${el.tagName.toLowerCase()} class="${String(el.getAttribute('class') ?? '').slice(0, 60)}"> right=${Math.round(r.right)}`)
+          out.push(`${card ?? ''} <${el.tagName.toLowerCase()} class="${String(el.getAttribute('class') ?? '').slice(0, 60)}"> ${r.left < -1 ? `left=${Math.round(r.left)}` : `right=${Math.round(r.right)}`}`)
           if (out.length >= 8) break
         }
       }

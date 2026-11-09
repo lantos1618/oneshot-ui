@@ -11,7 +11,9 @@
 /** @type {Record<string, { roots: string[], title?: string, type?: string, description?: string }>} */
 export const FAMILIES = {
   // foundation
-  'ui-provider': { roots: ['UIProvider', 'ThemeScript', 'useTheme', 'themeScriptSource'], title: 'UIProvider', description: 'Wrap your app once: injects the theme tokens (CSS variables), applies and saves the theme (light, dark, system, seven palettes), hosts toasts and turns motion off for reduced-motion users. ThemeScript applies the saved theme before paint. Every other drop-in needs it.' },
+  'ui-provider': { roots: ['UIProvider', 'ThemeScript', 'useTheme', 'themeScriptSource'], title: 'UIProvider', description: 'Wrap your app once: injects the theme tokens (CSS variables), applies and saves the theme (light, dark, system, seven palettes), provides the locale (English strings; add messages-de / messages-ar for those), hosts page-level UI such as the toast region and turns motion off for reduced-motion users. ThemeScript applies the saved theme before paint. Every other drop-in needs it; toasts, icons, translations and the appearance menu are separate items.' },
+  'messages-de': { roots: ['UI_MESSAGES_DE'], title: 'German UI strings', type: 'registry:lib', description: 'German strings for the built-in UI: <UIProvider locale="de-DE" messages={UI_MESSAGES_DE}>. Machine-drafted; have a native speaker review them.' },
+  'messages-ar': { roots: ['UI_MESSAGES_AR'], title: 'Arabic UI strings', type: 'registry:lib', description: 'Arabic strings for the built-in UI (right to left from the locale): <UIProvider locale="ar-EG" messages={UI_MESSAGES_AR}>. Machine-drafted; have a native speaker review them.' },
   utils: { roots: ['cn', 'variants', 'spring', 'sleep', 'clamp', 'mix', 'contrast', 'safeUrl', 'safeMediaUrl', 'safeColor', 'safeCssValue', 'cssUrl', 'fmt', 'fmtDate', 'maxOf', 'minOf', 'extent'], title: 'Utilities', type: 'registry:lib', description: 'Pure helpers: cn() and variants() for class names, spring() for motion, safeUrl/safeColor for model output, number and date formatting, clamp, mix and contrast.' },
   hooks: { roots: ['useControllable', 'useOutside', 'useDisclosure', 'useWidth', 'useSize', 'useMediaQuery', 'useCoarsePointer', 'usePointerDrag', 'useLongPress', 'useHotkey', 'useFocusTrap', 'useRoving', 'useStreamedText', 'useScrollEdges'], title: 'Hooks', type: 'registry:hook', description: 'Shared hooks: controlled-or-uncontrolled state, outside clicks, disclosure, element size, media queries, pointer drags, long press, hotkeys, focus trap, roving focus, streamed text and scroll edges.' },
   motion: { roots: ['Reveal', 'useViewport', 'useFrameLoop', 'useTween', 'play', 'shake', 'MOTION_PRESETS', 'motionTransition', 'EASE_OUT'], title: 'Motion helpers', description: 'Reveal on scroll, useViewport (pause work off screen), frame loops, tweens, play/shake keyframes and motion presets.' },
@@ -20,8 +22,8 @@ export const FAMILIES = {
   button: { roots: ['Button', 'IconButton', 'buttonVariants'] },
   badge: { roots: ['Badge', 'DeltaBadge'] },
   card: { roots: ['Card', 'Separator'] },
-  avatar: { roots: ['Avatar', 'AvatarStack', 'AvatarGroup'] },
-  icon: { roots: ['Icon', 'ICONS'] },
+  avatar: { roots: ['Avatar', 'AvatarStack'] },
+  icon: { roots: ['Icon', 'ICONS', 'registerIcons', 'iconPath', 'isIconName'], description: 'Every icon (inline SVG paths) and <Icon>. Other drop-ins embed only the icons they draw: add this file to pass any icon name (icon="trash") to their props, or register your own paths with registerIcons().' },
   // overlays
   popover: { roots: ['Popover', 'PopoverRoot', 'PopoverTrigger', 'PopoverContent', 'PopoverClose', 'FloatingPanel', 'usePopover'] },
   'dropdown-menu': { roots: ['DropdownMenu', 'MenuItem', 'MenuSeparator', 'MenuLabel', 'MenuGroup', 'MenuShortcut', 'MenuCheckboxItem', 'MenuRadioGroup', 'MenuRadioItem', 'MenuSub', 'MenuSubTrigger', 'MenuSubContent', 'menuListVariants'] },

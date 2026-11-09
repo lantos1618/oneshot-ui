@@ -1,5 +1,5 @@
-// Server-render check: renders <UIProvider><Button/></UIProvider>, ThemeScript, and every showcase section with
-// react-dom/server renderToString (modules loaded through Vite SSR, so the TSX sources are used as they are).
+// Server-render check: renders <UIProvider><Button/></UIProvider>, ThemeScript, every showcase section and the whole
+// page (also in Arabic, which must come out dir="rtl") with react-dom/server renderToString (modules loaded through Vite SSR, so the TSX sources are used as they are).
 // Usage: node scripts/ssr-check.mjs [SectionName …]   Exit code 1 if anything throws.
 import { createServer } from 'vite'
 import { readdirSync } from 'node:fs'
@@ -26,6 +26,7 @@ const origError = console.error
 console.error = (...a) => { errors.push(a.map(String).join(' ').split('\n')[0]) }
 
 const results = []
+const expect = (name, ok, detail) => results.push(ok ? { name, ok: true, size: 0, warnings: [] } : { name, ok: false, error: detail, warnings: [] })
 async function check(name, make) {
   if (only.length && !only.includes(name)) return
   errors.length = 0
@@ -45,7 +46,6 @@ try {
   await check('ThemeScript', () => h(lib.ThemeScript, { storageKey: 'app-theme', defaultTheme: { theme: 'nord' } }))
   await check('AppearancePanel', () => h(lib.UIProvider, null, h(lib.AppearancePanel)))
   // CSP: every <style> carries the nonce; injectStyles={false} renders none; fonts are off unless asked for
-  const expect = (name, ok, detail) => results.push(ok ? { name, ok: true, size: 0, warnings: [] } : { name, ok: false, error: detail, warnings: [] })
   {
     const withNonce = renderToString(h(lib.UIProvider, { nonce: 'n0nce', fonts: true }, h(lib.Button, null, 'x')))
     const styles = withNonce.match(/<style[^>]*>/g) ?? []
@@ -82,6 +82,18 @@ try {
     for (const [name, C] of Object.entries(mod)) if (/Section$/.test(name) && typeof C === 'function') await check(name, () => h(lib.UIProvider, null, h(C)))
   }
   await check('Showcase (whole page)', async () => h((await vite.ssrLoadModule('/src/showcase/index.tsx')).default))
+  // right to left: the whole page in Arabic carries dir="rtl" and lang="ar-EG" on its .ui-root (in the server HTML)
+  {
+    const Showcase = (await vite.ssrLoadModule('/src/showcase/index.tsx')).default
+    errors.length = 0
+    let html = ''
+    try { html = renderToString(h(Showcase, { locale: 'ar-EG' })) } catch (e) { html = `threw ${e?.message ?? e}` }
+    const root = /<div[^>]*class="ui-root[^"]*"[^>]*>/.exec(html)?.[0] ?? ''
+    expect('Showcase locale="ar-EG": .ui-root has dir="rtl" lang="ar-EG"', /\sdir="rtl"/.test(root) && /\slang="ar-EG"/.test(root), root || html.slice(0, 200))
+    expect('Showcase locale="ar-EG": no console.error', !errors.length, errors[0] ?? '')
+    const small = renderToString(h(lib.UIProvider, { locale: 'ar-EG' }, h(lib.Button, null, 'x')))
+    expect('UIProvider locale="ar-EG": dir="rtl" on .ui-root', /class="ui-root"[^>]*dir="rtl"|dir="rtl"[^>]*class="ui-root"/.test(small), small.slice(0, 300))
+  }
 } finally {
   console.error = origError
   await vite.close()

@@ -1,10 +1,17 @@
 import { useRef } from 'react'
 import { AnimatePresence, motion } from 'motion/react'
-import { AnimatedNumber, cn, spring, surface, useControllable, CheckboxBox, confetti, useToast } from '../lib'
+import { AnimatedNumber, cn, defineMessages, spring, surface, useControllable, useMessages, CheckboxBox, confetti, useToast } from '../lib'
 
 /* Onboarding checklist: tasks with progress and a celebration when done.
    Copy-in block (registry: `registry:block`), not part of the npm API: copy it into your app and edit freely. It builds
    on the library through `../lib` (in your app: `@lyndon/ui`). */
+
+/* Strings: English plus machine-drafted German and Arabic (have them reviewed). */
+const OB_MSG = defineMessages('onboarding', {
+  en: { setUp: 'Get set up', complete: 'Setup complete', ready: 'You’re ready to go', allDone: 'All done. Nice work! 🎉', progress: '{n} of {total} complete', done: 'Done' },
+  de: { setUp: 'Einrichten', complete: 'Einrichtung abgeschlossen', ready: 'Alles bereit', allDone: 'Alles erledigt. Gut gemacht! 🎉', progress: '{n} von {total} erledigt', done: 'Erledigt' },
+  ar: { setUp: 'ابدأ الإعداد', complete: 'اكتمل الإعداد', ready: 'أنت جاهز للانطلاق', allDone: 'تم كل شيء. أحسنت! 🎉', progress: '{n} من {total} مكتملة', done: 'تم' },
+})
 
 /* ── Onboarding checklist ──────────────────────────────────────────────── */
 
@@ -15,9 +22,10 @@ export type OnboardingTask = { id: string; label: string; /** e.g. "~2 min"; rep
  * (Space / Enter too) with time estimates that turn into "Done", and confetti plus a toast at 100%.
  * `value` / `defaultValue` are the ids that are done.
  */
-export function OnboardingChecklist({ tasks, value, defaultValue = [], onChange, title = 'Get set up', onComplete, className }:
+export function OnboardingChecklist({ tasks, value, defaultValue = [], onChange, title: titleProp, onComplete, className }:
   { tasks: OnboardingTask[]; value?: string[]; defaultValue?: string[]; onChange?: (done: string[]) => void; title?: string; onComplete?: () => void; className?: string }) {
   const [done, setDone] = useControllable(value, defaultValue, onChange)
+  const tm = useMessages(OB_MSG), title = titleProp ?? tm('setUp')
   const ring = useRef<HTMLDivElement>(null)
   const toast = useToast()
   const n = tasks.filter(t => done.includes(t.id)).length, p = tasks.length ? n / tasks.length : 0, all = n === tasks.length && n > 0
@@ -28,7 +36,7 @@ export function OnboardingChecklist({ tasks, value, defaultValue = [], onChange,
     if (tasks.every(t => next.includes(t.id))) {
       const r = ring.current?.getBoundingClientRect()
       if (r) confetti({ x: r.left + r.width / 2, y: r.top + r.height / 2, count: 100 })
-      toast({ title: 'Setup complete', description: 'You’re ready to go' }); onComplete?.()
+      toast({ title: tm('complete'), description: tm('ready') }); onComplete?.()
     }
   }
   return (
@@ -48,7 +56,7 @@ export function OnboardingChecklist({ tasks, value, defaultValue = [], onChange,
           <AnimatePresence mode="wait" initial={false}>
             <motion.span key={String(all)} initial={{ opacity: 0, y: 3 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0, y: -3 }} transition={{ duration: 0.15 }} aria-live="polite"
               className={cn('block text-xs', all ? 'font-medium text-[var(--ok)]' : 'text-[var(--fg3)]')}>
-              {all ? 'All done. Nice work! 🎉' : <>{n} of {tasks.length} complete</>}
+              {all ? tm('allDone') : tm('progress', { n, total: tasks.length })}
             </motion.span>
           </AnimatePresence>
         </div>
@@ -61,7 +69,8 @@ export function OnboardingChecklist({ tasks, value, defaultValue = [], onChange,
               className={cn(surface.md, 'flex cursor-pointer items-center gap-2.5 bg-transparent px-3 py-2.5 text-[13px] transition-colors select-none hover:bg-[var(--muted)] focus-visible:outline-2 focus-visible:outline-offset-1 focus-visible:outline-[var(--accent)]')}>
               <CheckboxBox checked={on} className={cn(on && '!border-[var(--ok)] !bg-[var(--ok)] !text-[var(--card)]')} />
               <span className={cn('flex-1 transition-colors', on && 'text-[var(--fg3)] line-through')}>{t.label}</span>
-              <span className={cn('text-xs', on ? 'text-[var(--ok)]' : 'text-[var(--fg3)]')}>{on ? 'Done' : t.estimate ?? ''}</span>
+              <span className={cn('text-xs', on ? 'text-[var(--ok)]' : 'text-[var(--fg3)]')}>{on ? tm('done') : t.estimate ?? ''}</span>
+
             </div>
           )
         })}

@@ -10,7 +10,7 @@
 
 ## Rules
 
-- Edit only the files your brief lists. Exception: you may append new icon paths to `ICONS` in `src/lib/core.tsx` (re-read the file right before editing; keep the edit to the map). If you need any other change in a file you don't own, put a minimal local version in your own module and mention it in your report.
+- Edit only the files your brief lists. Exception: you may append new icon paths to `ICONS` in `src/lib/icons.tsx` (re-read the file right before editing; keep the edit to the map). If you need any other change in a file you don't own, put a minimal local version in your own module and mention it in your report.
 - Import siblings explicitly: `import { Button, cn, spring } from './core'`. Showcase files import from `'../lib'` and `'./kit'`.
 - No new npm dependencies. Everything is React + `motion/react` + Tailwind.
 - Do not run `pnpm build`, do not commit, do not restart the dev server.
@@ -45,9 +45,10 @@
 
 - **Strings.** Every word a user reads or hears (JSX text, `aria-label`, `title`, `placeholder`, `alt`, label-like
   prop defaults, toast titles) goes through `const { t } = useLocale()`. Reuse a key from `UI_MESSAGES_EN` in
-  `src/lib/core.tsx` (`common.*`, `status.*`, `date.*`, `paging.*`, `field.*`…); add new keys under a prefix named
-  after your module (`grid.groupBy`, `chat.stop`) and add the same key to `UI_MESSAGES_DE` and `UI_MESSAGES_AR` in
-  `provider.tsx` (TypeScript fails the build until you do). Interpolate (`t('common.removeItem', { name })`) rather
+  `src/lib/locale.tsx` (`common.*`, `status.*`, `date.*`, `paging.*`, `field.*`…) for shared words. A module's own
+  strings live in its own file: `const MY_MSG = defineMessages('grid', { en: {…}, de: {…}, ar: {…} })` and
+  `const t = useMessages(MY_MSG)`, so a drop-in carries only its own strings (de/ar are machine-drafted until
+  reviewed; keys are typed from `en`). Interpolate (`t('common.removeItem', { name })`) rather
   than concatenating, and use plural messages (`{count, plural, one {# row} other {# rows}}`) rather than
   `` `${n} row${n === 1 ? '' : 's'}` ``. A label prop's default becomes `label?: string` with
   `label ?? t('…')` in the body. Sample/demo content (chat transcripts, table rows) is data, not UI: leave it.
@@ -67,6 +68,29 @@
   from the start edge in RTL (`dir === 'rtl' ? rect.right - x : x - rect.left`).
 - **Check.** `node scripts/i18n-extract.mjs <your files>` should list nothing you own but data; test RTL by setting
   the showcase's language menu (globe button) to العربية, or `<UIProvider locale="ar-EG">` in a unit test.
+- **Plots stay left to right** (charts with an x scale, Gantt, trace waterfall, heatmaps, statecharts, flows, Sankey,
+  maps, the before/after compare). As in Excel, Google Sheets, Grafana and most BI tools, the time or number axis
+  keeps running left to right in RTL locales: the plot box gets `dir="ltr"` (an LTR island), its geometry stays
+  physical (inline `left`, the sticky `left-0` label column, `scrollLeft` from 0) and is marked `rtl-lint-ignore`.
+  ←/→ follow the plot (→ is later / the next point), so plot key handlers do *not* go through `logicalArrow`. What
+  mirrors: toolbars, legends, captions, footers, tooltips (their text gets the locale's `dir`; `ChartTooltip` prefers
+  the reading side of the point) and label cells inside the plot (Gantt task names and trace span names set
+  `dir={dir}` on the cell, so Arabic names align and truncate from the right). SVG `<text>` inherits `direction`,
+  which flips `text-anchor`, so an SVG plot must sit inside an LTR island. Number axes size themselves to their tick
+  labels (`chartAxisPad`): Arabic compact numbers ("١٢٫٤ ألف") are wider than "12.4K".
+- **Lists that look like charts mirror.** `BarList` bars grow from the start edge; `BarList` and `FunnelChart` pass the
+  locale's dir to `useChartFocus({ dir })`, so ← moves forward in RTL.
+- **Media.** Seek bars, waveforms and the back / play / forward cluster stay LTR with unmirrored icons (YouTube, Apple
+  and Material keep media progress left to right: it is the medium's timeline, not text); `useSeekSlider().bind`
+  carries `dir: 'ltr'`, so every bar spread from it is an island and → seeks forward. The rest of a player (volume,
+  time, speed, fullscreen), the gallery, carousel and lightbox mirror: `logicalArrow` for keys, swipes through `dirX`,
+  chevrons with `ui-flip`, carousel scroll offsets negative in RTL.
+- **`rtl:` inside islands.** Tailwind's `rtl:` variant matches `[dir=rtl] *`, so it still fires inside a `dir="ltr"`
+  island. Inside islands use logical utilities (they resolve against the island) or decide in JS from
+  `useLocale().dir`; keep `rtl:` twins for elements that never sit inside an island.
+- **Module catalogs.** A module's own strings can live in one `defineMessages('ns', { en, de, ar })` catalog next to
+  its components (`CHART_MESSAGES`, `MEDIA_MESSAGES`…, exported so apps can review them), read with
+  `const m = useMessages(NS_MESSAGES)`; apps override one key as `'chart.funnel'` through `<UIProvider messages>`.
 
 ## Mobile (phones and touch)
 

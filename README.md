@@ -368,6 +368,13 @@ renders only those in view, with `useVirtual`), `Message`,
 (autogrowing textarea, attachments by paste, drop or pick, model picker, Send/Stop). `AssistantChat` and
 `AgentComposer` also take `chat={useAiChat(…)}`. Their 0.2 scripted props (`respond`, `onSend`) still work.
 
+**Renderers (0.4).** Out of the box a message's text renders as Markdown with code fences in a plain frame (no
+highlighter), and tool arguments and results as indented JSON, so the chat drop-ins stay small. Pass richer renderers
+where you want them: `renderers={AI_RICH_RENDERERS}` on `MessageParts`, `Message`, `AssistantChat` or `AgentComposer`
+(fences highlighted by CodeBlock, and a JsonViewer tree), or once for a subtree with
+`<AiRenderersProvider renderers={AI_RICH_RENDERERS}>`. Mix your own: `{ text: aiMarkdownText(markdownCodeBlock), value: v => … }`.
+`Markdown` likewise shows fences in a plain frame unless you pass `renderCode={markdownCodeBlock}`.
+
 A Next.js route handler that streams from the Anthropic API as NDJSON chunks (the key stays in the server
 environment, `ANTHROPIC_API_KEY`; validate the request body in real code):
 
@@ -411,7 +418,7 @@ export async function POST(req: Request) {
 ```tsx
 // app/chat.tsx
 'use client'
-import { AssistantChat, aiMessageText, useAiChat } from '@lyndon/ui'
+import { AI_RICH_RENDERERS, AssistantChat, aiMessageText, useAiChat } from '@lyndon/ui'
 
 export function Chat() {
   const chat = useAiChat({
@@ -424,7 +431,7 @@ export function Chat() {
       return res.body // NDJSON bytes: useAiChat parses them
     },
   })
-  return <AssistantChat chat={chat} starters={['Summarise this week']} />
+  return <AssistantChat chat={chat} renderers={AI_RICH_RENDERERS} starters={['Summarise this week']} />
 }
 ```
 
@@ -449,7 +456,8 @@ import { WorldMap } from '@lyndon/ui/geo'
 import { cn, mix } from '@lyndon/ui/utils'
 ```
 
-Entries: `core`, `motion`, `virtual`, `overlay`, `forms`, `navigation`, `feedback`, `data`, `datagrid`, `layout`,
+Entries: `core` (re-exports `helpers`, `theme`, `locale`, `hooks`, `icons`, `primitives`, `slot`, `safe`,
+`formcontrol` and `shared`, each also an entry), `motion`, `virtual`, `overlay`, `forms` (re-exports `fields`, `inputs`, `select`, `pickers` and `upload`, each also an entry), `navigation`, `feedback`, `data`, `datagrid`, `layout`,
 `editor`, `scheduler`, `code`, `markdown`, `media`, `collab`, `pages`, `charts`, `diagrams` (re-exports `gantt`,
 `statechart`, `trace` and `network`, each also an entry), `geo` (its map data, `geoworld` and `geoland`, loads lazily),
 `aistream`, `ai`, `aichat`, `aiagent`, `appearance`, `provider`, `utils`, plus `styles.css`, `preflight.css` and
@@ -492,11 +500,15 @@ npx @lyndon/ui info data-grid                           # exports, embedded comp
 `--overwrite` replaces them), never writes outside `--dir` and refuses names that aren't registry names (no paths).
 It prints the npm packages your `package.json` is missing (usually `motion`).
 
-Wrap the app once in `<UIProvider>` from `ui-provider.tsx`. The files share it: each file keeps its React contexts
-(theme, toasts, forms) on `globalThis` under a versioned key, so the provider from one file reaches the components in
-another. Module state that is not a context is per file: the scroll lock and the modal stack (Escape and `inert` for
-nested modals) are shared by the overlays inside one file, so nest modals from the same file (`dialog` has
-`Dialog`, `ModalLayer` and the composable parts).
+Wrap the app once in `<UIProvider>` from `ui-provider.tsx`. The files share it: React contexts (theme, locale, forms)
+and module state (toast queue, scroll lock, modal stack and `inert` list, focus-trap stack, icon registry) live on
+`globalThis` under a versioned key (`@lyndon/ui@0.4:<name>`), so a provider or modal from one file works with
+components from another, exactly as with the npm package.
+
+`ui-provider` holds only the theme engine, the locale engine with the English messages, `ThemeScript` and the host
+outlet. Optional items: `toast` (toasts; `useToast()` without a `ToastProvider` uses one page-wide queue), `icon`
+(the full icon set: each drop-in embeds only the icons it draws, and items that take icon names from props say so in
+their header and list `suggests: ['icon']` in `index.json`), `messages-de` and `messages-ar` (drafted catalogues).
 
 ### Blocks
 
@@ -828,6 +840,15 @@ Menu items close the menu when chosen. Checkbox and radio items stay open so you
 `closeOnSelect`, or call `e.preventDefault()` in `onSelect` to keep the menu open. Menu content positions its
 submenus itself, so don't give it `overflow-hidden` or `overflow-auto`.
 
+### Placement in RTL
+
+`side` is physical, as in Floating UI and Radix: `top`, `right`, `bottom` and `left` are the same screen edge in both
+directions. `align` is logical for top and bottom panels (`-start` lines up with the trigger's start edge, its right
+edge in RTL). Things that hang off an inline edge mirror themselves: submenus and context menus open toward the
+inline end, and a collapsed sidebar's tooltips pick their side from the direction. `Sheet` takes
+`side="start" | "end"` (default `end`) as well as the physical `left`/`right`; DataGrid pins take `start`/`end`
+(logical) or `left`/`right` (physical).
+
 ### asChild and links
 
 `asChild` renders your single child element instead of the part's own element, with the part's props merged in. It
@@ -900,7 +921,8 @@ What the components do with untrusted input, and what stays your job. Report vul
   tel and relative only), colours through `safeColor`, and model HTML is previewed in a sandboxed frame without
   scripts. Never treat model text as instructions to your app.
 - **Streamed AI messages** (`useAiChat`, `MessageParts`): model text renders only through `Markdown` (no raw HTML,
-  links through `safeUrl`), user text as plain text, tool arguments and results as data (`JsonViewer`, text), and
+  links through `safeUrl`), user text as plain text, tool arguments and results as
+  data (indented JSON text, or `JsonViewer`), and
   source links through `safeUrl`. Attachment previews use object URLs that are revoked when the file is removed,
   sent or unmounted, shown only through `safeMediaUrl`. Streams are capped (`AI_LIMITS`: 200,000 characters per
   part, 100,000 of tool-argument JSON, 400 parts per message, 2,000 messages, 1 MB per SSE event or NDJSON line;

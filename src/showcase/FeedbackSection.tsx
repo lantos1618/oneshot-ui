@@ -10,7 +10,7 @@ function FbMockWindow({ children, className }: { children?: ReactNode; className
     <div className={`relative h-[190px] overflow-hidden rounded-[var(--r-md)] border border-[var(--line)] bg-[var(--bg)] ${className ?? ''}`}>
       <div className="flex items-center gap-1 border-b border-[var(--line)] bg-[var(--card)] px-2.5 py-2">
         {[0, 1, 2].map(i => <i key={i} className="h-2 w-2 rounded-full bg-[var(--line2)]" />)}
-        <span className="ml-2 h-3.5 flex-1 rounded-full bg-[var(--muted)] px-2" aria-hidden />
+        <span className="ms-2 h-3.5 flex-1 rounded-full bg-[var(--muted)] px-2" aria-hidden />
       </div>
       <div aria-hidden className="flex flex-col gap-2 p-3">
         <div className="flex items-center gap-2"><i className="h-3 w-3 rounded-[var(--r-sm)] bg-[var(--primary)]" /><i className="h-2 w-12 rounded-full bg-[var(--line2)]" /><span className="flex-1" /><i className="h-2 w-8 rounded-full bg-[var(--line)]" /><i className="h-2 w-8 rounded-full bg-[var(--line)]" /></div>
@@ -102,7 +102,7 @@ function FbCookieDemo() {
           onDecision={c => { setDecided(true); toast({ title: c.kind === 'accept' ? 'All cookies accepted' : c.kind === 'reject' ? 'Only essential cookies' : 'Saved your choices', tone: 'info' }) }} />
         <AnimatePresence>
           {decided && (
-            <motion.div className="absolute bottom-2.5 left-2.5" initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}>
+            <motion.div className="absolute bottom-2.5 start-2.5" initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}>
               <Button size="sm" onClick={() => setDecided(false)}><Icon name="settings" size={13} />Cookie settings</Button>
             </motion.div>
           )}
@@ -144,7 +144,7 @@ function FbUpgradeDemo() {
   const tone = card === 'pro' ? 'ok' : used >= LIM ? 'bad' : used >= 8 ? 'warn' : 'primary'
   return (
     <>
-      <Row className="justify-between"><span className="text-[13px] text-[var(--fg2)]">Projects</span><span className="ui-num text-xs text-[var(--fg3)]">{used} / {card === 'pro' ? '∞' : LIM}</span></Row>
+      <Row className="justify-between"><span className="text-[13px] text-[var(--fg2)]">Projects</span><span dir="ltr" className="ui-num text-xs text-[var(--fg3)]">{used} / {card === 'pro' ? '∞' : LIM}</span></Row>
       <div ref={barRef}><Progress value={card === 'pro' ? LIM : used} max={LIM} tone={tone} label="Projects used" /></div>
       <Button size="sm" className="self-start" onClick={add}><Icon name="plus" size={13} />New project</Button>
       <AnimatePresence mode="wait">
@@ -186,7 +186,7 @@ function FbAlertsDemo() {
       <Alert tone="bad" title="Sync failed" action={<Button size="xs" onClick={() => toast({ title: 'Synced', description: '3 changes uploaded', tone: 'ok' })}>Retry</Button>}>Your changes are saved locally.</Alert>
       <div className="sm:col-span-2">
         {shown
-          ? <Alert tone="neutral" title="Tip: press ⌘K to jump anywhere" action={<IconButton icon="x" label="Dismiss tip" size="icon-sm" onClick={() => setShown(false)} className="-my-1 -mr-1" />}>Dismissible: it stays gone until you bring it back.</Alert>
+          ? <Alert tone="neutral" title="Tip: press ⌘K to jump anywhere" action={<IconButton icon="x" label="Dismiss tip" size="icon-sm" onClick={() => setShown(false)} className="-my-1 -me-1" />}>Dismissible: it stays gone until you bring it back.</Alert>
           : <Button size="sm" onClick={() => setShown(true)}>Show the tip again</Button>}
       </div>
     </div>

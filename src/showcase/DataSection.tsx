@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { motion } from 'motion/react'
-import { Accordion, Avatar, AvatarStack, Badge, DataGrid, DataTable, type GridColumn, type GridFilterNode, type GridGroup, type GridSelection, type GridSort, GRID_NO_SELECTION, gridSelectedCount, Icon, SegmentedControl, Switch, InlineDatePicker, JsonViewer, Kbd, type ShortcutGroup, ShortcutOverlay, ShortcutSheet, StatCard, TaskList, type Tone, gridFilter, StatGrid, useToast } from '../lib'
+import { Accordion, Avatar, AvatarStack, Badge, DataGrid, DataTable, type GridColumn, type GridFilterNode, type GridGroup, type GridSelection, type GridSort, GRID_NO_SELECTION, gridSelectedCount, Icon, SegmentedControl, Switch, InlineDatePicker, JsonViewer, Kbd, type ShortcutGroup, ShortcutSheet, StatCard, TaskList, type Tone, gridFilter, StatGrid, useToast } from '../lib'
 import { Row, Section, Spec, SpecAction } from './kit'
 
 type DataInvoice = { id: string; customer: string; status: string; amount: number }
@@ -130,7 +130,7 @@ function DataServerGrid() {
       <DataGrid aria-label="Customers (server)" server columns={DATA_BIG_COLS} rows={res.rows} rowKey={r => r.id} rowLabel={r => r.name} rowCount={res.total}
         sort={sort} onSortChange={setSort} filter={filter} onFilterChange={setFilter} onSearchChange={setQ}
         selection={selection} onSelectionChange={setSelection} loading={loading} error={error} onRetry={() => { setFail(false); failRef.current = false; setRetry(n => n + 1) }}
-        defaultPinnedColumns={{ left: ['id'], right: ['status'] }} maxHeight={380}
+        defaultPinnedColumns={{ start: ['id'], end: ['status'] }} maxHeight={380}
         {...(mode === 'pages'
           ? { page, onPageChange: setPage, pageSize, pageSizes: [25, 50, 100], onPageSizeChange: setPageSize }
           : { onLoadMore: () => load(res.rows.length, 100, true), hasMore: res.rows.length < res.total })} />
@@ -141,7 +141,7 @@ function DataBigGrid() {
   const rows = useMemo(() => dataBigRows(50_000), [])
   return (
     <DataGrid aria-label="Customers (50,000)" columns={DATA_BIG_COLS} defaultRows={rows} rowKey={r => r.id} rowLabel={r => r.name} maxHeight={440}
-      defaultPinnedColumns={{ left: ['id', 'name'], right: ['mrr'] }} defaultHiddenColumns={['seats']} groupable={['status', 'plan', 'country']} />
+      defaultPinnedColumns={{ start: ['id', 'name'], end: ['mrr'] }} defaultHiddenColumns={['seats']} groupable={['status', 'plan', 'country']} />
   )
 }
 
@@ -206,7 +206,7 @@ export function DataSection() {
             <Accordion.Content forceMount><span className="mb-2 block">30 days, no questions asked.</span><Switch label="Email me a return label" /></Accordion.Content>
           </Accordion.Item>
           <Accordion.Item value="warranty" disabled>
-            <Accordion.Trigger>Warranty <Badge size="sm" className="ml-auto mr-1">Soon</Badge></Accordion.Trigger>
+            <Accordion.Trigger>Warranty <Badge size="sm" className="ms-auto me-1">Soon</Badge></Accordion.Trigger>
             <Accordion.Content>Two years on every product.</Accordion.Content>
           </Accordion.Item>
         </Accordion.Root>
@@ -235,7 +235,7 @@ export function DataSection() {
       <Spec title="Data grid · server mode" desc="Sorting, the filter builder, search and paging all round-trip through a fake API (250–650 ms latency): the grid only emits what changed. Switch to infinite scroll, or make requests fail to see the error and Retry. Select a page, then “Select all” to select across every page." span={3}>
         <DataServerGrid />
       </Spec>
-      <Spec title="Date picker" desc="Two modes: a single date, or a range. Type dd/mm/yyyy (slashes fill in) or pick on the calendar.">
+      <Spec title="Date picker" desc="Two modes: a single date, or a range. Type the date (in the locale’s order and digits) or pick on the calendar.">
         <InlineDatePicker defaultValue={[today, today]} />
       </Spec>
       <Spec title="JSON viewer" desc="Collapsible tree, typed colours. Filter keys; click a key to copy its path.">
@@ -243,7 +243,7 @@ export function DataSection() {
       </Spec>
       <Spec title="Keyboard shortcuts" desc="Grouped sheet. The full sheet opens as an overlay." actions={<SpecAction onClick={() => setKeys(true)}>Open all <Kbd className="leading-none">?</Kbd></SpecAction>}>
         <ShortcutSheet groups={DATA_SHORTCUTS.slice(0, 2)} />
-        <ShortcutOverlay open={keys} onOpenChange={setKeys} groups={DATA_SHORTCUTS} />
+        <ShortcutSheet variant="dialog" open={keys} onOpenChange={setKeys} groups={DATA_SHORTCUTS} />
       </Spec>
     </Section>
   )

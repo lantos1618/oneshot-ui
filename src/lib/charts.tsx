@@ -1,6 +1,6 @@
 import { useEffect, useId, useLayoutEffect, useMemo, useRef, useState, type FocusEvent as ReactFocusEvent, type KeyboardEvent as ReactKeyboardEvent, type PointerEvent as ReactPointerEvent, type ReactNode, type RefObject } from 'react'
 import { motion } from 'motion/react'
-import { AnimatedNumber, DeltaBadge, SparkChart, TOUCH, chartPath, type Curve, addDays, clamp, cn, dayKey, extent, fmt, fmtDate, isTouch, LOCALE, maxOf, minOf, onMouseLeave, prefersReducedMotion, releaseTouchCapture, safeColor, spring, startOfWeek, surface, useCoarsePointer, useOutside, useWidth } from './core'
+import { AnimatedNumber, DeltaBadge, SparkChart, TOUCH, chartPath, type Curve, type UIDir, addDays, clamp, cn, dayKey, defineMessages, extent, fmt, isTouch, logicalArrow, maxOf, minOf, type MessageDefs, type MessageKeyOf, type MessageVars, onMouseLeave, prefersReducedMotion, releaseTouchCapture, safeColor, spring, startOfWeek, surface, useCoarsePointer, useLocale, useMessages, useOutside, useWidth } from './core'
 import { useTween, useViewport } from './motion'
 
 /* ════════════════════════════════════════════════════════════════════════════
@@ -16,8 +16,301 @@ import { useTween, useViewport } from './motion'
 export const CHART_NEUTRAL = 'var(--c-neutral, var(--muted-fg, var(--fg3)))'
 /** Series colours, in order. Point these at your brand tokens. */
 export const PALETTE = ['var(--c2)', 'var(--c3)', 'var(--c4)', CHART_NEUTRAL, 'var(--bad)', 'var(--warn)']
-/** The charts' default number format: compact(12400) → "12.4K" (same as core fmt.compact). */
+/** Compact numbers in en-GB: compact(12400) → "12.4K" (core fmt.compact). Charts default to the provider locale's (`useLocale().fmt.compact`). */
 export const compact = fmt.compact
+
+/**
+ * Chart strings (summaries, tooltips, legends; machine-drafted de/ar). Series names, categories and axis titles are
+ * data: pass them translated.
+ *
+ * Direction (0.4): every chart with an x scale (time or numbers) is an LTR plot in every locale, as in Excel, Google
+ * Sheets and most BI tools: its box is `dir="ltr"`, the y axis stays on the left, ←/→ step through the points in the
+ * plot's direction and tooltips prefer the reading side. Legends, captions, tooltips' text, footers and the
+ * scale-free charts (BarList, FunnelChart) follow the locale; their ←/→ follow the reading direction.
+ */
+export const CHART_MESSAGES = defineMessages('chart', {
+  en: {
+    roledesc: 'chart', range: '{from} to {to}', noValues: 'no values', noData: 'No data.', data: 'Data', rangeLabel: 'Range',
+    chartLabel: '{names} chart', pointsFromTo: '{n, plural, one {# point} other {# points}} from {from} to {to}.',
+    seriesRange: '{name}: {range}.',
+  },
+  de: {
+    roledesc: 'Diagramm', range: '{from} bis {to}', noValues: 'keine Werte', noData: 'Keine Daten.', data: 'Daten', rangeLabel: 'Bereich',
+    chartLabel: 'Diagramm {names}', pointsFromTo: '{n, plural, one {# Punkt} other {# Punkte}} von {from} bis {to}.',
+    seriesRange: '{name}: {range}.',
+  },
+  ar: {
+    roledesc: 'مخطط', range: '{from} إلى {to}', noValues: 'لا قيم', noData: 'لا بيانات.', data: 'البيانات', rangeLabel: 'النطاق',
+    chartLabel: 'مخطط {names}',
+    pointsFromTo: '{n, plural, zero {لا نقاط} one {نقطة واحدة} two {نقطتان} few {# نقاط} many {# نقطة} other {# نقطة}} من {from} إلى {to}.',
+    seriesRange: '{name}: {range}.',
+  },
+})
+/** DonutChart (namespace 'chart'). */
+export const CHART_DONUT_MESSAGES = defineMessages('chart', {
+  en: {
+    total: 'Total', polar: 'Polar area chart', byShare: '{label} by share',
+    slices: '{n, plural, one {# slice} other {# slices}}, total {total}: {list}.', sliceText: '{label} {value} ({pct})',
+    sliceDescribe: '{label}: {value}, {pct} of {total}',
+  },
+  de: {
+    total: 'Gesamt', polar: 'Polarflächendiagramm', byShare: '{label} nach Anteil',
+    slices: '{n, plural, one {# Segment} other {# Segmente}}, gesamt {total}: {list}.', sliceText: '{label} {value} ({pct})',
+    sliceDescribe: '{label}: {value}, {pct} von {total}',
+  },
+  ar: {
+    total: 'الإجمالي', polar: 'مخطط مساحي قطبي', byShare: '{label} حسب الحصة',
+    slices: '{n, plural, one {شريحة واحدة} two {شريحتان} few {# شرائح} many {# شريحة} other {# شريحة}}، الإجمالي {total}: {list}.',
+    sliceText: '{label} {value} ({pct})', sliceDescribe: '{label}: {value}، {pct} من {total}',
+  },
+})
+/** Gauge (namespace 'chart'). */
+export const CHART_GAUGE_MESSAGES = defineMessages('chart', {
+  en: {
+    gauge: 'Gauge',
+  },
+  de: {
+    gauge: 'Anzeige',
+  },
+  ar: {
+    gauge: 'مؤشر',
+  },
+})
+/** RadarChart (namespace 'chart'). */
+export const CHART_RADAR_MESSAGES = defineMessages('chart', {
+  en: {
+    radarLabel: 'Radar chart: {names}', axes: '{n, plural, one {# axis} other {# axes}}: {list}.',
+  },
+  de: {
+    radarLabel: 'Netzdiagramm: {names}', axes: '{n, plural, one {# Achse} other {# Achsen}}: {list}.',
+  },
+  ar: {
+    radarLabel: 'مخطط راداري: {names}',
+    axes: '{n, plural, one {محور واحد} two {محوران} few {# محاور} many {# محورًا} other {# محور}}: {list}.',
+  },
+})
+/** ScatterChart (namespace 'chart'). */
+export const CHART_SCATTER_MESSAGES = defineMessages('chart', {
+  en: {
+    bubble: 'Bubble chart', scatter: 'Scatter plot', size: 'size', points: '{n, plural, one {# point} other {# points}}.',
+    groups: 'Groups: {list}.', leftToRight: 'Arrow keys go left to right.',
+  },
+  de: {
+    bubble: 'Blasendiagramm', scatter: 'Streudiagramm', size: 'Größe', points: '{n, plural, one {# Punkt} other {# Punkte}}.',
+    groups: 'Gruppen: {list}.', leftToRight: 'Pfeiltasten gehen von links nach rechts.',
+  },
+  ar: {
+    bubble: 'مخطط فقاعي', scatter: 'مخطط انتشار', size: 'الحجم',
+    points: '{n, plural, zero {لا نقاط} one {نقطة واحدة} two {نقطتان} few {# نقاط} many {# نقطة} other {# نقطة}}.',
+    groups: 'المجموعات: {list}.', leftToRight: 'تنتقل الأسهم من اليسار إلى اليمين.',
+  },
+})
+/** Heatmap and CalendarHeatmap (namespace 'chart'). */
+export const CHART_HEATMAP_MESSAGES = defineMessages('chart', {
+  en: {
+    heatmapName: 'Heatmap, {rows, plural, one {# row} other {# rows}} by {cols, plural, one {# column} other {# columns}}',
+    heatSummary: 'Values {range}. Arrow keys read the cells.', tapCell: 'Tap a cell', hoverCell: 'Hover a cell',
+    swipeMore: 'swipe for more', scrollMore: 'scroll for more', contributions: '{n, plural, one {# contribution} other {# contributions}}',
+    lastWeeks: 'Contributions, last {n} weeks', less: 'Less', more: 'More',
+  },
+  de: {
+    heatmapName: 'Heatmap, {rows, plural, one {# Zeile} other {# Zeilen}} × {cols, plural, one {# Spalte} other {# Spalten}}',
+    heatSummary: 'Werte {range}. Pfeiltasten lesen die Zellen.', tapCell: 'Tippe auf eine Zelle', hoverCell: 'Zeige auf eine Zelle',
+    swipeMore: 'wischen für mehr', scrollMore: 'scrollen für mehr', contributions: '{n, plural, one {# Beitrag} other {# Beiträge}}',
+    lastWeeks: 'Beiträge der letzten {n} Wochen', less: 'Weniger', more: 'Mehr',
+  },
+  ar: {
+    heatmapName: 'خريطة حرارية، {rows, plural, one {صف واحد} two {صفان} few {# صفوف} many {# صفًا} other {# صف}} × {cols, plural, one {عمود واحد} two {عمودان} few {# أعمدة} many {# عمودًا} other {# عمود}}',
+    heatSummary: 'القيم {range}. تقرأ الأسهم الخلايا.', tapCell: 'انقر على خلية', hoverCell: 'مرّر المؤشر فوق خلية',
+    swipeMore: 'اسحب للمزيد', scrollMore: 'مرّر للمزيد',
+    contributions: '{n, plural, zero {لا مساهمات} one {مساهمة واحدة} two {مساهمتان} few {# مساهمات} many {# مساهمة} other {# مساهمة}}',
+    lastWeeks: 'المساهمات، آخر {n} أسبوعًا', less: 'أقل', more: 'أكثر',
+  },
+})
+/** FunnelChart (namespace 'chart'). */
+export const CHART_FUNNEL_MESSAGES = defineMessages('chart', {
+  en: {
+    funnel: 'Funnel', count: 'Count', ofFirst: 'Of first step', steps: '{n, plural, one {# step} other {# steps}}: {list}.',
+    reachLast: '{pct} reach the last step.', stepDescribe: '{label}: {value}, {pct} of the first step',
+    ofBefore: '{pct} of the step before',
+  },
+  de: {
+    funnel: 'Trichter', count: 'Anzahl', ofFirst: 'Vom ersten Schritt', steps: '{n, plural, one {# Schritt} other {# Schritte}}: {list}.',
+    reachLast: '{pct} erreichen den letzten Schritt.', stepDescribe: '{label}: {value}, {pct} des ersten Schritts',
+    ofBefore: '{pct} des vorigen Schritts',
+  },
+  ar: {
+    funnel: 'مسار التحويل', count: 'العدد', ofFirst: 'من الخطوة الأولى',
+    steps: '{n, plural, one {خطوة واحدة} two {خطوتان} few {# خطوات} many {# خطوة} other {# خطوة}}: {list}.',
+    reachLast: '{pct} يصلون إلى الخطوة الأخيرة.', stepDescribe: '{label}: {value}، {pct} من الخطوة الأولى',
+    ofBefore: '{pct} من الخطوة السابقة',
+  },
+})
+/** BarList (namespace 'chart'). */
+export const CHART_BARLIST_MESSAGES = defineMessages('chart', {
+  en: {
+    ranked: 'Ranked list', items: '{n, plural, one {# item} other {# items}}, {range}.', itemDescribe: '{i} of {n}: {label} {value}',
+  },
+  de: {
+    ranked: 'Rangliste', items: '{n, plural, one {# Eintrag} other {# Einträge}}, {range}.', itemDescribe: '{i} von {n}: {label} {value}',
+  },
+  ar: {
+    ranked: 'قائمة مرتّبة', items: '{n, plural, one {عنصر واحد} two {عنصران} few {# عناصر} many {# عنصرًا} other {# عنصر}}، {range}.',
+    itemDescribe: '{i} من {n}: {label} {value}',
+  },
+})
+/** Treemap (namespace 'chart'). */
+export const CHART_TREEMAP_MESSAGES = defineMessages('chart', {
+  en: {
+    treemap: 'Treemap', parts: '{n, plural, one {# part} other {# parts}}, largest first: {list}.',
+  },
+  de: {
+    treemap: 'Treemap', parts: '{n, plural, one {# Teil} other {# Teile}}, größte zuerst: {list}.',
+  },
+  ar: {
+    treemap: 'خريطة شجرية',
+    parts: '{n, plural, one {جزء واحد} two {جزآن} few {# أجزاء} many {# جزءًا} other {# جزء}}، الأكبر أولًا: {list}.',
+  },
+})
+/** SparkTile and TickerTable (namespace 'chart'). */
+export const CHART_SPARK_MESSAGES = defineMessages('chart', {
+  en: {
+    pointOf: 'Point {i} of {n}',
+    trend: 'Trend of {n, plural, one {# point} other {# points}}, {range}, {up, select, yes {up} other {down}} {pct} from the first.',
+    noTrend: 'No trend data.', prices: 'Prices', upSince: 'Up since the first price shown', downSince: 'Down since the first price shown',
+  },
+  de: {
+    pointOf: 'Punkt {i} von {n}',
+    trend: 'Verlauf aus {n, plural, one {# Punkt} other {# Punkten}}, {range}, {up, select, yes {plus} other {minus}} {pct} seit dem ersten.',
+    noTrend: 'Keine Verlaufsdaten.', prices: 'Kurse', upSince: 'Gestiegen seit dem ersten angezeigten Kurs',
+    downSince: 'Gefallen seit dem ersten angezeigten Kurs',
+  },
+  ar: {
+    pointOf: 'النقطة {i} من {n}',
+    trend: 'اتجاه من {n, plural, one {نقطة واحدة} two {نقطتين} few {# نقاط} many {# نقطة} other {# نقطة}}، {range}، {up, select, yes {ارتفاع} other {انخفاض}} {pct} منذ الأولى.',
+    noTrend: 'لا بيانات للاتجاه.', prices: 'الأسعار', upSince: 'ارتفع منذ أول سعر معروض', downSince: 'انخفض منذ أول سعر معروض',
+  },
+})
+/** BulletChart (namespace 'chart'). */
+export const CHART_BULLET_MESSAGES = defineMessages('chart', {
+  en: {
+    bullet: 'Bullet chart', actual: 'Actual', target: 'Target',
+    measures: '{n, plural, one {# measure} other {# measures}} against targets. {met} of {n} meet their target.',
+    measureDescribe: '{label}: {value}, target {target}, {met, select, yes {met} other {below target}}',
+  },
+  de: {
+    bullet: 'Bullet-Diagramm', actual: 'Ist', target: 'Ziel',
+    measures: '{n, plural, one {# Kennzahl} other {# Kennzahlen}} gegen Ziele. {met} von {n} erreichen ihr Ziel.',
+    measureDescribe: '{label}: {value}, Ziel {target}, {met, select, yes {erreicht} other {unter dem Ziel}}',
+  },
+  ar: {
+    bullet: 'مخطط نقطي', actual: 'الفعلي', target: 'الهدف',
+    measures: '{n, plural, one {مقياس واحد} two {مقياسان} few {# مقاييس} many {# مقياسًا} other {# مقياس}} مقابل الأهداف. {met} من {n} تحقق هدفها.',
+    measureDescribe: '{label}: {value}، الهدف {target}، {met, select, yes {محقق} other {دون الهدف}}',
+  },
+})
+/** RegressionChart (namespace 'chart'). */
+export const CHART_REGRESSION_MESSAGES = defineMessages('chart', {
+  en: {
+    regression: 'Regression chart', ci95: '95% CI', prediction: 'Prediction',
+    regSummary: '{n, plural, one {# point} other {# points}}. Fitted line y = {a} + {b}x, R² {r2}. Arrow keys walk the fitted line.',
+    regDescribe: 'x {x}: fitted {y}, 95% CI plus or minus {ci}', regPred: 'prediction plus or minus {p}', slope: 'slope',
+    intercept: 'intercept', residualSE: 'residual SE', xEq: 'x = {x}',
+  },
+  de: {
+    regression: 'Regressionsdiagramm', ci95: '95-%-KI', prediction: 'Vorhersage',
+    regSummary: '{n, plural, one {# Punkt} other {# Punkte}}. Ausgleichsgerade y = {a} + {b}x, R² {r2}. Pfeiltasten folgen der Geraden.',
+    regDescribe: 'x {x}: geschätzt {y}, 95-%-KI plus/minus {ci}', regPred: 'Vorhersage plus/minus {p}', slope: 'Steigung',
+    intercept: 'Achsenabschnitt', residualSE: 'Residual-SE', xEq: 'x = {x}',
+  },
+  ar: {
+    regression: 'مخطط انحدار', ci95: 'فاصل ثقة 95%', prediction: 'التنبؤ',
+    regSummary: '{n, plural, one {نقطة واحدة} two {نقطتان} few {# نقاط} many {# نقطة} other {# نقطة}}. خط الملاءمة y = {a} + {b}x، R² {r2}. تتبع الأسهم الخط.',
+    regDescribe: 'x {x}: القيمة المقدّرة {y}، فاصل ثقة 95% زائد أو ناقص {ci}', regPred: 'التنبؤ زائد أو ناقص {p}', slope: 'الميل',
+    intercept: 'المقطع', residualSE: 'الخطأ المعياري للبواقي', xEq: 'x = {x}',
+  },
+})
+/** BoxViolinChart (namespace 'chart'). */
+export const CHART_BOX_MESSAGES = defineMessages('chart', {
+  en: {
+    boxViolin: 'Box and violin chart', median: 'median', iqr: 'IQR', whiskers: 'whiskers', outlier: 'outlier',
+    boxGroups: '{n, plural, one {# group} other {# groups}}: {list}.', boxMedian: '{label} median {v}',
+    boxDescribe: '{label}: median {q2}, quartiles {q1} to {q3}, whiskers {lo} to {hi}',
+    outliers: '{n, plural, one {# outlier} other {# outliers}}',
+  },
+  de: {
+    boxViolin: 'Box- und Violinplot', median: 'Median', iqr: 'IQR', whiskers: 'Whisker', outlier: 'Ausreißer',
+    boxGroups: '{n, plural, one {# Gruppe} other {# Gruppen}}: {list}.', boxMedian: '{label} Median {v}',
+    boxDescribe: '{label}: Median {q2}, Quartile {q1} bis {q3}, Whisker {lo} bis {hi}',
+    outliers: '{n, plural, one {# Ausreißer} other {# Ausreißer}}',
+  },
+  ar: {
+    boxViolin: 'مخطط صندوقي وكماني', median: 'الوسيط', iqr: 'المدى الربيعي', whiskers: 'الشعيرات', outlier: 'قيمة شاذة',
+    boxGroups: '{n, plural, one {مجموعة واحدة} two {مجموعتان} few {# مجموعات} many {# مجموعة} other {# مجموعة}}: {list}.',
+    boxMedian: '{label} الوسيط {v}', boxDescribe: '{label}: الوسيط {q2}، الربيعيات {q1} إلى {q3}، الشعيرات {lo} إلى {hi}',
+    outliers: '{n, plural, one {قيمة شاذة واحدة} two {قيمتان شاذتان} few {# قيم شاذة} many {# قيمة شاذة} other {# قيمة شاذة}}',
+  },
+})
+/** DensityHistogram (namespace 'chart'). */
+export const CHART_HISTOGRAM_MESSAGES = defineMessages('chart', {
+  en: {
+    histogram: 'Histogram with density curve', values: 'values',
+    histSummary: '{n, plural, one {# value} other {# values}} in {bins} bins from {lo} to {hi}. Mean {m}, median {md}, standard deviation {sd}.',
+    binDescribe: '{lo} to {hi}: {n, plural, one {# value} other {# values}}', meanV: 'mean {v}', medianV: 'median {v}', sigmaV: 'σ {v}',
+  },
+  de: {
+    histogram: 'Histogramm mit Dichtekurve', values: 'Werte',
+    histSummary: '{n, plural, one {# Wert} other {# Werte}} in {bins} Klassen von {lo} bis {hi}. Mittelwert {m}, Median {md}, Standardabweichung {sd}.',
+    binDescribe: '{lo} bis {hi}: {n, plural, one {# Wert} other {# Werte}}', meanV: 'Mittel {v}', medianV: 'Median {v}', sigmaV: 'σ {v}',
+  },
+  ar: {
+    histogram: 'مدرج تكراري مع منحنى الكثافة', values: 'القيم',
+    histSummary: '{n, plural, one {قيمة واحدة} two {قيمتان} few {# قيم} many {# قيمة} other {# قيمة}} في {bins} فئة من {lo} إلى {hi}. المتوسط {m}، الوسيط {md}، الانحراف المعياري {sd}.',
+    binDescribe: '{lo} إلى {hi}: {n, plural, zero {لا قيم} one {قيمة واحدة} two {قيمتان} few {# قيم} many {# قيمة} other {# قيمة}}',
+    meanV: 'المتوسط {v}', medianV: 'الوسيط {v}', sigmaV: 'σ {v}',
+  },
+})
+/** ForestPlot (namespace 'chart'). */
+export const CHART_FOREST_MESSAGES = defineMessages('chart', {
+  en: {
+    segment: 'Segment', lift: 'Lift [95% CI]', worse: '← worse', better: 'better →', forest: 'Forest plot',
+    ciText: '{effect}, 95% CI {lo} to {hi}', significant: 'significant', notSignificant: 'not significant', weight: 'weight {pct}',
+    pooledIV: 'Pooled (inverse-variance)', pooled: 'Pooled',
+    forestSummary: '{n, plural, one {# row} other {# rows}} and a pooled estimate of {p}. {k} of {n} intervals clear zero.',
+    forestDescribe: '{label}: {effect}, 95% interval {lo} to {hi}, {sig}', pooledDescribe: 'Pooled: {effect}, 95% interval {lo} to {hi}',
+  },
+  de: {
+    segment: 'Segment', lift: 'Uplift [95-%-KI]', worse: '← schlechter', better: 'besser →', forest: 'Forest-Plot',
+    ciText: '{effect}, 95-%-KI {lo} bis {hi}', significant: 'signifikant', notSignificant: 'nicht signifikant', weight: 'Gewicht {pct}',
+    pooledIV: 'Gepoolt (inverse Varianz)', pooled: 'Gepoolt',
+    forestSummary: '{n, plural, one {# Zeile} other {# Zeilen}} und eine gepoolte Schätzung von {p}. {k} von {n} Intervallen schließen null aus.',
+    forestDescribe: '{label}: {effect}, 95-%-Intervall {lo} bis {hi}, {sig}',
+    pooledDescribe: 'Gepoolt: {effect}, 95-%-Intervall {lo} bis {hi}',
+  },
+  ar: {
+    segment: 'الشريحة', lift: 'التحسّن [فاصل ثقة 95%]', worse: '← أسوأ', better: 'أفضل →', forest: 'مخطط الغابة',
+    ciText: '{effect}، فاصل ثقة 95% من {lo} إلى {hi}', significant: 'دال إحصائيًا', notSignificant: 'غير دال إحصائيًا',
+    weight: 'الوزن {pct}', pooledIV: 'مجمّع (التباين العكسي)', pooled: 'مجمّع',
+    forestSummary: '{n, plural, one {صف واحد} two {صفان} few {# صفوف} many {# صفًا} other {# صف}} وتقدير مجمّع قدره {p}. {k} من {n} فواصل لا تتضمن الصفر.',
+    forestDescribe: '{label}: {effect}، فاصل 95% من {lo} إلى {hi}، {sig}', pooledDescribe: 'مجمّع: {effect}، فاصل 95% من {lo} إلى {hi}',
+  },
+})
+
+/** The provider's locale for charts: messages, formatters, direction and the summary helpers. */
+function useChartLocale<K extends string = never>(own?: MessageDefs<K>) {
+  const { fmt, dir, locale, weekStartsOn } = useLocale(), kit = useMessages(CHART_MESSAGES), mine = useMessages<string>((own ?? CHART_MESSAGES) as MessageDefs<string>)
+  // each chart carries only its own catalog plus the shared kit, so a drop-in file doesn't embed every chart's strings
+  const cm = (key: K | MessageKeyOf<typeof CHART_MESSAGES>, vars?: MessageVars) => own && key in own.en ? mine(key, vars) : kit(key as MessageKeyOf<typeof CHART_MESSAGES>, vars)
+  /** Fixed decimals in the locale: fixed(1.234, 2) → "1.23" / "1,23" / "١٫٢٣". */
+  const fixed = (v: number, d = 1) => fmt.number(Math.round(v * 10 ** d) / 10 ** d, { minimumFractionDigits: d, maximumFractionDigits: d })
+  /** "a to b" range text for the summaries. */
+  const range = (vals: number[], f: (n: number) => string) => { const v = vals.filter(Number.isFinite); return v.length ? cm('range', { from: f(minOf(v)), to: f(maxOf(v)) }) : cm('noValues') }
+  /** Whole-number percent of a fraction: 0.42 → "42%" / "42 %" / "٤٢٪". */
+  const pct = (f: number) => fmt.percent(Number.isFinite(f) ? f : 0, 0)
+  return { cm, fmt, dir, locale, weekStartsOn, fixed, range, pct }
+}
+/** Room for the widest y-tick label (Arabic compact numbers such as "١٢٫٤ ألف" are wider than "12.4K"). */
+const chartAxisPad = (labels: string[], min = 40) => Math.max(min, Math.ceil(maxOf(labels.map(s => s.length), 0) * 6.2 + 12))
 /**
  * One row of chart data: the x label plus one field per series. Chart is generic over its rows, so typed rows
  * (interfaces included) work too and `x` / `series[].key` are checked against their keys; this is the untyped default.
@@ -82,6 +375,11 @@ export type ChartFocusOptions = {
   columns?: number
   /** the point the first arrow press lands on (default 0) */
   start?: number
+  /**
+   * Which way ←/→ step: 'ltr' (default) for plots, which run left to right in every locale; pass the locale's dir
+   * for charts that mirror (lists such as BarList), so ← moves forward in RTL.
+   */
+  dir?: UIDir
 }
 /**
  * The keyboard model every chart shares. The chart is one Tab stop (role=group, roledescription "chart", a name and an
@@ -90,8 +388,9 @@ export type ChartFocusOptions = {
  * keyboard users, and each move is announced in a polite live region. Tab focus lands on the first point; a mouse click
  * doesn't. Spread `props` on the focusable box and render `a11y` inside it.
  */
-export function useChartFocus({ count, index, onIndex, label, summary, describe, columns, start = 0 }: ChartFocusOptions) {
+export function useChartFocus({ count, index, onIndex, label, summary, describe, columns, start = 0, dir = 'ltr' }: ChartFocusOptions) {
   const id = useId()
+  const cm = useMessages(CHART_MESSAGES)
   const [live, setLive] = useState('')
   const go = (i: number) => { onIndex(i); setLive(describe(i)) }
   const onKeyDown = (e: ReactKeyboardEvent<HTMLElement>) => {
@@ -100,8 +399,8 @@ export function useChartFocus({ count, index, onIndex, label, summary, describe,
     const c = columns && columns > 0 ? columns : 0, cur = index === null || index >= count ? null : index
     const row = c && cur !== null ? cur - (cur % c) : 0
     let next: number | null = null
-    switch (e.key) {
-      case 'ArrowRight': next = cur === null ? start : c ? (cur % c < c - 1 ? cur + 1 : cur) : cur + 1; break
+    switch (logicalArrow(e.key, dir)) {
+      case 'ArrowRight': next = cur === null ? start : c ? (cur % c < c - 1 ? cur + 1 : cur) : cur + 1; break // rtl-lint-ignore: LTR plot (logicalArrow above)
       case 'ArrowLeft': next = cur === null ? start : c ? (cur % c > 0 ? cur - 1 : cur) : cur - 1; break
       case 'ArrowDown': next = cur === null ? start : cur + (c || 1); break
       case 'ArrowUp': next = cur === null ? start : cur - (c || 1); break
@@ -114,7 +413,7 @@ export function useChartFocus({ count, index, onIndex, label, summary, describe,
     go(clamp(next, 0, count - 1))
   }
   const props = {
-    tabIndex: 0, role: 'group', 'aria-roledescription': 'chart', 'aria-label': label, 'aria-describedby': `${id}-sum`, onKeyDown,
+    tabIndex: 0, role: 'group', 'aria-roledescription': cm('roledesc'), 'aria-label': label, 'aria-describedby': `${id}-sum`, onKeyDown,
     onFocus: (e: ReactFocusEvent<HTMLElement>) => { if (e.target === e.currentTarget && index === null && count && e.currentTarget.matches(':focus-visible')) go(clamp(start, 0, count - 1)) },
     onBlur: (e: ReactFocusEvent<HTMLElement>) => { if (!e.currentTarget.contains(e.relatedTarget as Node | null)) { onIndex(null); setLive('') } },
   }
@@ -123,8 +422,6 @@ export function useChartFocus({ count, index, onIndex, label, summary, describe,
 }
 /** Focus ring for a chart's focusable box (the active point carries the second, data-level mark). */
 const CHART_FOCUS = 'rounded-[var(--r-md)] outline-none focus-visible:outline-solid focus-visible:outline-2 focus-visible:outline-offset-4 focus-visible:outline-[var(--accent)]'
-/** "a to b" range text for the summaries. */
-const chartRange = (vals: number[], f: (n: number) => string) => { const v = vals.filter(Number.isFinite); return v.length ? `${f(minOf(v))} to ${f(maxOf(v))}` : 'no values' }
 /** A hover index that is dropped (not left dangling) when the data shrinks under it. */
 const chartIndex = (i: number | null, n: number) => (i !== null && i >= 0 && i < n ? i : null)
 
@@ -154,17 +451,20 @@ const num = (v: unknown) => (v === null || v === undefined || v === '' ? null : 
  * a hover readout. Charts ignore that trailing leave for touch (core onMouseLeave) and dismiss on the next tap
  * outside or Escape instead (core useOutside). */
 /**
- * Tooltip inside a chart's relative box (the in-box sibling of overlay's PointerTooltip, same surface): sits right of x,
- * flips left when there is no room and is clamped to the box, gliding between points.
+ * Tooltip inside a chart's relative box (the in-box sibling of overlay's PointerTooltip, same surface): sits on the
+ * reading side of x (right, or left in RTL), flips when there is no room and is clamped to the box, gliding between
+ * points. `x` is physical (plot coordinates); the text follows the locale's direction.
  */
 function ChartTooltip({ x, y, children, width }: { x: number; y: number; children: ReactNode; width: number }) {
   const ref = useRef<HTMLDivElement>(null)
+  const { dir } = useLocale()
   const [tw, setTw] = useState(150)
   useLayoutEffect(() => { const w = ref.current?.offsetWidth; if (w && Math.abs(w - tw) > 1) setTw(w) })
-  const flip = x + 12 + tw > width && x - 12 - tw > -8
-  const left = clamp(flip ? x - 12 - tw : x + 12, Math.min(0, width - tw), width - tw)
+  const fitsR = x + 12 + tw <= width, fitsL = x - 12 - tw >= -8
+  const right = dir === 'rtl' ? !fitsL && fitsR : fitsR || !fitsL
+  const left = clamp(right ? x + 12 : x - 12 - tw, Math.min(0, width - tw), width - tw)
   return (
-    <motion.div ref={ref} role="tooltip" className={cn(surface.floating, 'pointer-events-none absolute z-10 w-max max-w-[min(300px,calc(100vw-40px))] min-w-[120px] rounded-[var(--r-md)] px-2.5 py-1.5 text-xs')}
+    <motion.div ref={ref} role="tooltip" dir={dir} className={cn(surface.floating, 'pointer-events-none absolute z-10 w-max max-w-[min(300px,calc(100vw-40px))] min-w-[120px] rounded-[var(--r-md)] px-2.5 py-1.5 text-xs')}
       initial={false} animate={{ left, top: y }} transition={spring(0.1, 0.25)}>
       {children}
     </motion.div>
@@ -275,7 +575,9 @@ export type ChartProps<T extends object = ChartDatum> = {
  * Keyboard: the chart is one Tab stop; arrows, Home and End move the same crosshair and tooltip (useChartFocus).
  * Draws in when scrolled into view.
  */
-export function Chart<T extends object = ChartDatum>({ data: allRows, x, series, height = 220, stacked, band, gap = 0.3, format = compact, rightFormat, legend = true, curve = 'linear', zero = true, domain, tooltip, maxPoints, label, summary, xFormat, className }: ChartProps<T>) {
+export function Chart<T extends object = ChartDatum>({ data: allRows, x, series, height = 220, stacked, band, gap = 0.3, format: formatProp, rightFormat, legend = true, curve = 'linear', zero = true, domain, tooltip, maxPoints, label, summary, xFormat, className }: ChartProps<T>) {
+  const { cm, fmt: lf, range } = useChartLocale()
+  const format = formatProp ?? lf.compact
   const data = useMemo(() => chartDownsample(allRows, maxPoints), [allRows, maxPoints])
   const [ref, w, seen] = useChartFrame<HTMLDivElement>()
   const [hoverAt, setHover] = useState<number | null>(null)
@@ -284,8 +586,8 @@ export function Chart<T extends object = ChartDatum>({ data: allRows, x, series,
   const S = series.map((s, i) => ({ ...s, type: s.type ?? 'line', color: s.color ?? PALETTE[i % PALETTE.length], label: s.label ?? s.key, axis: s.axis ?? 'left', curve: s.curve ?? curve }))
   type RS = (typeof S)[number]
   const hasL = S.some(s => s.axis === 'left'), hasR = S.some(s => s.axis === 'right')
-  const pad = { l: hasL ? 40 : 8, r: hasR ? 40 : 10, t: S.some(s => s.labelOf) ? 22 : 10, b: 24 }
-  const iw = Math.max(0, w - pad.l - pad.r), ih = height - pad.t - pad.b
+  const pad = { l: 8, r: 10, t: S.some(s => s.labelOf) ? 22 : 10, b: 24 }
+  const ih = height - pad.t - pad.b
   const n = data.length, slots = S.filter(s => s.type === 'bar' || s.type === 'float'), banded = slots.length > 0
   // stacking: each series sits on the sum of the stackable series before it (same type, same axis)
   const base = (i: number, si: number) => stacked ? S.slice(0, si).filter(s => s.type === S[si].type && s.axis === S[si].axis).reduce((a, s) => a + (num(data[i][s.key]) ?? 0), 0) : 0
@@ -299,6 +601,10 @@ export function Chart<T extends object = ChartDatum>({ data: allRows, x, series,
     return { ticks, Y: (val: number) => pad.t + ih - ((val - y0) / (y1 - y0 || 1)) * ih, rest: y0 <= 0 && y1 >= 0 ? 0 : y0 }
   }
   const L = hasL ? scale('left', domain) : null, R = hasR ? scale('right') : null, G = L ?? R
+  // the axes take the room their widest tick label needs (Arabic compact numbers run longer than "12.4K")
+  if (L) pad.l = chartAxisPad(L.ticks.map(format))
+  if (R) pad.r = chartAxisPad(R.ticks.map(rightFormat ?? format))
+  const iw = Math.max(0, w - pad.l - pad.r)
   const sc = (s: RS) => (s.axis === 'right' ? R : L) ?? G!
   const step = iw / Math.max(1, banded ? n : n - 1)
   const X = (i: number) => pad.l + (banded ? step * (i + 0.5) : step * i)
@@ -326,14 +632,14 @@ export function Chart<T extends object = ChartDatum>({ data: allRows, x, series,
   useOutside([ref], () => setHover(null), hover !== null, { escape: true })
   const valueText = (i: number, si: number) => {
     const s = S[si]
-    if (s.type === 'float') { const sp = span(i, si); return sp && `${fmtOf(s)(sp[0])} to ${fmtOf(s)(sp[1])}` }
+    if (s.type === 'float') { const sp = span(i, si); return sp && cm('range', { from: fmtOf(s)(sp[0]), to: fmtOf(s)(sp[1]) }) }
     const v = num(data[i][s.key]); return v === null ? null : fmtOf(s)(v)
   }
   const names = S.map(s => s.label)
   const focus = useChartFocus({
     count: n, index: hover, onIndex: setHover,
-    label: label ?? `${names.length > 1 ? `${names.slice(0, -1).join(', ')} and ${names[names.length - 1]}` : names[0] ?? 'Data'} chart`,
-    summary: summary ?? (n ? `${n} points from ${xText(0)} to ${xText(n - 1)}. ${S.map(s => `${s.label}: ${chartRange(data.map((_, i) => s.type === 'float' ? num(data[i][s.key]) ?? NaN : top(i, S.indexOf(s)) ?? NaN), fmtOf(s))}`).join('. ')}.` : 'No data.'),
+    label: label ?? cm('chartLabel', { names: names.length ? lf.list(names) : cm('data') }),
+    summary: summary ?? (n ? [cm('pointsFromTo', { n, from: xText(0), to: xText(n - 1) }), ...S.map(s => cm('seriesRange', { name: s.label, range: range(data.map((_, i) => s.type === 'float' ? num(data[i][s.key]) ?? NaN : top(i, S.indexOf(s)) ?? NaN), fmtOf(s)) }))].join(' ') : cm('noData')),
     describe: i => `${xText(i)}: ${S.map((s, si) => { const v = valueText(i, si); return v === null ? null : `${s.label} ${v}` }).filter(Boolean).join(', ')}`,
   })
   const whiskers = (caps: boolean) => S.map(s => s.whisker && !!s.whisker.caps === caps && data.map((d, i) => {
@@ -345,7 +651,8 @@ export function Chart<T extends object = ChartDatum>({ data: allRows, x, series,
   }))
   return (
     <div className={className}>
-      <div ref={ref} {...focus.props} className={cn('relative', CHART_FOCUS)} style={{ height }} onPointerLeave={onMouseLeave(() => setHover(null))}>
+      {/* an LTR plot in every locale (see CHART_MESSAGES); legend and tooltip text follow the locale */}
+      <div ref={ref} {...focus.props} dir="ltr" className={cn('relative', CHART_FOCUS)} style={{ height }} onPointerLeave={onMouseLeave(() => setHover(null))}>
         {focus.a11y}
         {w > 0 && G && (
           <svg width={w} height={height} aria-hidden className="block touch-pan-y overflow-visible text-[11px]"
@@ -409,12 +716,12 @@ export function Chart<T extends object = ChartDatum>({ data: allRows, x, series,
                 if (s.type === 'float') { const sp = span(hover, si); return sp && <TooltipRow key={s.key} color={s.colorOf?.(data[hover], hover) ?? s.color} label={s.label} value={`${fmtOf(s)(sp[0])} → ${fmtOf(s)(sp[1])}`} /> }
                 const v = num(data[hover][s.key]); return v !== null && <TooltipRow key={s.key} color={s.color} label={s.label} dashed={s.dashed} value={fmtOf(s)(v)} />
               })}
-              {band && num(data[hover][band.lower]) !== null && <TooltipRow color="var(--band)" label={band.label ?? 'Range'} value={`${format(num(data[hover][band.lower])!)}–${format(num(data[hover][band.upper])!)}`} />}
+              {band && num(data[hover][band.lower]) !== null && <TooltipRow color="var(--band)" label={band.label ?? cm('rangeLabel')} value={`${format(num(data[hover][band.lower])!)}–${format(num(data[hover][band.upper])!)}`} />}
             </>}
           </ChartTooltip>
         )}
       </div>
-      {legend && <Legend items={[...S.map(s => ({ label: s.label, color: s.color, dashed: s.dashed })), ...(band ? [{ label: band.label ?? 'Range', color: '', band: true }] : [])]} />}
+      {legend && <Legend items={[...S.map(s => ({ label: s.label, color: s.color, dashed: s.dashed })), ...(band ? [{ label: band.label ?? cm('rangeLabel'), color: '', band: true }] : [])]} />}
     </div>
   )
 }
@@ -425,20 +732,22 @@ export type Slice = { label: string; value: number; color?: string }
  * Share of a total. variant 'donut' (default; pie with thickness = size/2) or 'polar' (polar area: equal angles,
  * radius by value). Hover or tap a slice or legend row to focus it (tap outside to clear). Sweeps in when scrolled into view.
  */
-export function DonutChart({ data, size = 150, thickness = 20, format = compact, centerLabel = 'Total', variant = 'donut', label, className }:
+export function DonutChart({ data, size = 150, thickness = 20, format: formatProp, centerLabel: centerProp, variant = 'donut', label, className }:
   { data: Slice[]; size?: number; thickness?: number; format?: (n: number) => string; centerLabel?: string; variant?: 'donut' | 'polar'
     /** accessible name (default "<centerLabel> by share" / "Polar area chart") */ label?: string; className?: string }) {
   const [ref, seen] = useChartSeen<HTMLDivElement>()
+  const { cm, fmt: lf, locale } = useChartLocale(CHART_DONUT_MESSAGES)
+  const format = formatProp ?? lf.compact, centerLabel = centerProp ?? cm('total')
   const [hoverAt, setHover] = useState<number | null>(null)
   const hover = chartIndex(hoverAt, data.length)
   useOutside([ref], () => setHover(null), hover !== null, { escape: true })
   const total = data.reduce((a, d) => a + d.value, 0) || 1
-  const pctOf = (d: Slice) => Math.round((d.value / total) * 100)
+  const pctOf = (d: Slice) => lf.percent(Math.round((d.value / total) * 100) / 100, 0)
   const focus = useChartFocus({
     count: data.length, index: hover, onIndex: setHover,
-    label: label ?? (variant === 'polar' ? 'Polar area chart' : `${centerLabel} by share`),
-    summary: `${data.length} slices, total ${format(total)}: ${data.map(d => `${d.label} ${format(d.value)} (${pctOf(d)}%)`).join(', ')}.`,
-    describe: i => `${data[i].label}: ${format(data[i].value)}, ${pctOf(data[i])}% of ${format(total)}`,
+    label: label ?? (variant === 'polar' ? cm('polar') : cm('byShare', { label: centerLabel })),
+    summary: cm('slices', { n: data.length, total: format(total), list: lf.list(data.map(d => cm('sliceText', { label: d.label, value: format(d.value), pct: pctOf(d) }))) }),
+    describe: i => cm('sliceDescribe', { label: data[i].label, value: format(data[i].value), pct: pctOf(data[i]), total: format(total) }),
   })
   const colorOf = (d: Slice, i: number) => d.color ?? PALETTE[i % PALETTE.length]
   const r = (size - thickness) / 2 - 2, c = 2 * Math.PI * r
@@ -476,7 +785,7 @@ export function DonutChart({ data, size = 150, thickness = 20, format = compact,
         {variant === 'donut' ? (
           <div aria-hidden className="pointer-events-none absolute inset-0 grid place-content-center text-center">
             <span className="text-xs text-[var(--fg3)]">{hover === null ? centerLabel : data[hover].label}</span>
-            <AnimatedNumber value={hover === null ? total : data[hover].value} className="justify-center text-lg font-semibold" format={{ notation: 'compact', maximumFractionDigits: 1 }} />
+            <AnimatedNumber locale={locale} value={hover === null ? total : data[hover].value} className="justify-center text-lg font-semibold" format={{ notation: 'compact', maximumFractionDigits: 1 }} />
           </div>
         ) : hover !== null && (() => {
           const a = ((hover + 0.5) / data.length) * 2 * Math.PI - Math.PI / 2, rr = (data[hover].value / max) * R * 0.6
@@ -489,7 +798,7 @@ export function DonutChart({ data, size = 150, thickness = 20, format = compact,
             className={cn('flex items-center gap-2 text-[13px] transition-opacity', TOUCH.tap, hover !== null && hover !== i && 'opacity-50')}>
             <span className="h-2.5 w-2.5 rounded-[var(--r-sm)]" style={{ background: safeColor(colorOf(d, i)) }} />
             <span className="flex-1 text-[var(--fg2)]">{d.label}</span><span className="ui-num">{format(d.value)}</span>
-            <span className="ui-num w-10 text-right text-xs text-[var(--fg3)]">{pctOf(d)}%</span>
+            <span className="ui-num w-10 text-end text-xs text-[var(--fg3)]">{pctOf(d)}</span>
           </div>
         ))}
       </div>
@@ -504,18 +813,19 @@ export function DonutChart({ data, size = 150, thickness = 20, format = compact,
 export function Gauge({ value, min = 0, max = 100, label, format, numberFormat = { maximumFractionDigits: 0 }, color, thresholds = [[0.6, 'var(--ok)'], [0.85, 'var(--warn)'], [1, 'var(--bad)']], className }:
   { value: number; min?: number; max?: number; label?: string; format?: (v: number) => string; numberFormat?: Intl.NumberFormatOptions; color?: string; thresholds?: [number, string][]; className?: string }) {
   const [ref, seen] = useChartSeen<HTMLDivElement>()
+  const { cm, fmt: lf, locale } = useChartLocale(CHART_GAUGE_MESSAGES)
   const raw = (value - min) / (max - min || 1), t = Number.isFinite(raw) ? clamp(raw, 0, 1) : 0
   const stroke = color ?? thresholds.find(([at]) => t <= at)?.[1] ?? 'var(--primary)'
   const shown = useTween(seen && Number.isFinite(value) ? value : min, 800)
   const arc = 'M 12 82 A 68 68 0 0 1 148 82'
   return (
     <div ref={ref} className={cn('relative mx-auto w-full max-w-[220px]', className)}>
-      <svg viewBox="0 0 160 92" className="block w-full" role="img" aria-label={`${label ?? 'Gauge'}: ${format ? format(value) : value}`}>
+      <svg viewBox="0 0 160 92" className="block w-full" role="img" aria-label={`${label ?? cm('gauge')}: ${format ? format(value) : lf.number(value, numberFormat)}`}>
         <path d={arc} fill="none" stroke="var(--muted)" strokeWidth={14} strokeLinecap="round" />
         <motion.path d={arc} fill="none" stroke={stroke} strokeWidth={14} strokeLinecap="round" initial={{ pathLength: 0 }} animate={{ pathLength: seen ? Math.max(0.001, t) : 0, stroke }} transition={spring(0.15, 0.9)} />
       </svg>
       <div className="absolute inset-x-0 bottom-1 text-center">
-        {format ? <div className="ui-num text-2xl font-semibold">{format(shown)}</div> : <AnimatedNumber value={Math.round(shown)} format={numberFormat} className="justify-center text-[28px] font-semibold tracking-tight" />}
+        {format ? <div className="ui-num text-2xl font-semibold">{format(shown)}</div> : <AnimatedNumber locale={locale} value={Math.round(shown)} format={numberFormat} className="justify-center text-[28px] font-semibold tracking-tight" />}
         {label && <div className="mt-1 text-xs text-[var(--fg3)]">{label}</div>}
       </div>
     </div>
@@ -523,17 +833,19 @@ export function Gauge({ value, min = 0, max = 100, label, format, numberFormat =
 }
 
 /** Radar / spider chart for comparing a few profiles across the same axes. Vertex dots, dashed or unfilled series; hover or tap an axis for its values. */
-export function RadarChart({ axes, series, max, size = 240, format = compact, label, className }:
+export function RadarChart({ axes, series, max, size = 240, format: formatProp, label, className }:
   { axes: string[]; series: { label: string; values: number[]; color?: string; dashed?: boolean; fill?: boolean }[]; max?: number; size?: number; format?: (n: number) => string
     /** accessible name (default: the series labels) */ label?: string; className?: string }) {
   const [ref, seen] = useChartSeen<HTMLDivElement>()
   const [hoverAt, setHover] = useState<number | null>(null)
   const hover = chartIndex(hoverAt, axes.length)
+  const { cm, fmt: lf, range } = useChartLocale(CHART_RADAR_MESSAGES)
+  const format = formatProp ?? lf.compact
   useOutside([ref], () => setHover(null), hover !== null, { escape: true })
   const focus = useChartFocus({
     count: axes.length, index: hover, onIndex: setHover,
-    label: label ?? `Radar chart: ${series.map(s => s.label).join(' vs ')}`,
-    summary: `${axes.length} axes: ${axes.join(', ')}. ${series.map(s => `${s.label}: ${chartRange(s.values, format)}`).join('. ')}.`,
+    label: label ?? cm('radarLabel', { names: lf.list(series.map(s => s.label)) }),
+    summary: [cm('axes', { n: axes.length, list: lf.list(axes) }), ...series.map(s => cm('seriesRange', { name: s.label, range: range(s.values, format) }))].join(' '),
     describe: i => `${axes[i]}: ${series.map(s => `${s.label} ${format(s.values[i] ?? 0)}`).join(', ')}`,
   })
   // an all-zero (or empty) chart would divide by zero: fall back to a unit scale
@@ -547,7 +859,7 @@ export function RadarChart({ axes, series, max, size = 240, format = compact, la
   }
   return (
     <div ref={ref} className={cn('flex flex-col items-center', className)}>
-      <div {...focus.props} className={cn('relative', CHART_FOCUS)} style={{ width: size, height: size }} onPointerLeave={onMouseLeave(() => setHover(null))}>
+      <div {...focus.props} dir="ltr" className={cn('relative', CHART_FOCUS)} style={{ width: size, height: size }} onPointerLeave={onMouseLeave(() => setHover(null))}>
         {focus.a11y}
         <svg width={size} height={size} aria-hidden className="overflow-visible text-[11px]">
           {[0.25, 0.5, 0.75, 1].map(f => <path key={f} d={linePath(axes.map((_, i) => pt(i, m * f))) + 'Z'} fill="none" stroke="var(--line)" />)}
@@ -581,7 +893,7 @@ export type Point = { x: number; y: number; r?: number; label?: string; group?: 
  * Scatter plot; give points an `r` for a bubble chart and a `group` for colours. Points pop in when scrolled into view.
  * Hover or tap near a point (or slide a finger) for its tooltip; touch uses a wider catch radius.
  */
-export function ScatterChart({ points: allPoints, height = 220, xLabel, yLabel, format = compact, xDomain, yDomain, maxPoints, label, className }:
+export function ScatterChart({ points: allPoints, height = 220, xLabel, yLabel, format: formatProp, xDomain, yDomain, maxPoints, label, className }:
   { points: Point[]; height?: number; xLabel?: string; yLabel?: string; format?: (n: number) => string; xDomain?: [number, number]; yDomain?: [number, number]
     /** draw at most this many points (evenly sampled) */ maxPoints?: number; /** accessible name (default "Scatter plot" / "Bubble chart") */ label?: string; className?: string }) {
   const points = useMemo(() => chartDownsample(allPoints, maxPoints), [allPoints, maxPoints])
@@ -591,18 +903,20 @@ export function ScatterChart({ points: allPoints, height = 220, xLabel, yLabel, 
   const [hoverAt, setHover] = useState<number | null>(null)
   const hover = chartIndex(hoverAt, points.length)
   const groups = [...new Set(points.map(p => p.group ?? ''))]
-  const pad = { l: 40, r: 12, t: 10, b: 28 }, iw = w - pad.l - pad.r, ih = height - pad.t - pad.b
+  const { cm, fmt: lf, range } = useChartLocale(CHART_SCATTER_MESSAGES)
+  const format = formatProp ?? lf.compact
   const xt = niceTicks(xDomain?.[0] ?? minOf(points.map(p => p.x)), xDomain?.[1] ?? maxOf(points.map(p => p.x)))
   const yt = niceTicks(yDomain?.[0] ?? minOf(points.map(p => p.y), 0), yDomain?.[1] ?? maxOf(points.map(p => p.y)))
+  const pad = { l: chartAxisPad(yt.map(format)), r: 12, t: 10, b: 28 }, iw = w - pad.l - pad.r, ih = height - pad.t - pad.b
   const X = (v: number) => pad.l + ((v - xt[0]) / (xt[xt.length - 1] - xt[0] || 1)) * iw, Y = (v: number) => pad.t + ih - ((v - yt[0]) / (yt[yt.length - 1] - yt[0] || 1)) * ih
   const color = (p: Point) => PALETTE[groups.indexOf(p.group ?? '') % PALETTE.length]
   useOutside([ref], () => setHover(null), hover !== null, { escape: true })
   const bubbles = points.some(p => p.r !== undefined)
-  const pointText = (p: Point) => `${p.label ? `${p.label}: ` : ''}${xLabel ?? 'x'} ${format(p.x)}, ${yLabel ?? 'y'} ${format(p.y)}${p.r !== undefined ? `, size ${format(p.r)}` : ''}${p.group ? `, ${p.group}` : ''}`
+  const pointText = (p: Point) => (p.label ? `${p.label}: ` : '') + [`${xLabel ?? 'x'} ${format(p.x)}`, `${yLabel ?? 'y'} ${format(p.y)}`, ...(p.r !== undefined ? [`${cm('size')} ${format(p.r)}`] : []), ...(p.group ? [p.group] : [])].join(', ')
   const focus = useChartFocus({
     count: points.length, index: hover === null ? null : order.indexOf(hover), onIndex: k => setHover(k === null ? null : order[k] ?? null),
-    label: label ?? (bubbles ? 'Bubble chart' : 'Scatter plot'),
-    summary: `${points.length} points. ${xLabel ?? 'x'} ${chartRange(points.map(p => p.x), format)}, ${yLabel ?? 'y'} ${chartRange(points.map(p => p.y), format)}.${groups.length > 1 ? ` Groups: ${groups.join(', ')}.` : ''} Arrow keys go left to right.`,
+    label: label ?? (bubbles ? cm('bubble') : cm('scatter')),
+    summary: [cm('points', { n: points.length }), `${xLabel ?? 'x'} ${range(points.map(p => p.x), format)}, ${yLabel ?? 'y'} ${range(points.map(p => p.y), format)}.`, ...(groups.length > 1 ? [cm('groups', { list: lf.list(groups) })] : []), cm('leftToRight')].join(' '),
     describe: k => pointText(points[order[k]]),
   })
   const near = (e: ReactPointerEvent<SVGSVGElement>) => {
@@ -613,7 +927,7 @@ export function ScatterChart({ points: allPoints, height = 220, xLabel, yLabel, 
   }
   return (
     <div className={className}>
-      <div ref={ref} {...focus.props} className={cn('relative', CHART_FOCUS)} style={{ height }} onPointerLeave={onMouseLeave(() => setHover(null))}>
+      <div ref={ref} {...focus.props} dir="ltr" className={cn('relative', CHART_FOCUS)} style={{ height }} onPointerLeave={onMouseLeave(() => setHover(null))}>
         {focus.a11y}
         {w > 0 && (
           <svg width={w} height={height} aria-hidden className="block touch-pan-y overflow-visible text-[11px]" onPointerDown={near} onPointerMove={near}>
@@ -632,7 +946,7 @@ export function ScatterChart({ points: allPoints, height = 220, xLabel, yLabel, 
         {hover !== null && <ChartTooltip x={X(points[hover].x)} y={Y(points[hover].y) - 20} width={w}>
           {points[hover].label && <div className="mb-1 font-medium">{points[hover].label}</div>}
           <TooltipRow color={color(points[hover])} label={xLabel ?? 'x'} value={format(points[hover].x)} /><TooltipRow color={color(points[hover])} label={yLabel ?? 'y'} value={format(points[hover].y)} />
-          {points[hover].r !== undefined && <TooltipRow color={color(points[hover])} label="size" value={format(points[hover].r!)} />}
+          {points[hover].r !== undefined && <TooltipRow color={color(points[hover])} label={cm('size')} value={format(points[hover].r!)} />}
         </ChartTooltip>}
       </div>
       {groups.length > 1 && <Legend items={groups.map((g, i) => ({ label: g, color: PALETTE[i % PALETTE.length] }))} />}
@@ -649,7 +963,7 @@ const heat = (t: number, color = 'var(--accent)') => t <= 0 ? 'var(--muted)' : `
  * screens cells grow to at least `touchCell`; when the grid is wider than its box it scrolls inside it with the row
  * labels pinned (`scrollTo` picks the start edge).
  */
-export function Heatmap({ rows, cols, value, format = compact, cell = 18, touchCell = 24, label = (r, c) => `${rows[r]} · ${cols[c]}`, color = 'var(--accent)', shade, footer = true, scrollTo = 'start', name, className }:
+export function Heatmap({ rows, cols, value, format: formatProp, cell = 18, touchCell = 24, label = (r, c) => `${rows[r]} · ${cols[c]}`, color = 'var(--accent)', shade, footer = true, scrollTo = 'start', name, className }:
   {
     rows: string[]; cols: string[]; value: (r: number, c: number) => number; format?: (n: number) => string; cell?: number; touchCell?: number; label?: (r: number, c: number) => string
     color?: string; shade?: (t: number) => string; footer?: boolean; scrollTo?: 'start' | 'end'
@@ -661,6 +975,8 @@ export function Heatmap({ rows, cols, value, format = compact, cell = 18, touchC
   const hover = hoverAt && hoverAt[0] < rows.length && hoverAt[1] < cols.length ? hoverAt : null
   const [scrolls, setScrolls] = useState(false)
   const coarse = useCoarsePointer()
+  const { cm, fmt: lf, range, dir } = useChartLocale(CHART_HEATMAP_MESSAGES)
+  const format = formatProp ?? lf.compact
   useOutside([ref], () => setHover(null), hover !== null, { escape: true })
   const size = coarse ? Math.max(cell, touchCell) : cell
   const vals = rows.map((_, r) => cols.map((_, c) => value(r, c))), max = maxOf(vals.flat().filter(Number.isFinite), 0) || 1
@@ -689,20 +1005,21 @@ export function Heatmap({ rows, cols, value, format = compact, cell = 18, touchC
       setHover(to)
       scroller.current?.querySelector<HTMLElement>(`[data-hm="${to[0]}-${to[1]}"]`)?.scrollIntoView({ block: 'nearest', inline: 'nearest' })
     },
-    label: name ?? `Heatmap, ${rows.length} rows by ${nc} columns`,
-    summary: `Values ${chartRange(flat, format)}. Arrow keys read the cells.`,
+    label: name ?? cm('heatmapName', { rows: rows.length, cols: nc }),
+    summary: cm('heatSummary', { range: range(flat, format) }),
     describe: k => `${label(Math.floor(k / nc), k % nc)}: ${format(flat[k])}`,
   })
-  const pin = 'sticky left-0 z-[1] bg-[var(--card)] shadow-[3px_0_0_var(--card)]'
+  const pin = 'sticky start-0 z-[1] bg-[var(--card)] shadow-[3px_0_0_var(--card)]'
   return (
     <div ref={ref} className={className}>
-      <div ref={scroller} {...focus.props}
+      {/* the grid is a plot (columns are usually time): LTR in every locale, labels pinned on the left; the footer follows the locale */}
+      <div ref={scroller} {...focus.props} dir="ltr"
         className="overflow-x-auto overscroll-x-contain rounded-[var(--r-sm)] outline-none focus-visible:shadow-[0_0_0_2px_var(--accent)]">
       {focus.a11y}
       <div className="inline-grid gap-[3px] text-[11px] text-[var(--fg3)]" style={{ gridTemplateColumns: `auto repeat(${cols.length}, ${size}px)` }} onPointerLeave={onMouseLeave(() => setHover(null))}>
-        <span className={pin} />{shown.map((c, i) => <span key={i} aria-hidden className="overflow-visible text-left whitespace-nowrap">{c}</span>)}
+        <span className={pin} />{shown.map((c, i) => <span key={i} aria-hidden className="overflow-visible text-start whitespace-nowrap">{c}</span>)}
         {rows.map((r, ri) => [
-          <span key={`r${ri}`} aria-hidden className={cn('pr-1.5', pin)} style={{ lineHeight: `${size}px` }}>{r}</span>,
+          <span key={`r${ri}`} aria-hidden className={cn('pe-1.5', pin)} style={{ lineHeight: `${size}px` }}>{r}</span>,
           // plain spans with CSS transitions (opacity + transform) rather than one motion component per cell: a 26-week
           // calendar has 182 cells, which made the mount frame long
           ...cols.map((_, ci) => {
@@ -714,8 +1031,8 @@ export function Heatmap({ rows, cols, value, format = compact, cell = 18, touchC
         ])}
       </div>
       </div>
-      {footer && <div className="mt-2 h-4 truncate text-xs text-[var(--fg2)]" aria-live="polite">{hover ? <>{label(hover[0], hover[1])} · <b className="ui-num font-medium">{format(vals[hover[0]][hover[1]])}</b></>
-        : <>{coarse ? 'Tap a cell' : 'Hover a cell'}{scrolls && <span className="text-[var(--fg3)]"> · {coarse ? 'swipe' : 'scroll'} for more</span>}</>}</div>}
+      {footer && <div dir={dir} className="mt-2 h-4 truncate text-xs text-[var(--fg2)]" aria-live="polite">{hover ? <>{label(hover[0], hover[1])} · <b className="ui-num font-medium">{format(vals[hover[0]][hover[1]])}</b></>
+        : <>{coarse ? cm('tapCell') : cm('hoverCell')}{scrolls && <span className="text-[var(--fg3)]"> · {coarse ? cm('swipeMore') : cm('scrollMore')}</span>}</>}</div>}
     </div>
   )
 }
@@ -731,21 +1048,23 @@ const calLevel = (t: number) => t <= 0 ? 0 : t <= 0.4 ? 1 : t <= 0.7 ? 2 : 3
  */
 export function CalendarHeatmap({ values, weeks = 26, end: endProp, className }: { values: Record<string, number>; weeks?: number; end?: Date; className?: string }) {
   const [ref, w] = useWidth<HTMLDivElement>()
+  const { cm, fmt: lf, weekStartsOn } = useChartLocale(CHART_HEATMAP_MESSAGES)
   const [today, setToday] = useState<Date | null>(null)
   useEffect(() => { if (!endProp) setToday(new Date()) }, [endProp])
   const end = endProp ?? today
-  const start = end && addDays(startOfWeek(end), -(weeks - 1) * 7) // Monday, `weeks` columns back
+  const start = end && addDays(startOfWeek(end, weekStartsOn), -(weeks - 1) * 7) // the locale's first weekday, `weeks` columns back
   const day = (wk: number, d: number) => addDays(start!, wk * 7 + d)
-  const month = (wk: number) => fmtDate(day(wk, 0), { month: 'short' })
+  const month = (wk: number) => lf.date(day(wk, 0), { month: 'short' })
+  const wd = lf.weekdays('short') // rows from the locale's first day; every other one is labelled
   // label a column only where a new month starts
   const cols = start ? Array.from({ length: weeks }, (_, wk) => (wk === 0 || month(wk) !== month(wk - 1) ? month(wk) : '')) : []
   const cell = Math.max(8, Math.min(14, Math.floor((w - 34) / weeks) - 3))
   return (
     <div ref={ref} className={className}>
-      {w > 0 && start && <Heatmap name={`Contributions, last ${weeks} weeks`} cell={cell} touchCell={20} scrollTo="end" rows={['Mon', '', 'Wed', '', 'Fri', '', '']} cols={cols} value={(r, c) => values[dayKey(day(c, r))] ?? 0} shade={t => calShade(calLevel(t))}
-        label={(r, c) => fmtDate(day(c, r), { weekday: 'short', day: 'numeric', month: 'short' })} format={n => `${n} contributions`} />}
+      {w > 0 && start && <Heatmap name={cm('lastWeeks', { n: weeks })} cell={cell} touchCell={20} scrollTo="end" rows={[wd[0], '', wd[2], '', wd[4], '', '']} cols={cols} value={(r, c) => values[dayKey(day(c, r))] ?? 0} shade={t => calShade(calLevel(t))}
+        label={(r, c) => lf.date(day(c, r), { weekday: 'short', day: 'numeric', month: 'short' })} format={n => cm('contributions', { n })} />}
       <div className="mt-1 flex items-center justify-end gap-1 text-[11px] text-[var(--fg3)]">
-        Less{[0, 1, 2, 3].map(k => <span key={k} className="h-2.5 w-2.5 rounded-[var(--r-sm)]" style={{ background: calShade(k) }} />)}More
+        {cm('less')}{[0, 1, 2, 3].map(k => <span key={k} className="h-2.5 w-2.5 rounded-[var(--r-sm)]" style={{ background: calShade(k) }} />)}{cm('more')}
       </div>
     </div>
   )
@@ -755,24 +1074,26 @@ export function CalendarHeatmap({ values, weeks = 26, end: endProp, className }:
  * Funnel with step-to-step conversion. Bars grow in when scrolled into view (a clip-path wipe from the centre, so nothing
  * reflows); hover, tap or arrow-key a step for its share of the first step.
  */
-export function FunnelChart({ steps, format = compact, label = 'Funnel', className }: { steps: { label: string; value: number }[]; format?: (n: number) => string; /** accessible name */ label?: string; className?: string }) {
+export function FunnelChart({ steps, format: formatProp, label: labelProp, className }: { steps: { label: string; value: number }[]; format?: (n: number) => string; /** accessible name */ label?: string; className?: string }) {
   const [ref, seen] = useChartSeen<HTMLDivElement>()
   const [hoverAt, setHover] = useState<number | null>(null)
   const hover = chartIndex(hoverAt, steps.length)
   const [tip, bind, , tipAt] = useChartTip(ref)
+  const { cm, fmt: lf, pct, dir } = useChartLocale(CHART_FUNNEL_MESSAGES)
+  const format = formatProp ?? lf.compact, label = labelProp ?? cm('funnel')
   useOutside([ref], () => setHover(null), hover !== null, { escape: true })
   const max = steps[0]?.value || 1
-  const share = (i: number) => Math.round((steps[i].value / max) * 100)
-  const conv = (i: number) => (i > 0 && steps[i - 1].value ? Math.round((steps[i].value / steps[i - 1].value) * 100) : null)
+  const share = (i: number) => pct(steps[i].value / max)
+  const conv = (i: number) => (i > 0 && steps[i - 1].value ? pct(steps[i].value / steps[i - 1].value) : null)
   const body = (i: number) => () => <>
     <div className="mb-1 font-medium">{steps[i].label}</div>
-    <TooltipRow color={PALETTE[0]} label="Count" value={format(steps[i].value)} />
-    <TooltipRow color={PALETTE[0]} label="Of first step" value={`${share(i)}%`} />
+    <TooltipRow color={PALETTE[0]} label={cm('count')} value={format(steps[i].value)} />
+    <TooltipRow color={PALETTE[0]} label={cm('ofFirst')} value={share(i)} />
   </>
   const focus = useChartFocus({
-    count: steps.length, index: hover, onIndex: i => { setHover(i); tipAt(i, i === null ? undefined : body(i)) }, label,
-    summary: `${steps.length} steps: ${steps.map(s => `${s.label} ${format(s.value)}`).join(', ')}.${steps.length > 1 ? ` ${share(steps.length - 1)}% reach the last step.` : ''}`,
-    describe: i => `${steps[i].label}: ${format(steps[i].value)}, ${share(i)}% of the first step${conv(i) !== null ? `, ${conv(i)}% of the step before` : ''}`,
+    count: steps.length, index: hover, onIndex: i => { setHover(i); tipAt(i, i === null ? undefined : body(i)) }, label, dir,
+    summary: cm('steps', { n: steps.length, list: lf.list(steps.map(s => `${s.label} ${format(s.value)}`)) }) + (steps.length > 1 ? ' ' + cm('reachLast', { pct: share(steps.length - 1) }) : ''),
+    describe: i => cm('stepDescribe', { label: steps[i].label, value: format(steps[i].value), pct: share(i) }) + (conv(i) !== null ? ', ' + cm('ofBefore', { pct: conv(i) }) : ''),
   })
   return (
     <div ref={ref} {...focus.props} className={cn('relative flex flex-col gap-1', CHART_FOCUS, className)} onPointerLeave={onMouseLeave(() => setHover(null))}>
@@ -781,7 +1102,7 @@ export function FunnelChart({ steps, format = compact, label = 'Funnel', classNa
         const cut = (100 - (s.value / max) * 100) / 2
         return (
           <div key={s.label} aria-hidden>
-            {i > 0 && <div className="py-0.5 text-center text-[11px] text-[var(--fg3)]">↓ {conv(i) ?? 0}%</div>}
+            {i > 0 && <div className="py-0.5 text-center text-[11px] text-[var(--fg3)]">↓ {conv(i) ?? pct(0)}</div>}
             <div className="flex items-center gap-3 text-[13px]" {...bind(body(i), () => setHover(i))}>
               <span className="w-24 flex-none truncate text-[var(--fg2)]">{s.label}</span>
               <div className="flex-1">
@@ -790,7 +1111,7 @@ export function FunnelChart({ steps, format = compact, label = 'Funnel', classNa
                   animate={{ clipPath: seen ? `inset(0% ${cut}% 0% ${cut}% round 8px)` : 'inset(0% 50% 0% 50% round 8px)', opacity: (1 - i * 0.2) * (hover === null || hover === i ? 1 : 0.6) }}
                   transition={{ ...spring(0.15, 0.6), delay: seen ? i * 0.08 : 0 }} />
               </div>
-              <span className="ui-num w-12 text-right">{format(s.value)}</span>
+              <span className="ui-num w-12 text-end">{format(s.value)}</span>
             </div>
           </div>
         )
@@ -804,17 +1125,21 @@ export function FunnelChart({ steps, format = compact, label = 'Funnel', classNa
  * Ranked horizontal bars: top pages, countries, referrers. Bars grow in when scrolled into view (a clip-path wipe, no
  * reflow). Hover a row or arrow-key through them to highlight one; the values are always printed.
  */
-export function BarList({ items, format = compact, color = 'var(--accent)', label = 'Ranked list', className }: { items: { label: ReactNode; value: number; key?: string }[]; format?: (n: number) => string; color?: string; /** accessible name */ label?: string; className?: string }) {
+export function BarList({ items, format: formatProp, color = 'var(--accent)', label: labelProp, className }: { items: { label: ReactNode; value: number; key?: string }[]; format?: (n: number) => string; color?: string; /** accessible name */ label?: string; className?: string }) {
   const [ref, seen] = useChartSeen<HTMLDivElement>()
   const [hoverAt, setHover] = useState<number | null>(null)
   const hover = chartIndex(hoverAt, items.length)
   useOutside([ref], () => setHover(null), hover !== null, { escape: true })
   const max = maxOf(items.map(i => i.value), 0) || 1
+  const { cm, fmt: lf, range, dir } = useChartLocale(CHART_BARLIST_MESSAGES)
+  const format = formatProp ?? lf.compact, label = labelProp ?? cm('ranked')
   const text = (l: ReactNode) => (typeof l === 'string' || typeof l === 'number' ? String(l) : '')
+  // a list, not a plot: rows mirror in RTL (bars grow from the right) and ←/→ follow the reading direction
+  const wipe = (f: number) => (dir === 'rtl' ? `inset(0% 0% 0% ${f}% round 8px)` : `inset(0% ${f}% 0% 0% round 8px)`)
   const focus = useChartFocus({
-    count: items.length, index: hover, onIndex: setHover, label,
-    summary: `${items.length} items, ${chartRange(items.map(i => i.value), format)}.`,
-    describe: i => `${i + 1} of ${items.length}: ${text(items[i].label)} ${format(items[i].value)}`,
+    count: items.length, index: hover, onIndex: setHover, label, dir,
+    summary: cm('items', { n: items.length, range: range(items.map(i => i.value), format) }),
+    describe: i => cm('itemDescribe', { i: i + 1, n: items.length, label: text(items[i].label), value: format(items[i].value) }),
   })
   const bar = `color-mix(in srgb, ${safeColor(color, 'var(--accent)')} 16%, transparent)`
   return (
@@ -824,7 +1149,7 @@ export function BarList({ items, format = compact, color = 'var(--accent)', labe
         <div key={it.key ?? String(it.label)} onPointerEnter={() => setHover(i)}
           className={cn('relative flex h-8 items-center justify-between overflow-hidden rounded-[var(--r-md)] px-2.5 text-[13px] transition-colors', hover === i && 'bg-[var(--muted)]')}>
           <motion.span aria-hidden className="absolute inset-0 rounded-[var(--r-md)]" style={{ background: bar }}
-            initial={{ clipPath: 'inset(0% 100% 0% 0% round 8px)' }} animate={{ clipPath: `inset(0% ${seen ? 100 - (it.value / max) * 100 : 100}% 0% 0% round 8px)` }}
+            initial={{ clipPath: wipe(100) }} animate={{ clipPath: wipe(seen ? 100 - (it.value / max) * 100 : 100) }}
             transition={{ ...spring(0.1, 0.6), delay: seen ? i * 0.04 : 0 }} />
           <span className="relative truncate">{it.label}</span><span className="ui-num relative text-[var(--fg2)]">{format(it.value)}</span>
         </div>
@@ -838,12 +1163,14 @@ export function BarList({ items, format = compact, color = 'var(--accent)', labe
  * when values change; both run on transforms (motion layout animations), never on left/top/width/height. Hover, tap or
  * arrow-key a tile to highlight it and see its share. `show` picks the second line: value or percent.
  */
-export function Treemap({ items, height = 220, format = compact, show = 'value', label = 'Treemap', className }:
+export function Treemap({ items, height = 220, format: formatProp, show = 'value', label: labelProp, className }:
   { items: { label: string; value: number; color?: string }[]; height?: number; format?: (n: number) => string; show?: 'value' | 'percent'; /** accessible name */ label?: string; className?: string }) {
   const [ref, w, seen] = useChartFrame<HTMLDivElement>()
   const [hoverAt, setHover] = useState<number | null>(null)
   const hover = chartIndex(hoverAt, items.length)
   const [tip, bind, , tipAt] = useChartTip(ref)
+  const { cm, fmt: lf, pct: lpct, locale } = useChartLocale(CHART_TREEMAP_MESSAGES)
+  const format = formatProp ?? lf.compact, label = labelProp ?? cm('treemap')
   useOutside([ref], () => setHover(null), hover !== null, { escape: true })
   const total = items.reduce((a, d) => a + d.value, 0) || 1
   type Rect = { x: number; y: number; w: number; h: number; i: number }
@@ -867,16 +1194,17 @@ export function Treemap({ items, height = 220, format = compact, show = 'value',
     return out
   }, [items, w, height, total])
   const pct = (i: number) => Math.round((items[i].value / total) * 100)
-  const tipBody = (i: number) => () => <TooltipRow color={items[i].color ?? PALETTE[i % PALETTE.length]} label={items[i].label} value={show === 'percent' ? `${pct(i)}%` : `${format(items[i].value)} · ${pct(i)}%`} />
+  const tipBody = (i: number) => () => <TooltipRow color={items[i].color ?? PALETTE[i % PALETTE.length]} label={items[i].label} value={show === 'percent' ? lpct(pct(i) / 100) : `${format(items[i].value)} · ${lpct(pct(i) / 100)}`} />
   const order = useMemo(() => rects.map(r => r.i), [rects]) // largest first
   const focus = useChartFocus({
     count: items.length, index: hover === null ? null : order.indexOf(hover), label,
     onIndex: k => { const i = k === null ? null : order[k] ?? null; setHover(i); tipAt(i, i === null ? undefined : tipBody(i)) },
-    summary: `${items.length} parts, largest first: ${order.map(i => `${items[i].label} ${pct(i)}%`).join(', ')}.`,
-    describe: k => { const i = order[k]; return `${items[i].label}: ${format(items[i].value)}, ${pct(i)}%` },
+    summary: cm('parts', { n: items.length, list: lf.list(order.map(i => `${items[i].label} ${lpct(pct(i) / 100)}`)) }),
+    describe: k => { const i = order[k]; return `${items[i].label}: ${format(items[i].value)}, ${lpct(pct(i) / 100)}` },
   })
   return (
-    <div ref={ref} {...focus.props} className={cn('relative', CHART_FOCUS, className)} style={{ height }} onPointerLeave={onMouseLeave(() => setHover(null))}>
+    // tiles are laid out by geometry (largest at the top left), like a plot: dir="ltr"; their labels follow the locale
+    <div ref={ref} {...focus.props} dir="ltr" className={cn('relative', CHART_FOCUS, className)} style={{ height }} onPointerLeave={onMouseLeave(() => setHover(null))}>
       {focus.a11y}
       {w > 0 && rects.map(r => {
         const it = items[r.i], color = it.color ?? PALETTE[r.i % PALETTE.length]
@@ -884,13 +1212,13 @@ export function Treemap({ items, height = 220, format = compact, show = 'value',
           // the box is laid out at its final rect straight away; `layout` animates the change as a transform (FLIP)
           // and the entrance is a scale from the centre, so no frame ever changes layout properties
           <motion.div key={it.label} data-ci={r.i} aria-hidden layout initial={{ scale: 0, opacity: 0 }} animate={seen ? { scale: 1, opacity: 1 } : { scale: 0, opacity: 0 }}
-            transition={spring(0.2, 0.65)} className="absolute overflow-hidden p-[2px]" style={{ left: r.x, top: r.y, width: r.w, height: r.h }}
+            transition={spring(0.2, 0.65)} className="absolute overflow-hidden p-[2px]" style={{ /* rtl-lint-ignore: LTR plot */ left: r.x, top: r.y, width: r.w, height: r.h }}
             {...bind(tipBody(r.i), () => setHover(r.i))}>
             <motion.div layout className={cn('h-full p-2 text-xs transition-[opacity,box-shadow]', hover === r.i && 'shadow-[inset_0_0_0_2px_var(--card)]')}
               style={{ borderRadius: 8, background: `color-mix(in srgb, ${safeColor(color, 'var(--accent)')} 72%, var(--fg))`, color: 'var(--card)', opacity: hover === null || hover === r.i ? 1 : 0.7 }}>
-              {r.w > it.label.length * 6.5 + 18 && r.h > 34 && <motion.div layout="position">
+              {r.w > it.label.length * 6.5 + 18 && r.h > 34 && <motion.div layout="position" dir="auto">
                 <b className="block truncate font-semibold">{it.label}</b>
-                <span className="ui-num opacity-85">{show === 'percent' ? <><AnimatedNumber value={pct(r.i)} />%</> : format(it.value)}</span>
+                <span className="ui-num opacity-85">{show === 'percent' ? <AnimatedNumber locale={locale} value={pct(r.i) / 100} format={{ style: 'percent' }} /> : format(it.value)}</span>
               </motion.div>}
             </motion.div>
           </motion.div>
@@ -915,27 +1243,27 @@ export function SparkTile({ label, value, format, data, color = 'var(--ok)', hei
   const shown = useTween(seen ? value : 0, 1100)
   const [hoverAt, setHover] = useState<number | null>(null)
   const hover = chartIndex(hoverAt, data.length)
-  const nf = useMemo(() => new Intl.NumberFormat(LOCALE, format), [format])
+  const { cm, fmt: lf, range, pct, locale } = useChartLocale(CHART_SPARK_MESSAGES)
   const n = data.length, lo = minOf(data), hi = maxOf(data), pad = 4
-  const ptName = (i: number) => points?.[i] ?? `Point ${i + 1} of ${n}`
+  const ptName = (i: number) => points?.[i] ?? cm('pointOf', { i: i + 1, n })
   const focus = useChartFocus({
     count: n, index: hover, onIndex: setHover, start: n - 1,
-    label: `${label}: ${nf.format(value)}`,
-    summary: n ? `Trend of ${n} points, ${chartRange(data, compact)}, ${data[n - 1] >= data[0] ? 'up' : 'down'} ${Math.abs(Math.round(((data[n - 1] - data[0]) / (Math.abs(data[0]) || 1)) * 100))}% from the first.` : 'No trend data.',
-    describe: i => `${ptName(i)}: ${compact(data[i])}`,
+    label: `${label}: ${lf.number(value, format)}`,
+    summary: n ? cm('trend', { n, range: range(data, lf.compact), up: data[n - 1] >= data[0] ? 'yes' : 'no', pct: pct(Math.abs((data[n - 1] - data[0]) / (Math.abs(data[0]) || 1))) }) : cm('noTrend'),
+    describe: i => `${ptName(i)}: ${lf.compact(data[i])}`,
   })
   const px = (i: number) => (i / Math.max(1, n - 1)) * bw, py = (i: number) => height - pad - ((data[i] - lo) / (hi - lo || 1)) * (height - pad * 2)
   return (
     <div ref={ref} {...focus.props} className={cn('flex flex-col gap-1', CHART_FOCUS, className)}>
       {focus.a11y}
       <span aria-hidden className="text-xs text-[var(--fg3)]">{label}</span>
-      <span aria-hidden><AnimatedNumber value={Math.round(shown)} format={format} className="text-[28px] font-semibold tracking-tight" /></span>
-      <div ref={boxRef} aria-hidden className="relative mt-2" style={{ height }}>
+      <span aria-hidden><AnimatedNumber locale={locale} value={Math.round(shown)} format={format} className="text-[28px] font-semibold tracking-tight" /></span>
+      <div ref={boxRef} aria-hidden dir="ltr" className="relative mt-2" style={{ height }}>
         <SparkChart data={data} variant="area" curve="monotone" color={color} height={height} endDot />
         {hover !== null && bw > 0 && <>
-          <span className="pointer-events-none absolute inset-y-0 w-px bg-[var(--line2)]" style={{ left: px(hover) }} />
-          <span className="pointer-events-none absolute h-2.5 w-2.5 -translate-x-1/2 -translate-y-1/2 rounded-full border-2 border-[var(--card)]" style={{ left: px(hover), top: py(hover), background: safeColor(color) }} />
-          <ChartTooltip x={px(hover)} y={-34} width={bw}><TooltipRow color={color} label={ptName(hover)} value={compact(data[hover])} /></ChartTooltip>
+          <span className="pointer-events-none absolute inset-y-0 w-px bg-[var(--line2)]" style={{ /* rtl-lint-ignore: LTR plot */ left: px(hover) }} />
+          <span className="pointer-events-none absolute h-2.5 w-2.5 -translate-x-1/2 -translate-y-1/2 rounded-full border-2 border-[var(--card)]" style={{ /* rtl-lint-ignore: LTR plot */ left: px(hover), top: py(hover), background: safeColor(color) }} />
+          <ChartTooltip x={px(hover)} y={-34} width={bw}><TooltipRow color={color} label={ptName(hover)} value={lf.compact(data[hover])} /></ChartTooltip>
         </>}
       </div>
     </div>
@@ -948,8 +1276,9 @@ export type TickerRow = { symbol: string; name: string; data: number[] }
  * Feed it new `data` to tick. Price and change cells have a fixed width with tabular digits, so a tick never moves a column.
  */
 export function TickerTable({ rows, className }: { rows: TickerRow[]; className?: string }) {
+  const { cm, locale } = useChartLocale(CHART_SPARK_MESSAGES)
   return (
-    <div role="table" aria-label="Prices" className={cn('flex flex-col', className)}>
+    <div role="table" aria-label={cm('prices')} className={cn('flex flex-col', className)}>
       {rows.map(r => {
         const first = r.data[0] ?? 0, last = r.data[r.data.length - 1] ?? 0, ch = first ? (last / first - 1) * 100 : 0, up = ch >= 0
         return (
@@ -957,8 +1286,8 @@ export function TickerTable({ rows, className }: { rows: TickerRow[]; className?
             <span role="cell" className="font-[family-name:var(--mono)] text-xs font-semibold">{r.symbol}</span>
             <span role="cell" className="hidden truncate text-[var(--fg2)] sm:block">{r.name}</span>
             <SparkChart data={r.data} height={28} endDot color={up ? 'var(--ok)' : 'var(--bad)'} />
-            <span role="cell" className="flex justify-end font-[family-name:var(--mono)] text-xs tabular-nums"><AnimatedNumber value={last} format={{ minimumFractionDigits: 2, maximumFractionDigits: 2 }} /></span>
-            <span role="cell" className="flex min-w-[62px] justify-end tabular-nums"><DeltaBadge value={ch} digits={2} title={`${up ? 'Up' : 'Down'} since the first price shown`} className="min-w-[62px] justify-center font-[family-name:var(--mono)] tabular-nums" /></span>
+            <span role="cell" className="flex justify-end font-[family-name:var(--mono)] text-xs tabular-nums"><AnimatedNumber locale={locale} value={last} format={{ minimumFractionDigits: 2, maximumFractionDigits: 2 }} /></span>
+            <span role="cell" className="flex min-w-[62px] justify-end tabular-nums"><DeltaBadge value={ch} digits={2} title={up ? cm('upSince') : cm('downSince')} className="min-w-[62px] justify-center font-[family-name:var(--mono)] tabular-nums" /></span>
           </div>
         )
       })}
@@ -972,10 +1301,12 @@ export function TickerTable({ rows, className }: { rows: TickerRow[]; className?
  * Bullet chart: qualitative bands, the actual bar (green when it meets its target, neutral grey when not) and a target
  * tick, one row per measure. Bars grow in when scrolled into view; hover, tap or arrow-key a row for numbers.
  */
-export function BulletChart({ rows, max = 100, bands = [0.5, 0.75], format = compact, label = 'Bullet chart', className }:
+export function BulletChart({ rows, max = 100, bands = [0.5, 0.75], format: formatProp, label: labelProp, className }:
   { rows: { label: string; value: number; target: number }[]; max?: number; bands?: number[]; format?: (n: number) => string; /** accessible name */ label?: string; className?: string }) {
   const [ref, w, seen] = useChartFrame<HTMLDivElement>()
   const [tip, bind, , tipAt] = useChartTip(ref)
+  const { cm, fmt: lf } = useChartLocale(CHART_BULLET_MESSAGES)
+  const format = formatProp ?? lf.compact, label = labelProp ?? cm('bullet')
   const [hoverAt, setHover] = useState<number | null>(null)
   const hover = chartIndex(hoverAt, rows.length)
   const L = 72, rowH = 31, iw = Math.max(0, w - L - 4), X = (v: number) => L + (clamp(v, 0, max) / (max || 1)) * iw
@@ -983,16 +1314,16 @@ export function BulletChart({ rows, max = 100, bands = [0.5, 0.75], format = com
   const miss = CHART_NEUTRAL
   const body = (r: { label: string; value: number; target: number }) => () => <>
     <div className="mb-1 font-medium">{r.label}</div>
-    <TooltipRow color={r.value >= r.target ? 'var(--ok)' : miss} label="Actual" value={format(r.value)} />
-    <TooltipRow color="var(--fg2)" label="Target" value={format(r.target)} />
+    <TooltipRow color={r.value >= r.target ? 'var(--ok)' : miss} label={cm('actual')} value={format(r.value)} />
+    <TooltipRow color="var(--fg2)" label={cm('target')} value={format(r.target)} />
   </>
   const focus = useChartFocus({
     count: rows.length, index: hover, label, onIndex: i => { setHover(i); tipAt(i, i === null ? undefined : body(rows[i])) },
-    summary: `${rows.length} measures against targets. ${rows.filter(r => r.value >= r.target).length} of ${rows.length} meet their target.`,
-    describe: i => `${rows[i].label}: ${format(rows[i].value)}, target ${format(rows[i].target)}, ${rows[i].value >= rows[i].target ? 'met' : 'below target'}`,
+    summary: cm('measures', { n: rows.length, met: rows.filter(r => r.value >= r.target).length }),
+    describe: i => cm('measureDescribe', { label: rows[i].label, value: format(rows[i].value), target: format(rows[i].target), met: rows[i].value >= rows[i].target ? 'yes' : 'no' }),
   })
   return (
-    <div ref={ref} {...focus.props} className={cn('relative', CHART_FOCUS, className)} style={{ height: rows.length * rowH }} onPointerLeave={onMouseLeave(() => setHover(null))}>
+    <div ref={ref} {...focus.props} dir="ltr" className={cn('relative', CHART_FOCUS, className)} style={{ height: rows.length * rowH }} onPointerLeave={onMouseLeave(() => setHover(null))}>
       {focus.a11y}
       {w > 0 && (
         <svg width={w} height={rows.length * rowH} aria-hidden className="block overflow-visible text-[11px]">
@@ -1025,9 +1356,9 @@ const statSd = (a: number[]) => { const m = statMean(a); return Math.sqrt(a.redu
 const statQuantile = (a: number[], p: number) => { const s = [...a].sort((x, y) => x - y), i = (s.length - 1) * p, lo = Math.floor(i); return s[lo] + (s[Math.ceil(i)] - s[lo]) * (i - lo) }
 const statKde = (a: number[], xs: number[], bw: number) => xs.map(x => a.reduce((s, v) => s + Math.exp(-0.5 * ((x - v) / bw) ** 2), 0) / (a.length * bw * 2.5066))
 const statBandwidth = (a: number[]) => 1.06 * statSd(a) * a.length ** -0.2 || 1
-const chartFixed = (v: number, d = 1) => (Math.round(v * 10 ** d) / 10 ** d).toFixed(d)
 
-function StatGridY({ ticks, Y, x1, x2, format = (v: number) => chartFixed(v, 0) }: { ticks: number[]; Y: (v: number) => number; x1: number; x2: number; format?: (v: number) => string }) {
+function StatGridY({ ticks, Y, x1, x2, format: formatProp }: { ticks: number[]; Y: (v: number) => number; x1: number; x2: number; format?: (v: number) => string }) {
+  const { fixed } = useChartLocale(), format = formatProp ?? ((v: number) => fixed(v, 0))
   return <>{ticks.map(t => <g key={t}><line x1={x1} x2={x2} y1={Y(t)} y2={Y(t)} stroke="var(--line)" strokeDasharray="2 3" /><text x={x1 - 6} y={Y(t)} dy="0.32em" textAnchor="end" fill="var(--fg3)">{format(t)}</text></g>)}</>
 }
 const ticksIn = (lo: number, hi: number, count = 4) => niceTicks(lo, hi, count).filter(t => t >= lo - 1e-9 && t <= hi + 1e-9)
@@ -1046,10 +1377,12 @@ function regressionFit(P: [number, number][]) {
  * Scatter with a least-squares fit, the 95% confidence band for the mean and (optionally) the wider 95% prediction interval.
  * Hover, tap or slide a finger for a crosshair readout; a stats footer shows slope, intercept, R², residual SE and n. New `points` morph in place.
  */
-export function RegressionChart({ points, prediction = true, height = 240, xDomain, yDomain, footer = true, label = 'Regression chart', className }:
+export function RegressionChart({ points, prediction = true, height = 240, xDomain, yDomain, footer = true, label: labelProp, className }:
   { points: [number, number][]; prediction?: boolean; height?: number; xDomain?: [number, number]; yDomain?: [number, number]; footer?: boolean; /** accessible name */ label?: string; className?: string }) {
   const [ref, w, seen] = useChartFrame<HTMLDivElement>()
   const [hover, setHover] = useState<number | null>(null)
+  const { cm, fmt: lf, fixed } = useChartLocale(CHART_REGRESSION_MESSAGES)
+  const label = labelProp ?? cm('regression')
   useOutside([ref], () => setHover(null), hover !== null, { escape: true })
   const fit = useMemo(() => regressionFit(points), [points])
   const collapsed = useMemo(() => ({ ...fit, band: fit.band.map(r => [r[0], r[1], 0, 0]), pts: fit.pts.map(([x]) => [x, fit.a + fit.b * x]) }), [fit])
@@ -1065,18 +1398,18 @@ export function RegressionChart({ points, prediction = true, height = 240, xDoma
   }
   const focus = useChartFocus({
     count: fit.band.length, index: hover, onIndex: setHover, label, start: 20,
-    summary: `${fit.n} points. Fitted line y = ${chartFixed(fit.a)} + ${chartFixed(fit.b, 2)}x, R² ${chartFixed(fit.r2, 2)}. Arrow keys walk the fitted line.`,
-    describe: i => { const r = fit.band[i]; return `x ${chartFixed(r[0], 0)}: fitted ${chartFixed(r[1])}, 95% CI plus or minus ${chartFixed(r[2])}${prediction ? `, prediction plus or minus ${chartFixed(r[3])}` : ''}` },
+    summary: cm('regSummary', { n: fit.n, a: fixed(fit.a), b: fixed(fit.b, 2), r2: fixed(fit.r2, 2) }),
+    describe: i => { const r = fit.band[i]; return cm('regDescribe', { x: fixed(r[0], 0), y: fixed(r[1]), ci: fixed(r[2]) }) + (prediction ? ', ' + cm('regPred', { p: fixed(r[3]) }) : '') },
   })
-  const kv = (k: string, v: string) => <span key={k} className="text-xs text-[var(--fg3)]">{k}<b className="ml-1 font-[family-name:var(--mono)] font-semibold text-[var(--fg)]">{v}</b></span>
+  const kv = (k: string, v: string) => <span key={k} className="text-xs text-[var(--fg3)]">{k}<b className="ms-1 font-[family-name:var(--mono)] font-semibold text-[var(--fg)]">{v}</b></span>
   return (
     <div className={className}>
-      <div ref={ref} {...focus.props} className={cn('relative', CHART_FOCUS)} style={{ height }} onPointerLeave={onMouseLeave(() => setHover(null))}>
+      <div ref={ref} {...focus.props} dir="ltr" className={cn('relative', CHART_FOCUS)} style={{ height }} onPointerLeave={onMouseLeave(() => setHover(null))}>
         {focus.a11y}
         {w > 0 && (
           <svg width={w} height={height} aria-hidden className="block touch-pan-y overflow-visible text-[11px]">
             <StatGridY ticks={ticksIn(yd[0], yd[1], 5)} Y={Y} x1={pad.l} x2={w - pad.r} />
-            {ticksIn(xd[0], xd[1]).map(t => <text key={t} x={X(t)} y={height - 8} textAnchor="middle" fill="var(--fg3)">{t}</text>)}
+            {ticksIn(xd[0], xd[1]).map(t => <text key={t} x={X(t)} y={height - 8} textAnchor="middle" fill="var(--fg3)">{lf.number(t)}</text>)}
             <motion.polygon points={poly(3)} fill="var(--accent)" initial={false} animate={{ opacity: prediction ? 0.07 : 0 }} />
             <polygon points={poly(2)} fill="var(--accent)" opacity={0.16} />
             {S.pts.map((p, i) => <circle key={i} cx={X(p[0])} cy={Y(p[1])} r={3} fill="var(--fg2)" opacity={0.55} />)}
@@ -1088,15 +1421,15 @@ export function RegressionChart({ points, prediction = true, height = 240, xDoma
         )}
         {row && w > 0 && (
           <ChartTooltip x={X(row[0])} y={Math.max(0, Y(row[1] + row[3]) - 10)} width={w}>
-            <div className="mb-1 font-medium">x = {chartFixed(row[0], 0)}</div>
-            <TooltipRow color="var(--accent)" label="ŷ" value={chartFixed(row[1])} />
-            <TooltipRow color="var(--band)" label="95% CI" value={`± ${chartFixed(row[2])}`} />
-            {prediction && <TooltipRow color="var(--band)" label="Prediction" value={`± ${chartFixed(row[3])}`} />}
+            <div className="mb-1 font-medium">{cm('xEq', { x: fixed(row[0], 0) })}</div>
+            <TooltipRow color="var(--accent)" label="ŷ" value={fixed(row[1])} />
+            <TooltipRow color="var(--band)" label={cm('ci95')} value={`± ${fixed(row[2])}`} />
+            {prediction && <TooltipRow color="var(--band)" label={cm('prediction')} value={`± ${fixed(row[3])}`} />}
           </ChartTooltip>
         )}
       </div>
       {footer && <div className="mt-2.5 flex flex-wrap gap-x-4 gap-y-1">
-        {[kv('slope', `${chartFixed(S.b, 2)} ± ${chartFixed(1.96 * S.seb, 2)}`), kv('intercept', chartFixed(S.a)), kv('R²', chartFixed(S.r2, 2)), kv('residual SE', chartFixed(S.se)), kv('n', String(Math.round(S.n)))]}
+        {[kv(cm('slope'), `${fixed(S.b, 2)} ± ${fixed(1.96 * S.seb, 2)}`), kv(cm('intercept'), fixed(S.a)), kv('R²', fixed(S.r2, 2)), kv(cm('residualSE'), fixed(S.se)), kv('n', lf.number(Math.round(S.n)))]}
       </div>}
     </div>
   )
@@ -1114,10 +1447,12 @@ function boxStats(a: number[]) {
  * Distributions per group: box (median, quartiles, 1.5 × IQR whiskers), KDE violin, or both, with outliers as dots.
  * Hover or tap a box or outlier for numbers. New values morph in place.
  */
-export function BoxViolinChart({ groups, mode = 'both', domain, height = 200, format = (v: number) => chartFixed(v), label = 'Box and violin chart', className }:
+export function BoxViolinChart({ groups, mode = 'both', domain, height = 200, format: formatProp, label: labelProp, className }:
   { groups: BoxGroup[]; mode?: 'box' | 'violin' | 'both'; domain?: [number, number]; height?: number; format?: (v: number) => string; /** accessible name */ label?: string; className?: string }) {
   const [ref, w, seen] = useChartFrame<HTMLDivElement>()
   const [tip, bind, , tipAt] = useChartTip(ref)
+  const { cm, fmt: lf, fixed } = useChartLocale(CHART_BOX_MESSAGES)
+  const format = formatProp ?? ((v: number) => fixed(v)), label = labelProp ?? cm('boxViolin')
   const [hoverAt, setHover] = useState<number | null>(null)
   const hover = chartIndex(hoverAt, groups.length)
   // the box and violin morph between samples; outliers (their count varies) tween on their own, so a changed count only
@@ -1132,17 +1467,17 @@ export function BoxViolinChart({ groups, mode = 'both', domain, height = 200, fo
   const Y = (v: number) => pad.t + ih - ((v - dom[0]) / (dom[1] - dom[0] || 1)) * ih, slot = iw / Math.max(1, groups.length), JIT = [-4, 3, -2, 5, -5, 2]
   const boxTip = (i: number) => () => { const k = stats[i]; return <>
     <div className="mb-1 font-medium">{groups[i].label}</div>
-    <TooltipRow color={groups[i].color ?? PALETTE[i % PALETTE.length]} label="median" value={format(k.q2)} />
-    <TooltipRow color={groups[i].color ?? PALETTE[i % PALETTE.length]} label="IQR" value={`${format(k.q1)} – ${format(k.q3)}`} />
-    <TooltipRow color={groups[i].color ?? PALETTE[i % PALETTE.length]} label="whiskers" value={`${format(k.lo)} – ${format(k.hi)}`} />
+    <TooltipRow color={groups[i].color ?? PALETTE[i % PALETTE.length]} label={cm('median')} value={format(k.q2)} />
+    <TooltipRow color={groups[i].color ?? PALETTE[i % PALETTE.length]} label={cm('iqr')} value={`${format(k.q1)} – ${format(k.q3)}`} />
+    <TooltipRow color={groups[i].color ?? PALETTE[i % PALETTE.length]} label={cm('whiskers')} value={`${format(k.lo)} – ${format(k.hi)}`} />
   </> }
   const focus = useChartFocus({
     count: groups.length, index: hover, label, onIndex: i => { setHover(i); tipAt(i, i === null ? undefined : boxTip(i)) },
-    summary: `${groups.length} groups: ${groups.map((g, i) => `${g.label} median ${format(stats[i].q2)}`).join(', ')}.`,
-    describe: i => { const k = stats[i]; return `${groups[i].label}: median ${format(k.q2)}, quartiles ${format(k.q1)} to ${format(k.q3)}, whiskers ${format(k.lo)} to ${format(k.hi)}${outs[i].length ? `, ${outs[i].length} outliers` : ''}` },
+    summary: cm('boxGroups', { n: groups.length, list: lf.list(groups.map((g, i) => cm('boxMedian', { label: g.label, v: format(stats[i].q2) }))) }),
+    describe: i => { const k = stats[i]; return cm('boxDescribe', { label: groups[i].label, q2: format(k.q2), q1: format(k.q1), q3: format(k.q3), lo: format(k.lo), hi: format(k.hi) }) + (outs[i].length ? ', ' + cm('outliers', { n: outs[i].length }) : '') },
   })
   return (
-    <div ref={ref} {...focus.props} className={cn('relative', CHART_FOCUS, className)} style={{ height }} onPointerLeave={onMouseLeave(() => setHover(null))}>
+    <div ref={ref} {...focus.props} dir="ltr" className={cn('relative', CHART_FOCUS, className)} style={{ height }} onPointerLeave={onMouseLeave(() => setHover(null))}>
       {focus.a11y}
       {w > 0 && (
         <svg width={w} height={height} aria-hidden className="block overflow-visible text-[11px]">
@@ -1159,15 +1494,15 @@ export function BoxViolinChart({ groups, mode = 'both', domain, height = 200, fo
                   <rect x={cx - bxw} y={Y(k.q3)} width={bxw * 2} height={Math.max(0, Y(k.q1) - Y(k.q3))} rx={3} fill="var(--card)" stroke={color} strokeWidth={1.6} className="cursor-default"
                     {...bind(() => <>
                       <div className="mb-1 font-medium">{g.label}</div>
-                      <TooltipRow color={color} label="median" value={format(k.q2)} />
-                      <TooltipRow color={color} label="IQR" value={`${format(k.q1)} – ${format(k.q3)}`} />
-                      <TooltipRow color={color} label="whiskers" value={`${format(k.lo)} – ${format(k.hi)}`} />
+                      <TooltipRow color={color} label={cm('median')} value={format(k.q2)} />
+                      <TooltipRow color={color} label={cm('iqr')} value={`${format(k.q1)} – ${format(k.q3)}`} />
+                      <TooltipRow color={color} label={cm('whiskers')} value={`${format(k.lo)} – ${format(k.hi)}`} />
                     </>)} />
                   <line x1={cx - bxw} x2={cx + bxw} y1={Y(k.q2)} y2={Y(k.q2)} stroke="var(--fg)" strokeWidth={1.5} pointerEvents="none" />
                 </>}
-                {mode === 'violin' && <circle cx={cx} cy={Y(k.q2)} r={3} fill="var(--fg)" stroke="transparent" strokeWidth={16} {...bind(() => <><div className="mb-1 font-medium">{g.label}</div><TooltipRow color={color} label="median" value={format(k.q2)} /></>)} />}
+                {mode === 'violin' && <circle cx={cx} cy={Y(k.q2)} r={3} fill="var(--fg)" stroke="transparent" strokeWidth={16} {...bind(() => <><div className="mb-1 font-medium">{g.label}</div><TooltipRow color={color} label={cm('median')} value={format(k.q2)} /></>)} />}
                 {(O[i] ?? []).map((v, j) => <circle key={j} cx={cx + JIT[j % JIT.length]} cy={Y(v)} r={2.8} fill="var(--bad)" opacity={0.9} stroke="transparent" strokeWidth={14}
-                  {...bind(() => <><div className="mb-1 font-medium">{g.label}</div><TooltipRow color="var(--bad)" label="outlier" value={format(v)} /></>)} />)}
+                  {...bind(() => <><div className="mb-1 font-medium">{g.label}</div><TooltipRow color="var(--bad)" label={cm('outlier')} value={format(v)} /></>)} />)}
                 <text x={cx} y={height - 7} textAnchor="middle" fill={hover === i ? 'var(--fg)' : 'var(--fg3)'} fontWeight={hover === i ? 600 : undefined}>{g.label}</text>
               </g>
             )
@@ -1183,9 +1518,11 @@ export function BoxViolinChart({ groups, mode = 'both', domain, height = 200, fo
  * Histogram with a kernel-density curve, mean (dashed), median and a ±1σ shaded band. `bins` is usually driven by a slider;
  * bins, density and markers all morph when it or the data changes. Hover or tap a bar for its range and count.
  */
-export function DensityHistogram({ values, bins = 18, domain, height = 190, label = 'Histogram with density curve', className }: { values: number[]; bins?: number; domain?: [number, number]; height?: number; /** accessible name */ label?: string; className?: string }) {
+export function DensityHistogram({ values, bins = 18, domain, height = 190, label: labelProp, className }: { values: number[]; bins?: number; domain?: [number, number]; height?: number; /** accessible name */ label?: string; className?: string }) {
   const [ref, w, seen] = useChartFrame<HTMLDivElement>()
   const [tip, bind, , tipAt] = useChartTip(ref)
+  const { cm, fmt: lf, fixed } = useChartLocale(CHART_HISTOGRAM_MESSAGES)
+  const label = labelProp ?? cm('histogram')
   const [hoverAt, setHover] = useState<number | null>(null)
   const [d0, d1] = domain ?? [NaN, NaN]
   const dom = useMemo(() => (Number.isFinite(d0) ? [d0, d1] : niceTicks(minOf(values), maxOf(values)).filter((_, i, a) => i === 0 || i === a.length - 1)) as [number, number], [d0, d1, values])
@@ -1204,14 +1541,14 @@ export function DensityHistogram({ values, bins = 18, domain, height = 190, labe
   const nb = Math.round(S.bins), bwv = (dom[1] - dom[0]) / nb
   const hover = chartIndex(hoverAt, bins)
   const binLo = (i: number) => dom[0] + (i * (dom[1] - dom[0])) / bins, binN = (i: number) => Math.round(stats.dens[i] * values.length * ((dom[1] - dom[0]) / bins))
-  const binTip = (i: number) => () => <><div className="mb-1 font-medium">{chartFixed(binLo(i), 0)}–{chartFixed(binLo(i + 1), 0)}</div><TooltipRow color="var(--accent)" label="values" value={binN(i)} /></>
+  const binTip = (i: number) => () => <><div className="mb-1 font-medium">{fixed(binLo(i), 0)}–{fixed(binLo(i + 1), 0)}</div><TooltipRow color="var(--accent)" label={cm('values')} value={lf.number(binN(i))} /></>
   const focus = useChartFocus({
     count: bins, index: hover, label, onIndex: i => { setHover(i); tipAt(i, i === null ? undefined : binTip(i)) },
-    summary: `${values.length} values in ${bins} bins from ${chartFixed(dom[0], 0)} to ${chartFixed(dom[1], 0)}. Mean ${chartFixed(stats.m)}, median ${chartFixed(stats.md)}, standard deviation ${chartFixed(stats.sd)}.`,
-    describe: i => `${chartFixed(binLo(i), 0)} to ${chartFixed(binLo(i + 1), 0)}: ${binN(i)} values`,
+    summary: cm('histSummary', { n: values.length, bins, lo: fixed(dom[0], 0), hi: fixed(dom[1], 0), m: fixed(stats.m), md: fixed(stats.md), sd: fixed(stats.sd) }),
+    describe: i => cm('binDescribe', { lo: fixed(binLo(i), 0), hi: fixed(binLo(i + 1), 0), n: binN(i) }),
   })
   return (
-    <div ref={ref} {...focus.props} className={cn('relative', CHART_FOCUS, className)} style={{ height }} onPointerLeave={onMouseLeave(() => setHover(null))}>
+    <div ref={ref} {...focus.props} dir="ltr" className={cn('relative', CHART_FOCUS, className)} style={{ height }} onPointerLeave={onMouseLeave(() => setHover(null))}>
       {focus.a11y}
       {w > 0 && (
         <svg width={w} height={height} aria-hidden className="block overflow-visible text-[11px]">
@@ -1220,15 +1557,15 @@ export function DensityHistogram({ values, bins = 18, domain, height = 190, labe
           {Array.from({ length: nb }, (_, i) => {
             const lo = dom[0] + i * bwv
             return <rect key={i} data-ci={i} x={X(lo) + 1} y={Y(S.dens[i])} width={Math.max(0, X(lo + bwv) - X(lo) - 2)} height={Math.max(0, Y(0) - Y(S.dens[i]))} rx={2} fill="var(--accent)" opacity={hover === i ? 0.5 : 0.22}
-              {...bind(() => <><div className="mb-1 font-medium">{chartFixed(lo, 0)}–{chartFixed(lo + bwv, 0)}</div><TooltipRow color="var(--accent)" label="values" value={Math.round(stats.dens[i] * values.length * bwv)} /></>, () => setHover(i))} />
+              {...bind(() => <><div className="mb-1 font-medium">{fixed(lo, 0)}–{fixed(lo + bwv, 0)}</div><TooltipRow color="var(--accent)" label={cm('values')} value={lf.number(Math.round(stats.dens[i] * values.length * bwv))} /></>, () => setHover(i))} />
           })}
           <path d={chartPath(xs.map((v, i) => [X(v), Y(S.kde[i])]))} fill="none" stroke="var(--accent)" strokeWidth={2} pointerEvents="none" />
           <line x1={X(S.m)} x2={X(S.m)} y1={pad.t} y2={pad.t + ih} stroke="var(--bad)" strokeWidth={1.5} strokeDasharray="4 3" pointerEvents="none" />
           <line x1={X(S.md)} x2={X(S.md)} y1={pad.t} y2={pad.t + ih} stroke="var(--fg)" strokeWidth={1.5} pointerEvents="none" />
-          {ticksIn(dom[0], dom[1]).map(t => <text key={t} x={X(t)} y={height - 8} textAnchor="middle" fill="var(--fg3)">{t}</text>)}
-          <text x={w - pad.r} y={pad.t + 10} textAnchor="end" fill="var(--bad)">mean {chartFixed(S.m)}</text>
-          <text x={w - pad.r} y={pad.t + 24} textAnchor="end" fill="var(--fg)">median {chartFixed(S.md)}</text>
-          <text x={w - pad.r} y={pad.t + 38} textAnchor="end" fill="var(--fg3)">σ {chartFixed(S.sd)}</text>
+          {ticksIn(dom[0], dom[1]).map(t => <text key={t} x={X(t)} y={height - 8} textAnchor="middle" fill="var(--fg3)">{lf.number(t)}</text>)}
+          <text x={w - pad.r} y={pad.t + 10} textAnchor="end" fill="var(--bad)">{cm('meanV', { v: fixed(S.m) })}</text>
+          <text x={w - pad.r} y={pad.t + 24} textAnchor="end" fill="var(--fg)">{cm('medianV', { v: fixed(S.md) })}</text>
+          <text x={w - pad.r} y={pad.t + 38} textAnchor="end" fill="var(--fg3)">{cm('sigmaV', { v: fixed(S.sd) })}</text>
         </svg>
       )}
       {tip && <ChartTooltip x={tip.x} y={tip.y} width={w}>{tip.body}</ChartTooltip>}
@@ -1237,17 +1574,22 @@ export function DensityHistogram({ values, bins = 18, domain, height = 190, labe
 }
 
 export type ForestRow = { label: string; effect: number; se: number }
-const forestPct = (v: number) => (v > 0 ? '+' : '') + (v * 100).toFixed(1) + '%'
-const forestCi = (v: number) => { const t = (v * 100).toFixed(1); return t === '-0.0' ? '0.0' : t }
 /**
  * Forest plot: effect sizes with 95% CI whiskers, squares sized by inverse-variance weight, a pooled diamond and a zero line.
  * Rows whose interval clears 0 are coloured as significant. New rows morph in place; hover or tap a row for its numbers.
  * Below 400px wide the right column shows the effect only (the interval stays drawn and is in the tooltip).
  */
-export function ForestPlot({ rows, domain = [-0.1, 0.2], ticks = [-0.1, 0, 0.1, 0.2], height = 220, label = 'Segment', valueLabel = 'Lift [95% CI]', lower = '← worse', higher = 'better →', name = 'Forest plot', className }:
+export function ForestPlot({ rows, domain = [-0.1, 0.2], ticks = [-0.1, 0, 0.1, 0.2], height = 220, label: labelProp, valueLabel: valueProp, lower: lowerProp, higher: higherProp, name: nameProp, className }:
   { rows: ForestRow[]; domain?: [number, number]; ticks?: number[]; height?: number; label?: string; valueLabel?: string; lower?: string; higher?: string; /** accessible name */ name?: string; className?: string }) {
   const [ref, w, seen] = useChartFrame<HTMLDivElement>()
   const [tip, bind, , tipAt] = useChartTip(ref)
+  const { cm, fmt: lf } = useChartLocale(CHART_FOREST_MESSAGES)
+  const label = labelProp ?? cm('segment'), valueLabel = valueProp ?? cm('lift'), lower = lowerProp ?? cm('worse'), higher = higherProp ?? cm('better'), name = nameProp ?? cm('forest')
+  /** +12.3% (signed, one decimal, the locale's digits and percent sign) */
+  const forestPct = (v: number) => lf.number(v, { style: 'percent', minimumFractionDigits: 1, maximumFractionDigits: 1, signDisplay: 'exceptZero' })
+  /** the interval ends without the % sign: −1.2, 0.0, 3.4 */
+  const forestCi = (v: number) => lf.number(Math.round(v * 1000) / 10 || 0, { minimumFractionDigits: 1, maximumFractionDigits: 1 })
+  const ci = (e: number, lo: number, hi: number) => cm('ciText', { effect: forestPct(e), lo: forestPct(lo), hi: forestPct(hi) })
   const [hoverAt, setHover] = useState<number | null>(null)
   const hover = chartIndex(hoverAt, rows.length + 1)
   const state = useMemo(() => {
@@ -1263,17 +1605,17 @@ export function ForestPlot({ rows, domain = [-0.1, 0.2], ticks = [-0.1, 0, 0.1, 
   const rowSig = (r: ForestRow) => r.effect - 1.96 * r.se > 0 || r.effect + 1.96 * r.se < 0
   const rowTip = (i: number) => () => i < rows.length ? <>
     <div className="mb-1 font-medium">{rows[i].label}</div>
-    <div className="text-[var(--fg2)]">{forestPct(rows[i].effect)}, 95% CI {forestPct(rows[i].effect - 1.96 * rows[i].se)} to {forestPct(rows[i].effect + 1.96 * rows[i].se)}</div>
-    <div className="text-[var(--fg2)]">{rowSig(rows[i]) ? 'significant' : 'not significant'}</div>
-  </> : <><div className="mb-1 font-medium">Pooled (inverse-variance)</div><div className="text-[var(--fg2)]">{forestPct(state.pooled)}, 95% CI {forestPct(state.pooled - 1.96 * state.pse)} to {forestPct(state.pooled + 1.96 * state.pse)}</div></>
+    <div className="text-[var(--fg2)]">{ci(rows[i].effect, rows[i].effect - 1.96 * rows[i].se, rows[i].effect + 1.96 * rows[i].se)}</div>
+    <div className="text-[var(--fg2)]">{rowSig(rows[i]) ? cm('significant') : cm('notSignificant')}</div>
+  </> : <><div className="mb-1 font-medium">{cm('pooledIV')}</div><div className="text-[var(--fg2)]">{ci(state.pooled, state.pooled - 1.96 * state.pse, state.pooled + 1.96 * state.pse)}</div></>
   const focus = useChartFocus({
     count: rows.length + 1, index: hover, label: name, onIndex: i => { setHover(i); tipAt(i, i === null ? undefined : rowTip(i)) },
-    summary: `${rows.length} ${label.toLowerCase()}s and a pooled estimate of ${forestPct(state.pooled)}. ${rows.filter(rowSig).length} of ${rows.length} intervals clear zero.`,
-    describe: i => i < rows.length ? `${rows[i].label}: ${forestPct(rows[i].effect)}, 95% interval ${forestPct(rows[i].effect - 1.96 * rows[i].se)} to ${forestPct(rows[i].effect + 1.96 * rows[i].se)}, ${rowSig(rows[i]) ? 'significant' : 'not significant'}`
-      : `Pooled: ${forestPct(state.pooled)}, 95% interval ${forestPct(state.pooled - 1.96 * state.pse)} to ${forestPct(state.pooled + 1.96 * state.pse)}`,
+    summary: cm('forestSummary', { n: rows.length, p: forestPct(state.pooled), k: rows.filter(rowSig).length }),
+    describe: i => i < rows.length ? cm('forestDescribe', { label: rows[i].label, effect: forestPct(rows[i].effect), lo: forestPct(rows[i].effect - 1.96 * rows[i].se), hi: forestPct(rows[i].effect + 1.96 * rows[i].se), sig: rowSig(rows[i]) ? cm('significant') : cm('notSignificant') })
+      : cm('pooledDescribe', { effect: forestPct(state.pooled), lo: forestPct(state.pooled - 1.96 * state.pse), hi: forestPct(state.pooled + 1.96 * state.pse) }),
   })
   return (
-    <div ref={ref} {...focus.props} className={cn('relative', CHART_FOCUS, className)} style={{ height }} onPointerLeave={onMouseLeave(() => setHover(null))}>
+    <div ref={ref} {...focus.props} dir="ltr" className={cn('relative', CHART_FOCUS, className)} style={{ height }} onPointerLeave={onMouseLeave(() => setHover(null))}>
       {focus.a11y}
       {w > 0 && (
         <svg width={w} height={height} aria-hidden className="block overflow-visible text-[11px]">
@@ -1281,7 +1623,7 @@ export function ForestPlot({ rows, domain = [-0.1, 0.2], ticks = [-0.1, 0, 0.1, 
           <text x={w - 2} y={10} textAnchor="end" fontWeight={600} fill="var(--fg2)">{narrow ? valueLabel.replace(/\s*\[.*\]\s*$/, '') : valueLabel}</text>
           {ticks.map(v => <g key={v}>
             <line x1={X(v)} x2={X(v)} y1={T} y2={height - B} stroke={v ? 'var(--line)' : 'var(--fg2)'} strokeWidth={v ? 1 : 1.2} strokeDasharray={v ? '2 3' : undefined} />
-            <text x={X(v)} y={height - B + 14} textAnchor="middle" fill="var(--fg3)">{(v > 0 ? '+' : '') + Math.round(v * 100)}%</text>
+            <text x={X(v)} y={height - B + 14} textAnchor="middle" fill="var(--fg3)">{lf.number(v, { style: 'percent', maximumFractionDigits: 0, signDisplay: 'exceptZero' })}</text>
           </g>)}
           <text x={X(0) - 4} y={height - 4} textAnchor="end" fill="var(--fg3)">{lower}</text>
           <text x={X(0) + 4} y={height - 4} fill="var(--fg3)">{higher}</text>
@@ -1295,8 +1637,8 @@ export function ForestPlot({ rows, domain = [-0.1, 0.2], ticks = [-0.1, 0, 0.1, 
                 <rect data-ci={i} x={0} y={cy - rowH / 2} width={w} height={rowH} fill="transparent"
                   {...bind(() => <>
                     <div className="mb-1 font-medium">{r.label}</div>
-                    <div className="text-[var(--fg2)]">{forestPct(r.effect)}, 95% CI {forestPct(r.effect - 1.96 * r.se)} to {forestPct(r.effect + 1.96 * r.se)}</div>
-                    <div className="text-[var(--fg2)]">{sig ? 'significant' : 'not significant'} · weight {Math.round((wts[i] / wsum) * 100)}%</div>
+                    <div className="text-[var(--fg2)]">{ci(r.effect, r.effect - 1.96 * r.se, r.effect + 1.96 * r.se)}</div>
+                    <div className="text-[var(--fg2)]">{sig ? cm('significant') : cm('notSignificant')} · {cm('weight', { pct: lf.percent(wts[i] / wsum, 0) })}</div>
                   </>, () => setHover(i))} />
                 <rect x={X(e) - sz / 2} y={cy - sz / 2} width={sz} height={sz} rx={1.5} fill={col} pointerEvents="none" />
                 <text x={w - 2} y={cy} dy="0.32em" textAnchor="end" fontFamily="var(--mono)" pointerEvents="none" fill={sig ? 'var(--fg)' : 'var(--fg3)'}>{forestPct(e)}{narrow ? '' : ` [${forestCi(lo)}, ${forestCi(hi)}]`}</text>
@@ -1305,10 +1647,10 @@ export function ForestPlot({ rows, domain = [-0.1, 0.2], ticks = [-0.1, 0, 0.1, 
           })}
           <line x1={8} x2={w - 2} y1={py - rowH * 0.6} y2={py - rowH * 0.6} stroke="var(--line)" />
           {hover === rows.length && <rect x={2} y={py - rowH / 2 + 1} width={w - 4} height={rowH - 2} rx={4} fill="var(--muted)" />}
-          <text x={L - 8} y={py} dy="0.32em" textAnchor="end" fontWeight={600} fill="var(--fg)">Pooled</text>
+          <text x={L - 8} y={py} dy="0.32em" textAnchor="end" fontWeight={600} fill="var(--fg)">{cm('pooled')}</text>
           <path d={`M${p1(X(plo))},${p1(py)}L${p1(X(S.pooled))},${p1(py - 6)}L${p1(X(phi))},${p1(py)}L${p1(X(S.pooled))},${p1(py + 6)}Z`} fill="var(--fg)" />
           <rect data-ci={rows.length} x={0} y={py - rowH / 2} width={w} height={rowH} fill="transparent"
-            {...bind(() => <><div className="mb-1 font-medium">Pooled (inverse-variance)</div><div className="text-[var(--fg2)]">{forestPct(state.pooled)}, 95% CI {forestPct(state.pooled - 1.96 * state.pse)} to {forestPct(state.pooled + 1.96 * state.pse)}</div></>, () => setHover(rows.length))} />
+            {...bind(() => <><div className="mb-1 font-medium">{cm('pooledIV')}</div><div className="text-[var(--fg2)]">{ci(state.pooled, state.pooled - 1.96 * state.pse, state.pooled + 1.96 * state.pse)}</div></>, () => setHover(rows.length))} />
           <text x={w - 2} y={py} dy="0.32em" textAnchor="end" fontFamily="var(--mono)" fontWeight={600} pointerEvents="none" fill="var(--fg)">{forestPct(S.pooled)}{narrow ? '' : ` [${forestCi(plo)}, ${forestCi(phi)}]`}</text>
         </svg>
       )}

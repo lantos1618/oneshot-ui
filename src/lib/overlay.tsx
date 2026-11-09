@@ -1,7 +1,7 @@
 import { Fragment, createContext, isValidElement, useCallback, useContext, useEffect, useId, useLayoutEffect, useMemo, useRef, useState, type CSSProperties, type HTMLAttributes, type ReactNode, type Ref, type RefObject, type KeyboardEvent as RKeyboardEvent, type MouseEvent as ReactMouseEvent, type PointerEvent as ReactPointerEvent } from 'react'
 import { createPortal } from 'react-dom'
 import { AnimatePresence, motion, useDragControls, type Variants } from 'motion/react'
-import { type AsChildProps, Button, type ButtonProps, FOCUSABLE, Icon, IconButton, type IconName, Kbd, Slot, cn, floatingSurface, isTouch, menuItemClass, prefersReducedMotion, spring, useControllable, useFocusTrap, useLongPress, useMediaQuery, useOutside, useRoving, AnimatedNumber, Spinner, TOUCH } from './core'
+import { type AsChildProps, Button, type ButtonProps, FOCUSABLE, Icon, IconButton, type IconName, Kbd, Slot, type UIDir, cn, defineMessages, dirX, floatingSurface, isTouch, logicalArrow, menuItemClass, prefersReducedMotion, spring, useControllable, useDir, useFocusTrap, useLocale, useLongPress, useMediaQuery, useMessages, useOutside, useRoving, AnimatedNumber, Spinner, TOUCH, uiShared } from './core'
 import { EmptyState } from './feedback'
 import { shake } from './motion'
 import { useVirtual, virtualSetAria } from './virtual'
@@ -16,6 +16,40 @@ import { useVirtual, virtualSetAria } from './virtual'
  *   ContextMenu.Root/Trigger/Content (+ the same item parts) · Dialog/Sheet/AlertDialog.Root/Trigger/Content/Title/Description/Close/Footer
  * Triggers and Close take `asChild` (see Slot in core).
  * ══════════════════════════════════════════════════════════════════════════ */
+
+/** This module's strings (machine-drafted de/ar: have a native speaker review). Override with `<UIProvider messages={{ 'overlay.searching': … }}>`. */
+const OVERLAY_MSG = defineMessages('overlay', {
+  en: {
+    options: 'Options', alertFailed: 'Something went wrong. Try again.',
+    palette: 'Command palette', palettePlaceholder: 'Type a command or search…', palettePages: 'Palette pages', backTo: 'Back to {name}', allCommands: 'all commands',
+    searchIn: 'Search {name}…', searchInLabel: 'Search {name}', searchCommands: 'Search commands', results: 'Results', recent: 'Recent',
+    searching: 'Searching…', loadFailed: 'Couldn’t load results', nothingMatches: 'Nothing matches “{query}”.', tryPrefix: 'Try', quoted: '“{text}”',
+    hintMove: 'move', hintOpen: 'open', hintRun: 'run', hintBack: 'back', hintClose: 'close', keyEsc: 'esc',
+    inlineTitle: 'Title', inlineEdit: ', edit', inlineEditNamed: ', edit {name}', savedJustNow: 'Saved just now',
+    bell: 'Notifications, {count} unread', markAllRead: 'Mark all read', caughtUp: 'You’re all caught up',
+    tour: 'Product tour', stepOf: '{step} of {total}', skip: 'Skip',
+  },
+  de: {
+    options: 'Optionen', alertFailed: 'Etwas ist schiefgelaufen. Bitte erneut versuchen.',
+    palette: 'Befehlspalette', palettePlaceholder: 'Befehl eingeben oder suchen…', palettePages: 'Palettenseiten', backTo: 'Zurück zu {name}', allCommands: 'allen Befehlen',
+    searchIn: '{name} durchsuchen…', searchInLabel: '{name} durchsuchen', searchCommands: 'Befehle durchsuchen', results: 'Ergebnisse', recent: 'Zuletzt verwendet',
+    searching: 'Suche läuft…', loadFailed: 'Ergebnisse konnten nicht geladen werden', nothingMatches: 'Keine Treffer für „{query}“.', tryPrefix: 'Versuche', quoted: '„{text}“',
+    hintMove: 'bewegen', hintOpen: 'öffnen', hintRun: 'ausführen', hintBack: 'zurück', hintClose: 'schließen', keyEsc: 'Esc',
+    inlineTitle: 'Titel', inlineEdit: ', bearbeiten', inlineEditNamed: ', {name} bearbeiten', savedJustNow: 'Gerade gespeichert',
+    bell: 'Benachrichtigungen, {count} ungelesen', markAllRead: 'Alle als gelesen markieren', caughtUp: 'Du bist auf dem neuesten Stand',
+    tour: 'Produkttour', stepOf: '{step} von {total}', skip: 'Überspringen',
+  },
+  ar: {
+    options: 'خيارات', alertFailed: 'حدث خطأ ما. حاول مرة أخرى.',
+    palette: 'لوحة الأوامر', palettePlaceholder: 'اكتب أمرًا أو ابحث…', palettePages: 'صفحات اللوحة', backTo: 'العودة إلى {name}', allCommands: 'كل الأوامر',
+    searchIn: 'البحث في {name}…', searchInLabel: 'البحث في {name}', searchCommands: 'البحث في الأوامر', results: 'النتائج', recent: 'الأخيرة',
+    searching: 'جارٍ البحث…', loadFailed: 'تعذّر تحميل النتائج', nothingMatches: 'لا شيء يطابق «{query}».', tryPrefix: 'جرّب', quoted: '«{text}»',
+    hintMove: 'تنقّل', hintOpen: 'فتح', hintRun: 'تشغيل', hintBack: 'رجوع', hintClose: 'إغلاق', keyEsc: 'Esc',
+    inlineTitle: 'العنوان', inlineEdit: '، تعديل', inlineEditNamed: '، تعديل {name}', savedJustNow: 'تم الحفظ الآن',
+    bell: 'الإشعارات، {count} غير مقروءة', markAllRead: 'تعليم الكل كمقروء', caughtUp: 'لا جديد لديك',
+    tour: 'جولة في المنتج', stepOf: '{step} من {total}', skip: 'تخطٍّ',
+  },
+})
 
 type PopCtx = { open: boolean; setOpen: (v: boolean) => void; triggerRef: RefObject<HTMLButtonElement | null>; id: string }
 const PopoverCtx = createContext<PopCtx | null>(null)
@@ -61,13 +95,20 @@ export function PopoverClose({ children, ...p }: ButtonProps) {
   return <OverlayPartButton {...p} action={() => setOpen(false)}>{children}</OverlayPartButton>
 }
 
+/*
+ * Placement semantics (0.4, RTL): the SIDE is physical, as in Floating UI and Radix: `top`/`bottom`/`left`/`right` are
+ * the same edge of the screen in both directions (a tooltip on the `right` of an icon stays on its right). The ALIGNMENT
+ * of a top or bottom panel is logical: `-start` lines the panel up with the trigger's start edge, which is its right
+ * edge under dir="rtl", and `-end` with its end edge. (`-start`/`-end` on a left or right side mean top/bottom.)
+ * Widgets that hang off an inline edge (submenus, a collapsed sidebar's tooltips) pick left or right from useDir().
+ */
 const SIDE = {
-  'bottom-start': 'top-[calc(100%+6px)] left-0 origin-top-left', 'bottom-end': 'top-[calc(100%+6px)] right-0 origin-top-right',
-  'bottom-center': 'top-[calc(100%+6px)] left-1/2 -translate-x-1/2 origin-top', 'top-start': 'bottom-[calc(100%+8px)] left-0 origin-bottom-left',
-  'top-center': 'bottom-[calc(100%+8px)] left-1/2 -translate-x-1/2 origin-bottom', 'top-end': 'bottom-[calc(100%+8px)] right-0 origin-bottom-right',
-  right: 'left-[calc(100%+8px)] top-1/2 -translate-y-1/2 origin-left', left: 'right-[calc(100%+8px)] top-1/2 -translate-y-1/2 origin-right',
-  'right-start': 'left-[calc(100%+8px)] top-0 origin-top-left', 'right-end': 'left-[calc(100%+8px)] bottom-0 origin-bottom-left',
-  'left-start': 'right-[calc(100%+8px)] top-0 origin-top-right', 'left-end': 'right-[calc(100%+8px)] bottom-0 origin-bottom-right',
+  'bottom-start': 'top-[calc(100%+6px)] start-0 origin-top-left rtl:origin-top-right', 'bottom-end': 'top-[calc(100%+6px)] end-0 origin-top-right rtl:origin-top-left', // rtl-lint-ignore
+  'bottom-center': 'top-[calc(100%+6px)] left-1/2 -translate-x-1/2 origin-top', 'top-start': 'bottom-[calc(100%+8px)] start-0 origin-bottom-left rtl:origin-bottom-right', // rtl-lint-ignore
+  'top-center': 'bottom-[calc(100%+8px)] left-1/2 -translate-x-1/2 origin-bottom', 'top-end': 'bottom-[calc(100%+8px)] end-0 origin-bottom-right rtl:origin-bottom-left', // rtl-lint-ignore
+  right: 'left-[calc(100%+8px)] top-1/2 -translate-y-1/2 origin-left', left: 'right-[calc(100%+8px)] top-1/2 -translate-y-1/2 origin-right', // rtl-lint-ignore: physical sides
+  'right-start': 'left-[calc(100%+8px)] top-0 origin-top-left', 'right-end': 'left-[calc(100%+8px)] bottom-0 origin-bottom-left', // rtl-lint-ignore
+  'left-start': 'right-[calc(100%+8px)] top-0 origin-top-right', 'left-end': 'right-[calc(100%+8px)] bottom-0 origin-bottom-right', // rtl-lint-ignore
 } as const
 export type Placement = keyof typeof SIDE
 const FLIP_SIDE: Partial<Record<Placement, Placement>> = {
@@ -75,9 +116,9 @@ const FLIP_SIDE: Partial<Record<Placement, Placement>> = {
   right: 'left', left: 'right', 'right-start': 'left-start', 'right-end': 'left-end', 'left-start': 'right-start', 'left-end': 'right-end',
 }
 
-/** Which side of its trigger a floating part opens on. */
+/** Which side of its trigger a floating part opens on. Physical: `right` is the right in RTL too. */
 export type FloatSide = 'top' | 'right' | 'bottom' | 'left'
-/** How a floating part lines up along that side. */
+/** How a floating part lines up along that side. Logical on top/bottom: `start` is the right edge in RTL. */
 export type FloatAlign = 'start' | 'center' | 'end'
 /** Positioning props of the floating content parts (Popover, DropdownMenu, HoverCard, Tooltip). */
 export type FloatProps = {
@@ -102,9 +143,10 @@ function floatGap(p: Placement, offset: number | undefined): CSSProperties | und
   return s === 'bottom' ? { marginTop: gap } : s === 'top' ? { marginBottom: gap } : s === 'right' ? { marginLeft: gap } : { marginRight: gap }
 }
 /* Arrow classes: which edge it sits on (and which two borders draw it), then where along that edge. */
-const ARROW_EDGE = { bottom: '-top-[5px] border-t border-l', top: '-bottom-[5px] border-b border-r', right: '-left-[5px] border-b border-l', left: '-right-[5px] border-t border-r' } as const
+// a rotated square: which two borders draw the point is physical geometry, like the side itself
+const ARROW_EDGE = { bottom: '-top-[5px] border-t border-l', top: '-bottom-[5px] border-b border-r', right: '-left-[5px] border-b border-l', left: '-right-[5px] border-t border-r' } as const // rtl-lint-ignore
 const ARROW_ALONG = {
-  x: { start: 'left-4', center: 'left-[calc(50%-5px)]', end: 'right-4' },
+  x: { start: 'start-4', center: 'left-[calc(50%-5px)]', end: 'end-4' }, // rtl-lint-ignore (centre is symmetric)
   y: { start: 'top-3', center: 'top-[calc(50%-5px)]', end: 'bottom-3' },
 } as const
 const floatArrowClass = (p: Placement) => {
@@ -125,6 +167,7 @@ export function FloatingPanel({ open, placement = 'bottom-start', flip = true, m
   { open: boolean; placement?: Placement; flip?: boolean | 'scroll'; matchWidth?: boolean; offset?: number; arrow?: boolean; className?: string; children: ReactNode; role?: string; id?: string } & Omit<HTMLAttributes<HTMLDivElement>, 'onAnimationStart' | 'onDrag' | 'onDragStart' | 'onDragEnd'>) {
   const [side, setSide] = useState<Placement>(placement)
   const [shift, setShift] = useState(0)
+  const rtl = useDir() === 'rtl'
   const ref = useRef<HTMLDivElement>(null), shiftRef = useRef(0)
   const horizontal = (s: Placement) => s.startsWith('left') || s.startsWith('right')
   useLayoutEffect(() => { // horizontal clamp: keep the panel inside the viewport
@@ -160,8 +203,9 @@ export function FloatingPanel({ open, placement = 'bottom-start', flip = true, m
   }, [open, placement, flip])
   const up = side.startsWith('top')
   const gap = floatGap(side, offset)
-  // a right-anchored (…-end) panel moves with margin-right; the others with margin-left
-  const style = gap || shift ? { ...gap, ...(shift ? side.endsWith('end') ? { marginRight: -shift } : { marginLeft: shift } : null) } : undefined
+  // a right-anchored panel (…-end, or …-start in RTL) moves with margin-right; the others with margin-left
+  const rightAnchored = !side.endsWith('center') && side.endsWith('end') !== rtl
+  const style = gap || shift ? { ...gap, ...(shift ? rightAnchored ? { marginRight: -shift } : { marginLeft: shift } : null) } : undefined
   return (
     <AnimatePresence>
       {open && (
@@ -219,7 +263,8 @@ export const Popover = Object.assign(PopoverRoot, { Root: PopoverRoot, Trigger: 
 
 /** Variants for a menu's item list: items slide in one after another. */
 export const menuListVariants: Variants = { hidden: {}, show: { transition: { staggerChildren: 0.03 } } }
-const menuItemVariants: Variants = { hidden: { opacity: 0, x: -6 }, show: { opacity: 1, x: 0, transition: { duration: 0.2 } } }
+/** Each item slides in from the inline start (pass `custom={dir}`). */
+const menuItemVariants: Variants = { hidden: (dir: UIDir = 'ltr') => ({ opacity: 0, x: dirX(-6, dir) }), show: { opacity: 1, x: 0, transition: { duration: 0.2 } } }
 
 /** What the items of a menu (DropdownMenu or ContextMenu content) need from it: close it, focus back on its trigger. */
 type MenuCtxV = { close: (refocus?: boolean) => void }
@@ -283,7 +328,7 @@ type MenuItemBase = {
   /** indent to line up with checkbox and radio items */ inset?: boolean
 }
 const menuRowClass = (danger?: boolean, disabled?: boolean, inset?: boolean, className?: string) =>
-  cn(menuItemClass, danger && 'text-[var(--bad)]', disabled && 'cursor-default opacity-50', inset && '!pl-8', className)
+  cn(menuItemClass, danger && 'text-[var(--bad)]', disabled && 'cursor-default opacity-50', inset && '!ps-8', className)
 
 /**
  * One row in a menu (DropdownMenu.Item / ContextMenu.Item). Not a Tab stop (arrows and typeahead move between rows); choosing
@@ -292,7 +337,7 @@ const menuRowClass = (danger?: boolean, disabled?: boolean, inset?: boolean, cla
  */
 export function MenuItem({ children, shortcut, icon, danger, disabled, onSelect, closeOnSelect = true, textValue, inset, asChild, className }: MenuItemBase & AsChildProps &
   { shortcut?: string; icon?: IconName; danger?: boolean; onSelect?: (e: MenuSelectEvent) => void; closeOnSelect?: boolean }) {
-  const close = useMenuClose(), inMenu = useContext(MenuCtx) !== null
+  const close = useMenuClose(), inMenu = useContext(MenuCtx) !== null, dir = useDir()
   const props = {
     role: 'menuitem', tabIndex: -1, 'data-text-value': textValue, className: menuRowClass(danger, disabled, inset, className),
     onPointerMove: inMenu ? menuHoverFocus : undefined,
@@ -304,7 +349,7 @@ export function MenuItem({ children, shortcut, icon, danger, disabled, onSelect,
   }
   if (asChild) return <Slot {...props} aria-disabled={disabled || undefined}>{children}</Slot>
   return (
-    <motion.button type="button" variants={menuItemVariants} disabled={disabled} {...props}>
+    <motion.button type="button" variants={menuItemVariants} custom={dir} disabled={disabled} {...props}>
       <span className="flex min-w-0 flex-1 items-center gap-2">{icon && <Icon name={icon} size={15} className={danger ? '' : 'text-[var(--fg3)]'} />}{children}</span>
       {shortcut && <Kbd>{shortcut}</Kbd>}
     </motion.button>
@@ -314,13 +359,13 @@ export function MenuItem({ children, shortcut, icon, danger, disabled, onSelect,
 export const MenuSeparator = ({ className }: { className?: string }) => <div role="separator" className={cn('mx-1 my-1 h-px bg-[var(--line)]', className)} />
 /** Small grey heading over a group of rows in a menu, listbox or palette. */
 export const MenuLabel = ({ children, id, inset, className }: { children: ReactNode; id?: string; inset?: boolean; className?: string }) =>
-  <div id={id} role="presentation" className={cn('px-2 pt-2 pb-1 text-[11px] text-[var(--fg3)]', inset && 'pl-8', className)}>{children}</div>
+  <div id={id} role="presentation" className={cn('px-2 pt-2 pb-1 text-[11px] text-[var(--fg3)]', inset && 'ps-8', className)}>{children}</div>
 /** A named group of menu rows (role=group). */
 export const MenuGroup = ({ children, 'aria-label': label, className }: { children: ReactNode; 'aria-label'?: string; className?: string }) =>
   <div role="group" aria-label={label} className={className}>{children}</div>
-/** Right-aligned shortcut hint inside a menu row: `<DropdownMenu.Item>Copy<DropdownMenu.Shortcut>⌘C</DropdownMenu.Shortcut></DropdownMenu.Item>`. */
+/** End-aligned shortcut hint inside a menu row: `<DropdownMenu.Item>Copy<DropdownMenu.Shortcut>⌘C</DropdownMenu.Shortcut></DropdownMenu.Item>`. */
 export const MenuShortcut = ({ children, className }: { children: ReactNode; className?: string }) =>
-  <span className={cn('ml-auto pl-3 font-[family-name:var(--mono)] text-[11px] text-[var(--fg3)]', className)}>{children}</span>
+  <span className={cn('ms-auto ps-3 font-[family-name:var(--mono)] text-[11px] text-[var(--fg3)]', className)}>{children}</span>
 
 /** The tick or dot in front of a checkbox or radio menu item; pops in when it turns on. */
 function MenuIndicator({ on, kind }: { on: boolean; kind: 'check' | 'dot' }) {
@@ -342,9 +387,9 @@ function MenuIndicator({ on, kind }: { on: boolean; kind: 'check' | 'dot' }) {
 export function MenuCheckboxItem({ checked, defaultChecked = false, onCheckedChange, onSelect, closeOnSelect = false, shortcut, children, disabled, textValue, className }: MenuItemBase &
   { checked?: boolean; defaultChecked?: boolean; onCheckedChange?: (checked: boolean) => void; onSelect?: (e: MenuSelectEvent) => void; closeOnSelect?: boolean; shortcut?: string }) {
   const [on, set] = useControllable(checked, defaultChecked, onCheckedChange)
-  const close = useMenuClose()
+  const close = useMenuClose(), dir = useDir()
   return (
-    <motion.button type="button" variants={menuItemVariants} role="menuitemcheckbox" aria-checked={on} tabIndex={-1} disabled={disabled} data-text-value={textValue}
+    <motion.button type="button" variants={menuItemVariants} custom={dir} role="menuitemcheckbox" aria-checked={on} tabIndex={-1} disabled={disabled} data-text-value={textValue}
       className={menuRowClass(false, disabled, false, className)} onPointerMove={menuHoverFocus}
       onClick={e => { const ev = menuSelectEvent(e); onSelect?.(ev); if (ev.defaultPrevented) return; set(!on); if (closeOnSelect) close() }}>
       <span className="flex min-w-0 flex-1 items-center gap-2"><MenuIndicator on={on} kind="check" />{children}</span>
@@ -366,9 +411,9 @@ export function MenuRadioItem({ value, onSelect, closeOnSelect = false, shortcut
   { value: string; onSelect?: (e: MenuSelectEvent) => void; closeOnSelect?: boolean; shortcut?: string }) {
   const g = useContext(MenuRadioCtx)
   if (!g) throw new Error('<RadioItem> must be inside a menu <RadioGroup>')
-  const close = useMenuClose(), on = g.value === value
+  const close = useMenuClose(), on = g.value === value, dir = useDir()
   return (
-    <motion.button type="button" variants={menuItemVariants} role="menuitemradio" aria-checked={on} tabIndex={-1} disabled={disabled} data-text-value={textValue}
+    <motion.button type="button" variants={menuItemVariants} custom={dir} role="menuitemradio" aria-checked={on} tabIndex={-1} disabled={disabled} data-text-value={textValue}
       className={menuRowClass(false, disabled, false, className)} onPointerMove={menuHoverFocus}
       onClick={e => { const ev = menuSelectEvent(e); onSelect?.(ev); if (ev.defaultPrevented) return; g.set(value); if (closeOnSelect) close() }}>
       <span className="flex min-w-0 flex-1 items-center gap-2"><MenuIndicator on={on} kind="dot" />{children}</span>
@@ -386,7 +431,8 @@ const menuFirstItem = (id: string) => requestAnimationFrame(() => menuItemsOf(do
 
 /**
  * A nested menu (DropdownMenu.Sub / ContextMenu.Sub): wraps a SubTrigger and a SubContent. Opens on hover (mouse), click
- * or tap, → / Enter / Space; ← or Escape closes it and returns to the trigger. `open` + `onOpenChange` to control it.
+ * or tap, → / Enter / Space; ← or Escape closes it and returns to the trigger (in RTL ← opens and → closes).
+ * `open` + `onOpenChange` to control it.
  */
 export function MenuSub({ open, defaultOpen = false, onOpenChange, children }: { open?: boolean; defaultOpen?: boolean; onOpenChange?: (open: boolean) => void; children: ReactNode }) {
   const [o, setO] = useControllable(open, defaultOpen, onOpenChange)
@@ -409,16 +455,16 @@ export function MenuSub({ open, defaultOpen = false, onOpenChange, children }: {
 }
 /** The row that opens a submenu (aria-haspopup=menu, aria-expanded); shows a chevron. */
 export function MenuSubTrigger({ children, icon, disabled, textValue, inset, className }: MenuItemBase & { icon?: IconName }) {
-  const sub = useMenuSub('SubTrigger')
+  const sub = useMenuSub('SubTrigger'), dir = useDir()
   const openAndFocus = () => { sub.setOpen(true); menuFirstItem(sub.id) }
   return (
-    <motion.button ref={sub.triggerRef} id={`${sub.id}-t`} type="button" variants={menuItemVariants} role="menuitem" aria-haspopup="menu" aria-expanded={sub.open}
+    <motion.button ref={sub.triggerRef} id={`${sub.id}-t`} type="button" variants={menuItemVariants} custom={dir} role="menuitem" aria-haspopup="menu" aria-expanded={sub.open}
       aria-controls={sub.open ? sub.id : undefined} tabIndex={-1} disabled={disabled} data-text-value={textValue} data-state={sub.open ? 'open' : 'closed'}
       className={cn(menuRowClass(false, disabled, inset, className), 'data-[state=open]:bg-[var(--muted)]')}
       onPointerMove={menuHoverFocus} onPointerEnter={e => { if (e.pointerType === 'mouse') sub.hover() }} onClick={openAndFocus}
-      onKeyDown={e => { if (e.key === 'ArrowRight' || e.key === 'Enter' || e.key === ' ') { e.preventDefault(); e.stopPropagation(); openAndFocus() } }}>
+      onKeyDown={e => { if (logicalArrow(e.key, dir) === 'ArrowRight' || e.key === 'Enter' || e.key === ' ') { e.preventDefault(); e.stopPropagation(); openAndFocus() } }}>
       <span className="flex min-w-0 flex-1 items-center gap-2">{icon && <Icon name={icon} size={15} className="text-[var(--fg3)]" />}{children}</span>
-      <Icon name="chevronRight" size={13} className="text-[var(--fg3)]" />
+      <Icon name="chevronRight" size={13} className="ui-flip text-[var(--fg3)]" />
     </motion.button>
   )
 }
@@ -429,25 +475,27 @@ const ctxPanelVariants: Variants = {
 }
 
 /**
- * The submenu panel. Opens beside its trigger, on the left when the right has no room, and on a phone too narrow for
- * either it overlaps just below the trigger; it also moves up to stay on screen.
+ * The submenu panel. Opens beside its trigger toward the inline end (the right, or the left in RTL), on the other side
+ * when that has no room, and on a phone too narrow for either it overlaps just below the trigger; it also moves up to
+ * stay on screen.
  */
 export function MenuSubContent({ children, className, 'aria-label': ariaLabel }: { children: ReactNode; className?: string; 'aria-label'?: string }) {
-  const sub = useMenuSub('SubContent'), keys = useMenuKeys()
+  const sub = useMenuSub('SubContent'), keys = useMenuKeys(), dir = useDir()
   const ref = useRef<HTMLDivElement>(null)
-  const [place, setPlace] = useState<{ left: number; top: number; flipped: boolean } | null>(null)
+  const [place, setPlace] = useState<{ left: number; top: number; onLeft: boolean } | null>(null)
   useLayoutEffect(() => {
     if (!sub.open) { setPlace(null); return }
     const el = ref.current, tr = sub.triggerRef.current
     if (!el || !tr) return
-    const r = tr.getBoundingClientRect(), w = el.offsetWidth, h = el.offsetHeight
-    let left = r.width + 4, top = -5, flipped = false
-    if (r.right + 4 + w > innerWidth - 8) {
-      if (r.left - 4 - w >= 8) { left = -w - 4; flipped = true }
-      else { left = Math.max(8, Math.min(innerWidth - 8 - w, r.left + 24)) - r.left; top = r.height }
-    }
+    const r = tr.getBoundingClientRect(), w = el.offsetWidth, h = el.offsetHeight, rtl = dir === 'rtl'
+    const right = r.width + 4, leftOf = -w - 4 // physical offsets from the trigger's left edge
+    const fitsR = r.right + 4 + w <= innerWidth - 8, fitsL = r.left - 4 - w >= 8
+    let left: number, top = -5
+    if (rtl ? fitsL : fitsR) left = rtl ? leftOf : right
+    else if (rtl ? fitsR : fitsL) left = rtl ? right : leftOf
+    else { left = Math.max(8, Math.min(innerWidth - 8 - w, rtl ? r.right - 24 - w : r.left + 24)) - r.left; top = r.height }
     if (r.top + top + h > innerHeight - 8) top = top > 0 && r.top - h - 2 >= 8 ? -h - 2 : Math.max(8, innerHeight - 8 - h) - r.top // overlapping: above the trigger when below doesn't fit
-    setPlace({ left, top, flipped })
+    setPlace({ left, top, onLeft: left < 0 })
   }, [sub.open]) // eslint-disable-line react-hooks/exhaustive-deps
   return (
     <AnimatePresence>
@@ -455,10 +503,10 @@ export function MenuSubContent({ children, className, 'aria-label': ariaLabel }:
         <motion.div ref={ref} id={sub.id} role="menu" aria-label={ariaLabel} aria-labelledby={ariaLabel ? undefined : `${sub.id}-t`} data-menu-list
           variants={ctxPanelVariants} initial="hidden" animate="show" exit={{ opacity: 0, scale: 0.97, transition: { duration: 0.1 } }}
           style={place ? { left: place.left, top: place.top } : { visibility: 'hidden' }}
-          className={cn(floatingSurface, 'absolute z-10 min-w-[180px] p-1', place?.flipped ? 'origin-top-right' : 'origin-top-left', className)}
+          className={cn(floatingSurface, 'absolute z-10 min-w-[180px] p-1', place?.onLeft ? 'origin-top-right' : 'origin-top-left', className)} // rtl-lint-ignore: computed side
           onKeyDown={e => {
             if ((e.target as Element).closest('[data-menu-list]') !== e.currentTarget) return
-            if (e.key === 'ArrowLeft' || e.key === 'Escape') { e.preventDefault(); e.stopPropagation(); sub.setOpen(false); sub.triggerRef.current?.focus(); return }
+            if (logicalArrow(e.key, dir) === 'ArrowLeft' || e.key === 'Escape') { e.preventDefault(); e.stopPropagation(); sub.setOpen(false); sub.triggerRef.current?.focus(); return }
             keys(e)
           }}>
           {children}
@@ -560,15 +608,15 @@ export function ContextMenuRoot({ open: openProp, onOpenChange, children }: { op
  * ContextMenu.Trigger: the area that opens the menu on right-click, long-press (touch), or the Menu key / Shift+F10 when
  * focused. A focusable named group (`label`); `children` may be a function of `open`. `asChild` puts it on your element.
  */
-export function ContextMenuTrigger({ children, className, label = 'Options', asChild }:
+export function ContextMenuTrigger({ children, className, label, asChild }:
   { children: ReactNode | ((open: boolean) => ReactNode); className?: string; label?: string } & AsChildProps) {
-  const { open, openAt, area } = useCtxMenu('Trigger')
+  const { open, openAt, area } = useCtxMenu('Trigger'), tm = useMessages(OVERLAY_MSG)
   const inArea = (t: EventTarget) => !!area.current?.contains(t as Node)
   // touch: long-press opens the menu just under the finger (the menu's own events bubble here through the portal, hence inArea)
   const hold = useLongPress({ onPress: ({ x, y }) => { navigator.vibrate?.(10); openAt(x, y + 10) } })
   const fromArea = <E extends { target: EventTarget }>(fn: (e: E) => void) => (e: E) => { if (inArea(e.target)) fn(e) }
   const props = {
-    ref: area as RefObject<HTMLDivElement | null>, tabIndex: 0, role: 'group', 'aria-label': label, 'aria-keyshortcuts': 'Shift+F10 ContextMenu', 'data-state': open ? 'open' : 'closed',
+    ref: area as RefObject<HTMLDivElement | null>, tabIndex: 0, role: 'group', 'aria-label': label ?? tm('options'), 'aria-keyshortcuts': 'Shift+F10 ContextMenu', 'data-state': open ? 'open' : 'closed',
     className: cn('relative select-none outline-none [-webkit-touch-callout:none] focus-visible:ring-2 focus-visible:ring-[var(--accent)]', className),
     onContextMenu: (e: ReactMouseEvent<HTMLElement>) => { if (!inArea(e.target)) return; e.preventDefault(); hold.cancel(); openAt(e.clientX, e.clientY) },
     onPointerDown: fromArea(hold.bind.onPointerDown), onPointerMove: hold.bind.onPointerMove,
@@ -591,8 +639,8 @@ export function ContextMenuTrigger({ children, className, label = 'Options', asC
  */
 export function ContextMenuContent({ children, className, 'aria-label': ariaLabel }: { children: ReactNode; className?: string; 'aria-label'?: string }) {
   const { open, at, close } = useCtxMenu('Content')
-  const panel = useRef<HTMLDivElement>(null), keys = useMenuKeys()
-  const [place, setPlace] = useState<{ left: number; top: number; flipped: boolean } | null>(null)
+  const panel = useRef<HTMLDivElement>(null), keys = useMenuKeys(), rtl = useDir() === 'rtl'
+  const [place, setPlace] = useState<{ left: number; top: number; onLeft: boolean } | null>(null)
   useOutside([panel], () => close(), open)
   useEffect(() => {
     if (!open) return
@@ -600,11 +648,13 @@ export function ContextMenuContent({ children, className, 'aria-label': ariaLabe
     addEventListener('scroll', off, { capture: true, passive: true }); addEventListener('resize', off)
     return () => { removeEventListener('scroll', off, { capture: true }); removeEventListener('resize', off) }
   }, [open, close])
-  useLayoutEffect(() => { // keep the fixed panel inside the viewport
+  useLayoutEffect(() => { // keep the fixed panel inside the viewport; it opens toward the inline end of the point (leftward in RTL)
     const el = panel.current
     if (!open || !at || !el) { setPlace(null); return }
-    const w = el.offsetWidth, h = el.offsetHeight, flipped = at.x + w > innerWidth - 8
-    setPlace({ left: Math.max(8, flipped ? innerWidth - w - 8 : at.x), top: Math.max(8, Math.min(at.y, innerHeight - h - 8)), flipped })
+    const w = el.offsetWidth, h = el.offsetHeight
+    const onLeft = rtl ? at.x - w >= 8 : at.x + w > innerWidth - 8
+    const left = Math.max(8, Math.min(innerWidth - w - 8, onLeft ? at.x - w : at.x))
+    setPlace({ left, top: Math.max(8, Math.min(at.y, innerHeight - h - 8)), onLeft })
   }, [open, at?.x, at?.y]) // eslint-disable-line react-hooks/exhaustive-deps
   useEffect(() => {
     if (!open || !at) return
@@ -619,8 +669,9 @@ export function ContextMenuContent({ children, className, 'aria-label': ariaLabe
           {open && at && (
             <motion.div key="menu" ref={panel} role="menu" aria-label={ariaLabel} data-menu-list variants={ctxPanelVariants} initial="hidden" animate="show"
               exit={{ opacity: 0, scale: 0.97, transition: { duration: 0.1 } }}
+              // rtl-lint-ignore: a pointer position is physical
               style={{ left: place?.left ?? at.x, top: place?.top ?? at.y, visibility: place ? 'visible' : 'hidden' }}
-              className={cn(floatingSurface, 'fixed z-[85] min-w-[200px] p-1', place?.flipped ? 'origin-top-right' : 'origin-top-left', className)}
+              className={cn(floatingSurface, 'fixed z-[85] min-w-[200px] p-1', place?.onLeft ? 'origin-top-right' : 'origin-top-left', className)} // rtl-lint-ignore
               onContextMenu={e => { e.preventDefault(); e.stopPropagation() }}
               onKeyDown={e => {
                 e.stopPropagation()
@@ -648,8 +699,9 @@ function ctxEntries(entries: ContextMenuEntry[]): ReactNode {
   ))
 }
 
-function ContextMenuConfig({ items, children, className, label = 'Options', onOpenChange }:
+function ContextMenuConfig({ items, children, className, label: labelProp, onOpenChange }:
   { items: ContextMenuEntry[]; children: ReactNode | ((open: boolean) => ReactNode); className?: string; label?: string; onOpenChange?: (open: boolean) => void }) {
+  const tm = useMessages(OVERLAY_MSG), label = labelProp ?? tm('options')
   return (
     <ContextMenuRoot onOpenChange={onOpenChange}>
       <ContextMenuTrigger className={className} label={label}>{children}</ContextMenuTrigger>
@@ -726,9 +778,9 @@ function tipFixed(r: DOMRect, p: Placement, offset?: number) {
   if (s === 'bottom') return { left: r.left + r.width / 2, top: r.bottom + (offset ?? 6), transform: 'translateX(-50%)' }
   return { left: r.left + r.width / 2, top: r.top - (offset ?? 8), transform: 'translate(-50%,-100%)' }
 }
-const TIP_ARROW_EDGE = { top: '-bottom-1', bottom: '-top-1', right: '-left-1', left: '-right-1' } as const
+const TIP_ARROW_EDGE = { top: '-bottom-1', bottom: '-top-1', right: '-left-1', left: '-right-1' } as const // rtl-lint-ignore: physical sides
 const TIP_ARROW_ALONG = {
-  x: { start: 'left-3', center: 'left-[calc(50%-4px)]', end: 'right-3' },
+  x: { start: 'start-3', center: 'left-[calc(50%-4px)]', end: 'end-3' }, // rtl-lint-ignore (centre is symmetric)
   y: { start: 'top-2', center: 'top-[calc(50%-4px)]', end: 'bottom-2' },
 } as const
 const tipArrowClass = (p: Placement, portal?: boolean) => {
@@ -895,7 +947,9 @@ export function PointerTooltip({ tip, className }: { tip: PointerTip; className?
   const top = Math.max(8, t.y - (t.touch ? box.h + 30 : 44))
   return createPortal(
     <div ref={el} role="tooltip" className={cn(floatingSurface, 'pointer-events-none fixed z-[90] w-max max-w-[calc(100vw-16px)] rounded-[var(--r-md)] px-2 py-1.5 text-xs leading-snug text-[var(--fg)] transition-opacity duration-150', className)}
+      // rtl-lint-ignore: follows the pointer (physical)
       style={{ left, top, opacity: tip ? 1 : 0, fontFamily: 'var(--font)' }}>{t.content}</div>,
+
     document.body,
   )
 }
@@ -928,24 +982,48 @@ export function OverlayPortal({ children }: { children: ReactNode }) {
   return el ? createPortal(children, el) : null
 }
 
-let overlayLocks = 0
-/** Stop the page from scrolling while `active` (modals, lightboxes, full-screen sheets). Every caller shares one counter, so nested locks unwind correctly. */
+/**
+ * Open scroll locks (page-wide: shared by every copy of the library, so locks from different drop-in files nest), and the
+ * inline styles the first one replaced, which the last one puts back.
+ */
+const overlayLock = uiShared('scroll-lock', () => ({ count: 0, saved: null as { overflow: string; side: 'paddingLeft' | 'paddingRight'; pad: string } | null }))
+/** Is the page's vertical scrollbar on the left (some browsers put it there under dir="rtl")? */
+function overlayScrollbarLeft() {
+  const probe = document.createElement('div')
+  probe.style.cssText = 'position:fixed;left:0;top:0;width:0;height:0;visibility:hidden' // rtl-lint-ignore: probes the physical edge
+  document.body.appendChild(probe)
+  const left = probe.getBoundingClientRect().left > 0
+  probe.remove()
+  return left
+}
+/**
+ * Stop the page from scrolling while `active` (modals, lightboxes, full-screen sheets). Every caller on the page (any copy
+ * of the library) shares one counter, so nested locks unwind correctly; the last unlock restores the styles the first
+ * one replaced. The scrollbar's width is padded on the side it was on (the left when the browser puts it there in RTL).
+ */
 export function useScrollLock(active: boolean) {
   useEffect(() => {
     if (!active) return
-    const root = document.documentElement, body = document.body
-    if (overlayLocks++ === 0) {
-      const gap = innerWidth - root.clientWidth
+    const root = document.documentElement, body = document.body, s = overlayLock
+    if (s.count++ === 0) {
+      const w = innerWidth - root.clientWidth, gap = w > 0 && w < 64 ? w : 0 // a classic scrollbar (and not a layout-less test DOM)
+      const side = gap > 0 && overlayScrollbarLeft() ? 'paddingLeft' : 'paddingRight'
+      s.saved = { overflow: root.style.overflow, side, pad: body.style[side] }
+      if (gap > 0) body.style[side]
+ = `${(parseFloat(getComputedStyle(body)[side]) || 0) + gap}px`
       root.style.overflow = 'hidden'
-      if (gap > 0) body.style.paddingRight = `${gap}px`
     }
-    return () => { if (--overlayLocks === 0) { root.style.overflow = ''; body.style.paddingRight = '' } }
+    return () => {
+      if (--s.count > 0 || !s.saved) return
+      root.style.overflow = s.saved.overflow; body.style[s.saved.side] = s.saved.pad; s.saved = null
+    }
   }, [active])
 }
 
-/** Open modal layers, innermost last. Only the top one handles Escape and keeps the rest of the page inert. */
-const overlayModals: HTMLElement[] = []
-let overlayInerted: HTMLElement[] = []
+
+/** Open modal layers, innermost last (page-wide, see uiShared). Only the top one handles Escape and keeps the rest of the page inert. */
+const overlayModals = uiShared('modal-stack', () => [] as HTMLElement[])
+const overlayInerted = uiShared('modal-inerted', () => [] as HTMLElement[])
 /**
  * Make everything outside the top modal `inert` (not focusable, clickable or read by screen readers): every sibling of
  * the modal and of each of its ancestors up to <body>. Elements that were already inert are left alone, and so is
@@ -953,7 +1031,7 @@ let overlayInerted: HTMLElement[] = []
  */
 function overlaySyncInert() {
   for (const el of overlayInerted) el.inert = false
-  overlayInerted = []
+  overlayInerted.length = 0
   const top = overlayModals[overlayModals.length - 1]
   for (let node: Element | null = top ?? null; node && node.parentElement && node !== document.body; node = node.parentElement) {
     for (const sib of node.parentElement.children) {
@@ -1029,7 +1107,8 @@ export function DialogRoot({ open, defaultOpen = false, onOpenChange, children }
   const base = useId()
   const [parts, setParts] = useState<Record<DialogPart, boolean>>({ title: false, desc: false })
   const setPart = useCallback((k: DialogPart, on: boolean) => setParts(p => p[k] === on ? p : { ...p, [k]: on }), [])
-  const value = useMemo(() => ({ open: o, setOpen: setO, ids: { title: `${base}-t`, desc: `${base}-d` }, parts, setPart }), [o, setO, base, parts, setPart])
+  const value = useMemo(() => ({ open: o, setOpen: setO, ids: { title: `${base}-t`, desc: `${base}-d` }, parts, setPart }), [o, setO, base, parts, setPart]) // i18n-ignore: ids
+
   return <DialogCtx.Provider value={value}>{children}</DialogCtx.Provider>
 }
 /** Dialog.Trigger: opens it (aria-haspopup=dialog); focus comes back here on close. Button props, or `asChild`. */
@@ -1039,10 +1118,10 @@ export function DialogTrigger({ children, ...p }: ButtonProps) {
 }
 /** Dialog.Close: closes it. With no children it is the ✕ icon button ("Close"); otherwise a Button, or `asChild`. */
 export function DialogClose({ children, ...p }: ButtonProps) {
-  const { setOpen } = useDialogCtx('Dialog.Close')
+  const { setOpen } = useDialogCtx('Dialog.Close'), { t } = useLocale()
   if (children === undefined && !p.asChild) {
     const { onClick, ...rest } = p
-    return <IconButton icon="x" label="Close" {...rest} onPointerDown={e => e.stopPropagation()} onClick={e => { onClick?.(e); if (!e.defaultPrevented) setOpen(false) }} />
+    return <IconButton icon="x" label={t('common.close')} {...rest} onPointerDown={e => e.stopPropagation()} onClick={e => { onClick?.(e); if (!e.defaultPrevented) setOpen(false) }} />
   }
   return <OverlayPartButton {...p} action={() => setOpen(false)}>{children}</OverlayPartButton>
 }
@@ -1128,32 +1207,43 @@ export const Dialog = Object.assign(DialogConfig, {
 
 /* Sheet ─ */
 
+// physical edges; `start`/`end` resolve to one of these from the direction
 const SHEET = {
-  right: { cls: 'top-0 right-0 bottom-0 w-[min(380px,92vw)] pt-[max(20px,env(safe-area-inset-top))] pb-[max(20px,env(safe-area-inset-bottom))]', off: { x: '100%' } },
-  left: { cls: 'top-0 left-0 bottom-0 w-[min(380px,92vw)] pt-[max(20px,env(safe-area-inset-top))] pb-[max(20px,env(safe-area-inset-bottom))]', off: { x: '-100%' } },
-  bottom: { cls: 'left-0 right-0 bottom-0 max-h-[85dvh] rounded-t-[var(--r-lg)] !pt-2 pb-[max(20px,env(safe-area-inset-bottom))]', off: { y: '100%' } },
+  right: { cls: 'top-0 right-0 bottom-0 w-[min(380px,92vw)] pt-[max(20px,env(safe-area-inset-top))] pb-[max(20px,env(safe-area-inset-bottom))]', off: { x: '100%' } }, // rtl-lint-ignore
+  left: { cls: 'top-0 left-0 bottom-0 w-[min(380px,92vw)] pt-[max(20px,env(safe-area-inset-top))] pb-[max(20px,env(safe-area-inset-bottom))]', off: { x: '-100%' } }, // rtl-lint-ignore
+  bottom: { cls: 'inset-x-0 bottom-0 max-h-[85dvh] rounded-t-[var(--r-lg)] !pt-2 pb-[max(20px,env(safe-area-inset-bottom))]', off: { y: '100%' } },
 }
+/**
+ * The edge a Sheet slides in from: `start`/`end` follow the reading direction (`end` is the right in LTR and the left in
+ * RTL); `left`/`right` are physical and stay put in RTL; `bottom` is a bottom sheet.
+ */
+export type SheetSide = 'start' | 'end' | 'left' | 'right' | 'bottom'
+const sheetEdge = (side: SheetSide, dir: UIDir): keyof typeof SHEET =>
+  side === 'start' ? (dir === 'rtl' ? 'right' : 'left') : side === 'end' ? (dir === 'rtl' ? 'left' : 'right') : side
 /** Below this width a left or right Sheet opens as a bottom sheet instead. */
 const SHEET_BOTTOM_BELOW = 640
 type SheetGrab = { onPointerDown: (e: ReactPointerEvent) => void; className: string } | null
 const SheetGrabCtx = createContext<SheetGrab>(null)
 
 /**
- * Sheet.Content: the panel that slides in from `side`. Below 640px a `left`/`right` sheet becomes a bottom sheet
- * (`responsive={false}` keeps the edge drawer). A bottom sheet has a grab handle: drag it, or the Sheet.Header, down to dismiss.
+ * Sheet.Content: the panel that slides in from `side` (default `end`: the right, or the left in RTL; `start`, or the
+ * physical `left`/`right`, or `bottom`). Below 640px a side sheet becomes a bottom sheet (`responsive={false}` keeps the
+ * edge drawer). A bottom sheet has a grab handle: drag it, or the Sheet.Header, down to dismiss.
  */
-export function SheetContent({ side = 'right', responsive = true, className, children, 'aria-label': ariaLabel }:
-  { side?: keyof typeof SHEET; responsive?: boolean; className?: string; children: ReactNode; 'aria-label'?: string }) {
+export function SheetContent({ side = 'end', responsive = true, className, children, 'aria-label': ariaLabel }:
+  { side?: SheetSide; responsive?: boolean; className?: string; children: ReactNode; 'aria-label'?: string }) {
   const { open, setOpen, ids, parts } = useDialogCtx('Sheet.Content')
-  const narrow = useMediaQuery(`(max-width: ${SHEET_BOTTOM_BELOW - 1}px)`)
-  const edge = responsive && narrow ? 'bottom' : side
+  const narrow = useMediaQuery(`(max-width: ${SHEET_BOTTOM_BELOW - 1}px)`), dir = useDir()
+  const edge = responsive && narrow ? 'bottom' : sheetEdge(side, dir)
+
   const { cls, off } = SHEET[edge]
   const drag = useDragControls()
   const bottom = edge === 'bottom'
   const grab = useMemo<SheetGrab>(() => bottom ? { onPointerDown: (e: ReactPointerEvent) => drag.start(e), className: 'touch-none' } : null, [bottom, drag])
   return (
     <ModalLayer open={open} onClose={() => setOpen(false)}>
-      <motion.div key={edge} role="dialog" aria-modal="true" aria-label={ariaLabel} aria-labelledby={!ariaLabel && parts.title ? ids.title : undefined} aria-describedby={parts.desc ? ids.desc : undefined}
+      <motion.div key={edge} data-side={edge} role="dialog" aria-modal="true" aria-label={ariaLabel}
+ aria-labelledby={!ariaLabel && parts.title ? ids.title : undefined} aria-describedby={parts.desc ? ids.desc : undefined}
         initial={off} animate={{ x: 0, y: 0 }} exit={off} transition={spring(0.15, 0.4)}
         drag={bottom ? 'y' : false} dragListener={false} dragControls={drag} dragConstraints={{ top: 0, bottom: 0 }} dragElastic={{ top: 0, bottom: 0.9 }}
         onDragEnd={(_, i) => { if (i.offset.y > 90 || i.velocity.y > 500) setOpen(false) }}
@@ -1164,14 +1254,14 @@ export function SheetContent({ side = 'right', responsive = true, className, chi
     </ModalLayer>
   )
 }
-/** Sheet.Header: the title row (title left, close right). On a bottom sheet it is also a drag handle. */
+/** Sheet.Header: the title row (title at the start, close at the end). On a bottom sheet it is also a drag handle. */
 export function SheetHeader({ className, children }: { className?: string; children: ReactNode }) {
   const grab = useContext(SheetGrabCtx)
   return <div className={cn('flex flex-none items-center justify-between', grab?.className, className)} onPointerDown={grab?.onPointerDown}>{children}</div>
 }
 
-function SheetConfig({ open, onOpenChange, title, side = 'right', responsive = true, children, footer, className }:
-  ModalProps & { title: ReactNode; side?: keyof typeof SHEET; responsive?: boolean; children: ReactNode; footer?: ReactNode; className?: string }) {
+function SheetConfig({ open, onOpenChange, title, side = 'end', responsive = true, children, footer, className }:
+  ModalProps & { title: ReactNode; side?: SheetSide; responsive?: boolean; children: ReactNode; footer?: ReactNode; className?: string }) {
   return (
     <DialogRoot open={open} onOpenChange={onOpenChange}>
       <SheetContent side={side} responsive={responsive} className={className}>
@@ -1184,7 +1274,8 @@ function SheetConfig({ open, onOpenChange, title, side = 'right', responsive = t
 }
 
 /**
- * Panel that slides in from an edge. On screens narrower than 640px a `left`/`right` sheet becomes a bottom sheet
+ * Panel that slides in from an edge: `side` is `end` (default; the right in LTR, the left in RTL), `start`, the physical
+ * `left`/`right`, or `bottom`. On screens narrower than 640px a side sheet becomes a bottom sheet
  * (pass `responsive={false}` to keep the edge drawer, e.g. for app navigation). A bottom sheet has a grab handle:
  * drag it (or the header) down to dismiss. Keeps clear of the safe areas.
  * Parts: Sheet.Root / Trigger / Content (side, responsive) / Header / Title / Description / Close / Footer.
@@ -1207,7 +1298,7 @@ export function AlertDialogContent({ className, children, onCancel }: { classNam
   const { open, setOpen, ids, parts } = useDialogCtx('AlertDialog.Content')
   const [pending, setPending] = useState(false)
   const [err, setErr] = useState<string | null>(null)
-  const panel = useRef<HTMLDivElement>(null)
+  const panel = useRef<HTMLDivElement>(null), tm = useMessages(OVERLAY_MSG)
   const alive = useRef(true)
   useEffect(() => { alive.current = true; return () => { alive.current = false } }, [])
   useEffect(() => { if (open) { setErr(null); setPending(false) } }, [open])
@@ -1222,7 +1313,7 @@ export function AlertDialogContent({ className, children, onCancel }: { classNam
       setPending(false); setOpen(false)
     } catch (e) {
       if (!alive.current) return
-      setPending(false); setErr((e instanceof Error ? e.message : String(e ?? '')) || 'Something went wrong. Try again.')
+      setPending(false); setErr((e instanceof Error ? e.message : String(e ?? '')) || tm('alertFailed'))
     }
   }
   return (
@@ -1237,17 +1328,17 @@ export function AlertDialogContent({ className, children, onCancel }: { classNam
   )
 }
 /** AlertDialog.Cancel (also .Close): the least destructive action; takes focus when the dialog opens. Button props, or `asChild`. */
-export function AlertDialogCancel({ children = 'Cancel', ...p }: ButtonProps) {
-  const a = useAlert('Cancel')
-  return <OverlayPartButton data-autofocus disabled={a.pending} {...p} action={a.cancel}>{children}</OverlayPartButton>
+export function AlertDialogCancel({ children, ...p }: ButtonProps) {
+  const a = useAlert('Cancel'), { t } = useLocale()
+  return <OverlayPartButton data-autofocus disabled={a.pending} {...p} action={a.cancel}>{children ?? t('common.cancel')}</OverlayPartButton>
 }
 /** AlertDialog.Action: confirms. `onConfirm` may return a promise: the button spins until it settles, then the dialog closes (or shows the error). */
-export function AlertDialogAction({ children = 'Continue', tone = 'danger', onConfirm, variant, ...p }: ButtonProps & { tone?: 'danger' | 'default'; onConfirm?: () => void | Promise<unknown> }) {
-  const a = useAlert('Action')
-  return <OverlayPartButton variant={variant ?? (tone === 'danger' ? 'danger' : 'primary')} loading={a.pending} {...p} action={() => a.confirm(onConfirm ?? (() => {}))}>{children}</OverlayPartButton>
+export function AlertDialogAction({ children, tone = 'danger', onConfirm, variant, ...p }: ButtonProps & { tone?: 'danger' | 'default'; onConfirm?: () => void | Promise<unknown> }) {
+  const a = useAlert('Action'), { t } = useLocale()
+  return <OverlayPartButton variant={variant ?? (tone === 'danger' ? 'danger' : 'primary')} loading={a.pending} {...p} action={() => a.confirm(onConfirm ?? (() => {}))}>{children ?? t('common.continue')}</OverlayPartButton>
 }
 
-function AlertDialogConfig({ open, onOpenChange, title, description, confirmLabel = 'Continue', cancelLabel = 'Cancel', tone = 'danger', onConfirm, onCancel, children, className }:
+function AlertDialogConfig({ open, onOpenChange, title, description, confirmLabel, cancelLabel, tone = 'danger', onConfirm, onCancel, children, className }:
   ModalProps & { title: ReactNode; description: ReactNode; confirmLabel?: ReactNode; cancelLabel?: ReactNode
     /** danger: red confirm button (deleting, revoking); default: primary */ tone?: 'danger' | 'default'
     onConfirm: () => void | Promise<unknown>; onCancel?: () => void; children?: ReactNode; className?: string }) {
@@ -1319,7 +1410,9 @@ function cmdkMark(text: string, words: string[]) {
   const re = new RegExp(`(${words.map(w => w.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')).join('|')})`, 'ig')
   return text.split(re).map((part, i) => i % 2 ? <b key={i} className="font-semibold text-[var(--fg)]">{part}</b> : part)
 }
-const cmdkGroup = (h: CmdkHit | undefined) => h ? (h.recent ? 'Recent' : h.c.group ?? '') : undefined
+/** The group key of the Recent entries (shown as the translated "Recent"). */
+const CMDK_RECENT = '\u0000recent'
+const cmdkGroup = (h: CmdkHit | undefined) => h ? (h.recent ? CMDK_RECENT : h.c.group ?? '') : undefined
 const cmdkFlatten = (cs: Command[]): Command[] => cs.flatMap(c => [c, ...cmdkFlatten(c.children ?? [])])
 /** Result lists longer than this are virtualised. */
 const CMDK_VIRTUAL_AT = 60
@@ -1332,12 +1425,13 @@ const CMDK_VIRTUAL_AT = 60
  * nested pages (Enter in, Backspace on an empty search out, or click the breadcrumb). `recents` keeps the last N
  * entries run as a Recent group (persisted under `recentKey`). Long result lists are virtualised.
  */
-export function CommandPalette({ open, onOpenChange, commands, placeholder = 'Type a command or search…', suggestion, loadItems, debounce = 150, recents = 0, recentKey, className }:
+export function CommandPalette({ open, onOpenChange, commands, placeholder, suggestion, loadItems, debounce = 150, recents = 0, recentKey, className }:
   ModalProps & { commands: Command[]; placeholder?: string; suggestion?: string; loadItems?: CommandLoader; /** ms */ debounce?: number
     /** how many recently run entries to offer when the search is empty (0: none) */ recents?: number; /** localStorage key for recents */ recentKey?: string; className?: string }) {
   const [q, setQ] = useState('')
   const [stack, setStack] = useState<{ c: Command; q: string }[]>([])
-  const uid = useId()
+  const uid = useId(), tm = useMessages(OVERLAY_MSG), { t } = useLocale()
+  const groupLabel = (g: string) => g === CMDK_RECENT ? tm('recent') : g
   useEffect(() => { if (open) { setQ(''); setStack([]) } }, [open])
   const top = stack[stack.length - 1]?.c
   const pageKey = stack.map(s => s.c.id).join('/')
@@ -1354,7 +1448,7 @@ export function CommandPalette({ open, onOpenChange, commands, placeholder = 'Ty
     const t = setTimeout(() => {
       loaderRef.current?.(q, { signal: ctl.signal }).then(
         items => { if (!ctl.signal.aborted) setFound({ page, q, items, loading: false, error: '' }) },
-        (e: unknown) => { if (!ctl.signal.aborted) setFound({ page, q, items: [], loading: false, error: (e instanceof Error && e.message) || 'Couldn’t load results' }) })
+        (e: unknown) => { if (!ctl.signal.aborted) setFound({ page, q, items: [], loading: false, error: (e instanceof Error && e.message) || tm('loadFailed') }) })
     }, debounce)
     return () => { clearTimeout(t); ctl.abort() }
   }, [open, q, pageKey, debounce, !!loader]) // eslint-disable-line react-hooks/exhaustive-deps
@@ -1433,7 +1527,7 @@ export function CommandPalette({ open, onOpenChange, commands, placeholder = 'Ty
         </span>
         <span className="relative flex flex-none items-center gap-1">
           {c.shortcut && <Kbd className="[@media(hover:none)]:hidden">{c.shortcut}</Kbd>}
-          {nested ? <Icon name="chevronRight" size={14} className="text-[var(--fg3)]" />
+          {nested ? <Icon name="chevronRight" size={14} className="ui-flip text-[var(--fg3)]" />
             : i === active && <Kbd aria-hidden className="[@media(hover:none)]:hidden">↵</Kbd>}
         </span>
       </button>
@@ -1441,66 +1535,66 @@ export function CommandPalette({ open, onOpenChange, commands, placeholder = 'Ty
   }
   const empty = list.length === 0 && (
     <div className="p-6 text-center text-[13px] text-[var(--fg3)]">
-      {loading ? 'Searching…' : found.error && found.page === pageKey ? null : <>Nothing matches “{q}”.{!stack.length && suggest && <> Try <button className="cursor-pointer border-0 bg-transparent p-0 font-medium text-[var(--accent)] underline-offset-2 hover:underline" onClick={() => setQ(suggest)}>“{suggest}”</button>.</>}</>}
+      {loading ? tm('searching') : found.error && found.page === pageKey ? null : <>{tm('nothingMatches', { query: q })}{!stack.length && suggest && <> {tm('tryPrefix')} <button className="cursor-pointer border-0 bg-transparent p-0 font-medium text-[var(--accent)] underline-offset-2 hover:underline" onClick={() => setQ(suggest)}>{tm('quoted', { text: suggest })}</button></>}</>}
     </div>
   )
   return (
     <ModalLayer open={open} onClose={() => onOpenChange(false)}>
-      <motion.div role="dialog" aria-modal="true" aria-label="Command palette"
+      <motion.div role="dialog" aria-modal="true" aria-label={tm('palette')}
         initial={{ opacity: 0, scale: 0.96, y: -8 }} animate={{ opacity: 1, scale: 1, y: 0 }} exit={{ opacity: 0, scale: 0.98, transition: { duration: 0.12 } }}
         transition={spring(0.25, 0.35)} className={cn(floatingSurface, 'fixed top-[14vh] left-1/2 z-[72] w-[min(540px,calc(100%-32px))] -translate-x-1/2 overflow-hidden max-[640px]:top-[max(12px,env(safe-area-inset-top))] [@media(max-height:500px)]:top-[max(8px,env(safe-area-inset-top))]', className)}>
         <div className="flex items-center gap-2 border-b border-[var(--line)] px-4">
           <Icon name="search" className="flex-none text-[var(--fg3)]" />
           {stack.length > 0 && (
-            <nav aria-label="Palette pages" className="flex min-w-0 flex-none items-center gap-1 text-xs text-[var(--fg3)]">
+            <nav aria-label={tm('palettePages')} className="flex min-w-0 flex-none items-center gap-1 text-xs text-[var(--fg3)]">
               {stack.map((s, i) => (
                 <span key={s.c.id} className="flex items-center gap-1">
-                  <button onClick={() => back(i)} title={`Back to ${i ? stack[i - 1].c.label : 'all commands'}`}
+                  <button onClick={() => back(i)} title={tm('backTo', { name: i ? stack[i - 1].c.label : tm('allCommands') })}
                     className={cn('max-w-[120px] cursor-pointer truncate rounded-[var(--r-sm)] border-0 bg-[var(--muted)] px-1.5 py-0.5 text-xs text-[var(--fg2)] hover:text-[var(--fg)]', TOUCH.target)}>{s.c.label}</button>
                   <span aria-hidden>/</span>
                 </span>
               ))}
             </nav>
           )}
-          <input ref={inputRef} data-autofocus value={q} onChange={e => setQ(e.target.value)} placeholder={top?.placeholder ?? (top ? `Search ${top.label.replace(/(…|\.{3})$/, '').toLowerCase()}…` : placeholder)}
+          <input ref={inputRef} data-autofocus value={q} onChange={e => setQ(e.target.value)} placeholder={top?.placeholder ?? (top ? tm('searchIn', { name: top.label.replace(/(…|\.{3})$/, '').toLowerCase() }) : placeholder ?? tm('palettePlaceholder'))}
             onKeyDown={e => { if (e.key === 'Backspace' && !q && stack.length) { e.preventDefault(); back(); return } onKeyDown(e) }}
             role="combobox" aria-expanded="true" aria-controls={`${uid}-list`} aria-autocomplete="list" aria-busy={loading || undefined}
-            aria-activedescendant={list[active] ? optionId(active) : undefined} aria-label={top ? `Search ${top.label.replace(/(…|\.{3})$/, '')}` : 'Search commands'}
+            aria-activedescendant={list[active] ? optionId(active) : undefined} aria-label={top ? tm('searchInLabel', { name: top.label.replace(/(…|\.{3})$/, '') }) : tm('searchCommands')}
             className="w-full min-w-0 border-0 bg-transparent py-3 text-base outline-none" />
-          {loading && <Spinner size={14} label="Loading results" className="text-[var(--fg3)]" />}
+          {loading && <Spinner size={14} label={t('status.loadingResults')} className="text-[var(--fg3)]" />}
         </div>
         {asyncOn && found.error && found.page === pageKey && (
           <div role="alert" className="flex items-center gap-1.5 border-b border-[var(--line)] px-4 py-2 text-xs text-[var(--bad)]"><Icon name="alert" size={13} />{found.error}</div>
         )}
         {virtualOn ? (
-          <div ref={listRef} id={`${uid}-list`} role="listbox" aria-label="Results" className="relative h-[min(340px,50vh)] overflow-auto overscroll-contain px-1.5 max-[640px]:h-[min(420px,60dvh)]">
+          <div ref={listRef} id={`${uid}-list`} role="listbox" aria-label={tm('results')} className="relative h-[min(340px,50vh)] overflow-auto overscroll-contain px-1.5 max-[640px]:h-[min(420px,60dvh)]">
             <div style={{ height: v.totalSize, position: 'relative' }}>
               {v.items.map(it => {
                 const row = rows.out[it.index]
                 return (
                   <div key={row.label !== undefined ? `l:${row.label}:${it.index}` : `o:${row.hit}`} data-index={it.index} ref={v.measureElement}
-                    style={{ position: 'absolute', top: 0, left: 0, width: '100%', transform: `translateY(${it.start}px)` }}>
-                    {row.label !== undefined ? <MenuLabel>{row.label}</MenuLabel> : option(row.hit)}
+                    style={{ position: 'absolute', top: 0, insetInlineStart: 0, width: '100%', transform: `translateY(${it.start}px)` }}>
+                    {row.label !== undefined ? <MenuLabel>{groupLabel(row.label)}</MenuLabel> : option(row.hit)}
                   </div>
                 )
               })}
             </div>
           </div>
         ) : (
-          <div ref={listRef} id={`${uid}-list`} role="listbox" aria-label="Results" className="max-h-[min(340px,50vh)] overflow-auto overscroll-contain p-1.5 max-[640px]:max-h-[min(420px,60dvh)]">
+          <div ref={listRef} id={`${uid}-list`} role="listbox" aria-label={tm('results')} className="max-h-[min(340px,50vh)] overflow-auto overscroll-contain p-1.5 max-[640px]:max-h-[min(420px,60dvh)]">
             {empty}
             {list.map((h, i) => (
               <div key={`${h.recent ? 'r' : 'c'}:${h.c.id}:${i}`}>
-                {cmdkGroup(h) && cmdkGroup(h) !== cmdkGroup(list[i - 1]) && <MenuLabel>{cmdkGroup(h)}</MenuLabel>}
+                {cmdkGroup(h) && cmdkGroup(h) !== cmdkGroup(list[i - 1]) && <MenuLabel>{groupLabel(cmdkGroup(h)!)}</MenuLabel>}
                 {option(i)}
               </div>
             ))}
           </div>
         )}
         <div className="flex gap-3 border-t border-[var(--line)] px-3 py-2 text-[11px] text-[var(--fg3)] [@media(hover:none)]:hidden">
-          <span><Kbd>↑</Kbd> <Kbd>↓</Kbd> move</span><span><Kbd>↵</Kbd> {list[active]?.c.children || list[active]?.c.loadChildren ? 'open' : 'run'}</span>
-          {stack.length > 0 && <span><Kbd>⌫</Kbd> back</span>}<span><Kbd>esc</Kbd> close</span>
-          <span className="ml-auto ui-num" aria-live="polite">{loading ? '' : `${list.length} ${list.length === 1 ? 'result' : 'results'}`}</span>
+          <span><Kbd>↑</Kbd> <Kbd>↓</Kbd> {tm('hintMove')}</span><span><Kbd>↵</Kbd> {list[active]?.c.children || list[active]?.c.loadChildren ? tm('hintOpen') : tm('hintRun')}</span>
+          {stack.length > 0 && <span><Kbd>⌫</Kbd> {tm('hintBack')}</span>}<span><Kbd>{tm('keyEsc')}</Kbd> {tm('hintClose')}</span>
+          <span className="ms-auto ui-num" aria-live="polite">{loading ? '' : t('status.resultsCount', { count: list.length })}</span>
         </div>
       </motion.div>
     </ModalLayer>
@@ -1513,12 +1607,12 @@ export function CommandPalette({ open, onOpenChange, commands, placeholder = 'Ty
  * Click (or Enter) to edit; Enter or blur saves, Escape cancels. With `helper`, a line below shows
  * e.g. "Last edited 2 h ago" and turns into a green `savedHelper` after a change; the text flashes on save.
  */
-export function InlineEdit({ value, onSave, className, helper, savedHelper = 'Saved just now', label }:
+export function InlineEdit({ value, onSave, className, helper, savedHelper, label }:
   { value: string; onSave: (v: string) => void; className?: string; helper?: ReactNode; savedHelper?: ReactNode; label?: string }) {
   const [editing, setEditing] = useState(false)
   const [draft, setDraft] = useState(value)
   const [saves, setSaves] = useState(0)
-  const btn = useRef<HTMLButtonElement>(null), refocus = useRef(false)
+  const btn = useRef<HTMLButtonElement>(null), refocus = useRef(false), dir = useDir(), tm = useMessages(OVERLAY_MSG)
   useEffect(() => {
     if (editing || !refocus.current) return
     refocus.current = false
@@ -1531,16 +1625,16 @@ export function InlineEdit({ value, onSave, className, helper, savedHelper = 'Sa
     refocus.current = viaKey; setEditing(false)
   }
   const field = editing ? (
-    <input autoFocus value={draft} aria-label={label ?? 'Title'} maxLength={80} onFocus={e => e.currentTarget.select()} onChange={e => setDraft(e.target.value)} onBlur={() => done(true)}
+    <input autoFocus value={draft} aria-label={label ?? tm('inlineTitle')} maxLength={80} onFocus={e => e.currentTarget.select()} onChange={e => setDraft(e.target.value)} onBlur={() => done(true)}
       onKeyDown={e => { e.stopPropagation(); if (e.nativeEvent.isComposing) return; if (e.key === 'Enter') { e.preventDefault(); done(true, true) } if (e.key === 'Escape') { e.preventDefault(); done(false, true) } }}
       style={{ width: `${Math.max(12, draft.length + 2)}ch` }}
       className={cn('-mx-2 max-w-full min-w-[min(200px,100%)] rounded-[var(--r-md)] border-0 bg-[var(--card)] px-2 py-1 font-semibold outline-none shadow-[0_0_0_1px_var(--fg3),0_0_0_4px_var(--muted)]', className)} />
   ) : (
     // the name is the visible text plus a hidden ", edit title", so speech users can say what they see
     <button ref={btn} onClick={() => { setDraft(value); setEditing(true) }}
-      className={cn('group relative -mx-2 flex max-w-full cursor-text items-center gap-2 overflow-hidden rounded-[var(--r-md)] border-0 bg-transparent px-2 py-1 text-left font-semibold hover:bg-[var(--muted)]', className)}>
+      className={cn('group relative -mx-2 flex max-w-full cursor-text items-center gap-2 overflow-hidden rounded-[var(--r-md)] border-0 bg-transparent px-2 py-1 text-start font-semibold hover:bg-[var(--muted)]', className)}>
       {saves > 0 && <motion.span key={`f${saves}`} aria-hidden className="absolute inset-0 rounded-[var(--r-md)] bg-[var(--ok-soft)]" initial={{ opacity: 1 }} animate={{ opacity: 0 }} transition={{ duration: 0.9, ease: 'easeOut' }} />}
-      <motion.span key={saves} className="relative truncate" initial={saves ? { opacity: 0.3, x: -3 } : false} animate={{ opacity: 1, x: 0 }} transition={spring(0.3, 0.3)}>{value}<span className="sr-only">, edit{label ? ` ${label}` : ''}</span></motion.span>
+      <motion.span key={saves} className="relative truncate" initial={saves ? { opacity: 0.3, x: dirX(-3, dir) } : false} animate={{ opacity: 1, x: 0 }} transition={spring(0.3, 0.3)}>{value}<span className="sr-only">{label ? tm('inlineEditNamed', { name: label }) : tm('inlineEdit')}</span></motion.span>
       <Icon name="edit" size={14} className="relative text-[var(--fg3)] opacity-0 transition-opacity group-hover:opacity-100 group-focus-visible:opacity-100 [@media(hover:none)]:opacity-100" />
     </button>
   )
@@ -1550,7 +1644,7 @@ export function InlineEdit({ value, onSave, className, helper, savedHelper = 'Sa
       {field}
       <AnimatePresence mode="wait" initial={false}>
         <motion.span key={saves ? 'saved' : 'helper'} aria-live="polite" initial={{ opacity: 0, y: 3 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0, y: -3 }} transition={{ duration: 0.15 }}
-          className={cn('text-xs', saves ? 'text-[var(--ok)]' : 'text-[var(--fg3)]')}>{saves ? savedHelper : helper}</motion.span>
+          className={cn('text-xs', saves ? 'text-[var(--ok)]' : 'text-[var(--fg3)]')}>{saves ? savedHelper ?? tm('savedJustNow') : helper}</motion.span>
       </AnimatePresence>
     </div>
   )
@@ -1570,33 +1664,33 @@ export function NotificationBell({ items, onChange, max = 5, className }: { item
   useEffect(() => { if (unread > prev.current) setShake(s => s + 1); prev.current = unread }, [unread])
   const cascade = useRef(false)
   const markAll = () => { cascade.current = true; onChange(items.map(n => ({ ...n, read: true }))); setTimeout(() => { cascade.current = false }, 600) }
-  const shown = items.slice(0, max)
+  const shown = items.slice(0, max), dir = useDir(), tm = useMessages(OVERLAY_MSG), { t } = useLocale()
   return (
     <Popover className={className}>
-      <PopoverTrigger size="icon" aria-label={`Notifications, ${unread} unread`} className="!overflow-visible">
+      <PopoverTrigger size="icon" aria-label={tm('bell', { count: unread })} className="!overflow-visible">
         <motion.span key={shake} className="inline-flex origin-top" initial={false} animate={shake ? { rotate: [0, -14, 12, -8, 6, 0] } : undefined} transition={{ duration: 0.5 }}>
           <Icon name="bell" />
         </motion.span>
         <AnimatePresence>
           {unread > 0 && (
             <motion.span initial={{ scale: 0 }} animate={{ scale: 1 }} exit={{ scale: 0 }} transition={spring(0.5, 0.4)}
-              className="pointer-events-none absolute -top-1.5 -right-1.5 grid h-5 min-w-5 place-items-center rounded-full border-2 border-[var(--card)] bg-[var(--bad)] px-1 text-[11px] font-semibold text-[var(--card)]">
+              className="pointer-events-none absolute -top-1.5 -end-1.5 grid h-5 min-w-5 place-items-center rounded-full border-2 border-[var(--card)] bg-[var(--bad)] px-1 text-[11px] font-semibold text-[var(--card)]">
               <AnimatedNumber value={unread} />
             </motion.span>
           )}
         </AnimatePresence>
       </PopoverTrigger>
       <PopoverContent className="w-[min(300px,calc(100vw-32px))] overflow-hidden !p-0">
-        <div className="flex items-center justify-between border-b border-[var(--line)] px-3 py-2"><b className="text-[13px]">Notifications</b>
-          <Button size="sm" variant="ghost" disabled={!unread} onClick={markAll}>Mark all read</Button></div>
-        {items.length === 0 ? <EmptyState icon="bell" title="You’re all caught up" /> : (
+        <div className="flex items-center justify-between border-b border-[var(--line)] px-3 py-2"><b className="text-[13px]">{t('feedback.notifications')}</b>
+          <Button size="sm" variant="ghost" disabled={!unread} onClick={markAll}>{tm('markAllRead')}</Button></div>
+        {items.length === 0 ? <EmptyState icon="bell" title={tm('caughtUp')} /> : (
           <div role="list">
             <AnimatePresence initial>
               {shown.map((n, i) => (
-                <motion.div key={n.id} role="listitem" layout initial={{ opacity: 0, x: -6 }} animate={{ opacity: 1, x: 0 }} exit={{ opacity: 0, height: 0, transition: { duration: 0.15 } }}
+                <motion.div key={n.id} role="listitem" layout initial={{ opacity: 0, x: dirX(-6, dir) }} animate={{ opacity: 1, x: 0 }} exit={{ opacity: 0, height: 0, transition: { duration: 0.15 } }}
                   transition={{ ...spring(0.2, 0.35), delay: i * 0.04 }} className="overflow-hidden border-b border-[var(--line)] last:border-b-0">
                 <button onClick={() => onChange(items.map(x => x.id === n.id ? { ...x, read: true } : x))}
-                  className="flex w-full cursor-pointer gap-2.5 border-0 bg-transparent px-3 py-2.5 text-left text-xs hover:bg-[var(--muted)]">
+                  className="flex w-full cursor-pointer gap-2.5 border-0 bg-transparent px-3 py-2.5 text-start text-xs hover:bg-[var(--muted)]">
                   <motion.span initial={false} animate={{ scale: n.read ? 0 : 1 }} transition={{ ...spring(0.4, 0.3), delay: cascade.current ? i * 0.06 : 0 }}
                     className="mt-1 h-[7px] w-[7px] flex-none rounded-full bg-[var(--accent)]" />
                   <span className="flex-1"><span className="block text-[13px]">{n.title}</span>{n.body && <span className="text-[var(--fg2)]">{n.body}</span>}<span className="block text-[var(--fg3)]">{n.time}</span></span>
@@ -1619,14 +1713,15 @@ type TourGeo = { x: number; y: number; w: number; h: number; left: number; top: 
 /**
  * Guided tour over a region. Mark targets inside `children` with data-tour="…"; the spotlight springs
  * between them and a tooltip with an arrow anchors below each one (above if there's no room).
- * `step` is the open step (-1 = closed). Next/Done, Skip, ←/→ and Escape work.
+ * `step` is the open step (-1 = closed). Next/Done, Skip, ←/→ (mirrored in RTL) and Escape work. The spotlight and
+ * tooltip are placed from measured geometry, so they are physical by nature.
  */
 export function Tour({ steps, step, defaultStep = -1, onStepChange, children, className }:
   { steps: TourStep[]; step?: number; defaultStep?: number; onStepChange?: (step: number) => void; children: ReactNode; className?: string }) {
   const [i, setI] = useControllable(step, defaultStep, onStepChange)
   const wrap = useRef<HTMLDivElement>(null), tip = useRef<HTMLDivElement>(null), next = useRef<HTMLButtonElement>(null)
   const [geo, setGeo] = useState<TourGeo | null>(null)
-  const placed = useRef(false)
+  const placed = useRef(false), dir = useDir(), tm = useMessages(OVERLAY_MSG), { t } = useLocale()
   const open = i >= 0 && i < steps.length
   const go = (n: number) => setI(n >= 0 && n < steps.length ? n : -1)
 
@@ -1661,12 +1756,14 @@ export function Tour({ steps, step, defaultStep = -1, onStepChange, children, cl
       onKeyDown={e => {
         if (!open) return
         if (e.key === 'Escape') { e.stopPropagation(); go(-1) }
-        if (e.key === 'ArrowRight') go(i + 1)
-        if (e.key === 'ArrowLeft' && i > 0) go(i - 1)
+        const key = logicalArrow(e.key, dir)
+        if (key === 'ArrowRight') go(i + 1) // rtl-lint-ignore: mapped above
+        if (key === 'ArrowLeft' && i > 0) go(i - 1) // rtl-lint-ignore: mapped above
       }}>
       {children}
       <AnimatePresence>
         {open && geo && (
+          // rtl-lint-ignore: measured geometry
           <motion.div key="spot" aria-hidden className="pointer-events-none absolute top-0 left-0 z-[5] rounded-[var(--r-md)] shadow-[0_0_0_9999px_rgba(0,0,0,.45)]"
             initial={{ opacity: 0, x: geo.x, y: geo.y, width: geo.w, height: geo.h }} animate={{ opacity: 1, x: geo.x, y: geo.y, width: geo.w, height: geo.h }}
             exit={{ opacity: 0, transition: { duration: 0.2 } }} transition={{ ...spring(0.2, 0.5), opacity: { duration: 0.25 } }} />
@@ -1674,22 +1771,26 @@ export function Tour({ steps, step, defaultStep = -1, onStepChange, children, cl
       </AnimatePresence>
       <AnimatePresence>
         {s && (
-          <motion.div key="tip" ref={tip} role="dialog" aria-label="Product tour" aria-live="polite"
+          <motion.div key="tip" ref={tip} role="dialog" aria-label={tm('tour')} aria-live="polite"
             initial={{ opacity: 0, y: 8 }} animate={geo ? { opacity: 1, y: 0, left: geo.left, top: geo.top } : { opacity: 0 }}
             exit={{ opacity: 0, y: 8, transition: { duration: 0.15 } }} transition={{ default: spring(0.25, 0.35), left: move, top: move }}
             style={{ visibility: geo ? 'visible' : 'hidden' }}
+            // rtl-lint-ignore: measured geometry
             className={cn(floatingSurface, 'absolute top-0 left-0 z-[6] w-[min(250px,calc(100%-16px))] rounded-[var(--r-md)] p-3 text-[13px]')}>
             {geo && <span aria-hidden className={cn('absolute h-2.5 w-2.5 border-[var(--line)] bg-[var(--card)]',
+              // rtl-lint-ignore: a rotated square's borders are geometry
               geo.above ? '-bottom-[6px] rotate-[225deg] border-t border-l' : '-top-[6px] rotate-45 border-t border-l')} style={{ left: geo.ax }} />}
-            <motion.div key={i} initial={{ opacity: 0, x: 6 }} animate={{ opacity: 1, x: 0 }} transition={{ duration: 0.2 }}>
+            <motion.div key={i} initial={{ opacity: 0, x: dirX(6, dir) }}
+ animate={{ opacity: 1, x: 0 }} transition={{ duration: 0.2 }}>
               <b className="block font-semibold">{s.title}</b>
               {s.body && <div className="mt-1 mb-3 text-xs leading-normal text-[var(--fg3)]">{s.body}</div>}
             </motion.div>
             <div className="flex items-center justify-between gap-2">
-              <span className="ui-num text-xs text-[var(--fg3)]">{i + 1} of {steps.length}</span>
+              <span className="ui-num text-xs text-[var(--fg3)]">{tm('stepOf', { step: i + 1, total: steps.length })}</span>
               <div className="flex gap-1.5">
-                {i < steps.length - 1 && <Button size="sm" variant="ghost" onClick={() => go(-1)}>Skip</Button>}
-                <Button ref={next} size="sm" variant="primary" onClick={() => go(i + 1)}>{i === steps.length - 1 ? 'Done' : 'Next'}</Button>
+                {i < steps.length - 1 && <Button size="sm" variant="ghost" onClick={() => go(-1)}>{tm('skip')}</Button>}
+                <Button ref={next} size="sm" variant="primary" onClick={() => go(i + 1)}>{i === steps.length - 1 ? t('common.done') : t('common.next')}</Button>
+
               </div>
             </div>
           </motion.div>

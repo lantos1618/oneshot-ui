@@ -15,7 +15,11 @@
 //
 // The dependency graph comes from the TypeScript 7 API over tsconfig.app.json (scripts/registry/analyze.mjs).
 // Contexts created at the top level are made shared across files (see uiSharedContext below), so a <UIProvider> from
-// ui-provider.tsx reaches the components in every other drop-in file.
+// ui-provider.tsx reaches the components in every other drop-in file. Other module state (toast queue, modal stack,
+// scroll lock, focus traps, icon registry) is shared in the source itself through uiShared() (src/lib/shared.tsx).
+// To keep the files small: ICONS keeps only the icons a file draws (the rest resolve through the page-wide icon
+// registry; icon.tsx has them all), and DROPIN_STUBS swaps out declarations only ui-provider.tsx needs (the locale
+// engine behind useLocale() outside a provider).
 import { readFileSync, writeFileSync, mkdirSync, rmSync } from 'node:fs'
 import { join } from 'node:path'
 import { createHash } from 'node:crypto'
@@ -40,9 +44,50 @@ const sha256 = text => createHash('sha256').update(text, 'utf8').digest('hex')
 const tokensOf = bytes => Math.round(bytes / 3.6)
 const warn = msg => console.warn(`build-registry: ${msg}`)
 
+// Declarations swapped for a stub in drop-in files: the real one is only needed in ui-provider.tsx (or where the item
+// embeds what it depends on anyway). localeFallback is useLocale() outside a provider; with it, every file that
+// calls t() would carry the whole locale engine (Intl formatters, the English catalog) that UIProvider already provides.
+const DROPIN_STUBS = {
+  localeFallback: {
+    keepIf: ['resolveLocale'],
+    deps: ['UILocale'],
+    text: `/** useLocale() outside a provider: in a drop-in file the locale comes from <UIProvider> (ui-provider.tsx). */
+function localeFallback(): UILocale {
+  throw new Error('@lyndon/ui: render this component inside <UIProvider> from ui-provider.tsx (it provides the locale)')
+}`,
+  },
+  // `keyof typeof UI_MESSAGES_EN` would embed the English catalog in every file that types a t() call
+  UIMessageKey: {
+    keepIf: ['UI_MESSAGES_EN'],
+    deps: [],
+    text: `/** A message key of the built-in catalog (ui-provider.tsx, which embeds the catalog, has the full union). */
+export type UIMessageKey = string`,
+  },
+}
+
 
 function build() {
   const { decls, modules } = graph
+  // the same graph with DROPIN_STUBS swapped in
+  const stubDecls = new Map(decls)
+  for (const [name, stub] of Object.entries(DROPIN_STUBS)) {
+    const d = decls.get(name)
+    if (!d) { warn(`stub ${name}: no such declaration`); continue }
+    stubDecls.set(name, { ...d, deps: new Set(stub.deps), ext: [], dynImports: {}, parts: [{ order: d.parts[0].order, text: stub.text }] })
+  }
+  // per item: stub what the item does not otherwise embed (a stub whose `keepIf` names end up in the file goes back to real)
+  const itemClosure = it => {
+    if (it.name === 'ui-provider') return closure(graph, it.roots, rank)
+    const stubs = new Set(Object.keys(DROPIN_STUBS))
+    for (;;) {
+      const view = new Map(decls)
+      for (const n of stubs) if (stubDecls.has(n)) view.set(n, stubDecls.get(n))
+      const c = closure({ ...graph, decls: view }, it.roots, rank)
+      const back = [...stubs].filter(n => c.names.has(n) && DROPIN_STUBS[n].keepIf.some(k => c.names.has(k)))
+      if (!back.length) return c
+      back.forEach(n => stubs.delete(n))
+    }
+  }
 
   // modules in dependency order (imports first), so top-level code runs after what it uses
   const byName = new Map(modules.map((m, i) => [m.name, i]))
@@ -51,7 +96,8 @@ function build() {
   const visit = (i, stack = new Set()) => {
     if (rank[i] !== undefined || stack.has(i)) return
     stack.add(i)
-    for (const dep of modules[i].relImports) { const j = byName.get(dep); if (j !== undefined && modules[j].dir === 'lib') visit(j, stack) }
+    // imports, and the modules a barrel (core, forms) re-exports: `import { cn } from './core'` needs helpers.tsx first
+    for (const dep of [...modules[i].relImports, ...modules[i].reexports.map(r => r.from)]) { const j = byName.get(dep); if (j !== undefined && modules[j].dir === 'lib') visit(j, stack) }
     rank[i] = next++
   }
   ;['core', ...modules.map(m => m.name)].forEach(n => visit(byName.get(n)))
@@ -103,13 +149,15 @@ function build() {
   mkdirSync(join(out, 'r'), { recursive: true })
   const index = []
   for (const it of items) {
-    const c = closure(graph, it.roots, rank)
+    const c = itemClosure(it)
     const first = decls.get(it.roots[0])
     const description = it.description ?? (first.doc || `${it.title} from @lyndon/ui.`)
     const embeds = [...c.names].filter(n => componentRoots.has(n) && !it.roots.includes(n) && decls.get(n).exported).sort()
-    const { body, deps } = renderBody(c)
+    const { body, deps, icons } = renderBody(c, { allIcons: it.roots.includes('ICONS') })
+    // takes icon names from its props (IconButton icon="…", EmptyState icon=…): the names it doesn't draw itself need icon.tsx
+    const iconProps = icons && icons.kept < icons.total && c.names.has('isIconName')
     const needsProvider = it.type !== 'registry:lib' && it.type !== 'registry:hook' && it.name !== 'ui-provider'
-    const header = docHeader(it, description, embeds, needsProvider)
+    const header = docHeader(it, description, embeds, needsProvider, iconProps ? icons : null)
     const text = stamp(`${it.name}.tsx`, header + body)
     writeFileSync(join(out, 'files', `${it.name}.tsx`), text)
     const bytes = Buffer.byteLength(text)
@@ -119,6 +167,8 @@ function build() {
       embedsItems: [...new Set(embeds.map(e => itemOfRoot.get(e)).filter(Boolean))].sort(),
       dependencies: deps, modules: [...new Set([...c.names].map(n => decls.get(n).module))].sort(),
       requires: needsProvider ? ['ui-provider'] : [],
+      ...(iconProps ? { suggests: ['icon'] } : {}),
+      ...(icons ? { icons: { embedded: icons.kept, of: icons.total } } : {}),
       bytes, tokens: tokensOf(bytes), declarations: c.names.size, sha256: sha256(text),
     }
     if (it.type === 'registry:block' && first.dir === 'extra') {
@@ -201,7 +251,7 @@ function partSuffix(name, names) {
 
 // ── rendering ──────────────────────────────────────────────────────────────────────────────────────────────────────
 
-function renderBody(c) {
+function renderBody(c, { allIcons = false } = {}) {
   // merge external imports: one statement per module; a name stays `type` only if every use imported it as a type
   const named = new Map(), raw = new Set()
   for (const imp of c.ext) {
@@ -218,6 +268,8 @@ function renderBody(c) {
   for (const [m, names] of Object.entries(c.dynImports ?? {})) body = body.replaceAll(new RegExp(`import\\((['"])\\./${m}(\\.tsx?)?\\1\\)`, 'g'), `Promise.resolve({ ${names.join(', ')} })`)
   // drop the big section banners of the source modules (/* ════ 2. UTILITIES ════ */): they describe the module, not this file
   body = body.replace(/^\/\* ═+\n[\s\S]*?═+ \*\/\n+/gm, '')
+  let icons = null
+  if (!allIcons) ({ body, icons } = pruneIcons(body))
   // contexts: shared through globalThis so several drop-in files see the same provider
   const shared = shareContexts(body)
   if (shared !== body) {
@@ -234,7 +286,32 @@ function renderBody(c) {
     return `import { ${specs.join(', ')} } from '${f}'`
   })]
   const deps = [...new Set([...named.keys(), ...[...raw].map(r => /from '([^']+)'/.exec(r)[1])].map(f => (f.startsWith('@') ? f.split('/').slice(0, 2).join('/') : f.split('/')[0])))].sort()
-  return { body: lines.join('\n') + '\n\n' + body + '\n', deps }
+  return { body: lines.join('\n') + '\n\n' + body + '\n', deps, icons }
+}
+
+/**
+ * Keep only the icons a file draws: the ICONS entries whose name appears in the rest of the file as a string literal
+ * ('check', name="check") or as ICONS.check. Other names still resolve: the pruned map's prototype is the page-wide icon
+ * registry that every file (and icon.tsx, with all of them) fills. IconName stays the full union of names.
+ */
+function pruneIcons(body) {
+  const m = /^export const ICONS = \{\n/m.exec(body)
+  if (!m) return { body, icons: null }
+  const start = m.index, close = body.indexOf('\n}', start) + 2, end = close + (body.startsWith(' as const', close) ? 9 : 0)
+  const entries = [...body.slice(start, end).matchAll(/(\w+): '([^']*)'/g)].map(([, k, v]) => [k, v])
+  const rest = body.slice(0, start) + body.slice(end)
+  const used = new Set([...rest.matchAll(/(['"])(\w+)\1/g)].map(x => x[2]))
+  for (const x of rest.matchAll(/\bICONS\.(\w+)/g)) used.add(x[1])
+  const keep = entries.filter(([k]) => used.has(k))
+  const typed = /^export type IconName = keyof typeof ICONS$/m.test(rest), key = typed ? 'IconName' : 'string'
+  const all = entries.map(([k]) => `'${k}'`)
+  const union = all.reduce((lines, k) => { if ((lines.at(-1) + ' | ' + k).length > 116) lines.push(k); else lines[lines.length - 1] = lines.at(-1) ? `${lines.at(-1)} | ${k}` : k; return lines }, [''])
+  const icons = `/** The icons this file draws (${keep.length} of ${entries.length}). Any other name resolves through the page-wide registry: add icon.tsx for all of them, or registerIcons(). */
+export const ICONS: Record<${key}, string> = Object.assign(Object.create(iconRegistry) as Record<${key}, string>, {
+${keep.map(([k, v]) => `  ${k}: '${v}',`).join('\n')}
+})`
+  return { icons: { kept: keep.length, total: entries.length }, body: (body.slice(0, start) + icons + body.slice(end))
+    .replace(/^export type IconName = keyof typeof ICONS$/m, `/** Every icon name in @lyndon/ui (this file embeds only the paths it draws, see ICONS). */\nexport type IconName =\n  | ${union.join('\n  | ')}`) }
 }
 
 // `const X = createContext<T>(v)` (top level) → `const X = uiSharedContext<T>('X', v)`
@@ -272,7 +349,7 @@ function uiSharedContext<T>(name: string, defaultValue: T): Context<T> {
   return store.get(key) as Context<T>
 }`
 
-function docHeader(it, description, embeds, needsProvider) {
+function docHeader(it, description, embeds, needsProvider, icons) {
   const wrap = (s, width = 116) => s.split(' ').reduce((lines, w) => {
     if ((lines.at(-1) + ' ' + w).length > width) lines.push(w); else lines[lines.length - 1] = lines.at(-1) ? `${lines.at(-1)} ${w}` : w
     return lines
@@ -286,6 +363,8 @@ function docHeader(it, description, embeds, needsProvider) {
   ]
   if (needsProvider) parts.push('', 'Needs Tailwind CSS (v4 scans this file; v3: add it to `content`) and the theme tokens: render it inside ' +
     '<UIProvider> once (`npx @lyndon/ui add ui-provider`), or link @lyndon/ui/tokens.css and use <UIProvider injectStyles={false}>.')
+  if (icons) parts.push('', `Embeds only the ${icons.kept} of ${icons.total} icons it draws itself. To pass other icon names to its props (icon="trash"), ` +
+    'add icon.tsx (`npx @lyndon/ui add icon`), which registers every icon page-wide, or registerIcons({ name: path }).')
   return `/**\n${parts.map(p => (p ? wrap(p) : ' *')).join('\n')}\n */\n`
 }
 
@@ -379,10 +458,11 @@ and motion. Attach the ones you need plus ui-provider.tsx; they share one UIProv
 function sizeOf(rel) { try { return readFileSync(join(root, rel)).length } catch { return 0 } }
 
 const AREA = {
-  forms: 'Forms and inputs', overlay: 'Overlays', navigation: 'Navigation', feedback: 'Feedback', data: 'Data display', datagrid: 'Data display',
+  forms: 'Forms and inputs', formkit: 'Forms and inputs', fields: 'Forms and inputs', inputs: 'Forms and inputs', select: 'Forms and inputs', pickers: 'Forms and inputs', upload: 'Forms and inputs', overlay: 'Overlays', navigation: 'Navigation', feedback: 'Feedback', data: 'Data display', datagrid: 'Data display',
   layout: 'Layout', editor: 'Editors and content', scheduler: 'Scheduling', code: 'Code', markdown: 'Editors and content', media: 'Media', collab: 'Collaboration',
   pages: 'Pages', charts: 'Charts', diagrams: 'Diagrams', geo: 'Maps', aistream: 'AI', ai: 'AI', aichat: 'AI', aiagent: 'AI',
-  appearance: 'Theming', provider: 'Foundation', core: 'Primitives', motion: 'Foundation', virtual: 'Data display',
+  appearance: 'Theming', provider: 'Foundation', core: 'Primitives', primitives: 'Primitives', icons: 'Primitives', slot: 'Primitives',
+  helpers: 'Foundation', shared: 'Foundation', locale: 'Foundation', theme: 'Theming', hooks: 'Foundation', safe: 'Foundation', formcontrol: 'Forms and inputs', motion: 'Foundation', virtual: 'Data display',
   gantt: 'Diagrams', statechart: 'Diagrams', trace: 'Diagrams', network: 'Diagrams', diagramkit: 'Diagrams', geoworld: 'Maps', geoland: 'Maps',
 }
 

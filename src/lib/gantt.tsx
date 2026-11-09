@@ -1,6 +1,6 @@
 import { Fragment, useCallback, useEffect, useId, useLayoutEffect, useMemo, useRef, useState, type CSSProperties, type KeyboardEvent as ReactKeyboardEvent, type MouseEvent as ReactMouseEvent, type PointerEvent as ReactPointerEvent } from 'react'
 import { motion, useInView } from 'motion/react'
-import { Avatar, Button, Chip, ScrollEdges, TOUCH, addDays, cn, fmtDate, isTouch, maxOf, minOf, onMouseLeave, spring, surface, useLongPress, useOutside, usePointerDrag, useScrollEdges, useWidth } from './core'
+import { Avatar, Button, Chip, ScrollEdges, TOUCH, addDays, cn, defineMessages, isTouch, maxOf, minOf, onMouseLeave, spring, surface, useLocale, useLongPress, useMessages, useOutside, usePointerDrag, useScrollEdges, useWidth } from './core'
 import { Collapse } from './feedback'
 import { PointerTooltip, usePointerTooltip } from './overlay'
 import { DG_COLLAPSE_STICKY, DgChevron, dgSafeId } from './diagramkit'
@@ -16,8 +16,67 @@ export type GanttPhase = { id: string; name: string; tasks: GanttTask[] }
 
 const GANTT_ROW = 38
 /** Task-name cells stay pinned while the timeline scrolls sideways on narrow screens. */
-const GANTT_PIN = 'sticky left-0 z-[3] h-full shadow-[1px_0_0_var(--line)]'
+// The grid is an LTR plot (see Gantt), so the pinned column is physically on the left; its cells set the locale's dir.
+const GANTT_PIN = 'sticky left-0 z-[3] h-full shadow-[1px_0_0_var(--line)]' // rtl-lint-ignore: LTR plot
 const ganttEnd = (x: { s: number; d: number }) => x.s + x.d
+/** Gantt's UI strings (machine-drafted de/ar). Override any of them with `<UIProvider messages={{ 'gantt.links': … }}>`. */
+export const GANTT_MESSAGES = defineMessages('gantt', {
+  en: {
+    links: 'Links', critical: 'Critical path', baseline: 'Baseline', workload: 'Workload', task: 'Task', phase: 'Phase', milestone: 'Milestone', slack: 'Slack',
+    range: '{from} to {to}',
+    phaseSummary: '{from} to {to} · {pct}',
+    taskTip: '{from} to {to} · {days, plural, one {# day} other {# days}} · {pct}',
+    slackTip: '{n, plural, one {# day of slack} other {# days of slack}}',
+    milestoneLabel: '{name} milestone, {date}',
+    barLabel: '{name}, {from} to {to}, {days, plural, one {# day} other {# days}}. Arrow keys move, Shift + arrows resize',
+    barValue: '{date}, {days, plural, one {# day} other {# days}}',
+    tasksPerDay: 'tasks per day',
+    tasksOn: '{count, plural, one {# task} other {# tasks}} on {date}',
+    swipe: 'Swipe for more days',
+    hoverHint: 'Hover a task to see its links',
+    tapHint: 'Tap a task for its links · hold a bar to move it, drag its grip to resize',
+    late: '{n, plural, one {# day later than planned} other {# days later than planned}}',
+    early: '{n, plural, one {# day early} other {# days early}}',
+    onPlan: 'on plan',
+  },
+  de: {
+    links: 'Verknüpfungen', critical: 'Kritischer Pfad', baseline: 'Basisplan', workload: 'Auslastung', task: 'Aufgabe', phase: 'Phase', milestone: 'Meilenstein', slack: 'Puffer',
+    range: '{from} bis {to}',
+    phaseSummary: '{from} bis {to} · {pct}',
+    taskTip: '{from} bis {to} · {days, plural, one {# Tag} other {# Tage}} · {pct}',
+    slackTip: '{n, plural, one {# Tag Puffer} other {# Tage Puffer}}',
+    milestoneLabel: 'Meilenstein {name}, {date}',
+    barLabel: '{name}, {from} bis {to}, {days, plural, one {# Tag} other {# Tage}}. Pfeiltasten verschieben, Umschalt + Pfeiltasten ändern die Dauer',
+    barValue: '{date}, {days, plural, one {# Tag} other {# Tage}}',
+    tasksPerDay: 'Aufgaben pro Tag',
+    tasksOn: '{count, plural, one {# Aufgabe} other {# Aufgaben}} am {date}',
+    swipe: 'Wischen für weitere Tage',
+    hoverHint: 'Zeige auf eine Aufgabe, um ihre Verknüpfungen zu sehen',
+    tapHint: 'Tippe auf eine Aufgabe für ihre Verknüpfungen · halte einen Balken zum Verschieben, ziehe am Griff für die Dauer',
+    late: '{n, plural, one {# Tag später als geplant} other {# Tage später als geplant}}',
+    early: '{n, plural, one {# Tag früher} other {# Tage früher}}',
+    onPlan: 'im Plan',
+  },
+  ar: {
+    links: 'الروابط', critical: 'المسار الحرج', baseline: 'الخطة الأساسية', workload: 'عبء العمل', task: 'المهمة', phase: 'المرحلة', milestone: 'معلم رئيسي', slack: 'الفائض الزمني',
+    range: '{from} إلى {to}',
+    phaseSummary: '{from} إلى {to}، {pct}',
+    taskTip: '{from} إلى {to}، {days, plural, zero {# يوم} one {يوم واحد} two {يومان} few {# أيام} many {# يومًا} other {# يوم}}، {pct}',
+    slackTip: 'فائض {n, plural, zero {# يوم} one {يوم واحد} two {يومين} few {# أيام} many {# يومًا} other {# يوم}}',
+    milestoneLabel: 'المعلم {name}، {date}',
+    barLabel: '{name}، من {from} إلى {to}، {days, plural, zero {# يوم} one {يوم واحد} two {يومان} few {# أيام} many {# يومًا} other {# يوم}}. الأسهم للتحريك، وShift مع الأسهم لتغيير المدة',
+    barValue: '{date}، {days, plural, zero {# يوم} one {يوم واحد} two {يومان} few {# أيام} many {# يومًا} other {# يوم}}',
+    tasksPerDay: 'المهام في اليوم',
+    tasksOn: '{count, plural, one {مهمة واحدة} two {مهمتان} few {# مهام} many {# مهمة} other {# مهمة}} في {date}',
+    swipe: 'اسحب لرؤية أيام أخرى',
+    hoverHint: 'مرّر المؤشر فوق مهمة لرؤية روابطها',
+    tapHint: 'انقر على مهمة لرؤية روابطها، اضغط مطولًا على شريط لتحريكه، واسحب مقبضه لتغيير المدة',
+    late: 'متأخر {n, plural, one {يومًا واحدًا} two {يومين} few {# أيام} many {# يومًا} other {# يوم}} عن الخطة',
+    early: 'مبكر {n, plural, one {يومًا واحدًا} two {يومين} few {# أيام} many {# يومًا} other {# يوم}}',
+    onPlan: 'وفق الخطة',
+  },
+})
+
 const GANTT_CELL = { 1: 'bg-[color-mix(in_srgb,var(--ok)_22%,transparent)] text-[var(--fg2)]', 2: 'bg-[color-mix(in_srgb,var(--warn)_35%,transparent)] text-[var(--fg)]', 3: 'bg-[color-mix(in_srgb,var(--bad)_40%,transparent)] text-[var(--fg)]' } as const
 
 /**
@@ -30,6 +89,8 @@ const GANTT_CELL = { 1: 'bg-[color-mix(in_srgb,var(--ok)_22%,transparent)] text-
  */
 export function Gantt({ phases, dependencies, start, days = 42, today, people = {}, milestone, className }:
   { phases: GanttPhase[]; dependencies: [string, string][]; start: Date; days?: number; today?: number; people?: Record<string, string>; milestone?: string; className?: string }) {
+  const { t: ct, fmt, dir } = useLocale()
+  const m = useMessages(GANTT_MESSAGES)
   const tasks = useMemo(() => phases.flatMap(p => p.tasks.map(t => ({ ...t, phase: p.id }))), [phases])
   const initial = useMemo(() => Object.fromEntries(tasks.map(t => [t.id, { s: t.start, d: t.duration }])), [tasks])
   const [sched, setSched] = useState(initial)
@@ -48,7 +109,8 @@ export function Gantt({ phases, dependencies, start, days = 42, today, people = 
   const final = milestone ?? [...tasks].reverse().find(t => t.duration === 0)?.id ?? tasks[tasks.length - 1]?.id
   const preds = (id: string) => dependencies.filter(d => d[1] === id).map(d => d[0])
   const succs = (id: string) => dependencies.filter(d => d[0] === id).map(d => d[1])
-  const fdate = (d: number) => fmtDate(addDays(start, d), { day: 'numeric', month: 'short' })
+  const fdate = (d: number) => fmt.date(addDays(start, d), { day: 'numeric', month: 'short' })
+  const fpct = (f: number) => fmt.percent(f, 0)
   const pct = (d: number) => `${(d / days) * 100}%`
 
   // walk back from the final milestone through the tightest predecessor
@@ -100,7 +162,7 @@ export function Gantt({ phases, dependencies, start, days = 42, today, people = 
   const late = final ? ganttEnd(sched[final]) - (byId[final].start + byId[final].duration) : 0
   const tipFor = (id: string) => {
     const t = byId[id], x = sched[id], sl = slackOf(id)
-    return <><b className="font-semibold">{t.name}</b><br /><span className="text-[var(--fg2)]">{t.duration === 0 ? fdate(x.s) : `${fdate(x.s)} to ${fdate(ganttEnd(x) - 1)} · ${x.d} days · ${Math.round(t.progress * 100)}%`}{sl ? ` · ${sl}d slack` : ''}</span></>
+    return <><b className="font-semibold">{t.name}</b><br /><span className="text-[var(--fg2)]">{t.duration === 0 ? fdate(x.s) : m('taskTip', { from: fdate(x.s), to: fdate(ganttEnd(x) - 1), days: x.d, pct: fpct(t.progress) })}{sl ? ` · ${m('slackTip', { n: sl })}` : ''}</span></>
   }
   // dragging: usePointerDrag (capture, cancel and unmount handled); on touch a bar is picked up by a long-press,
   // so a swipe over the chart still scrolls it, and its resize grip drags straight away
@@ -166,8 +228,9 @@ export function Gantt({ phases, dependencies, start, days = 42, today, people = 
     onContextMenu: (e: ReactMouseEvent) => { if (press.current || drag.current) e.preventDefault() },
     onKeyDown: (e: ReactKeyboardEvent) => onKey(e, id), onFocus: () => setHover(id), onBlur: () => setHover(null),
   })
+  // the timeline is an LTR plot in every locale, so the arrows follow the plot: → is later (not logicalArrow)
   const onKey = (e: ReactKeyboardEvent, id: string) => {
-    const step = e.key === 'ArrowRight' ? 1 : e.key === 'ArrowLeft' ? -1 : 0
+    const step = e.key === 'ArrowRight' ? 1 : e.key === 'ArrowLeft' ? -1 : 0 // rtl-lint-ignore: plot direction
     if (!step) return
     e.preventDefault()
     if (e.shiftKey && byId[id].duration) moveTo(id, sched[id].s, sched[id].d + step); else moveTo(id, sched[id].s + step, sched[id].d)
@@ -181,25 +244,27 @@ export function Gantt({ phases, dependencies, start, days = 42, today, people = 
   return (
     <div className={cn('flex flex-col gap-2', className)}>
       <div className="flex flex-wrap justify-end gap-2">
-        <Chip pressed={view.lk} onClick={() => setView(v => ({ ...v, lk: !v.lk }))}>Links</Chip>
-        <Chip pressed={view.cp} onClick={() => setView(v => ({ ...v, cp: !v.cp }))}>Critical path</Chip>
-        <Chip pressed={view.bl} onClick={() => setView(v => ({ ...v, bl: !v.bl }))}>Baseline</Chip>
-        <Chip pressed={view.wl} onClick={() => setView(v => ({ ...v, wl: !v.wl }))}>Workload</Chip>
-        <Button size="sm" className={TOUCH.tap36} onClick={() => setSched(initial)}>Reset</Button>
+        <Chip pressed={view.lk} onClick={() => setView(v => ({ ...v, lk: !v.lk }))}>{m('links')}</Chip>
+        <Chip pressed={view.cp} onClick={() => setView(v => ({ ...v, cp: !v.cp }))}>{m('critical')}</Chip>
+        <Chip pressed={view.bl} onClick={() => setView(v => ({ ...v, bl: !v.bl }))}>{m('baseline')}</Chip>
+        <Chip pressed={view.wl} onClick={() => setView(v => ({ ...v, wl: !v.wl }))}>{m('workload')}</Chip>
+        <Button size="sm" className={TOUCH.tap36} onClick={() => setSched(initial)}>{ct('common.reset')}</Button>
       </div>
-      <div ref={boxRef} className={cn('relative overflow-hidden [--gd:10px] [--gs:30%] max-[700px]:[--gs:38%] max-sm:[--gd:15px] max-sm:[--gs:118px]', surface.card)}>
+      {/* the grid is a plot: the time axis runs left to right in every locale (like charts); the name cells, toolbar,
+          legend and tooltips follow the locale's direction */}
+      <div ref={boxRef} dir="ltr" className={cn('relative overflow-hidden [--gd:10px] [--gs:30%] max-[700px]:[--gs:38%] max-sm:[--gd:15px] max-sm:[--gs:118px]', surface.card)}>
         <div ref={scrollRef} className="overflow-x-auto overscroll-x-contain">
         <div style={{ minWidth: `calc(var(--gs) + ${days} * var(--gd))` }}>
         <div className="grid h-11 grid-cols-[var(--gs)_1fr] border-b border-[var(--line)] text-xs text-[var(--fg3)]">
-          <div className={cn('flex items-center pl-3', GANTT_PIN, 'bg-[var(--card)]')}>Task</div>
-          <div className="relative border-l border-[var(--line)]">
-            {Array.from({ length: Math.ceil(days / 7) }, (_, i) => <span key={i} className="absolute top-1.5 text-[11px] whitespace-nowrap" style={{ left: `calc(${pct(i * 7)} + 6px)` }}>{fdate(i * 7)}</span>)}
+          <div dir={dir} className={cn('flex items-center ps-3', GANTT_PIN, 'bg-[var(--card)]')}>{m('task')}</div>
+          <div className="relative border-s border-[var(--line)]">
+            {Array.from({ length: Math.ceil(days / 7) }, (_, i) => <span key={i} className="absolute top-1.5 text-[11px] whitespace-nowrap" style={{ /* rtl-lint-ignore: LTR plot */ left: `calc(${pct(i * 7)} + 6px)` }}>{fdate(i * 7)}</span>)}
           </div>
         </div>
         <div className="relative" onPointerLeave={onMouseLeave(() => { hide(); setHover(null) })}>
           {/* under the rows, so bars and pinned names paint over them */}
           {laneW > 0 && (
-            <svg width={laneW} height={bodyH} className="pointer-events-none absolute top-0 left-[var(--gs)] overflow-visible" aria-hidden>
+            <svg width={laneW} height={bodyH} className="pointer-events-none absolute top-0 start-[var(--gs)] overflow-visible" aria-hidden>
               {spawns.map(c => <motion.path key={c.key} initial={false} animate={{ d: c.d }} transition={dragId ? { duration: 0 } : spring(0.1, 0.35)} fill="none" strokeWidth={1}
                 className={cn('transition-[stroke] duration-200', c.on ? 'stroke-[color-mix(in_srgb,var(--accent)_75%,var(--fg2))]' : 'stroke-[color-mix(in_srgb,var(--fg3)_50%,transparent)]')} />)}
             </svg>
@@ -211,16 +276,16 @@ export function Gantt({ phases, dependencies, start, days = 42, today, people = 
             return (
               <Fragment key={p.id}>
                 <div className="relative grid h-[38px] grid-cols-[var(--gs)_1fr] items-center bg-[color-mix(in_srgb,var(--muted)_55%,transparent)] hover:bg-[color-mix(in_srgb,var(--muted)_70%,transparent)]">
-                  <div className={cn('flex min-w-0 items-center gap-2 pl-3 text-[13px] whitespace-nowrap', GANTT_PIN, 'bg-[color-mix(in_srgb,var(--muted)_55%,var(--card))]')}>
+                  <div dir={dir} className={cn('flex min-w-0 items-center gap-2 ps-3 text-[13px] whitespace-nowrap', GANTT_PIN, 'bg-[color-mix(in_srgb,var(--muted)_55%,var(--card))]')}>
                     <DgChevron open={open[p.id]} label={p.name} onClick={() => setOpen(o => ({ ...o, [p.id]: !o[p.id] }))} />
                     <b className="font-semibold">{p.name}</b>
-                    <span className="truncate text-xs text-[var(--fg3)] max-sm:hidden">{fdate(s)} to {fdate(e)} · {Math.round(pr * 100)}%</span>
+                    <span className="truncate text-xs text-[var(--fg3)] max-sm:hidden">{m('phaseSummary', { from: fdate(s), to: fdate(e), pct: fpct(pr) })}</span>
                   </div>
-                  <div className="relative h-full border-l border-[var(--line)]" style={laneBg}>
+                  <div className="relative h-full border-s border-[var(--line)]" style={laneBg}>
                     <div className="absolute top-[14px] h-[10px] rounded-[var(--r-sm)] bg-[color-mix(in_srgb,var(--fg3)_25%,var(--card))] transition-[left,width] duration-250 ease-[cubic-bezier(.22,1,.36,1)]"
-                      style={{ left: pct(s), width: pct(Math.max(0.5, e - s)) }}>
-                      <i className="absolute inset-y-0 left-0 rounded-[var(--r-sm)] bg-[var(--fg2)] opacity-60" style={{ width: `${pr * 100}%` }} />
-                      <span className="absolute -top-[3px] left-0 h-[10px] w-0.5 rounded-[1px] bg-[var(--fg3)]" /><span className="absolute -top-[3px] right-0 h-[10px] w-0.5 rounded-[1px] bg-[var(--fg3)]" />
+                      style={{ /* rtl-lint-ignore: LTR plot */ left: pct(s), width: pct(Math.max(0.5, e - s)) }}>
+                      <i className="absolute inset-y-0 start-0 rounded-[var(--r-sm)] bg-[var(--fg2)] opacity-60" style={{ width: `${pr * 100}%` }} />
+                      <span className="absolute -top-[3px] start-0 h-[10px] w-0.5 rounded-[1px] bg-[var(--fg3)]" /><span className="absolute -top-[3px] end-0 h-[10px] w-0.5 rounded-[1px] bg-[var(--fg3)]" />
                     </div>
                   </div>
                 </div>
@@ -232,26 +297,26 @@ export function Gantt({ phases, dependencies, start, days = 42, today, people = 
                     const dim = view.cp && !isCrit
                     return (
                       <div key={t.id} className="relative grid h-[38px] grid-cols-[var(--gs)_1fr] items-center hover:bg-[color-mix(in_srgb,var(--muted)_70%,transparent)]">
-                        <div className={cn('flex min-w-0 items-center gap-2 pr-2.5 pl-10 text-[13px] whitespace-nowrap max-sm:pl-8', GANTT_PIN, 'bg-[var(--card)]')}>
-                          <span className="truncate">{t.name}</span>
-                          <Avatar name={people[t.owner] ?? t.owner} size={22} className="ml-auto max-[700px]:hidden" />
+                        <div dir={dir} className={cn('flex min-w-0 items-center gap-2 pe-2.5 ps-10 text-[13px] whitespace-nowrap max-sm:ps-8', GANTT_PIN, 'bg-[var(--card)]')}>
+                          <span dir="auto" className="truncate">{t.name}</span>
+                          <Avatar name={people[t.owner] ?? t.owner} size={22} className="ms-auto max-[700px]:hidden" />
                         </div>
-                        <div className="relative h-full border-l border-[var(--line)]" style={laneBg}>
+                        <div className="relative h-full border-s border-[var(--line)]" style={laneBg}>
                           <span className={cn('pointer-events-none absolute top-8 h-1 rounded-[var(--r-sm)] bg-[var(--fg3)] transition-opacity duration-200', view.bl ? 'opacity-45' : 'opacity-0')}
-                            style={{ left: pct(t.start), width: pct(Math.max(0.4, t.duration)) }} />
-                          <span title={sl ? `${sl} days of slack` : undefined} className={cn('pointer-events-none absolute top-[18px] h-0.5 bg-[length:6px_2px] bg-[linear-gradient(90deg,var(--fg3)_50%,transparent_50%)] transition-[opacity,left,width] duration-250', view.cp ? 'opacity-80' : 'opacity-0')}
-                            style={{ left: pct(ganttEnd(x)), width: pct(isCrit ? 0 : sl) }} />
+                            style={{ /* rtl-lint-ignore: LTR plot */ left: pct(t.start), width: pct(Math.max(0.4, t.duration)) }} />
+                          <span title={sl ? m('slackTip', { n: sl }) : undefined} className={cn('pointer-events-none absolute top-[18px] h-0.5 bg-[length:6px_2px] bg-[linear-gradient(90deg,var(--fg3)_50%,transparent_50%)] transition-[opacity,left,width] duration-250', view.cp ? 'opacity-80' : 'opacity-0')}
+                            style={{ /* rtl-lint-ignore: LTR plot */ left: pct(ganttEnd(x)), width: pct(isCrit ? 0 : sl) }} />
                           {ms ? (
-                            <motion.span role="slider" tabIndex={0} aria-label={`${t.name} milestone, ${fdate(x.s)}`} aria-valuemin={0} aria-valuemax={days} aria-valuenow={x.s} aria-valuetext={fdate(x.s)}
-                              className={cn('absolute top-[13px] -ml-[7px] h-3.5 w-3.5 cursor-grab rounded-[var(--r-sm)] shadow-[0_0_0_3px_var(--card)] transition-[left] duration-250 ease-[cubic-bezier(.22,1,.36,1)] select-none [-webkit-touch-callout:none]',
-                                '[@media(pointer:coarse)]:top-[8px] [@media(pointer:coarse)]:-ml-[11.5px] [@media(pointer:coarse)]:h-[23px] [@media(pointer:coarse)]:w-[23px]',
+                            <motion.span role="slider" tabIndex={0} aria-label={m('milestoneLabel', { name: t.name, date: fdate(x.s) })} aria-valuemin={0} aria-valuemax={days} aria-valuenow={x.s} aria-valuetext={fdate(x.s)}
+                              className={cn('absolute top-[13px] -ms-[7px] h-3.5 w-3.5 cursor-grab rounded-[var(--r-sm)] shadow-[0_0_0_3px_var(--card)] transition-[left] duration-250 ease-[cubic-bezier(.22,1,.36,1)] select-none [-webkit-touch-callout:none]',
+                                '[@media(pointer:coarse)]:top-[8px] [@media(pointer:coarse)]:-ms-[11.5px] [@media(pointer:coarse)]:h-[23px] [@media(pointer:coarse)]:w-[23px]',
                                 view.cp && isCrit ? 'bg-[var(--bad)]' : 'bg-[var(--c3)]', dragging && 'cursor-grabbing !transition-none')}
-                              style={{ left: pct(x.s), rotate: 45 }} initial={{ scale: 0 }} animate={inView ? { scale: 1 } : undefined} transition={{ duration: 0.45, delay: i * 0.05, ease: [0.22, 1, 0.36, 1] }}
+                              style={{ /* rtl-lint-ignore: LTR plot */ left: pct(x.s), rotate: 45 }} initial={{ scale: 0 }} animate={inView ? { scale: 1 } : undefined} transition={{ duration: 0.45, delay: i * 0.05, ease: [0.22, 1, 0.36, 1] }}
                               {...barEvents(t.id)} />
                           ) : (
-                            <motion.div role="slider" tabIndex={0} aria-label={`${t.name}, ${fdate(x.s)} to ${fdate(ganttEnd(x) - 1)}, ${x.d} days. Arrow keys move, Shift + arrows resize`}
-                              aria-valuemin={0} aria-valuemax={days} aria-valuenow={x.s} aria-valuetext={`${fdate(x.s)}, ${x.d} days`}
-                              className={cn('absolute flex origin-left cursor-grab items-center overflow-hidden rounded-[var(--r-md)] transition-[left,width,top,height,opacity,box-shadow] duration-250 ease-[cubic-bezier(.22,1,.36,1)] select-none [-webkit-touch-callout:none]',
+                            <motion.div role="slider" tabIndex={0} aria-label={m('barLabel', { name: t.name, from: fdate(x.s), to: fdate(ganttEnd(x) - 1), days: x.d })}
+                              aria-valuemin={0} aria-valuemax={days} aria-valuenow={x.s} aria-valuetext={m('barValue', { date: fdate(x.s), days: x.d })}
+                              /* rtl-lint-ignore: LTR plot */ className={cn('absolute flex origin-left cursor-grab items-center overflow-hidden rounded-[var(--r-md)] transition-[left,width,top,height,opacity,box-shadow] duration-250 ease-[cubic-bezier(.22,1,.36,1)] select-none [-webkit-touch-callout:none]',
                                 'bg-[color-mix(in_srgb,var(--gc)_22%,var(--card))] shadow-[inset_0_0_0_1px_color-mix(in_srgb,var(--gc)_50%,transparent)]',
                                 view.bl ? 'top-[5px] h-6' : 'top-2.5 h-[18px]', '[@media(pointer:coarse)]:top-[3px] [@media(pointer:coarse)]:h-8', dim && 'opacity-45',
                                 view.cp && isCrit && '!shadow-[inset_0_0_0_1.5px_var(--bad),0_0_0_2px_color-mix(in_srgb,var(--bad)_18%,transparent)]',
@@ -259,16 +324,16 @@ export function Gantt({ phases, dependencies, start, days = 42, today, people = 
                               style={{ left: pct(x.s), width: pct(x.d), '--gc': color } as CSSProperties}
                               initial={{ scaleX: 0 }} animate={inView ? { scaleX: 1 } : undefined} transition={{ duration: 0.45, delay: i * 0.05, ease: [0.22, 1, 0.36, 1] }}
                               {...barEvents(t.id)}>
-                              <i className="pointer-events-none absolute inset-y-0 left-0 bg-[var(--gc)] opacity-85" style={{ width: `${t.progress * 100}%` }} />
-                              <span className="pointer-events-none relative z-[1] truncate px-2.5 text-xs font-medium text-[color-mix(in_srgb,var(--gc)_62%,var(--fg))]">{t.progress >= 1 ? '✓ ' : ''}{t.name}</span>
-                              <span data-resize="1" aria-hidden className="group absolute inset-y-0 right-0 w-2 cursor-ew-resize touch-none [@media(pointer:coarse)]:w-5">
-                                <span className="pointer-events-none absolute inset-y-1 right-[3px] w-0.5 rounded-[1px] bg-[var(--gc)] opacity-0 transition-opacity group-hover:opacity-90 [@media(pointer:coarse)]:right-[5px] [@media(pointer:coarse)]:w-[3px] [@media(pointer:coarse)]:opacity-80 [@media(pointer:coarse)]:shadow-[-4px_0_0_color-mix(in_srgb,var(--gc)_45%,transparent)]" />
+                              <i className="pointer-events-none absolute inset-y-0 start-0 bg-[var(--gc)] opacity-85" style={{ width: `${t.progress * 100}%` }} />
+                              <span dir="auto" className="pointer-events-none relative z-[1] truncate px-2.5 text-xs font-medium text-[color-mix(in_srgb,var(--gc)_62%,var(--fg))]">{t.progress >= 1 ? '✓ ' : ''}{t.name}</span>
+                              <span data-resize="1" aria-hidden className="group absolute inset-y-0 end-0 w-2 cursor-ew-resize touch-none [@media(pointer:coarse)]:w-5">
+                                <span className="pointer-events-none absolute inset-y-1 end-[3px] w-0.5 rounded-[1px] bg-[var(--gc)] opacity-0 transition-opacity group-hover:opacity-90 [@media(pointer:coarse)]:end-[5px] [@media(pointer:coarse)]:w-[3px] [@media(pointer:coarse)]:opacity-80 [@media(pointer:coarse)]:shadow-[-4px_0_0_color-mix(in_srgb,var(--gc)_45%,transparent)]" />
                               </span>
                             </motion.div>
                           )}
                           <span className="pointer-events-none absolute top-3 text-[11px] font-medium whitespace-nowrap text-[var(--fg2)] transition-[left] duration-250 ease-[cubic-bezier(.22,1,.36,1)]"
-                            style={{ left: flipL ? `calc(${pct(x.s)} - 14px)` : `calc(${pct(ms ? x.s : ganttEnd(x))} + ${ms ? 14 : 8}px)`, transform: flipL ? 'translateX(-100%)' : undefined }}>
-                            {ms ? `${t.name} · ${fdate(x.s)}` : view.bl && v ? <span className={cn('ml-1.5 font-semibold', v > 0 ? 'text-[var(--bad)]' : 'text-[var(--ok)]')}>{v > 0 ? '+' : '−'}{Math.abs(v)}d</span> : null}
+                            style={{ /* rtl-lint-ignore: LTR plot */ left: flipL ? `calc(${pct(x.s)} - 14px)` : `calc(${pct(ms ? x.s : ganttEnd(x))} + ${ms ? 14 : 8}px)`, transform: flipL ? 'translateX(-100%)' : undefined }}>
+                            {ms ? <bdi>{t.name} · {fdate(x.s)}</bdi> : view.bl && v ? <span className={cn('ms-1.5 font-semibold', v > 0 ? 'text-[var(--bad)]' : 'text-[var(--ok)]')}>{fmt.number(v, { style: 'unit', unit: 'day', unitDisplay: 'narrow', signDisplay: 'always' })}</span> : null}
                           </span>
                         </div>
                       </div>
@@ -281,22 +346,22 @@ export function Gantt({ phases, dependencies, start, days = 42, today, people = 
           {view.wl && (
             <>
               <div className="relative grid h-[38px] grid-cols-[var(--gs)_1fr] items-center bg-[color-mix(in_srgb,var(--muted)_55%,transparent)]">
-                <div className={cn('flex items-center gap-1.5 pl-3 text-[13px]', GANTT_PIN, 'bg-[color-mix(in_srgb,var(--muted)_55%,var(--card))]')}><b className="font-semibold">Workload</b><span className="text-xs text-[var(--fg3)]">tasks per day</span></div>
-                <div className="h-full border-l border-[var(--line)]" style={laneBg} />
+                <div dir={dir} className={cn('flex items-center gap-1.5 ps-3 text-[13px]', GANTT_PIN, 'bg-[color-mix(in_srgb,var(--muted)_55%,var(--card))]')}><b className="font-semibold">{m('workload')}</b><span className="text-xs text-[var(--fg3)]">{m('tasksPerDay')}</span></div>
+                <div className="h-full border-s border-[var(--line)]" style={laneBg} />
               </div>
               {owners.map((o, oi) => (
                 <div key={o} className="relative grid h-[38px] grid-cols-[var(--gs)_1fr] items-center">
-                  <div className={cn('flex min-w-0 items-center gap-2 pl-10 text-[13px] whitespace-nowrap max-sm:pl-3', GANTT_PIN, 'bg-[var(--card)]')}><Avatar name={people[o] ?? o} size={22} /><span className="truncate">{people[o] ?? o}</span></div>
-                  <div className="relative h-full border-l border-[var(--line)]" style={laneBg}>
+                  <div dir={dir} className={cn('flex min-w-0 items-center gap-2 ps-10 text-[13px] whitespace-nowrap max-sm:ps-3', GANTT_PIN, 'bg-[var(--card)]')}><Avatar name={people[o] ?? o} size={22} /><span dir="auto" className="truncate">{people[o] ?? o}</span></div>
+                  <div className="relative h-full border-s border-[var(--line)]" style={laneBg}>
                     {Array.from({ length: days }, (_, d) => {
                       if (d % 7 >= 5) return null
                       const n = tasks.filter(t => t.owner === o && t.duration > 0 && d >= sched[t.id].s && d < ganttEnd(sched[t.id])).length
                       if (!n) return null
                       return (
-                        <motion.span key={d} title={`${n} task${n > 1 ? 's' : ''} on ${fdate(d)}`} initial={{ opacity: 0, scale: 0.6 }} animate={{ opacity: 1, scale: 1 }}
+                        <motion.span key={d} title={m('tasksOn', { count: n, date: fdate(d) })} initial={{ opacity: 0, scale: 0.6 }} animate={{ opacity: 1, scale: 1 }}
                           transition={{ duration: 0.25, delay: Math.min(0.5, (oi * days + d) * 0.006) }}
                           className={cn('absolute top-[9px] grid h-5 place-items-center rounded-[var(--r-sm)] font-[family-name:var(--mono)] text-[11px] font-semibold', GANTT_CELL[Math.min(3, n) as 1 | 2 | 3])}
-                          style={{ left: `calc(${pct(d)} + 1px)`, width: `calc(${pct(1)} - 2px)` }}>{n > 1 ? n : ''}</motion.span>
+                          style={{ /* rtl-lint-ignore: LTR plot */ left: `calc(${pct(d)} + 1px)`, width: `calc(${pct(1)} - 2px)` }}>{n > 1 ? fmt.number(n) : ''}</motion.span>
                       )
                     })}
                   </div>
@@ -305,9 +370,9 @@ export function Gantt({ phases, dependencies, start, days = 42, today, people = 
             </>
           )}
           {/* overlay: dependency arrows and the today line, in lane coordinates */}
-          <div ref={laneRef} className="pointer-events-none absolute inset-y-0 right-0 left-[var(--gs)] z-[2]">
+          <div ref={laneRef} className="pointer-events-none absolute inset-y-0 end-0 start-[var(--gs)] z-[2]">
             {laneW > 0 && (
-              <svg width={laneW} height={bodyH} className="absolute top-0 left-0 overflow-visible" aria-hidden>
+              <svg width={laneW} height={bodyH} className="absolute top-0 start-0 overflow-visible" aria-hidden>
                 <defs>
                   {[['a', 'var(--fg3)'], ['c', 'var(--bad)']].map(([k, c]) => (
                     <marker key={k} id={`${uid}${k}`} viewBox="0 0 10 10" refX="8" refY="5" markerWidth="6" markerHeight="6" orient="auto">
@@ -323,8 +388,8 @@ export function Gantt({ phases, dependencies, start, days = 42, today, people = 
               </svg>
             )}
             {today !== undefined && (
-              <div className="absolute top-0 bottom-0 w-[1.5px] bg-[var(--accent)]" style={{ left: pct(today) }}>
-                <span className="absolute -top-[26px] -left-5 rounded-full bg-[var(--accent)] px-1.5 py-0.5 text-[11px] leading-none font-semibold text-[var(--card)]">Today</span>
+              <div className="absolute top-0 bottom-0 w-[1.5px] bg-[var(--accent)]" style={{ /* rtl-lint-ignore: LTR plot */ left: pct(today) }}>
+                <span className="absolute -top-[26px] -start-5 rounded-full bg-[var(--accent)] px-1.5 py-0.5 text-[11px] leading-none font-semibold whitespace-nowrap text-[var(--card)]">{ct('date.today')}</span>
               </div>
             )}
           </div>
@@ -332,19 +397,19 @@ export function Gantt({ phases, dependencies, start, days = 42, today, people = 
         </div>
         </div>
         {/* task names are pinned on the left, so only the right edge fades */}
-        <ScrollEdges left={false} right={edges.right} touched={edges.touched} hint="Swipe for more days" />
+        <ScrollEdges left={false} right={edges.right} touched={edges.touched} hint={m('swipe')} />
       </div>
       <div className="flex flex-wrap items-center gap-x-4 gap-y-1.5 text-xs text-[var(--fg2)]">
-        <span className="inline-flex items-center gap-1.5"><i className="inline-block h-2 w-4 rounded-[var(--r-sm)] bg-[var(--fg2)] opacity-60" />Phase</span>
-        <span className="inline-flex items-center gap-1.5"><i className="inline-block h-2.5 w-2.5 rotate-45 rounded-[var(--r-sm)] bg-[var(--c3)]" />Milestone</span>
-        <span className="inline-flex items-center gap-1.5"><i className="inline-block h-3 w-0.5 bg-[var(--accent)]" />Today</span>
-        <span className="text-[var(--fg3)] [@media(pointer:coarse)]:hidden">Hover a task to see its links</span>
-        <span className="hidden text-[var(--fg3)] [@media(pointer:coarse)]:inline">Tap a task for its links · hold a bar to move it, drag its grip to resize</span>
-        {view.cp && <><span className="inline-flex items-center gap-1.5"><i className="inline-block h-2 w-4 rounded-[var(--r-sm)] shadow-[inset_0_0_0_1.5px_var(--bad)]" />Critical path</span>
-          <span className="inline-flex items-center gap-1.5"><i className="inline-block w-4 border-t-2 border-dashed border-[var(--fg3)]" />Slack</span></>}
-        {view.bl && <span className="inline-flex items-center gap-1.5"><i className="inline-block h-1 w-4 rounded-[var(--r-sm)] bg-[var(--fg3)] opacity-50" />Baseline</span>}
-        {final && <span className={cn('ml-auto', late > 0 ? 'text-[var(--bad)]' : 'text-[var(--fg2)]')}>
-          {phases.find(p => p.id === byId[final].phase)?.name} {fdate(sched[final].s)}{late > 0 ? ` · ${late} days later than planned` : late < 0 ? ` · ${-late} days early` : ' · on plan'}</span>}
+        <span className="inline-flex items-center gap-1.5"><i className="inline-block h-2 w-4 rounded-[var(--r-sm)] bg-[var(--fg2)] opacity-60" />{m('phase')}</span>
+        <span className="inline-flex items-center gap-1.5"><i className="inline-block h-2.5 w-2.5 rotate-45 rounded-[var(--r-sm)] bg-[var(--c3)]" />{m('milestone')}</span>
+        <span className="inline-flex items-center gap-1.5"><i className="inline-block h-3 w-0.5 bg-[var(--accent)]" />{ct('date.today')}</span>
+        <span className="text-[var(--fg3)] [@media(pointer:coarse)]:hidden">{m('hoverHint')}</span>
+        <span className="hidden text-[var(--fg3)] [@media(pointer:coarse)]:inline">{m('tapHint')}</span>
+        {view.cp && <><span className="inline-flex items-center gap-1.5"><i className="inline-block h-2 w-4 rounded-[var(--r-sm)] shadow-[inset_0_0_0_1.5px_var(--bad)]" />{m('critical')}</span>
+          <span className="inline-flex items-center gap-1.5"><i className="inline-block w-4 border-t-2 border-dashed border-[var(--fg3)]" />{m('slack')}</span></>}
+        {view.bl && <span className="inline-flex items-center gap-1.5"><i className="inline-block h-1 w-4 rounded-[var(--r-sm)] bg-[var(--fg3)] opacity-50" />{m('baseline')}</span>}
+        {final && <span className={cn('ms-auto', late > 0 ? 'text-[var(--bad)]' : 'text-[var(--fg2)]')}>
+          {phases.find(p => p.id === byId[final].phase)?.name} {fdate(sched[final].s)} · {late > 0 ? m('late', { n: late }) : late < 0 ? m('early', { n: -late }) : m('onPlan')}</span>}
       </div>
       <PointerTooltip tip={tip} />
     </div>

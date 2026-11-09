@@ -1,6 +1,6 @@
 {
   "name": "@lyndon/ui",
-  "version": "0.3.0",
+  "version": "0.4.0",
   "description": "Animated React 19 components with themes, in the shadcn style: forms, overlays, data grids, charts, diagrams, maps, AI chat. Also ships as drop-in single files for AI tools.",
   "keywords": [
     "react",
@@ -49,6 +49,46 @@
       "types": "./dist/core.d.ts",
       "default": "./dist/core.js"
     },
+    "./helpers": {
+      "types": "./dist/helpers.d.ts",
+      "default": "./dist/helpers.js"
+    },
+    "./shared": {
+      "types": "./dist/shared.d.ts",
+      "default": "./dist/shared.js"
+    },
+    "./locale": {
+      "types": "./dist/locale.d.ts",
+      "default": "./dist/locale.js"
+    },
+    "./theme": {
+      "types": "./dist/theme.d.ts",
+      "default": "./dist/theme.js"
+    },
+    "./hooks": {
+      "types": "./dist/hooks.d.ts",
+      "default": "./dist/hooks.js"
+    },
+    "./icons": {
+      "types": "./dist/icons.d.ts",
+      "default": "./dist/icons.js"
+    },
+    "./primitives": {
+      "types": "./dist/primitives.d.ts",
+      "default": "./dist/primitives.js"
+    },
+    "./safe": {
+      "types": "./dist/safe.d.ts",
+      "default": "./dist/safe.js"
+    },
+    "./formcontrol": {
+      "types": "./dist/formcontrol.d.ts",
+      "default": "./dist/formcontrol.js"
+    },
+    "./slot": {
+      "types": "./dist/slot.d.ts",
+      "default": "./dist/slot.js"
+    },
     "./motion": {
       "types": "./dist/motion.d.ts",
       "default": "./dist/motion.js"
@@ -64,6 +104,26 @@
     "./forms": {
       "types": "./dist/forms.d.ts",
       "default": "./dist/forms.js"
+    },
+    "./fields": {
+      "types": "./dist/fields.d.ts",
+      "default": "./dist/fields.js"
+    },
+    "./inputs": {
+      "types": "./dist/inputs.d.ts",
+      "default": "./dist/inputs.js"
+    },
+    "./select": {
+      "types": "./dist/select.d.ts",
+      "default": "./dist/select.js"
+    },
+    "./pickers": {
+      "types": "./dist/pickers.d.ts",
+      "default": "./dist/pickers.js"
+    },
+    "./upload": {
+      "types": "./dist/upload.d.ts",
+      "default": "./dist/upload.js"
     },
     "./editor": {
       "types": "./dist/editor.d.ts",

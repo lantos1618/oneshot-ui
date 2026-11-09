@@ -83,7 +83,7 @@ describe('DataGrid: server mode', () => {
     render(<Server />)
     expect(grid()).toHaveAttribute('aria-rowcount', '1235')
     expect(bodyRows()[0]).toHaveAttribute('aria-rowindex', '102') // page 3 starts at row 101
-    expect(screen.getByRole('navigation', { name: 'Pagination' })).toHaveTextContent('101–150 of 1,234')
+    expect(screen.getByRole('navigation', { name: 'Customers: pages' })).toHaveTextContent('101–150 of 1,234')
     await user.click(screen.getByRole('button', { name: 'Next page' }))
     expect(onPage).toHaveBeenLastCalledWith(3)
     await user.click(screen.getByRole('button', { name: /^Amount/ }))
@@ -184,14 +184,14 @@ describe('DataGrid: columns', () => {
     expect(onHidden).toHaveBeenLastCalledWith(['region'])
     expect(headers()).toEqual(['Name', 'Amount'])
     await user.click(within(menu).getByRole('button', { name: 'Pin Amount left' }))
-    expect(onPinned).toHaveBeenLastCalledWith({ left: ['name', 'amount'], right: [] })
+    expect(onPinned).toHaveBeenLastCalledWith({ start: ['name', 'amount'], end: [], left: ['name', 'amount'], right: [] }) // logical and physical keys (0.4)
     expect(headers()).toEqual(['Name', 'Amount'])
     await user.click(within(menu).getByRole('button', { name: 'Move Amount left' }))
     expect(onOrder).toHaveBeenLastCalledWith(['amount', 'name', 'region'])
     expect(headers()).toEqual(['Amount', 'Name'])
     await user.click(within(menu).getByRole('button', { name: 'Pin Name right' }))
     expect(headers()).toEqual(['Amount', 'Name'])
-    expect(within(grid()).getByRole('columnheader', { name: /Name/ }).style.right).toBe('0px')
+    expect(within(grid()).getByRole('columnheader', { name: /Name/ }).getAttribute('style')).toMatch(/inset-inline-end: 0px/) // sticky on the logical end
     // the last visible column can't be hidden
     await user.click(within(menu).getByRole('checkbox', { name: 'Show Name' }))
     expect(within(menu).getByRole('checkbox', { name: 'Show Amount' })).toBeDisabled()
@@ -212,6 +212,6 @@ describe('DataGrid: columns', () => {
     const cols: GridColumn<Row>[] = [{ key: 'name', label: 'Name' }, { key: 'region', label: 'Region', hidden: true }, { key: 'amount', label: 'Amount', type: 'number', pin: 'right' }]
     render(<DataGrid aria-label="Customers" columns={cols} defaultRows={makeRows(3)} rowKey={r => r.id} columnOrder={['amount', 'region', 'name']} />)
     expect(headers()).toEqual(['Name', 'Amount']) // Amount is pinned right, so it stays last
-    expect(within(grid()).getByRole('columnheader', { name: /Amount/ }).style.right).toBe('0px')
+    expect(within(grid()).getByRole('columnheader', { name: /Amount/ }).getAttribute('style')).toMatch(/inset-inline-end: 0px/)
   })
 })

@@ -1,6 +1,6 @@
 import { useEffect, useLayoutEffect, useRef, useState, useSyncExternalStore, type KeyboardEvent as RKeyboardEvent, type PointerEvent as RPointerEvent, type ReactNode, type RefObject } from 'react'
 import { AnimatePresence, animate, motion, useInView, useMotionValue, useReducedMotion } from 'motion/react'
-import { Avatar, Badge, Button, Chip, Icon, IconButton, TOUCH, clamp, cn, cssUrl, fmt, safeMediaUrl, Spinner, spring, surface, useFocusTrap, useWidth } from './core'
+import { Avatar, Badge, Button, Chip, Icon, IconButton, TOUCH, clamp, cn, cssUrl, defineMessages, dirX, logicalArrow, safeMediaUrl, Spinner, spring, surface, useFocusTrap, useLocale, useMessages, useWidth, uiShared } from './core'
 import { Slider } from './forms'
 import { useToast } from './feedback'
 import { OverlayPortal, useScrollLock } from './overlay'
@@ -12,6 +12,90 @@ import { useFrameLoop, useViewport } from './motion'
  * WAV, a canvas recording: `mediaImage`, `mediaSynthTrack`, `mediaRecordVideo` in `@lyndon/ui/examples`).
  * ══════════════════════════════════════════════════════════════════════════ */
 
+/**
+ * Media strings (machine-drafted de/ar). Titles, captions and file names are data: pass them translated.
+ * Direction (0.4): seek bars, waveforms and the back / play / forward cluster stay left to right in RTL locales (they
+ * show the media's own timeline, as YouTube, Apple and Material do); the rest of each player, the gallery, the
+ * lightbox and the carousel mirror (arrows, swipes and slide order follow the reading direction).
+ */
+export const MEDIA_MESSAGES = defineMessages('media', {
+  en: {
+    seek: 'Seek', seekValue: '{t} of {d}', playFailVideo: 'Couldn’t play video', playFailAudio: 'Couldn’t play audio',
+    blocked: 'Your browser blocked playback', videoPlayer: 'Video player', videoPlayerTitled: 'Video player: {title}',
+    noVideo: 'Video preview isn’t supported in this browser', starting: 'Starting…', startingCancel: 'Starting… press to cancel',
+    startingShort: 'Starting', back5: 'Back 5 seconds', back10: 'Back 10 seconds', forward10: 'Forward 10 seconds', mute: 'Mute', unmute: 'Unmute',
+    volume: 'Volume', speedLabel: 'Playback speed {n}×', speed: '{n}×', fullscreen: 'Fullscreen', exitFullscreen: 'Exit fullscreen',
+    seekVoice: 'Seek voice note', playVoice: 'Play voice note', pauseVoice: 'Pause voice note', playTitle: 'Play {title}',
+    pauseTitle: 'Pause {title}',
+  },
+  de: {
+    seek: 'Spulen', seekValue: '{t} von {d}', playFailVideo: 'Video konnte nicht abgespielt werden',
+    playFailAudio: 'Audio konnte nicht abgespielt werden', blocked: 'Dein Browser hat die Wiedergabe blockiert', videoPlayer: 'Videoplayer',
+    videoPlayerTitled: 'Videoplayer: {title}', noVideo: 'Die Videovorschau wird in diesem Browser nicht unterstützt', starting: 'Wird gestartet…',
+    startingCancel: 'Wird gestartet… zum Abbrechen drücken', startingShort: 'Wird gestartet', back5: '5 Sekunden zurück',
+    back10: '10 Sekunden zurück', forward10: '10 Sekunden vor', mute: 'Stummschalten', unmute: 'Ton an', volume: 'Lautstärke',
+    speedLabel: 'Wiedergabegeschwindigkeit {n}×', speed: '{n}×', fullscreen: 'Vollbild', exitFullscreen: 'Vollbild beenden',
+    seekVoice: 'In Sprachnachricht spulen', playVoice: 'Sprachnachricht abspielen', pauseVoice: 'Sprachnachricht pausieren',
+    playTitle: '{title} abspielen', pauseTitle: '{title} pausieren',
+  },
+  ar: {
+    seek: 'التنقل', seekValue: '{t} من {d}', playFailVideo: 'تعذّر تشغيل الفيديو', playFailAudio: 'تعذّر تشغيل الصوت', blocked: 'حظر متصفحك التشغيل',
+    videoPlayer: 'مشغّل الفيديو', videoPlayerTitled: 'مشغّل الفيديو: {title}', noVideo: 'معاينة الفيديو غير مدعومة في هذا المتصفح',
+    starting: 'جارٍ البدء…', startingCancel: 'جارٍ البدء… اضغط للإلغاء', startingShort: 'جارٍ البدء', back5: 'رجوع 5 ثوانٍ', back10: 'رجوع 10 ثوانٍ',
+    forward10: 'تقديم 10 ثوانٍ', mute: 'كتم الصوت', unmute: 'إلغاء الكتم', volume: 'مستوى الصوت', speedLabel: 'سرعة التشغيل {n}×', speed: '{n}×',
+    fullscreen: 'ملء الشاشة', exitFullscreen: 'الخروج من ملء الشاشة', seekVoice: 'التنقل في الرسالة الصوتية', playVoice: 'تشغيل الرسالة الصوتية',
+    pauseVoice: 'إيقاف الرسالة الصوتية مؤقتًا', playTitle: 'تشغيل {title}', pauseTitle: 'إيقاف {title} مؤقتًا',
+  },
+})
+/** Lightbox, MasonryGallery, MediaCard and ProgressiveImage (namespace 'media'). */
+export const MEDIA_GALLERY_MESSAGES = defineMessages('media', {
+  en: {
+    imageViewer: 'Image viewer', counter: '{i} / {n}', openBy: 'Open {title} by {author}', save: 'Save', saved: 'Saved', saveTitle: 'Save {title}',
+    unsaveTitle: 'Unsave {title}', filter: 'Filter by category', all: 'All', gallery: 'Gallery', savedToBoard: 'Saved to board',
+    loadMore: 'Load more', everything: 'That’s everything', bookmark: 'Bookmark', bookmarkTitle: 'Bookmark {title}',
+    imageFailed: 'Image couldn’t load',
+  },
+  de: {
+    imageViewer: 'Bildbetrachter', counter: '{i} / {n}', openBy: '{title} von {author} öffnen', save: 'Merken', saved: 'Gemerkt',
+    saveTitle: '{title} merken', unsaveTitle: '{title} nicht mehr merken', filter: 'Nach Kategorie filtern', all: 'Alle', gallery: 'Galerie',
+    savedToBoard: 'Auf der Pinnwand gespeichert', loadMore: 'Mehr laden', everything: 'Das ist alles', bookmark: 'Lesezeichen',
+    bookmarkTitle: 'Lesezeichen für {title}', imageFailed: 'Bild konnte nicht geladen werden',
+  },
+  ar: {
+    imageViewer: 'عارض الصور', counter: '{i} / {n}', openBy: 'فتح {title} بواسطة {author}', save: 'حفظ', saved: 'محفوظ', saveTitle: 'حفظ {title}',
+    unsaveTitle: 'إلغاء حفظ {title}', filter: 'التصفية حسب الفئة', all: 'الكل', gallery: 'المعرض', savedToBoard: 'حُفظ في اللوحة',
+    loadMore: 'تحميل المزيد', everything: 'هذا كل شيء', bookmark: 'إشارة مرجعية', bookmarkTitle: 'إضافة {title} إلى الإشارات المرجعية',
+    imageFailed: 'تعذّر تحميل الصورة',
+  },
+})
+/** AvatarCropper, Carousel and ImageCompare (namespace 'media'). */
+export const MEDIA_IMAGE_MESSAGES = defineMessages('media', {
+  en: {
+    cropArea: 'Crop area. Drag or use arrow keys to reposition, + and − to zoom', cropPreview: 'Crop preview', previewPx: '{n} px preview',
+    zoom: 'Zoom', zoomValue: '{n}×', choose: 'Choose photo', dragHint: 'Drag the image to reposition', touchHint: 'Drag to move, pinch to zoom',
+    errType: 'Choose an image file (JPEG, PNG, WebP…).', errSize: 'That photo is {size}; the limit is {max}.',
+    errPixels: 'That photo is {w} × {h} px; the limit is {max} megapixels.', errRead: 'That file couldn’t be read as an image.', carousel: 'Carousel',
+    slideOf: '{i} of {n}', prevSlide: 'Previous slide', nextSlide: 'Next slide', goTo: 'Go to slide {n}', before: 'Before', after: 'After',
+    compare: 'Comparison position',
+  },
+  de: {
+    cropArea: 'Zuschneidebereich. Ziehen oder Pfeiltasten zum Verschieben, + und − zum Zoomen', cropPreview: 'Zuschnittvorschau',
+    previewPx: 'Vorschau {n} px', zoom: 'Zoom', zoomValue: '{n}×', choose: 'Foto auswählen', dragHint: 'Bild zum Verschieben ziehen',
+    touchHint: 'Ziehen zum Verschieben, zwei Finger zum Zoomen', errType: 'Wähle eine Bilddatei (JPEG, PNG, WebP…).',
+    errSize: 'Das Foto ist {size} groß; erlaubt sind {max}.', errPixels: 'Das Foto hat {w} × {h} px; erlaubt sind {max} Megapixel.',
+    errRead: 'Die Datei konnte nicht als Bild gelesen werden.', carousel: 'Karussell', slideOf: '{i} von {n}', prevSlide: 'Vorherige Folie',
+    nextSlide: 'Nächste Folie', goTo: 'Zu Folie {n}', before: 'Vorher', after: 'Nachher', compare: 'Vergleichsposition',
+  },
+  ar: {
+    cropArea: 'منطقة القص. اسحب أو استخدم الأسهم لتغيير الموضع، و+ و− للتكبير', cropPreview: 'معاينة القص', previewPx: 'معاينة {n} بكسل',
+    zoom: 'التكبير', zoomValue: '{n}×', choose: 'اختيار صورة', dragHint: 'اسحب الصورة لتغيير موضعها',
+    touchHint: 'اسحب للتحريك، واضغط بإصبعين للتكبير', errType: 'اختر ملف صورة (JPEG أو PNG أو WebP…).',
+    errSize: 'حجم الصورة {size}؛ والحد الأقصى {max}.', errPixels: 'أبعاد الصورة {w} × {h} بكسل؛ والحد الأقصى {max} ميغابكسل.',
+    errRead: 'تعذّرت قراءة الملف كصورة.', carousel: 'عرض شرائح', slideOf: '{i} من {n}', prevSlide: 'الشريحة السابقة', nextSlide: 'الشريحة التالية',
+    goTo: 'الانتقال إلى الشريحة {n}', before: 'قبل', after: 'بعد', compare: 'موضع المقارنة',
+  },
+})
+
 /* ── shared audio tracks ───────────────────────────────────────────────────── */
 
 export type AudioTrackState = { playing: boolean; time: number; duration: number; rate: number }
@@ -22,7 +106,7 @@ export type AudioTrackHandle = {
   view: (delta: 1 | -1) => void
   play: () => Promise<boolean>; pause: () => void; toggle: () => Promise<boolean>; seek: (t: number) => void; skip: (d: number) => void; setRate: (r: number) => void
 }
-const mediaLive = new Set<HTMLAudioElement>()
+const mediaLive = uiShared('media-live', () => new Set<HTMLAudioElement>()) // page-wide: one player at a time across drop-in files
 /**
  * A shared audio source that several players can render (e.g. the full player and the slim one stay in sync).
  * Only one track plays at a time: starting one pauses the others. Safe to call during render and on the server: the
@@ -80,17 +164,21 @@ function useOwnTrack(track: AudioTrackHandle | undefined, src: string | undefine
  * vertical swipe still scrolls the page, a sideways drag scrubs and a tap seeks to where it landed. Keys: ← / → move
  * `step` seconds, Home / End jump, Space calls `onToggle`. The pointer is captured, so drags keep working outside the bar.
  */
-export function useSeekSlider({ time, duration, onSeek, step = 2, onToggle, label = 'Seek', valueText = (t: number, d: number) => `${fmt.clock(t)} of ${fmt.clock(d)}`, focusable = true }:
+export function useSeekSlider({ time, duration, onSeek, step = 2, onToggle, label, valueText, focusable = true }:
   { time: number; duration: number; onSeek: (t: number) => void; step?: number; onToggle?: () => void; label?: string; valueText?: (t: number, d: number) => string; focusable?: boolean }) {
   const [drag, setDrag] = useState(false)
   const [hover, setHover] = useState<number | null>(null)
+  const m = useMessages(MEDIA_MESSAGES), { fmt } = useLocale()
+  const text = valueText ?? ((t: number, dd: number) => m('seekValue', { t: fmt.clock(t), d: fmt.clock(dd) }))
   const start = useRef<{ x: number; y: number; touch: boolean } | null>(null)
   const d = duration || 1
   const frac = (e: RPointerEvent) => { const r = e.currentTarget.getBoundingClientRect(); return clamp((e.clientX - r.left) / (r.width || 1), 0, 1) }
   const seek = (f: number) => onSeek(f * d)
   const begin = (e: RPointerEvent) => { try { e.currentTarget.setPointerCapture(e.pointerId) } catch { /* pointer already gone */ } setDrag(true); seek(frac(e)) }
   const bind = {
-    role: 'slider', tabIndex: focusable ? 0 : -1, 'aria-label': label, 'aria-valuemin': 0, 'aria-valuemax': Math.round(d), 'aria-valuenow': Math.round(time), 'aria-valuetext': valueText(time, d),
+    // the media timeline runs left to right in every locale (platform convention), so the bar is an LTR island and
+    // ← / → follow it physically
+    dir: 'ltr', role: 'slider', tabIndex: focusable ? 0 : -1, 'aria-label': label ?? m('seek'), 'aria-valuemin': 0, 'aria-valuemax': Math.round(d), 'aria-valuenow': Math.round(time), 'aria-valuetext': text(time, d),
     onPointerDown: (e: RPointerEvent) => { const touch = e.pointerType !== 'mouse'; start.current = { x: e.clientX, y: e.clientY, touch }; if (!touch) begin(e) },
     onPointerMove: (e: RPointerEvent) => {
       if (drag) { const f = frac(e); setHover(f); seek(f); return }
@@ -103,6 +191,7 @@ export function useSeekSlider({ time, duration, onSeek, step = 2, onToggle, labe
     onPointerCancel: () => { start.current = null; setDrag(false); setHover(null) },
     onPointerLeave: (e: RPointerEvent) => { if (e.pointerType === 'mouse' && !drag) setHover(null) },
     onKeyDown: (e: RKeyboardEvent) => {
+      // rtl-lint-ignore: the LTR timeline (→ is later in every locale)
       const to = e.key === 'ArrowRight' || e.key === 'ArrowUp' ? time + step : e.key === 'ArrowLeft' || e.key === 'ArrowDown' ? time - step : e.key === 'Home' ? 0 : e.key === 'End' ? d - 0.1 : null
       if (to !== null) { e.preventDefault(); onSeek(clamp(to, 0, d)) }
       else if (e.key === ' ' && onToggle) { e.preventDefault(); onToggle() }
@@ -215,6 +304,7 @@ export function VideoPlayer({ src, poster, title, meta, duration: fallback = 0, 
   { src?: string | null; poster?: string; title?: ReactNode; meta?: ReactNode; duration?: number; preparing?: boolean; className?: string }) {
   const box = useRef<HTMLDivElement>(null), vid = useRef<HTMLVideoElement>(null)
   const toast = useToast()
+  const m = useMessages(MEDIA_MESSAGES), { t: ct, fmt } = useLocale()
   const [playing, setPlaying] = useState(false)
   const [t, setT] = useState(0), [dur, setDur] = useState(fallback), [buf, setBuf] = useState(0)
   const [muted, setMuted] = useState(false), [vol, setVol] = useState(0.8), [si, setSi] = useState(0)
@@ -237,7 +327,7 @@ export function VideoPlayer({ src, poster, title, meta, duration: fallback = 0, 
     const v = vid.current; if (!v) return
     if (!src || fixing.current) { if (src || preparing) want(!wantPlay.current); return } // queue it until the source is ready
     want(false)
-    if (v.paused) v.play().catch(() => toast({ title: 'Couldn’t play video', description: 'Your browser blocked playback', tone: 'bad' })); else v.pause()
+    if (v.paused) v.play().catch(() => toast({ title: m('playFailVideo'), description: m('blocked'), tone: 'bad' })); else v.pause()
   }
   const seek = useSeekSlider({ time: t, duration: d, onSeek: s => { seekTo(s); wake() }, onToggle: toggle })
   useEffect(() => () => { clearTimeout(idleT.current); clearTimeout(tapT.current) }, [])
@@ -272,14 +362,14 @@ export function VideoPlayer({ src, poster, title, meta, duration: fallback = 0, 
   const fromTouch = () => performance.now() - touched.current < 800
   const icon = (name: Parameters<typeof Icon>[0]['name'], size = 17, filled?: boolean) => <Icon name={name} size={size} filled={filled} />
   return (
-    <div ref={box} tabIndex={0} aria-label={typeof title === 'string' ? `Video player: ${title}` : 'Video player'}
+    <div ref={box} tabIndex={0} aria-label={typeof title === 'string' ? m('videoPlayerTitled', { title }) : m('videoPlayer')}
       className={cn('relative touch-manipulation overflow-hidden bg-black outline-none select-none focus-visible:shadow-[0_0_0_2px_var(--accent)]', isFs ? 'h-full w-full' : 'aspect-video rounded-[var(--r-lg)]', hideControls && 'cursor-none', className)}
       onPointerMove={e => { if (e.pointerType === 'mouse') wake() }} onPointerLeave={e => { if (playing && e.pointerType === 'mouse') setIdle(true) }}
       onKeyDown={e => {
         if (e.target !== e.currentTarget) return // keys pressed on a control (seek bar, volume, buttons) belong to that control
         const k = e.key.toLowerCase()
         if (k === ' ' || k === 'k') { e.preventDefault(); toggle() }
-        else if (k === 'arrowright') { e.preventDefault(); seekBy(2); wake() }
+        else if (k === 'arrowright') { e.preventDefault(); seekBy(2); wake() } // the timeline is LTR in every locale
         else if (k === 'arrowleft') { e.preventDefault(); seekBy(-2); wake() }
         else if (k === 'm') toggleMute()
         else if (k === 'f') fullscreen()
@@ -301,19 +391,19 @@ export function VideoPlayer({ src, poster, title, meta, duration: fallback = 0, 
         {seekFx && (
           <motion.span key={seekFx.n} aria-hidden initial={{ opacity: 0, scale: 0.8 }} animate={{ opacity: [0, 1, 1, 0], scale: 1 }} transition={{ duration: 0.7, times: [0, 0.15, 0.6, 1] }}
             onAnimationComplete={() => setSeekFx(f => f?.n === seekFx.n ? null : f)}
-            className={cn('pointer-events-none absolute top-1/2 z-[3] -mt-7 grid h-14 w-14 place-items-center rounded-full bg-black/45 text-[11px] font-semibold text-white', seekFx.side < 0 ? 'left-[18%]' : 'right-[18%]')}>
-            <span className="flex flex-col items-center leading-tight">{icon(seekFx.side < 0 ? 'replay' : 'forward', 18)}{seekFx.side < 0 ? '−5 s' : '+5 s'}</span>
+            className={cn('pointer-events-none absolute top-1/2 z-[3] -mt-7 grid h-14 w-14 place-items-center rounded-full bg-black/45 text-[11px] font-semibold text-white', seekFx.side < 0 ? 'left-[18%]' : 'right-[18%]')}>{/* rtl-lint-ignore: the tapped half (physical, like the LTR timeline) */}
+            <span className="flex flex-col items-center leading-tight">{icon(seekFx.side < 0 ? 'replay' : 'forward', 18)}{fmt.number(seekFx.side * 5, { style: 'unit', unit: 'second', unitDisplay: 'narrow', signDisplay: 'always' })}</span>{/* rtl-lint-ignore: media icons don't mirror */}
           </motion.span>
         )}
       </AnimatePresence>
-      {!src && !preparing && <Badge className="absolute top-3 right-3 z-[3] !bg-black/45 !text-white">Video preview isn’t supported in this browser</Badge>}
-      <span className="sr-only" aria-live="polite">{pending ? 'Starting…' : ''}</span>
+      {!src && !preparing && <Badge className="absolute top-3 end-3 z-[3] !bg-black/45 !text-white">{m('noVideo')}</Badge>}
+      <span className="sr-only" aria-live="polite">{pending ? m('starting') : ''}</span>
       <AnimatePresence>
         {!playing && (
-          <motion.button key="big" type="button" aria-label={pending ? 'Starting… press to cancel' : 'Play'} aria-busy={pending || undefined} onClick={toggle} disabled={!src && !preparing}
+          <motion.button key="big" type="button" aria-label={pending ? m('startingCancel') : ct('common.play')} aria-busy={pending || undefined} onClick={toggle} disabled={!src && !preparing}
             initial={{ opacity: 0, scale: 0.8 }} animate={{ opacity: 1, scale: 1, transition: spring(0.4, 0.35) }} exit={{ opacity: 0, scale: 1.3, transition: { duration: 0.25 } }}
-            className={cn('absolute top-1/2 left-1/2 -mt-8 -ml-8 grid h-16 w-16 cursor-pointer place-items-center rounded-full border-0 bg-white/20 text-white backdrop-blur-md hover:bg-white/30 disabled:cursor-default disabled:opacity-50', !pending && 'pl-1')}>
-            {pending ? <Spinner size={24} label="Starting" className="!border-[3px]" /> : icon('play', 26, true)}
+            className={cn('absolute top-1/2 start-1/2 -mt-8 -ms-8 grid h-16 w-16 cursor-pointer place-items-center rounded-full border-0 bg-white/20 text-white backdrop-blur-md hover:bg-white/30 disabled:cursor-default disabled:opacity-50', !pending && 'ps-1')}>
+            {pending ? <Spinner size={24} label={m('startingShort')} className="!border-[3px]" /> : icon('play', 26, true)}
           </motion.button>
         )}
       </AnimatePresence>
@@ -328,26 +418,29 @@ export function VideoPlayer({ src, poster, title, meta, duration: fallback = 0, 
         className={cn('pointer-events-none absolute inset-x-0 bottom-0 bg-gradient-to-b from-transparent to-black/65 px-3 pt-6 pb-2 text-white max-sm:px-2 max-sm:pt-4 max-sm:pb-1 [&>*]:pointer-events-auto', hideControls && '[&>*]:!pointer-events-none')}>
         <div {...seek.bind} className="group relative flex h-4 cursor-pointer touch-pan-y items-center rounded-[var(--r-sm)] outline-none focus-visible:shadow-[0_0_0_2px_#fff] [@media(pointer:coarse)]:h-8">
           <span className="absolute inset-x-0 h-1 rounded-[var(--r-sm)] bg-white/25 transition-[height] group-hover:h-1.5" />
-          <span className="absolute left-0 h-1 rounded-[var(--r-sm)] bg-white/35 transition-[height] group-hover:h-1.5" style={{ width: `${Math.min(100, buf / d * 100)}%` }} />
-          <span className="absolute left-0 h-1 rounded-[var(--r-sm)] bg-white transition-[height] group-hover:h-1.5" style={{ width: `${t / d * 100}%` }} />
-          <span className={cn('absolute -ml-1.5 h-[13px] w-[13px] rounded-full bg-white shadow-[0_1px_4px_rgba(0,0,0,.4)] transition-transform group-hover:scale-100 group-focus-visible:scale-100 [@media(pointer:coarse)]:scale-100', seek.drag ? 'scale-100 [@media(pointer:coarse)]:scale-125' : 'scale-0')} style={{ left: `${t / d * 100}%` }} />
-          {seek.hover != null && <span className="pointer-events-none absolute bottom-5 -translate-x-1/2 rounded-[var(--r-sm)] bg-black/75 px-1.5 py-1 font-[family-name:var(--mono)] text-[11px] font-medium" style={{ left: `${seek.hover * 100}%` }}>{fmt.clock(seek.hover * d)}</span>}
+          <span className="absolute start-0 h-1 rounded-[var(--r-sm)] bg-white/35 transition-[height] group-hover:h-1.5" style={{ width: `${Math.min(100, buf / d * 100)}%` }} />
+          <span className="absolute start-0 h-1 rounded-[var(--r-sm)] bg-white transition-[height] group-hover:h-1.5" style={{ width: `${t / d * 100}%` }} />
+          <span className={cn('absolute -ms-1.5 h-[13px] w-[13px] rounded-full bg-white shadow-[0_1px_4px_rgba(0,0,0,.4)] transition-transform group-hover:scale-100 group-focus-visible:scale-100 [@media(pointer:coarse)]:scale-100', seek.drag ? 'scale-100 [@media(pointer:coarse)]:scale-125' : 'scale-0')} style={{ /* rtl-lint-ignore: physical geometry */ left: `${t / d * 100}%` }} />
+          {seek.hover != null && <span className="pointer-events-none absolute bottom-5 -translate-x-1/2 rounded-[var(--r-sm)] bg-black/75 px-1.5 py-1 font-[family-name:var(--mono)] text-[11px] font-medium" style={{ left: `${seek.hover * 100}%` }}>{fmt.clock(seek.hover * d)}</span>}{/* rtl-lint-ignore: inside the LTR seek bar */}
         </div>
         <div className="mt-0.5 flex items-center gap-0.5">
-          <IconButton tone="onDark" size="icon" className={VIDEO_BTN} label={playing ? 'Pause' : 'Play'} onClick={toggle} icon={icon(playing ? 'pause' : 'play', 18, true)} />
-          <IconButton tone="onDark" size="icon" className={VIDEO_BTN} label="Back 5 seconds" onClick={() => seekBy(-5)} icon={icon('replay')} />
+          {/* transport keeps the timeline's LTR order and unmirrored icons; the rest of the bar mirrors */}
+          <div dir="ltr" className="flex items-center gap-0.5">
+          <IconButton tone="onDark" size="icon" className={VIDEO_BTN} label={playing ? ct('common.pause') : ct('common.play')} onClick={toggle} icon={icon(playing ? 'pause' : 'play', 18, true)} />
+          <IconButton tone="onDark" size="icon" className={VIDEO_BTN} label={m('back5')} onClick={() => seekBy(-5)} icon={icon('replay')} />
+          </div>
           <div className="group/vol flex items-center">{/* phones use the hardware volume: only the mute button shows on touch */}
-            <IconButton tone="onDark" size="icon" className={VIDEO_BTN} label={muted ? 'Unmute' : 'Mute'} onClick={toggleMute} icon={icon(muted || vol === 0 ? 'volumeX' : 'volume')} />
+            <IconButton tone="onDark" size="icon" className={VIDEO_BTN} label={muted ? m('unmute') : m('mute')} onClick={toggleMute} icon={icon(muted || vol === 0 ? 'volumeX' : 'volume')} />
             {/* the shared Slider, re-tinted light for the video (its track and thumb follow --primary / --muted) */}
-            <label className="flex w-0 items-center overflow-hidden opacity-0 transition-[width,opacity,margin] duration-200 [--muted:rgba(255,255,255,.3)] [--primary:#fff] [@media(pointer:coarse)]:hidden group-hover/vol:mr-1.5 group-hover/vol:w-[70px] group-hover/vol:opacity-100 group-focus-within/vol:mr-1.5 group-focus-within/vol:w-[70px] group-focus-within/vol:opacity-100">
-              <span className="sr-only">Volume</span><Slider min={0} max={1} step={0.01} value={muted ? 0 : vol} onChange={setVolume} className="w-full" />
+            <label className="flex w-0 items-center overflow-hidden opacity-0 transition-[width,opacity,margin] duration-200 [--muted:rgba(255,255,255,.3)] [--primary:#fff] [@media(pointer:coarse)]:hidden group-hover/vol:me-1.5 group-hover/vol:w-[70px] group-hover/vol:opacity-100 group-focus-within/vol:me-1.5 group-focus-within/vol:w-[70px] group-focus-within/vol:opacity-100">
+              <span className="sr-only">{m('volume')}</span><Slider min={0} max={1} step={0.01} value={muted ? 0 : vol} onChange={setVolume} className="w-full" />
             </label>
           </div>
-          <span className="ml-1.5 font-[family-name:var(--mono)] text-xs font-medium whitespace-nowrap opacity-90 max-sm:ml-0.5">{fmt.clock(t)} / {fmt.clock(d)}</span>
+          <span className="ms-1.5 font-[family-name:var(--mono)] text-xs font-medium whitespace-nowrap opacity-90 max-sm:ms-0.5"><bdi dir="ltr">{fmt.clock(t)} / {fmt.clock(d)}</bdi></span>
           <span className="flex-1" />
-          <IconButton tone="onDark" size="icon" className="!h-[34px] !w-auto min-w-[34px] !px-2 font-[family-name:var(--mono)] text-xs font-semibold [@media(pointer:coarse)]:!h-10 [@media(pointer:coarse)]:min-w-10" label={`Playback speed ${VIDEO_SPEEDS[si]}×`} onClick={cycleSpeed}
-            icon={<motion.span key={si} initial={{ scale: 0.8 }} animate={{ scale: 1 }} transition={spring(0.5, 0.3)}>{VIDEO_SPEEDS[si]}×</motion.span>} />
-          <IconButton tone="onDark" size="icon" className={VIDEO_BTN} label={isFs ? 'Exit fullscreen' : 'Fullscreen'} onClick={fullscreen} icon={icon(isFs ? 'minimize' : 'maximize')} />
+          <IconButton tone="onDark" size="icon" className="!h-[34px] !w-auto min-w-[34px] !px-2 font-[family-name:var(--mono)] text-xs font-semibold [@media(pointer:coarse)]:!h-10 [@media(pointer:coarse)]:min-w-10" label={m('speedLabel', { n: VIDEO_SPEEDS[si] })} onClick={cycleSpeed}
+            icon={<motion.span key={si} initial={{ scale: 0.8 }} animate={{ scale: 1 }} transition={spring(0.5, 0.3)}>{m('speed', { n: VIDEO_SPEEDS[si] })}</motion.span>} />
+          <IconButton tone="onDark" size="icon" className={VIDEO_BTN} label={isFs ? m('exitFullscreen') : m('fullscreen')} onClick={fullscreen} icon={icon(isFs ? 'minimize' : 'maximize')} />
         </div>
       </motion.div>
     </div>
@@ -361,7 +454,7 @@ const AUDIO_SPEEDS = [1, 1.25, 1.5, 2, 0.75]
 function MediaPlayButton({ playing, label, size, iconSize, className, onClick }: { playing: boolean; label: string; size: string; iconSize: number; className?: string; onClick: () => void }) {
   return (
     <motion.button type="button" whileTap={{ scale: 0.88 }} aria-label={label} onClick={onClick}
-      className={cn('grid flex-none cursor-pointer place-items-center rounded-full border-0', size, !playing && 'pl-0.5', className ?? 'bg-[var(--primary)] text-[var(--on-primary)]')}>
+      className={cn('grid flex-none cursor-pointer place-items-center rounded-full border-0', size, !playing && 'ps-0.5', className ?? 'bg-[var(--primary)] text-[var(--on-primary)]')}>
       <Icon name={playing ? 'pause' : 'play'} size={iconSize} filled />
     </motion.button>
   )
@@ -378,8 +471,9 @@ export function AudioPlayer({ track: shared, src, title, meta, cover, peaks, dur
   const track = useOwnTrack(shared, src, duration, root)
   const s = useAudioTrack(track)
   const toast = useToast()
+  const m = useMessages(MEDIA_MESSAGES), { t: ct, fmt } = useLocale()
   const d = s.duration || duration || 1
-  const toggle = () => track.toggle().then(ok => { if (!ok) toast({ title: 'Couldn’t play audio', description: 'Your browser blocked playback', tone: 'bad' }) })
+  const toggle = () => track.toggle().then(ok => { if (!ok) toast({ title: m('playFailAudio'), description: m('blocked'), tone: 'bad' }) })
   const seek = useSeekSlider({ time: s.time, duration: d, onSeek: track.seek, onToggle: toggle })
   const [plays, setPlays] = useState(0)
   useEffect(() => { if (s.playing) setPlays(p => p + 1) }, [s.playing])
@@ -394,18 +488,21 @@ export function AudioPlayer({ track: shared, src, title, meta, cover, peaks, dur
           <b className="block truncate font-semibold">{title}</b>
           {meta && <span className="text-xs text-[var(--fg3)]">{meta}</span>}
           <div className="mt-2 flex items-center gap-1">
-            <IconButton icon="replay" label="Back 10 seconds" onClick={() => track.skip(-10)} tone="default" className="text-[var(--fg2)] hover:text-[var(--fg)]" />
-            <MediaPlayButton playing={s.playing} label={s.playing ? 'Pause' : 'Play'} onClick={toggle} size="h-9 w-9 [@media(pointer:coarse)]:h-11 [@media(pointer:coarse)]:w-11" iconSize={16} />
-            <IconButton icon="forward" label="Forward 10 seconds" onClick={() => track.skip(10)} tone="default" className="text-[var(--fg2)] hover:text-[var(--fg)]" />
+            {/* transport: LTR order and unmirrored icons, like the waveform it drives */}
+            <div dir="ltr" className="flex items-center gap-1">
+            <IconButton icon="replay" label={m('back10')} onClick={() => track.skip(-10)} tone="default" className="text-[var(--fg2)] hover:text-[var(--fg)]" />
+            <MediaPlayButton playing={s.playing} label={s.playing ? ct('common.pause') : ct('common.play')} onClick={toggle} size="h-9 w-9 [@media(pointer:coarse)]:h-11 [@media(pointer:coarse)]:w-11" iconSize={16} />
+            <IconButton icon="forward" label={m('forward10')} onClick={() => track.skip(10)} tone="default" className="text-[var(--fg2)] hover:text-[var(--fg)]" />{/* rtl-lint-ignore: media icons don't mirror */}
+            </div>
             <span className="flex-1" />
-            <Button variant="ghost" size="sm" aria-label={`Playback speed ${s.rate}×`} onClick={() => track.setRate(AUDIO_SPEEDS[(AUDIO_SPEEDS.indexOf(s.rate) + 1) % AUDIO_SPEEDS.length])} className="ui-num [@media(pointer:coarse)]:min-w-11">{s.rate}×</Button>
+            <Button variant="ghost" size="sm" aria-label={m('speedLabel', { n: s.rate })} onClick={() => track.setRate(AUDIO_SPEEDS[(AUDIO_SPEEDS.indexOf(s.rate) + 1) % AUDIO_SPEEDS.length])} className="ui-num [@media(pointer:coarse)]:min-w-11">{m('speed', { n: s.rate })}</Button>
           </div>
         </div>
       </div>
       <div {...seek.bind} className="h-12 cursor-pointer touch-pan-y rounded-[var(--r-md)] outline-none select-none focus-visible:shadow-[0_0_0_2px_var(--accent)]">
         <Waveform peaks={peaks} played={s.time / d} hover={seek.hover} className="h-full" />
       </div>
-      <div className="ui-num -mt-1 flex justify-between text-[11px] text-[var(--fg3)]"><span>{fmt.clock(s.time)}</span><span>{fmt.clock(d)}</span></div>
+      <div dir="ltr" className="ui-num -mt-1 flex justify-between text-[11px] text-[var(--fg3)]"><span>{fmt.clock(s.time)}</span><span>{fmt.clock(d)}</span></div>
     </div>
   )
 }
@@ -416,15 +513,16 @@ export function MiniAudioPlayer({ track: shared, src, title, duration = 0, class
   const track = useOwnTrack(shared, src, duration, root)
   const s = useAudioTrack(track)
   const d = s.duration || duration || 1
+  const m = useMessages(MEDIA_MESSAGES), { fmt } = useLocale()
   const seek = useSeekSlider({ time: s.time, duration: d, onSeek: track.seek, onToggle: () => track.toggle(), valueText: t => fmt.clock(t) })
   return (
-    <div ref={root} className={cn('flex items-center gap-2.5 rounded-full border border-[var(--line)] bg-[var(--card)] py-2 pr-3 pl-2 [@media(pointer:coarse)]:gap-3 [@media(pointer:coarse)]:pr-4', className)}>
-      <MediaPlayButton playing={s.playing} label={`${s.playing ? 'Pause' : 'Play'} ${title}`} onClick={() => track.toggle()} size="h-8 w-8 [@media(pointer:coarse)]:h-9 [@media(pointer:coarse)]:w-9" iconSize={13} />
+    <div ref={root} className={cn('flex items-center gap-2.5 rounded-full border border-[var(--line)] bg-[var(--card)] py-2 pe-3 ps-2 [@media(pointer:coarse)]:gap-3 [@media(pointer:coarse)]:pe-4', className)}>
+      <MediaPlayButton playing={s.playing} label={m(s.playing ? 'pauseTitle' : 'playTitle', { title })} onClick={() => track.toggle()} size="h-8 w-8 [@media(pointer:coarse)]:h-9 [@media(pointer:coarse)]:w-9" iconSize={13} />
       <div className="flex min-w-0 flex-1 flex-col gap-1">
         <b className="truncate text-xs leading-none font-semibold">{title}</b>
         <motion.div {...seek.bind} animate={{ scaleY: seek.drag ? 1.6 : 1 }} transition={{ duration: 0.12 }}
           className="relative h-1 cursor-pointer touch-pan-y rounded-[var(--r-sm)] bg-[var(--muted)] outline-none before:absolute before:inset-x-0 before:-inset-y-1.5 before:content-[''] focus-visible:shadow-[0_0_0_2px_var(--accent)] [@media(pointer:coarse)]:before:-inset-y-3.5">
-          <i className="absolute inset-y-0 left-0 rounded-[var(--r-sm)] bg-[var(--primary)]" style={{ width: `${s.time / d * 100}%` }} />
+          <i className="absolute inset-y-0 start-0 rounded-[var(--r-sm)] bg-[var(--primary)]" style={{ width: `${s.time / d * 100}%` }} />
         </motion.div>
       </div>
       <span className="ui-num flex-none text-[11px] text-[var(--fg3)] [@media(pointer:coarse)]:text-xs">{fmt.clock(!s.playing && !s.time ? d : s.time)}</span>
@@ -439,18 +537,19 @@ export function VoiceNote({ track: shared, src, peaks, duration = 0, bars = 34, 
   const track = useOwnTrack(shared, src, duration, box)
   const s = useAudioTrack(track)
   const d = s.duration || duration || 1
-  const seek = useSeekSlider({ time: s.time, duration: d, onSeek: track.seek, onToggle: () => track.toggle(), label: 'Seek voice note' })
+  const m = useMessages(MEDIA_MESSAGES), { fmt } = useLocale()
+  const seek = useSeekSlider({ time: s.time, duration: d, onSeek: track.seek, onToggle: () => track.toggle(), label: m('seekVoice') })
   return (
-    <div ref={box} className={cn('flex w-full max-w-[280px] items-center gap-2 self-end rounded-[18px_18px_4px_18px] bg-[var(--primary)] py-2 pr-2.5 pl-2 text-[var(--on-primary)]', className)}>
-      <MediaPlayButton playing={s.playing} label={s.playing ? 'Pause voice note' : 'Play voice note'} onClick={() => track.toggle()} iconSize={12}
+    <div ref={box} className={cn('flex w-full max-w-[280px] items-center gap-2 self-end rounded-[18px_18px_4px_18px] rtl:rounded-[18px_18px_18px_4px] bg-[var(--primary)] py-2 pe-2.5 ps-2 text-[var(--on-primary)]', className)}>
+      <MediaPlayButton playing={s.playing} label={s.playing ? m('pauseVoice') : m('playVoice')} onClick={() => track.toggle()} iconSize={12}
         size="h-7 w-7 [@media(pointer:coarse)]:h-9 [@media(pointer:coarse)]:w-9" className="bg-[color-mix(in_srgb,var(--on-primary)_18%,transparent)] text-inherit" />
       <div {...seek.bind} className="h-[22px] min-w-0 flex-1 cursor-pointer touch-pan-y rounded-[var(--r-sm)] outline-none select-none focus-visible:shadow-[0_0_0_2px_var(--on-primary)] [@media(pointer:coarse)]:h-8">
         <Waveform peaks={peaks} bars={bars} played={s.time / d} tone="current" minHeight={14} className="h-full" />
       </div>
       <span className="ui-num flex-none text-[11px] opacity-80">{fmt.clock(s.time || d)}</span>
-      <button type="button" aria-label={`Playback speed ${s.rate}×`} onClick={() => track.setRate(VOICE_SPEEDS[(VOICE_SPEEDS.indexOf(s.rate) + 1) % VOICE_SPEEDS.length])}
+      <button type="button" aria-label={m('speedLabel', { n: s.rate })} onClick={() => track.setRate(VOICE_SPEEDS[(VOICE_SPEEDS.indexOf(s.rate) + 1) % VOICE_SPEEDS.length])}
         className="h-5 flex-none cursor-pointer rounded-full border-0 bg-[color-mix(in_srgb,var(--on-primary)_16%,transparent)] px-1.5 font-[family-name:var(--mono)] text-[11px] font-semibold text-inherit [@media(pointer:coarse)]:h-8 [@media(pointer:coarse)]:min-w-9 [@media(pointer:coarse)]:text-[11px]">
-        <motion.span key={s.rate} className="inline-block" initial={{ scale: 0.8 }} animate={{ scale: 1 }} transition={spring(0.5, 0.3)}>{s.rate}×</motion.span>
+        <motion.span key={s.rate} className="inline-block" initial={{ scale: 0.8 }} animate={{ scale: 1 }} transition={spring(0.5, 0.3)}>{m('speed', { n: s.rate })}</motion.span>
       </button>
     </div>
   )
@@ -487,6 +586,7 @@ function LightboxView({ items, index, onIndexChange, onClose, originFor }:
   const [hiSrc, setHiSrc] = useState<string | null>(null)
   const lastTap = useRef(0), ptrType = useRef('mouse'), zoomRef = useRef(1), panFrom = useRef({ x: 0, y: 0 }), moved = useRef(false), bgDown = useRef(false)
   const it = items[index]
+  const m = useMessages(MEDIA_GALLERY_MESSAGES), { t: ct, fmt, dir: ldir } = useLocale()
   useFocusTrap(root, true)
   useEffect(() => { const r = () => setTick(n => n + 1); addEventListener('resize', r); return () => removeEventListener('resize', r) }, [])
   // frame size from the image ratio, so it's known before the full image decodes
@@ -515,7 +615,7 @@ function LightboxView({ items, index, onIndexChange, onClose, originFor }:
   const go = (k: number) => {
     const dir = k > index ? 1 : -1, n = (k + items.length) % items.length
     resetZoom(); onIndexChange(n)
-    if (!reduce) { fx.set(dir * 40); fo.set(0); animate(fx, 0, spring(0.2, 0.4)); animate(fo, 1, { duration: 0.25 }) } else { fx.set(0); fo.set(1) }
+    if (!reduce) { fx.set(dirX(dir * 40, ldir)); fo.set(0); animate(fx, 0, spring(0.2, 0.4)); animate(fo, 1, { duration: 0.25 }) } else { fx.set(0); fo.set(1) }
   }
   const close = async () => {
     if (closing) return
@@ -528,13 +628,13 @@ function LightboxView({ items, index, onIndexChange, onClose, originFor }:
     onClose()
   }
   const settle = () => { animate(fx, 0, spring(0.3, 0.35)); animate(fy, 0, spring(0.3, 0.35)); animate(fo, 1, { duration: 0.15 }) }
-  const latest = useRef({ go, close, setZoom, index }); latest.current = { go, close, setZoom, index }
+  const latest = useRef({ go, close, setZoom, index, ldir }); latest.current = { go, close, setZoom, index, ldir }
   useEffect(() => {
     const on = (e: KeyboardEvent) => {
-      const L = latest.current
+      const L = latest.current, key = logicalArrow(e.key, L.ldir) // RTL: ← is next
       if (e.key === 'Escape') { e.stopPropagation(); e.preventDefault(); L.close() }
-      else if (e.key === 'ArrowRight') L.go(L.index + 1)
-      else if (e.key === 'ArrowLeft') L.go(L.index - 1)
+      else if (key === 'ArrowRight') L.go(L.index + 1) // rtl-lint-ignore: physical geometry (logicalArrow above)
+      else if (key === 'ArrowLeft') L.go(L.index - 1)
       else if (e.key === '+' || e.key === '=') L.setZoom(Math.min(4, zoomRef.current + 0.6))
       else if (e.key === '-') L.setZoom(Math.max(1, zoomRef.current - 0.6))
     }
@@ -562,7 +662,7 @@ function LightboxView({ items, index, onIndexChange, onClose, originFor }:
       }
       if (zoomRef.current === 1) {
         if (dy > 110 && dy > Math.abs(dx)) close()
-        else if (Math.abs(dx) > 60 && Math.abs(dx) > Math.abs(dy)) go(index + (dx < 0 ? 1 : -1))
+        else if (Math.abs(dx) > 60 && Math.abs(dx) > Math.abs(dy)) go(index + (dirX(dx, ldir) < 0 ? 1 : -1)) // swipe towards the start: next
         else settle()
       }
       setTimeout(() => { moved.current = false }, 0)
@@ -571,12 +671,12 @@ function LightboxView({ items, index, onIndexChange, onClose, originFor }:
   })
   const chrome = { initial: { opacity: 0 }, animate: { opacity: closing ? 0 : 1 }, transition: { duration: closing ? 0.15 : 0.3, delay: closing ? 0 : 0.1 } }
   return (
-    <div ref={root} role="dialog" aria-modal="true" aria-label="Image viewer" className="fixed inset-0 z-[95] text-white">
+    <div ref={root} role="dialog" aria-modal="true" aria-label={m('imageViewer')} className="fixed inset-0 z-[95] text-white">
       <motion.div className="absolute inset-0 bg-[rgba(8,8,10,.92)] backdrop-blur-md" initial={{ opacity: 0 }} animate={{ opacity: closing ? 0 : 1 }} transition={{ duration: 0.25 }} onClick={close} />
       <motion.div {...chrome} className="absolute inset-x-0 top-0 z-[2] flex items-center gap-1.5 p-3 pt-[max(12px,env(safe-area-inset-top))] text-[13px]">
-        <span className="ui-num">{index + 1} / {items.length}</span><span className="flex-1" />
-        <IconButton tone="default" size="icon" className={LB_BTN} label={zoom > 1 ? 'Zoom out' : 'Zoom in'} aria-pressed={zoom > 1} onClick={() => setZoom(zoom > 1 ? 1 : 2.2)} icon={<Icon name="zoomIn" size={18} />} />
-        <IconButton tone="default" size="icon" className={LB_BTN} label="Close" data-autofocus onClick={close} icon={<Icon name="x" size={17} />} />
+        <span className="ui-num">{m('counter', { i: fmt.number(index + 1), n: fmt.number(items.length) })}</span><span className="flex-1" />
+        <IconButton tone="default" size="icon" className={LB_BTN} label={zoom > 1 ? ct('common.zoomOut') : ct('common.zoomIn')} aria-pressed={zoom > 1} onClick={() => setZoom(zoom > 1 ? 1 : 2.2)} icon={<Icon name="zoomIn" size={18} />} />
+        <IconButton tone="default" size="icon" className={LB_BTN} label={ct('common.close')} data-autofocus onClick={close} icon={<Icon name="x" size={17} />} />
       </motion.div>
       <div ref={stage} className="absolute inset-x-0 top-[calc(64px+env(safe-area-inset-top))] bottom-[calc(130px+env(safe-area-inset-bottom))] flex touch-none items-center justify-center overflow-hidden"
         onClick={() => { if (bgDown.current && !moved.current) close(); bgDown.current = false }} {...gesture.bind}>
@@ -586,12 +686,12 @@ function LightboxView({ items, index, onIndexChange, onClose, originFor }:
             className={cn('block h-full w-full rounded-[var(--r-md)] bg-cover object-cover shadow-[0_20px_60px_rgba(0,0,0,.5)] select-none', zoom > 1 ? 'cursor-grab active:cursor-grabbing' : 'cursor-zoom-in')} />
         </motion.div>
       </div>
-      <motion.div {...chrome} className="absolute top-1/2 left-4 z-[2] -mt-6 max-sm:hidden"><IconButton tone="default" size="icon" className={LB_NAV} label="Previous" onClick={() => go(index - 1)} icon={<Icon name="chevronLeft" size={24} />} /></motion.div>
-      <motion.div {...chrome} className="absolute top-1/2 right-4 z-[2] -mt-6 max-sm:hidden"><IconButton tone="default" size="icon" className={LB_NAV} label="Next" onClick={() => go(index + 1)} icon={<Icon name="chevronRight" size={24} />} /></motion.div>
+      <motion.div {...chrome} className="absolute top-1/2 start-4 z-[2] -mt-6 max-sm:hidden"><IconButton tone="default" size="icon" className={LB_NAV} label={ct('common.previous')} onClick={() => go(index - 1)} icon={<Icon name="chevronLeft" size={24} className="ui-flip" />} /></motion.div>
+      <motion.div {...chrome} className="absolute top-1/2 end-4 z-[2] -mt-6 max-sm:hidden"><IconButton tone="default" size="icon" className={LB_NAV} label={ct('common.next')} onClick={() => go(index + 1)} icon={<Icon name="chevronRight" size={24} className="ui-flip" />} /></motion.div>
       <motion.div {...chrome} className="pointer-events-none absolute inset-x-0 bottom-[calc(86px+env(safe-area-inset-bottom))] flex flex-col gap-0.5 text-center text-[13px]" aria-live="polite">
         <b className="font-semibold">{it.title}</b>{it.meta && <span className="text-xs opacity-65">{it.meta}</span>}
       </motion.div>
-      <motion.div {...chrome} ref={thumbs} className="absolute inset-x-0 bottom-0 flex gap-1.5 overflow-x-auto overscroll-x-contain p-3 pb-[max(12px,env(safe-area-inset-bottom))] [scrollbar-width:none] [&>:first-child]:ml-auto [&>:last-child]:mr-auto">
+      <motion.div {...chrome} ref={thumbs} className="absolute inset-x-0 bottom-0 flex gap-1.5 overflow-x-auto overscroll-x-contain p-3 pb-[max(12px,env(safe-area-inset-bottom))] [scrollbar-width:none] [&>:first-child]:ms-auto [&>:last-child]:me-auto">
         {items.map((t, k) => (
           <button key={t.id} type="button" aria-label={t.title} aria-current={k === index} onClick={() => go(k)}
             className={cn('h-[52px] w-[52px] flex-none cursor-pointer overflow-hidden rounded-[var(--r-md)] border-0 bg-[#222] p-0 transition-[opacity,transform] duration-200', k === index ? '-translate-y-0.5 opacity-100 shadow-[0_0_0_2px_#fff]' : 'opacity-45 hover:opacity-80')}>
@@ -607,27 +707,29 @@ function LightboxView({ items, index, onIndexChange, onClose, originFor }:
 
 export type GalleryItem = LightboxItem & { category: string; author: string; likes: number }
 
-function MasonryTile({ it, x, y, width, imgH, delay, saved, onSave, onOpen, imgRef }:
+function MasonryTile({ it, x: x0, y, width, imgH, delay, saved, onSave, onOpen, imgRef }:
   { it: GalleryItem; x: number; y: number; width: number; imgH: number; delay: number; saved: boolean; onSave: () => void; onOpen: () => void; imgRef: (el: HTMLImageElement | null) => void }) {
   const [entered, setEntered] = useState(false)
+  const m = useMessages(MEDIA_GALLERY_MESSAGES), { fmt, dir } = useLocale()
+  const x = dirX(x0, dir) // columns fill from the start edge (the tile is anchored there)
   // a list item holding two sibling controls: the picture opens the lightbox, Save toggles (never a button inside a button)
   return (
     <motion.div role="listitem"
       initial={{ x, y: y + 20, opacity: 0, scale: 0.96 }} animate={{ x, y, opacity: 1, scale: 1 }} exit={{ opacity: 0, scale: 0.9, transition: { duration: 0.18 } }}
       transition={entered ? spring(0.15, 0.55) : { duration: 0.45, delay, ease: [0.22, 1, 0.36, 1] }} onAnimationComplete={() => setEntered(true)}
-      className="group absolute top-0 left-0" style={{ width }}>
+      className="group absolute top-0 start-0" style={{ width }}>
       <div className="relative overflow-hidden rounded-[var(--r-lg)] bg-[var(--muted)] has-[button:focus-visible]:shadow-[0_0_0_2px_var(--accent)]" style={{ height: imgH }}>
-        <button type="button" onClick={onOpen} aria-label={`Open ${it.title} by ${it.author}`} className="absolute inset-0 block cursor-zoom-in border-0 bg-transparent p-0 outline-none">
+        <button type="button" onClick={onOpen} aria-label={m('openBy', { title: it.title, author: it.author })} className="absolute inset-0 block cursor-zoom-in border-0 bg-transparent p-0 outline-none">
           <img ref={imgRef} src={safeMediaUrl(it.src) || undefined} alt="" draggable={false} width={Math.round(width)} height={Math.round(imgH)} decoding="async" className="block h-full w-full object-cover transition-transform duration-500 ease-[cubic-bezier(.22,1,.36,1)] group-hover:scale-[1.04]" />
           <span aria-hidden className="absolute inset-0 flex items-end justify-between gap-2 bg-gradient-to-b from-transparent from-55% to-black/55 p-2.5 text-xs font-medium text-white opacity-0 transition-opacity group-hover:opacity-100 group-focus-within:opacity-100 [@media(pointer:coarse)]:opacity-100 max-sm:p-2">
-            <span className="min-w-0 truncate">{it.title}</span><span className="flex-none">♥ {it.likes}</span>
+            <span className="min-w-0 truncate">{it.title}</span><span className="flex-none">♥ {fmt.number(it.likes)}</span>
           </span>
         </button>
-        <motion.button type="button" aria-pressed={saved} aria-label={`${saved ? 'Unsave' : 'Save'} ${it.title}`} whileTap={{ scale: 0.85 }} onClick={onSave}
-          className={cn('absolute top-2 right-2 h-[30px] cursor-pointer rounded-full border-0 px-3 text-xs font-semibold transition-[opacity,transform] duration-200 [@media(pointer:coarse)]:h-[34px] max-sm:top-1.5 max-sm:right-1.5',
+        <motion.button type="button" aria-pressed={saved} aria-label={m(saved ? 'unsaveTitle' : 'saveTitle', { title: it.title })} whileTap={{ scale: 0.85 }} onClick={onSave}
+          className={cn('absolute top-2 end-2 h-[30px] cursor-pointer rounded-full border-0 px-3 text-xs font-semibold transition-[opacity,transform] duration-200 [@media(pointer:coarse)]:h-[34px] max-sm:top-1.5 max-sm:end-1.5',
             // touch has no hover: the button is always shown there
             saved ? 'bg-[var(--primary)] text-[var(--on-primary)] opacity-100' : '-translate-y-1 bg-[var(--bad)] text-[var(--card)] opacity-0 group-focus-within:translate-y-0 group-focus-within:opacity-100 group-hover:translate-y-0 group-hover:opacity-100 [@media(pointer:coarse)]:translate-y-0 [@media(pointer:coarse)]:opacity-100')}>
-          {saved ? 'Saved' : 'Save'}
+          {saved ? m('saved') : m('save')}
         </motion.button>
       </div>
       <div className="flex h-[30px] min-w-0 items-center gap-1.5 px-0.5 pt-2 text-xs text-[var(--fg2)]"><Avatar name={it.author} size={18} className="!border-0 [@media(pointer:coarse)]:!h-[22px] [@media(pointer:coarse)]:!w-[22px] [@media(pointer:coarse)]:!text-[11px]" /><span className="min-w-0 truncate">{it.author}</span></div>
@@ -648,6 +750,7 @@ export function MasonryGallery({ items, categories, onLoadMore, hasMore = true, 
   const [host, W] = useWidth<HTMLDivElement>()
   const inView = useInView(host, { once: true, amount: 0.05 })
   const toast = useToast()
+  const m = useMessages(MEDIA_GALLERY_MESSAGES), { fmt } = useLocale()
   const [filter, setFilter] = useState('All')
   const [saved, setSaved] = useState<Set<GalleryItem['id']>>(() => new Set())
   const [open, setOpen] = useState<number | null>(null)
@@ -669,13 +772,13 @@ export function MasonryGallery({ items, categories, onLoadMore, hasMore = true, 
   useEffect(() => { if (inView) prevIds.current = new Set(visible.map(v => v.id)); userResize.current = false })
   let tallest = 0; for (const v of hs) if (v > tallest) tallest = v
   const height = visible.length ? tallest - gap : 240
-  const lbItems = visible.map(it => ({ ...it, meta: `${it.author} · ${it.category} · ♥ ${it.likes}` }))
+  const lbItems = visible.map(it => ({ ...it, meta: `${it.author} · ${it.category} · ♥ ${fmt.number(it.likes)}` }))
   return (
     <div className={cn('flex flex-col gap-3', className)}>
-      <div className="flex flex-wrap gap-1.5" role="group" aria-label="Filter by category">
-        {cats.map(c => <Chip key={c} pressed={c === filter} onClick={() => { userResize.current = true; setFilter(c) }} className="font-normal">{c}</Chip>)}
+      <div className="flex flex-wrap gap-1.5" role="group" aria-label={m('filter')}>
+        {cats.map(c => <Chip key={c} pressed={c === filter} onClick={() => { userResize.current = true; setFilter(c) }} className="font-normal">{c === 'All' ? m('all') : c}</Chip>)}
       </div>
-      <motion.div ref={host} role="list" aria-label="Gallery" className="relative" initial={false} animate={{ height }} transition={userResize.current ? { duration: 0.35, ease: 'easeOut' } : { duration: 0 }}>
+      <motion.div ref={host} role="list" aria-label={m('gallery')} className="relative" initial={false} animate={{ height }} transition={userResize.current ? { duration: 0.35, ease: 'easeOut' } : { duration: 0 }}>
         <AnimatePresence>
           {cw > 0 && inView && placed.map(({ it, x, y, imgH, delay }, k) => (
             <MasonryTile key={it.id} it={it} x={x} y={y} width={cw} imgH={imgH} delay={delay} saved={saved.has(it.id)}
@@ -684,12 +787,12 @@ export function MasonryGallery({ items, categories, onLoadMore, hasMore = true, 
               onSave={() => {
                 const was = saved.has(it.id)
                 setSaved(s => { const n = new Set(s); if (was) n.delete(it.id); else n.add(it.id); return n })
-                if (!was) toast({ title: 'Saved to board', description: it.title, tone: 'ok' })
+                if (!was) toast({ title: m('savedToBoard'), description: it.title, tone: 'ok' })
               }} />
           ))}
         </AnimatePresence>
       </motion.div>
-      {onLoadMore && <Button className="self-center" disabled={!hasMore} onClick={() => { userResize.current = true; onLoadMore() }}>{hasMore ? 'Load more' : 'That’s everything'}</Button>}
+      {onLoadMore && <Button className="self-center" disabled={!hasMore} onClick={() => { userResize.current = true; onLoadMore() }}>{hasMore ? m('loadMore') : m('everything')}</Button>}
       {open != null && lbItems[open] && <Lightbox items={lbItems} index={open} onIndexChange={setOpen} onClose={() => setOpen(null)} originFor={id => imgs.current.get(id)} />}
     </div>
   )
@@ -699,10 +802,11 @@ export function MasonryGallery({ items, categories, onLoadMore, hasMore = true, 
 
 /** Loading placeholder for MediaCard. The shimmer only animates while the card is on screen. */
 function MediaCardSkeleton({ className }: { className: string }) {
+  const { t } = useLocale()
   const { ref, visible: onScreen } = useViewport<HTMLDivElement>(null, { amount: 0 })
   const bone = cn('rounded-[var(--r-sm)] bg-[var(--muted)]', onScreen && 'ui-shimmer')
   return (
-    <div ref={ref} className={className} role="status" aria-busy="true" aria-label="Loading">
+    <div ref={ref} className={className} role="status" aria-busy="true" aria-label={t('status.loading')}>
       <div className={cn(bone, 'aspect-[4/3] !rounded-none')} />
       {/* the same line boxes as the loaded card (date, title, two lines of description, author row), so swapping in the content doesn't move anything */}
       <div className="flex flex-1 flex-col gap-1.5 p-3">
@@ -723,6 +827,7 @@ function MediaCardSkeleton({ className }: { className: string }) {
 export function MediaCard({ image, title, description, tag, duration, date, author, loading, index = 0, bookmarked, defaultBookmarked = false, onBookmarkChange, className }:
   { image?: string; title?: string; description?: string; tag?: string; duration?: string; date?: string; author?: string; loading?: boolean; index?: number; bookmarked?: boolean; defaultBookmarked?: boolean; onBookmarkChange?: (v: boolean) => void; className?: string }) {
   const [ownMark, setOwnMark] = useState(defaultBookmarked)
+  const m = useMessages(MEDIA_GALLERY_MESSAGES)
   const mark = bookmarked ?? ownMark
   const [pops, setPops] = useState(0)
   const shell = cn(surface.card, 'flex flex-col overflow-hidden')
@@ -732,8 +837,8 @@ export function MediaCard({ image, title, description, tag, duration, date, auth
       className={cn(shell, 'transition-shadow hover:shadow-[var(--shadow)]', className)}>
       <div className="relative aspect-[4/3] overflow-hidden bg-[var(--muted)]">
         {image && <img src={safeMediaUrl(image) || undefined} alt={title} className="block h-full w-full object-cover" />}
-        {tag && <Badge size="sm" className="absolute top-2.5 left-2.5 !bg-black/50 !text-white backdrop-blur-sm">{tag}</Badge>}
-        {duration && <span className="absolute right-2.5 bottom-2.5 rounded-[var(--r-sm)] bg-black/65 px-1.5 py-0.5 font-[family-name:var(--mono)] text-[11px] font-medium text-white">{duration}</span>}
+        {tag && <Badge size="sm" className="absolute top-2.5 start-2.5 !bg-black/50 !text-white backdrop-blur-sm">{tag}</Badge>}
+        {duration && <span className="absolute end-2.5 bottom-2.5 rounded-[var(--r-sm)] bg-black/65 px-1.5 py-0.5 font-[family-name:var(--mono)] text-[11px] font-medium text-white">{duration}</span>}
       </div>
       <div className="flex flex-1 flex-col gap-1.5 p-3">
         {date && <span className="text-[11px] text-[var(--fg3)]">{date}</span>}
@@ -742,7 +847,7 @@ export function MediaCard({ image, title, description, tag, duration, date, auth
         <div className="mt-auto flex items-center gap-2 pt-1.5 text-xs leading-none text-[var(--fg3)]">
           {author && <><Avatar name={author} size={22} className="!border-0 [@media(pointer:coarse)]:!text-[11px]" />{author}</>}
           <span className="flex-1" />
-          <IconButton label={title ? `Bookmark ${title}` : 'Bookmark'} aria-pressed={mark} tone={mark ? 'default' : 'muted'} className={cn('-my-1 !h-6 !w-6 [@media(pointer:coarse)]:-mr-1.5', TOUCH.tap36)}
+          <IconButton label={title ? m('bookmarkTitle', { title }) : m('bookmark')} aria-pressed={mark} tone={mark ? 'default' : 'muted'} className={cn('-my-1 !h-6 !w-6 [@media(pointer:coarse)]:-me-1.5', TOUCH.tap36)}
             onClick={() => { const n = !mark; setOwnMark(n); onBookmarkChange?.(n); setPops(p => p + 1) }}
             icon={<motion.span key={pops} className="grid" initial={pops ? { scale: 0.7 } : false} animate={{ scale: [0.7, 1.15, 1] }} transition={spring(0.5, 0.4)}><Icon name="bookmark" size={15} filled={mark} /></motion.span>} />
         </div>
@@ -761,6 +866,7 @@ export function ProgressiveImage({ src, placeholder, alt, aspect = '4/3', delay 
   { src: string; placeholder?: string; alt: string; aspect?: string; delay?: number; onRetry?: () => void; className?: string }) {
   const [state, setState] = useState<'loading' | 'loaded' | 'error'>('loading')
   const [attempt, setAttempt] = useState(0)
+  const m = useMessages(MEDIA_GALLERY_MESSAGES), { t } = useLocale()
   useEffect(() => {
     setState('loading'); let live = true
     const t = setTimeout(() => { const im = new Image(); im.onload = () => live && setState('loaded'); im.onerror = () => live && setState('error'); im.src = safeMediaUrl(src) }, delay)
@@ -774,8 +880,8 @@ export function ProgressiveImage({ src, placeholder, alt, aspect = '4/3', delay 
         {state === 'error' && (
           <motion.div role="alert" initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} transition={{ duration: 0.25 }}
             className="absolute inset-0 flex flex-col items-center justify-center gap-2 text-xs text-[var(--fg3)]">
-            <Icon name="imageOff" size={26} strokeWidth={1.6} />Image couldn’t load
-            <Button size="sm" onClick={() => { onRetry?.(); setAttempt(a => a + 1) }}>Retry</Button>
+            <Icon name="imageOff" size={26} strokeWidth={1.6} />{m('imageFailed')}
+            <Button size="sm" onClick={() => { onRetry?.(); setAttempt(a => a + 1) }}>{t('common.retry')}</Button>
           </motion.div>
         )}
       </AnimatePresence>
@@ -798,6 +904,7 @@ export function AvatarCropper({ src: initial, defaultZoom = 1.2, onChange, onErr
   { src: string; defaultZoom?: number; onChange?: (dataUrl: string) => void; onError?: (message: string) => void; maxBytes?: number; maxPixels?: number; className?: string }) {
   const [src, setSrc] = useState(() => safeMediaUrl(initial))
   const [err, setErr] = useState<string | null>(null)
+  const m = useMessages(MEDIA_IMAGE_MESSAGES), { fmt } = useLocale()
   const ownUrl = useRef<string | null>(null) // object URL of the chosen file (ours to revoke)
   const [z, setZ] = useState(defaultZoom)
   const [off, setOff] = useState({ x: 0, y: 0 })
@@ -810,15 +917,15 @@ export function AvatarCropper({ src: initial, defaultZoom = 1.2, onChange, onErr
   useEffect(() => () => { if (ownUrl.current) URL.revokeObjectURL(ownUrl.current) }, [])
   const fail = (m: string) => { setErr(m); onError?.(m) }
   const choose = (f: File) => {
-    if (!/^image\//.test(f.type)) return fail('Choose an image file (JPEG, PNG, WebP…).')
-    if (f.size > maxBytes) return fail(`That photo is ${fmt.bytes(f.size)}; the limit is ${fmt.bytes(maxBytes)}.`)
+    if (!/^image\//.test(f.type)) return fail(m('errType'))
+    if (f.size > maxBytes) return fail(m('errSize', { size: fmt.bytes(f.size), max: fmt.bytes(maxBytes) }))
     const url = URL.createObjectURL(f), probe = new Image()
     probe.onload = () => { // the size comes from the header, before the image is decoded or drawn
       const pw = probe.naturalWidth, ph = probe.naturalHeight
-      if (!pw || !ph || pw * ph > maxPixels || Math.max(pw, ph) > 16384) { URL.revokeObjectURL(url); return fail(`That photo is ${pw} × ${ph} px; the limit is ${Math.round(maxPixels / 1e6)} megapixels.`) }
+      if (!pw || !ph || pw * ph > maxPixels || Math.max(pw, ph) > 16384) { URL.revokeObjectURL(url); return fail(m('errPixels', { w: pw, h: ph, max: Math.round(maxPixels / 1e6) })) }
       setErr(null); adopt(url, true); setZ(defaultZoom); setLoads(n => n + 1)
     }
-    probe.onerror = () => { URL.revokeObjectURL(url); fail('That file couldn’t be read as an image.') }
+    probe.onerror = () => { URL.revokeObjectURL(url); fail(m('errRead')) }
     probe.src = url
   }
   const base = nat ? CROP_BOX / Math.min(nat.w, nat.h) : 1
@@ -843,31 +950,32 @@ export function AvatarCropper({ src: initial, defaultZoom = 1.2, onChange, onErr
   return (
     <div className={cn('flex flex-wrap items-center gap-4', className)}>
       <motion.div ref={box} key={loads} initial={loads ? { scale: 0.96 } : false} animate={{ scale: 1 }} transition={spring(0.4, 0.35)}
-        tabIndex={0} role="group" aria-label="Crop area. Drag or use arrow keys to reposition, + and − to zoom"
+        tabIndex={0} role="group" aria-label={m('cropArea')}
         className="relative flex-none cursor-grab touch-none overflow-hidden rounded-[var(--r-lg)] bg-[var(--muted)] outline-none select-none focus-visible:shadow-[0_0_0_2px_var(--accent)] active:cursor-grabbing"
         style={{ width: CROP_BOX, height: CROP_BOX }} {...gesture.bind}
         onKeyDown={e => {
+          // the arrows move the picture physically (it is an image, not text)
           const step = e.shiftKey ? 20 : 6, mv: Record<string, [number, number]> = { ArrowLeft: [-step, 0], ArrowRight: [step, 0], ArrowUp: [0, -step], ArrowDown: [0, step] }
           if (mv[e.key]) { e.preventDefault(); setOff(clampOff({ x: o.x + mv[e.key][0], y: o.y + mv[e.key][1] })) }
           if (e.key === '+' || e.key === '=') zoomTo(z + 0.1)
           if (e.key === '-') zoomTo(z - 0.1)
         }}>
-        <img ref={img} src={src} alt="Crop preview" draggable={false} onLoad={e => { setNat({ w: e.currentTarget.naturalWidth, h: e.currentTarget.naturalHeight }); setOff({ x: 0, y: 0 }) }}
-          className="pointer-events-none absolute top-1/2 left-1/2 max-w-none select-none" style={{ width: w, transform: `translate(calc(-50% + ${o.x}px), calc(-50% + ${o.y}px))` }} />
+        <img ref={img} src={src} alt={m('cropPreview')} draggable={false} onLoad={e => { setNat({ w: e.currentTarget.naturalWidth, h: e.currentTarget.naturalHeight }); setOff({ x: 0, y: 0 }) }}
+          className="pointer-events-none absolute top-1/2 left-1/2 max-w-none select-none" style={{ /* rtl-lint-ignore: physical geometry */ width: w, transform: `translate(calc(-50% + ${o.x}px), calc(-50% + ${o.y}px))` }} />
         <div className="pointer-events-none absolute inset-0 bg-[radial-gradient(circle_at_center,transparent_69px,rgba(0,0,0,.5)_70px)]" />
         <div className="pointer-events-none absolute inset-2.5 rounded-full shadow-[0_0_0_1.5px_rgba(255,255,255,.85)]" />
       </motion.div>
       <div className="min-w-[180px] flex-1">
         <div className="mb-3 flex items-center gap-3">
-          {[48, 32, 22].map((s, i) => <canvas key={s} ref={el => { outs.current[i] = el }} width={96} height={96} aria-label={`${s} px preview`} role="img" className="flex-none rounded-full bg-[var(--muted)]" style={{ width: s, height: s }} />)}
+          {[48, 32, 22].map((s, i) => <canvas key={s} ref={el => { outs.current[i] = el }} width={96} height={96} aria-label={m('previewPx', { n: s })} role="img" className="flex-none rounded-full bg-[var(--muted)]" style={{ width: s, height: s }} />)}
         </div>
-        <Slider label="Zoom" min={1} max={3} step={0.01} value={z} onChange={zoomTo} format={v => `${v.toFixed(1)}×`} />
+        <Slider label={m('zoom')} min={1} max={3} step={0.01} value={z} onChange={zoomTo} format={v => m('zoomValue', { n: fmt.number(v, { minimumFractionDigits: 1, maximumFractionDigits: 1 }) })} />
         <div className="mt-2.5 flex flex-wrap items-center gap-2">
           <label className={cn(surface.md, 'inline-flex h-[30px] cursor-pointer items-center px-3 text-xs font-medium hover:bg-[var(--muted)] focus-within:shadow-[0_0_0_2px_var(--accent)] [@media(pointer:coarse)]:h-10 [@media(pointer:coarse)]:px-4')}>
-            Choose photo
+            {m('choose')}
             <input type="file" accept="image/*" className="sr-only" onChange={e => { const f = e.target.files?.[0]; e.target.value = ''; if (f) choose(f) }} />
           </label>
-          <span className="text-[11px] text-[var(--fg3)]"><span className="[@media(pointer:coarse)]:hidden">Drag the image to reposition</span><span className="hidden [@media(pointer:coarse)]:inline">Drag to move, pinch to zoom</span></span>
+          <span className="text-[11px] text-[var(--fg3)]"><span className="[@media(pointer:coarse)]:hidden">{m('dragHint')}</span><span className="hidden [@media(pointer:coarse)]:inline">{m('touchHint')}</span></span>
         </div>
         {err && <p role="alert" className="m-0 mt-2 text-xs text-[var(--bad)]">{err}</p>}
       </div>
@@ -885,20 +993,23 @@ export function Carousel({ slides, aspect = '16/8', className }: { slides: { con
   const track = useRef<HTMLDivElement>(null)
   const reduce = useReducedMotion()
   const [i, setI] = useState(0)
+  const m = useMessages(MEDIA_IMAGE_MESSAGES), { dir } = useLocale()
   const n = slides.length
-  const go = (k: number) => { const t = track.current, el = t?.children[((k % n) + n) % n] as HTMLElement | undefined; if (t && el) t.scrollTo({ left: el.offsetLeft, behavior: reduce ? 'auto' : 'smooth' }) }
+  // slides run in the reading direction: in RTL the track starts at the right and scrollLeft goes negative
+  const pitch = (t: HTMLElement) => ((t.children[0] as HTMLElement | undefined)?.offsetWidth ?? 0) + 12
+  const go = (k: number) => { const t = track.current; if (t && n) t.scrollTo({ left: dirX((((k % n) + n) % n) * pitch(t), dir), behavior: reduce ? 'auto' : 'smooth' }) }
   const arrow = 'absolute top-1/2 grid h-9 w-9 -translate-y-1/2 max-sm:h-8 max-sm:w-8 [@media(pointer:coarse)]:h-9 [@media(pointer:coarse)]:w-9 cursor-pointer place-items-center rounded-full border-0 bg-white/90 text-[#111] shadow-[0_2px_8px_rgba(0,0,0,.2)] hover:bg-white focus-visible:outline-2 focus-visible:outline-[var(--accent)]'
   return (
-    <div className={cn('flex w-full min-w-0 max-w-full flex-col gap-2.5', className)} role="region" aria-roledescription="carousel" aria-label="Carousel"
-      onKeyDown={e => { if (e.key === 'ArrowRight') { e.preventDefault(); go(i + 1) } if (e.key === 'ArrowLeft') { e.preventDefault(); go(i - 1) } }}>
+    <div className={cn('flex w-full min-w-0 max-w-full flex-col gap-2.5', className)} role="region" aria-roledescription="carousel" aria-label={m('carousel')}
+      onKeyDown={e => { const k = logicalArrow(e.key, dir); if (k === 'ArrowRight') { e.preventDefault(); go(i + 1) } if (k === 'ArrowLeft') { e.preventDefault(); go(i - 1) } }}>
       {/* contain: inline-size keeps the slides (and their images' natural width) out of the card's min-content width,
           so the carousel can never stretch its card or the page sideways */}
       <div className="relative min-w-0 overflow-hidden rounded-[var(--r-lg)]">
         <div ref={track} tabIndex={0} aria-live="polite"
-          onScroll={e => { const t = e.currentTarget, first = t.children[0] as HTMLElement | undefined; if (first) setI(clamp(Math.round(t.scrollLeft / (first.offsetWidth + 12)), 0, n - 1)) }}
+          onScroll={e => { const t = e.currentTarget; if (t.children[0]) setI(clamp(Math.round(Math.abs(t.scrollLeft) / pitch(t)), 0, n - 1)) }}
           className="flex w-full min-w-0 snap-x snap-mandatory gap-3 overflow-x-auto overscroll-x-contain rounded-[var(--r-lg)] outline-none [contain:inline-size] [scrollbar-width:none] focus-visible:shadow-[0_0_0_2px_var(--accent)] [&::-webkit-scrollbar]:hidden">
           {slides.map((s, k) => (
-            <div key={k} role="group" aria-roledescription="slide" aria-label={`${k + 1} of ${n}`} className="relative min-w-0 flex-[0_0_100%] snap-center overflow-hidden rounded-[var(--r-lg)]" style={{ aspectRatio: aspect }}>
+            <div key={k} role="group" aria-roledescription="slide" aria-label={m('slideOf', { i: k + 1, n })} className="relative min-w-0 flex-[0_0_100%] snap-center overflow-hidden rounded-[var(--r-lg)]" style={{ aspectRatio: aspect }}>
               {s.content}
               {(s.title || s.caption) && (
                 <motion.div initial={{ opacity: 0, y: 10 }} animate={k === i ? { opacity: 1, y: 0 } : { opacity: 0, y: 10 }} transition={{ duration: 0.4 }}
@@ -909,13 +1020,13 @@ export function Carousel({ slides, aspect = '16/8', className }: { slides: { con
             </div>
           ))}
         </div>
-        <button type="button" className={cn(arrow, 'left-2.5')} aria-label="Previous slide" onClick={() => go(i - 1)}><Icon name="chevronLeft" /></button>
-        <button type="button" className={cn(arrow, 'right-2.5')} aria-label="Next slide" onClick={() => go(i + 1)}><Icon name="chevronRight" /></button>
+        <button type="button" className={cn(arrow, 'start-2.5')} aria-label={m('prevSlide')} onClick={() => go(i - 1)}><Icon name="chevronLeft" className="ui-flip" /></button>
+        <button type="button" className={cn(arrow, 'end-2.5')} aria-label={m('nextSlide')} onClick={() => go(i + 1)}><Icon name="chevronRight" className="ui-flip" /></button>
       </div>
       {/* each dot is a 24px (32px on touch) button around the small visible pill */}
       <div className="-mt-1.5 flex justify-center">
         {slides.map((_, k) => (
-          <button key={k} type="button" aria-label={`Go to slide ${k + 1}`} aria-current={k === i} onClick={() => go(k)}
+          <button key={k} type="button" aria-label={m('goTo', { n: k + 1 })} aria-current={k === i} onClick={() => go(k)}
             className="group/dot grid h-6 min-w-6 cursor-pointer place-items-center rounded-full border-0 bg-transparent px-[3px] outline-none focus-visible:shadow-[0_0_0_2px_var(--accent)] [@media(pointer:coarse)]:h-8 [@media(pointer:coarse)]:min-w-8">
             <motion.span initial={false} animate={{ width: k === i ? 22 : 7 }} transition={spring(0.2, 0.35)}
               className={cn('block h-[7px] rounded-[var(--r-sm)] transition-colors', k === i ? 'bg-[var(--primary)]' : 'bg-[var(--line2)] group-hover/dot:bg-[var(--fg3)]')} />
@@ -935,6 +1046,7 @@ export function Carousel({ slides, aspect = '16/8', className }: { slides: { con
  */
 export function ImageCompare({ before, after, aspect = '4/3', className }: { before: ReactNode; after: ReactNode; aspect?: string; className?: string }) {
   const [pos, setPos] = useState(50)
+  const m = useMessages(MEDIA_IMAGE_MESSAGES)
   const box = useRef<HTMLDivElement>(null)
   const dragging = useRef(false), touched = useRef(false), start = useRef<{ x: number; y: number } | null>(null)
   const inView = useInView(box, { once: true, amount: 0.5 })
@@ -946,7 +1058,8 @@ export function ImageCompare({ before, after, aspect = '4/3', className }: { bef
     return () => run.stop()
   }, [inView, reduce])
   return (
-    <div ref={box} className={cn('relative cursor-ew-resize touch-pan-y overflow-hidden rounded-[var(--r-lg)] bg-[var(--muted)] select-none', className)} style={{ aspectRatio: aspect }}
+    // the two images and the divider are physical geometry (dir="ltr", like a chart); the labels follow the locale
+    <div ref={box} dir="ltr" className={cn('relative cursor-ew-resize touch-pan-y overflow-hidden rounded-[var(--r-lg)] bg-[var(--muted)] select-none', className)} style={{ aspectRatio: aspect }}
       onPointerDown={e => {
         touched.current = true
         const onHandle = !!(e.target as Element).closest('[role=slider]')
@@ -962,17 +1075,18 @@ export function ImageCompare({ before, after, aspect = '4/3', className }: { bef
       onPointerUp={e => { if (start.current) set(e.clientX); start.current = null; dragging.current = false }} onPointerCancel={() => { start.current = null; dragging.current = false }}>
       <div className="absolute inset-0">{after}</div>
       <div className="absolute inset-0" style={{ clipPath: `inset(0 ${100 - pos}% 0 0)` }}>{before}</div>
-      <Badge size="sm" className="pointer-events-none absolute top-2.5 left-2.5 !bg-black/45 font-semibold !text-white">Before</Badge>
-      <Badge size="sm" className="pointer-events-none absolute top-2.5 right-2.5 !bg-black/45 font-semibold !text-white">After</Badge>
+      <Badge size="sm" className="pointer-events-none absolute top-2.5 start-2.5 !bg-black/45 font-semibold !text-white">{m('before')}</Badge>
+      <Badge size="sm" className="pointer-events-none absolute top-2.5 end-2.5 !bg-black/45 font-semibold !text-white">{m('after')}</Badge>
       {/* the divider moves by transform (a full-width layer shifted by pos%), never by `left`, so dragging and the intro sweep skip layout */}
       <div className="pointer-events-none absolute inset-0" style={{ transform: `translateX(${pos}%)` }}>
-      <div className="pointer-events-auto absolute inset-y-0 left-0 w-0.5 -translate-x-1/2 bg-white shadow-[0_0_8px_rgba(0,0,0,.4)]">
-        <button type="button" role="slider" aria-label="Comparison position" aria-valuenow={Math.round(pos)} aria-valuemin={0} aria-valuemax={100}
+      <div /* rtl-lint-ignore: physical geometry */ className="pointer-events-auto absolute inset-y-0 left-0 w-0.5 -translate-x-1/2 bg-white shadow-[0_0_8px_rgba(0,0,0,.4)]">
+        <button type="button" role="slider" aria-label={m('compare')} aria-valuenow={Math.round(pos)} aria-valuemin={0} aria-valuemax={100}
           onKeyDown={e => {
+            // physical: the divider sits on an LTR image pair
             const k: Record<string, (p: number) => number> = { ArrowLeft: p => p - 5, ArrowRight: p => p + 5, Home: () => 0, End: () => 100 }
             if (k[e.key]) { e.preventDefault(); touched.current = true; setPos(p => clamp(k[e.key](p), 0, 100)) }
           }}
-          className="absolute top-1/2 left-1/2 flex h-[34px] w-[34px] -translate-1/2 cursor-ew-resize touch-none items-center justify-center rounded-full border-0 bg-white text-[#111] [@media(pointer:coarse)]:h-11 [@media(pointer:coarse)]:w-11 shadow-[0_2px_8px_rgba(0,0,0,.3)] focus-visible:shadow-[0_0_0_3px_var(--accent)] focus-visible:outline-none">
+          /* rtl-lint-ignore: physical geometry */ className="absolute top-1/2 left-1/2 flex h-[34px] w-[34px] -translate-1/2 cursor-ew-resize touch-none items-center justify-center rounded-full border-0 bg-white text-[#111] [@media(pointer:coarse)]:h-11 [@media(pointer:coarse)]:w-11 shadow-[0_2px_8px_rgba(0,0,0,.3)] focus-visible:shadow-[0_0_0_3px_var(--accent)] focus-visible:outline-none">
           <Icon name="chevronsLeftRight" size={14} strokeWidth={2.5} />
         </button>
       </div>

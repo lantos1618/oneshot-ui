@@ -3,7 +3,7 @@
 //   vite build --config vite.lib.config.ts              one ES module per source module (preserveModules), each
 //                                                       starting with "use client", so `@lyndon/ui/charts` etc. are
 //                                                       real entry points and App Router can import them. The barrels
-//                                                       (index.js, diagrams.js, examples.js) have no directive: they only
+//                                                       (index.js, core.js, diagrams.js, forms.js, examples.js) have no directive: they only
 //                                                       re-export, and Next.js rejects re-export-all inside a client boundary.
 //                                                       Also builds `@lyndon/ui/examples` (src/examples → dist/examples.js
 //                                                       and dist/examples/*.js, with types from tsconfig.examples.json).
@@ -17,7 +17,7 @@ import { defineConfig, type Plugin, type UserConfig } from 'vite'
 
 const external = [/^react($|\/)/, /^react-dom($|\/)/, /^motion($|\/)/]
 /** Entry modules that only re-export: no 'use client' banner. */
-const BARRELS = new Set(['index.js', 'diagrams.js', 'examples.js'])
+const BARRELS = new Set(['index.js', 'core.js', 'diagrams.js', 'forms.js', 'examples.js'])
 
 /**
  * Declarations for `@lyndon/ui/examples`. tsconfig.lib.json is rooted at src/lib, so the examples are declared on their
@@ -49,15 +49,15 @@ export default defineConfig(({ mode }): UserConfig => mode === 'utils'
       build: {
         outDir: 'dist', emptyOutDir: false, sourcemap: false, minify: false,
         lib: { entry: { utils: 'src/lib/utils.ts' }, formats: ['es'] },
-        rolldownOptions: { external, treeshake: { moduleSideEffects: false, manualPureFunctions: ['createContext', 'cn'] } },
+        rolldownOptions: { external, treeshake: { moduleSideEffects: false, manualPureFunctions: ['createContext', 'cn', 'memo', 'uiShared', 'defineMessages', 'registerIcons'] } },
       },
     }
   : {
       plugins: [react(), exampleTypes()],
       build: {
         outDir: 'dist', emptyOutDir: true, sourcemap: false, minify: false,
-        // diagrams is a re-export barrel: as its own entry it still gets a dist/diagrams.js for `@lyndon/ui/diagrams`
-        lib: { entry: { index: 'src/lib/index.ts', diagrams: 'src/lib/diagrams.tsx', examples: 'src/examples/index.ts' }, formats: ['es'] },
+        // core, diagrams and forms are re-export barrels: as entries they still get dist/core.js, dist/diagrams.js and dist/forms.js for their subpaths
+        lib: { entry: { index: 'src/lib/index.ts', core: 'src/lib/core.tsx', diagrams: 'src/lib/diagrams.tsx', forms: 'src/lib/forms.tsx', examples: 'src/examples/index.ts' }, formats: ['es'] },
         rolldownOptions: {
           external,
           output: { preserveModules: true, preserveModulesRoot: 'src/lib', entryFileNames: '[name].js', banner: chunk => (BARRELS.has(chunk.fileName) ? '' : "'use client';") },

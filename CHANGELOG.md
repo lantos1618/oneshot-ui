@@ -3,7 +3,7 @@
 All notable changes to `@lyndon/ui`. The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/);
 versions follow [semver](https://semver.org/) (while on 0.x, a minor version may break APIs).
 
-## [Unreleased] (0.4.0)
+## [0.4.0]
 
 ### Breaking
 
@@ -27,13 +27,56 @@ became copy-in registry blocks (`registry:block`), no longer exported by the pac
 | `import { OnboardingChecklist, type OnboardingTask } from '@lyndon/ui'` | registry block `onboarding-checklist` |
 | `import { CookieConsent, type CookieCategory, type CookieChoice } from '@lyndon/ui'` (or `/feedback`) | registry block `cookie-consent` |
 
+More breaking changes in 0.4:
+
+| Before (0.3) | Now (0.4) |
+| --- | --- |
+| `RTE_SAMPLE`, `MENTION_PEOPLE`, `MENTION_COMMANDS` from `@lyndon/ui` / `/editor` | `@lyndon/ui/examples` (removed from the main entry, not just deprecated) |
+| `PAGE_CSS` from `@lyndon/ui` / `/utils` | `@lyndon/ui/examples` |
+| `PhoneFrame` from `@lyndon/ui` / `/navigation` | `@lyndon/ui/examples` |
+| `AvatarGroup` (deprecated) | `AvatarStack` with `spread={false}` |
+| `InlineDatePicker` from `/data` | `/pickers`, `/forms` or `@lyndon/ui` (typed fields are now a locale-ordered `DateField`) |
+| UIProvider rendered a `ToastProvider` | `useToast()` without a provider uses one page-wide queue (mounted on the first toast); an explicit `<ToastProvider>` keeps its own |
+| Chat message text: Markdown with highlighted code fences | Markdown with plain code fences; pass `renderers={AI_RICH_RENDERERS}` (or `<AiRenderersProvider>`) for highlighting and JsonViewer |
+| `ShortcutOverlay` | `<ShortcutSheet variant="dialog">` (`ShortcutOverlay` is a deprecated alias) |
+| DataGrid `onPinnedColumnsChange` reported `{ left, right }` | reports `{ start, end, left, right }`; sticky cells use `inset-inline-start/end`; prefer `defaultPinnedColumns={{ start, end }}` |
+| `Sheet` defaulted to `side="right"` | defaults to `side="end"` (still the right edge in LTR); `start`/`end` added |
+| Scheduler weeks started on Monday everywhere | weeks start on the locale's first day (`en-US`: Sunday); hour labels follow the locale's clock |
+| DataGrid pager landmark "Pagination" | named "{grid label}: pages"; `Pagination` takes `aria-label` |
+
 Deprecated (still exported, removed in 0.5):
 
 | Deprecated | Use |
 | --- | --- |
-| `RTE_SAMPLE`, `MENTION_PEOPLE`, `MENTION_COMMANDS` from `@lyndon/ui` / `/editor` | the same names from `@lyndon/ui/examples` |
 | `ChatSources({ items: [{ name, desc, color, href }] })` | `SourceList({ sources: [{ title, domain, color, url }] })` |
 | `type SourceCard` | `type Source` (one model for Citation, SourceList and SourcesPanel) |
+
+### Added
+- **Internationalisation and RTL.** `UIProvider` takes `locale`, `dir` (`auto` from the locale), `timeZone`,
+  `weekStartsOn`, `hourCycle` and `messages`; `useLocale()` gives `{ locale, dir, t, fmt, … }`; every module's
+  strings go through per-module catalogues (`defineMessages` / `useMessages`) with English plus machine-drafted
+  German and Arabic (`UI_MESSAGES_DE`, `UI_MESSAGES_AR`, module `*_MESSAGES`; review before shipping them).
+  Numbers, dates and relative times follow the locale (Arabic-Indic digits in `ar-EG`). Every component is laid out
+  with logical CSS and mirrors in RTL; arrow keys follow the reading direction (`logicalArrow`), motion offsets use
+  `dirX`, directional icons flip (`.ui-flip`). Plots, timelines, media seek bars, code and diagrams stay left to
+  right by convention (see CONVENTIONS.md). Tooling: `scripts/i18n-extract.mjs`, `scripts/rtl-lint.mjs`; e2e gains
+  `desktop-rtl` and `iphone-rtl` profiles.
+- **Composable parts and `asChild`.** `Slot` and `asChild` (Button, IconButton, every Trigger); part APIs for Tabs
+  (vertical, overflow scrolling, lazy panels), Dialog, Sheet, AlertDialog, Popover, Tooltip, HoverCard,
+  DropdownMenu and ContextMenu (checkbox and radio items, submenus, typeahead), Accordion; new Toggle, ToggleGroup
+  and Toolbar. The config APIs are built on the parts and keep working.
+- **Dates and times.** Calendar `min`/`max`/`isDateUnavailable`/`weekStartsOn`/`locale`/`numberOfMonths` and a
+  month/year quick picker (APG date grid); new `DateField`, `TimeField`, `DateTimeField`, `DateTimePicker` (IANA
+  time zones, ISO 8601 with offset, DST rules documented), `MonthPicker`, `YearPicker`, `TimeZonePicker`; range
+  presets; async `MultiSelect` (`loadOptions`, creatable, groups).
+- **Drop-in files, registry, CLI and docs.** One self-contained `.tsx` per component (about 200, median ~11k
+  tokens) built from the dependency graph; a shadcn-compatible registry (`r/<name>.json`, blocks as
+  `registry:block`); `npx @lyndon/ui add|list|info` (offline, safe paths); a docs site with live demos and props
+  tables generated from the types, deployed to GitHub Pages; `llms.txt` and `llms-full.txt`. Module state and
+  contexts are shared across drop-in files (`uiShared`); each file embeds only the icons it draws.
+- **Module splits.** `core` is a barrel over `helpers`, `theme`, `locale`, `hooks`, `icons`, `primitives`, `slot`,
+  `safe`, `formcontrol`, `shared`; `forms` over `fields`, `inputs`, `select`, `pickers`, `upload`; each is its
+  own subpath.
 
 ### Changed
 - **Diagrams split** into `@lyndon/ui/gantt` (Gantt), `/statechart` (Statechart, StateDiagram, WorkflowEngine,
@@ -56,6 +99,14 @@ Deprecated (still exported, removed in 0.5):
 - **Collapse and AutoHeight are one implementation:** `Collapse` animates open/closed and, while open, follows its
   content's height with a spring; `open` is optional (always shown) and `transition` configurable. `AutoHeight` is
   `Collapse` without `open`.
+- **AI chat renderers:** `MessageParts`/`Message` take `renderers` (`AiRenderers`) or `<AiRenderersProvider>`;
+  `AI_RICH_RENDERERS` adds highlighted code and JsonViewer. Model pickers are native selects, AgentComposer's
+  advanced settings are inline, "+ Add connector" needs `onAddConnector`, PermissionRequest has neutral defaults.
+- **Labels default to translated text** (charts, comments, presence, forms, pickers): pass your own to override.
+  Chart `format` defaults to the provider locale's compact format. `useRoving` swaps ←/→ in RTL.
+- Removed module-scope helpers that are now locale-aware inside components: `chartRange`, `chartFixed`,
+  `forestPct`, `forestCi`, `inboxTime`. `timeOptions`/`timeZoneOptions` return `TimeOption[]`. `RANGE_PRESETS` no
+  longer has "Last 14 days"; DateRangePicker shows ranges with `Intl` `formatRange`.
 
 ## [0.3.0]
 

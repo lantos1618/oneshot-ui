@@ -4,8 +4,10 @@
  * bundles their code into dist/utils.js (it does not import the client modules).
  */
 export { safeUrl, safeMediaUrl, cssUrl, safeCssValue, safeColor, maxOf, minOf, extent } from './core'
-export { cn, variants, spring, sleep, mix, contrast, derive, themePalette, themeTokens, themeCSS, themeStored, editPalette, THEMES, FONTS, DEFAULT_THEME, TOKENS, PAGE_CSS, FONT_CSS } from './core'
+export { cn, variants, spring, sleep, mix, contrast, derive, themePalette, themeTokens, themeCSS, themeStored, editPalette, THEMES, FONTS, DEFAULT_THEME, TOKENS, FONT_CSS } from './core'
 export type { Palette, Theme, ThemeSettings, CustomTheme } from './core'
+export { formatMessage, createTranslator, fmtFor, localeDir, localeWeekStart, logicalArrow, dirX, UI_DIR_CSS, UI_MESSAGES_EN, defineMessages, createMessagesTranslator, messageCatalog } from './core'
+export type { UIDir, LocaleFmt, MessageVars, Translate, UIMessages, UIMessageKey, MessageDefs } from './core'
 export { themeScriptSource } from './provider'
 export { highlightCode, codeLineDiff, codeLanguageOf, CODE_LANGUAGE_NAMES } from './code'
 export type { CodeLanguage, CodeDiffRow } from './code'

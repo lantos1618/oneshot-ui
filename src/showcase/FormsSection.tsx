@@ -1,5 +1,6 @@
 import { useMemo, useRef, useState } from 'react'
-import { AddressAutocomplete, type AddressRecord, Button, Checkbox, Combobox, DatePicker, DateTimePicker, EmojiInput, Field, Form, FormField, Input, MultiSelect, type Option, PhoneInput, RangeSlider, Rating, SegmentedControl, TagInput, MENTION_COMMANDS, MENTION_PEOPLE, MentionsInput, RTE_SAMPLE, RichTextEditor, Select, SignaturePad, Switch, Textarea, UnsavedChangesBar, sleep, useFormDraft, useToast } from '../lib'
+import { AddressAutocomplete, type AddressRecord, Button, Checkbox, Combobox, DatePicker, DateTimePicker, EmojiInput, Field, Form, FormField, Input, MultiSelect, type Option, PhoneInput, RangeSlider, Rating, SegmentedControl, TagInput, MentionsInput, RichTextEditor, Select, SignaturePad, Switch, Textarea, UnsavedChangesBar, sleep, useFormDraft, useToast } from '../lib'
+import { MENTION_COMMANDS, MENTION_PEOPLE, RTE_SAMPLE } from '../examples'
 import { Section, Spec } from './kit'
 
 const ROLE_OPTS = ['Admin', 'Editor', 'Viewer'].map(v => ({ value: v, label: v }))

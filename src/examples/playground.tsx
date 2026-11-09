@@ -1,10 +1,17 @@
 import { MOTION_PRESETS, type MotionPreset, motionTransition, useViewport } from '../lib/motion'
 import { useState, useRef, useLayoutEffect, useEffect } from 'react'
 import { useAnimate, useReducedMotion, motion, type Transition } from 'motion/react'
-import { cn, Badge, Button, Chip, isCoarsePointer } from '../lib/core'
+import { cn, Badge, Button, Chip, defineMessages, dirX, isCoarsePointer, useLocale, useMessages } from '../lib/core'
 import { SegmentedControl, Slider } from '../lib/forms'
 import { CodeBlock } from '../lib/code'
 /* Motion playground (an example, not part of the stable API): tune a spring or ease and copy the call. */
+
+/** Playground strings (machine-drafted de/ar). */
+export const PLAYGROUND_MESSAGES = defineMessages('playground', {
+  en: { spring: 'Spring', ease: 'Ease', bounce: 'Bounce', duration: 'Duration', card: 'Card', scaleIn: 'Scale in', previewSwitch: 'Preview switch', badge: 'New', replay: 'Replay' },
+  de: { spring: 'Feder', ease: 'Easing', bounce: 'Federung', duration: 'Dauer', card: 'Karte', scaleIn: 'Einblenden', previewSwitch: 'Vorschau-Schalter', badge: 'Neu', replay: 'Wiederholen' },
+  ar: { spring: 'نابض', ease: 'تسارع', bounce: 'الارتداد', duration: 'المدة', card: 'بطاقة', scaleIn: 'تكبير للظهور', previewSwitch: 'مفتاح المعاينة', badge: 'جديد', replay: 'إعادة التشغيل' },
+})
 
 /** The code the playground shows for a set of values. */
 const playgroundSnippet = (type: 'spring' | 'ease', bounce: number, duration: number) => {
@@ -24,24 +31,25 @@ export function MotionPlayground({ defaultType = 'spring', defaultBounce = 0.25,
   const [bounce, setBounce] = useState(defaultBounce)
   const [duration, setDuration] = useState(defaultDuration)
   const [side, setSide] = useState(false)
+  const m = useMessages(PLAYGROUND_MESSAGES), { fmt, dir } = useLocale()
   const [scope, animate] = useAnimate<HTMLDivElement>()
   const reduce = useReducedMotion()
   const { seen } = useViewport(scope, { amount: 0.4 })
-  const latest = useRef({ type, bounce, duration, side })
-  useLayoutEffect(() => { latest.current = { type, bounce, duration, side } })
+  const latest = useRef({ type, bounce, duration, side, dir })
+  useLayoutEffect(() => { latest.current = { type, bounce, duration, side, dir } })
   const timer = useRef<ReturnType<typeof setTimeout>>(undefined)
 
   const replay = () => {
-    const { type, bounce, duration, side } = latest.current
+    const { type, bounce, duration, side, dir } = latest.current
     const t = reduce ? { duration: 0 } : motionTransition(type, bounce, duration), next = !side
     setSide(next); latest.current.side = next
     onChange?.(motionTransition(type, bounce, duration))
     if (!scope.current) return
     const track = scope.current.querySelector<HTMLElement>('[data-mp="track"]')
     const w = (track?.clientWidth ?? 300) - 72
-    animate('[data-mp="box"]', { x: next ? w : 0 }, t)
+    animate('[data-mp="box"]', { x: next ? dirX(w, dir) : 0 }, t) // towards the end side in either direction
     animate('[data-mp="card"]', { scale: [0.8, 1], opacity: [0, 1] }, t)
-    animate('[data-mp="knob"]', { x: next ? (isCoarsePointer() ? 20 : 16) : 0 }, t)
+    animate('[data-mp="knob"]', { x: next ? dirX(isCoarsePointer() ? 20 : 16, dir) : 0 }, t)
     animate('[data-mp="badge"]', { scale: [0, 1] }, t)
   }
   const replaySoon = (ms = 120) => { clearTimeout(timer.current); timer.current = setTimeout(replay, ms) }
@@ -53,10 +61,10 @@ export function MotionPlayground({ defaultType = 'spring', defaultBounce = 0.25,
     <div className={cn('grid gap-4 md:grid-cols-[minmax(0,340px)_minmax(0,1fr)]', className)}>
       <div className="flex min-w-0 flex-col gap-3">
         <SegmentedControl className="self-start" value={type} onChange={v => { setType(v as 'spring' | 'ease'); latest.current.type = v as 'spring' | 'ease'; replaySoon(0) }}
-          options={[{ value: 'spring', label: 'Spring' }, { value: 'ease', label: 'Ease' }]} />
-        <Slider compact label="Bounce" min={0} max={0.8} step={0.05} value={bounce} disabled={type !== 'spring'} format={v => v.toFixed(2)}
+          options={[{ value: 'spring', label: m('spring') }, { value: 'ease', label: m('ease') }]} />
+        <Slider compact label={m('bounce')} min={0} max={0.8} step={0.05} value={bounce} disabled={type !== 'spring'} format={v => fmt.number(v, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
           onChange={v => { setBounce(v); latest.current.bounce = v; replaySoon() }} />
-        <Slider compact label="Duration" min={0.1} max={1.5} step={0.05} value={duration} format={v => `${v.toFixed(2)}s`}
+        <Slider compact label={m('duration')} min={0.1} max={1.5} step={0.05} value={duration} format={v => fmt.number(v, { style: 'unit', unit: 'second', unitDisplay: 'narrow', minimumFractionDigits: 2, maximumFractionDigits: 2 })}
           onChange={v => { setDuration(v); latest.current.duration = v; replaySoon() }} />
         <div className="flex min-h-[30px] flex-wrap gap-1.5 [@media(pointer:coarse)]:gap-2">
           {presets.map(([n, b, d]) => {
@@ -72,15 +80,15 @@ export function MotionPlayground({ defaultType = 'spring', defaultBounce = 0.25,
         </div>
         <div className="relative flex h-16 items-center gap-5 rounded-[var(--r-md)] border border-[var(--line)] bg-[var(--card)] px-4">
           <motion.div data-mp="card" className="flex flex-col rounded-[var(--r-md)] border border-[var(--line)] bg-[var(--card)] px-3 py-2 shadow-[var(--shadow)]">
-            <b className="text-[13px] font-semibold">Card</b><span className="text-xs text-[var(--fg3)]">Scale in</span>
+            <b className="text-[13px] font-semibold">{m('card')}</b><span className="text-xs text-[var(--fg3)]">{m('scaleIn')}</span>
           </motion.div>
-          <button role="switch" aria-checked={side} aria-label="Preview switch" onClick={replay}
+          <button role="switch" aria-checked={side} aria-label={m('previewSwitch')} onClick={replay}
             className={cn('relative h-[22px] w-[38px] flex-none cursor-pointer rounded-full border-0 p-0 transition-colors [@media(pointer:coarse)]:h-8 [@media(pointer:coarse)]:w-[52px]', side ? 'bg-[var(--primary)]' : 'bg-[var(--line2)]')}>
-            <motion.i data-mp="knob" className="absolute top-[3px] left-[3px] block h-4 w-4 [@media(pointer:coarse)]:h-[26px] [@media(pointer:coarse)]:w-[26px] rounded-full bg-[var(--card)] shadow-[0_1px_2px_rgba(0,0,0,.25)]" />
+            <motion.i data-mp="knob" className="absolute top-[3px] start-[3px] block h-4 w-4 [@media(pointer:coarse)]:h-[26px] [@media(pointer:coarse)]:w-[26px] rounded-full bg-[var(--card)] shadow-[0_1px_2px_rgba(0,0,0,.25)]" />
           </button>
-          <motion.span data-mp="badge" className="inline-flex"><Badge tone="accent">New</Badge></motion.span>
+          <motion.span data-mp="badge" className="inline-flex"><Badge tone="accent">{m('badge')}</Badge></motion.span>
         </div>
-        <Button size="sm" onClick={replay} className="self-center">Replay</Button>
+        <Button size="sm" onClick={replay} className="self-center">{m('replay')}</Button>
       </div>
     </div>
   )

@@ -5,5 +5,10 @@
     "media": {
       "label-content-name-mismatch": 16
     }
+  },
+  "iphone-rtl": {
+    "layout": {
+      "label-content-name-mismatch": 1
+    }
   }
 }

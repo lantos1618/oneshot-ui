@@ -46,7 +46,7 @@ export function PagesSection() {
           { id: 'storage', name: 'Extra storage', detail: '100 GB add-on', price: 48, qty: 1, swatch: 'linear-gradient(135deg,var(--c3),var(--warn))' },
         ]} />
       </Spec>
-      <Spec title="Settings page" desc="Section nav on the left, panels swap with a slide. Changes save automatically." span={3}>
+      <Spec title="Settings page" desc="Section nav at the start, panels swap with a slide. Changes save automatically." span={3}>
         <SettingsPage sections={sections} onSave={(id, v) => { if (id === 'theme') set({ mode: v as 'system' | 'light' | 'dark' }) }} />
       </Spec>
       <Spec title="Profile" desc="Cover, avatar, stats and tabs. Follow toggles and the count rolls." span={2}>

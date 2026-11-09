@@ -1,7 +1,6 @@
 import { type ReactNode, useLayoutEffect } from 'react'
 import { MotionConfig } from 'motion/react'
-import { DEFAULT_THEME, FONT_CSS, LocaleProvider, type LocaleSettings, PAGE_CSS, THEME_LEGACY_KEY, THEME_STORAGE_KEY, THEME_TOKEN_NAMES, THEME_VALUE_SOURCE, TOKENS, ThemeProvider, type ThemeSettings, UI_DIR_CSS, type UIMessages, cn, themeStyle, themeTokens, useLocale, useTheme } from './core'
-import { ToastProvider } from './feedback'
+import { DEFAULT_THEME, FONT_CSS, LocaleProvider, type LocaleSettings, THEME_LEGACY_KEY, THEME_STORAGE_KEY, THEME_TOKEN_NAMES, THEME_VALUE_SOURCE, TOKENS, ThemeProvider, type ThemeSettings, UIHosts, UI_DIR_CSS, type UIMessages, cn, themeStyle, themeTokens, useLocale, useTheme } from './core'
 
 export type UIProviderProps = LocaleSettings & {
   children: ReactNode
@@ -33,12 +32,16 @@ export type UIProviderProps = LocaleSettings & {
   injectStyles?: boolean
 }
 
+/** The page background and text colour, on `html`: added with target="html" (dist/tokens.css carries the same rule). */
+const PROVIDER_PAGE_CSS = 'html{background:var(--bg);color:var(--fg)}'
+
 /** The Google Fonts stylesheet behind FONT_CSS, for a `<link>` when inline styles are off. */
 const PROVIDER_FONT_HREF = 'https://fonts.googleapis.com/css2?family=Geist:wght@400;500;600&family=Geist+Mono:wght@400;500&display=swap'
 
 /**
- * Wrap your app once. Injects the tokens (and, with `fonts`, the Geist import), applies the theme, hosts toasts inside
- * the themed `.ui-root` wrapper, and turns motion off for reduced-motion users. Makes no outside requests unless `fonts`.
+ * Wrap your app once. Injects the tokens (and, with `fonts`, the Geist import), applies the theme, hosts page-level UI
+ * (the toast region, mounted on the first `useToast()` toast) inside the themed `.ui-root` wrapper, and turns motion off
+ * for reduced-motion users. Makes no outside requests unless `fonts`.
  * `locale`/`dir`/`timeZone`/`weekStartsOn`/`messages` set what `useLocale()` returns (default en-GB, ltr) and put
  * `lang`/`dir` on the wrapper (and on <html> with target="html").
  */
@@ -47,11 +50,12 @@ export function UIProvider({ children, className, defaultTheme, storageKey, pers
   return (
     <MotionConfig reducedMotion="user" nonce={nonce}>
       {fonts && (injectStyles ? <style nonce={nonce}>{FONT_CSS}</style> : <link rel="stylesheet" href={PROVIDER_FONT_HREF} nonce={nonce} />)}
-      {injectStyles && <style nonce={nonce}>{(target === 'html' ? TOKENS + '\n' + PAGE_CSS : TOKENS) + '\n' + UI_DIR_CSS}</style>}
+      {injectStyles && <style nonce={nonce}>{(target === 'html' ? TOKENS + '\n' + PROVIDER_PAGE_CSS : TOKENS) + '\n' + UI_DIR_CSS}</style>}
       <LocaleProvider locale={locale} dir={dir} timeZone={timeZone} weekStartsOn={weekStartsOn} hourCycle={hourCycle} messages={messages}>
         <ThemeProvider defaultSettings={defaultTheme} storageKey={storageKey} persist={persist} fonts={fonts} target={target}>
           <UIProviderRoot className={className}>
-            <ToastProvider>{children}</ToastProvider>
+            {children}
+            <UIHosts />
           </UIProviderRoot>
         </ThemeProvider>
       </LocaleProvider>
@@ -138,6 +142,7 @@ export const UI_MESSAGES_DE: UIMessages = {
   'status.typing': '{name} schreibt…', 'status.assistantTyping': 'Assistent schreibt', 'status.thinking': 'Denkt nach…', 'status.progress': 'Fortschritt',
   'status.offline': 'Du bist offline. Änderungen werden lokal gespeichert. Neuer Versuch in {seconds} s', 'status.better': '(besser)', 'status.worse': '(schlechter)',
   'status.deltaTitle': '{value} als im Vorzeitraum', 'status.higher': 'Höher', 'status.lower': 'Niedriger',
+  'status.betterWord': 'Besser', 'status.worseWord': 'Schlechter',
   'date.today': 'Heute', 'date.yesterday': 'Gestern', 'date.tomorrow': 'Morgen', 'date.previousMonth': 'Vorheriger Monat', 'date.nextMonth': 'Nächster Monat', 'date.chooseDate': 'Datum wählen',
   'paging.pagination': 'Seitennavigation', 'paging.previousPage': 'Vorherige Seite', 'paging.nextPage': 'Nächste Seite', 'paging.page': 'Seite {page}',
   'paging.pageOf': 'Seite {page} von {total}', 'paging.rangeOf': '{from}–{to} von {total}', 'paging.rowsPerPage': 'Zeilen pro Seite',
@@ -181,6 +186,7 @@ export const UI_MESSAGES_AR: UIMessages = {
   'status.typing': '{name} يكتب…', 'status.assistantTyping': 'المساعد يكتب', 'status.thinking': 'يفكر…', 'status.progress': 'التقدم',
   'status.offline': 'أنت غير متصل. تُحفظ التعديلات محليًا. إعادة المحاولة خلال {seconds} ث', 'status.better': '(أفضل)', 'status.worse': '(أسوأ)',
   'status.deltaTitle': '{value} مقارنة بالفترة السابقة', 'status.higher': 'أعلى', 'status.lower': 'أدنى',
+  'status.betterWord': 'أفضل', 'status.worseWord': 'أسوأ',
   'date.today': 'اليوم', 'date.yesterday': 'أمس', 'date.tomorrow': 'غدًا', 'date.previousMonth': 'الشهر السابق', 'date.nextMonth': 'الشهر التالي', 'date.chooseDate': 'اختر تاريخًا',
   'paging.pagination': 'التنقل بين الصفحات', 'paging.previousPage': 'الصفحة السابقة', 'paging.nextPage': 'الصفحة التالية', 'paging.page': 'الصفحة {page}',
   'paging.pageOf': 'الصفحة {page} من {total}', 'paging.rangeOf': '{from}–{to} من {total}', 'paging.rowsPerPage': 'صفوف في كل صفحة',

@@ -7,6 +7,8 @@ import type { ShowcaseOptions } from './tests/e2e/fixtures'
 const CI = !!process.env.CI
 const external = process.env.E2E_BASE_URL
 const PORT = 4173
+/** The tests the iphone-rtl profile runs. */
+const RTL_PHONE_SUBSET = /page shell|section (buttons|inputs|forms|navigation|feedback|overlays|data|layout)$/
 
 export default defineConfig<ShowcaseOptions>({
   testDir: 'tests/e2e',
@@ -33,6 +35,10 @@ export default defineConfig<ShowcaseOptions>({
     { name: 'desktop-dark', use: { viewport: { width: 1440, height: 900 }, colorScheme: 'dark', themeMode: 'dark' } },
     // iPhone 13 metrics (390 × 664 CSS px, touch, mobile) in Chromium instead of WebKit.
     { name: 'iphone-13', use: { ...devices['iPhone 13'], browserName: 'chromium', colorScheme: 'light', themeMode: 'light' } },
+    // Right to left: the showcase in Arabic (ar-EG, dir="rtl" from the locale). Desktop covers every section; the phone a
+    // subset (the page shell plus the sections with the most direction-sensitive layout) to keep the run short.
+    { name: 'desktop-rtl', use: { viewport: { width: 1440, height: 900 }, colorScheme: 'light', themeMode: 'light', showcaseLocale: 'ar-EG', locale: 'ar-EG' } },
+    { name: 'iphone-rtl', grep: RTL_PHONE_SUBSET, use: { ...devices['iPhone 13'], browserName: 'chromium', colorScheme: 'light', themeMode: 'light', showcaseLocale: 'ar-EG', locale: 'ar-EG' } },
   ],
   webServer: external ? undefined : {
     command: `pnpm exec vite build --logLevel warn && pnpm exec vite preview --port ${PORT} --strictPort`,

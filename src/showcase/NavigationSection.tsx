@@ -1,7 +1,8 @@
 import { useRef, useState, type AnchorHTMLAttributes, type Ref } from 'react'
 import { AnimatePresence, motion, useInView } from 'motion/react'
-import { Badge, Breadcrumbs, Button, CollapsibleSidebar, ContextMenu, type ContextMenuEntry, DropdownMenu, Icon, IconButton, type IconName, MegaMenu, type MegaMenuItem, MobileTabBar, Pagination, PhoneFrame,
-  type SidebarEntry, Switch, type TabBarItem, Tabs, Toggle, ToggleGroup, Toolbar, Wizard, cn, spring, useToast } from '../lib'
+import { Badge, Breadcrumbs, Button, CollapsibleSidebar, ContextMenu, type ContextMenuEntry, DropdownMenu, Icon, IconButton, type IconName, MegaMenu, type MegaMenuItem, MobileTabBar, Pagination,
+  type SidebarEntry, Switch, type TabBarItem, Tabs, Toggle, ToggleGroup, Toolbar, Wizard, cn, spring, useDir, useToast } from '../lib'
+import { PhoneFrame } from '../examples'
 import { Section, Spec } from './kit'
 
 const NAV_SIDEBAR: SidebarEntry[] = [
@@ -188,9 +189,11 @@ function NavTabsPartsDemo() {
 /* Toolbar with toggle groups, plus a standalone ToggleGroup and Toggle */
 function NavToolbarDemo() {
   const [marks, setMarks] = useState<string[]>(['bold'])
-  const [align, setAlign] = useState('left')
+  const [align, setAlign] = useState('start')
   const [pinned, setPinned] = useState(true)
-  const alignCls = { left: 'text-left', center: 'text-center', right: 'text-right' }[align]
+  const rtl = useDir() === 'rtl' // start/end alignment: the icons point at the edge that is, the left one in LTR
+  const alignCls = { start: 'text-start', center: 'text-center', end: 'text-end' }[align]
+  const alignIcon = { start: rtl ? 'alignRight' : 'alignLeft', center: 'alignCenter', end: rtl ? 'alignLeft' : 'alignRight' } as const
   return (
     <>
       <Toolbar aria-label="Formatting">
@@ -201,14 +204,15 @@ function NavToolbarDemo() {
         </Toolbar.ToggleGroup>
         <Toolbar.Separator />
         <Toolbar.ToggleGroup type="single" size="icon-sm" value={align} onValueChange={setAlign} aria-label="Alignment">
-          {(['left', 'center', 'right'] as const).map(a => <Toolbar.ToggleItem key={a} value={a} aria-label={`Align ${a}`}><Icon name={a === 'left' ? 'alignLeft' : a === 'center' ? 'alignCenter' : 'alignRight'} size={15} /></Toolbar.ToggleItem>)}
+          {(['start', 'center', 'end'] as const).map(a => <Toolbar.ToggleItem key={a} value={a} aria-label={`Align ${a}`}><Icon name={alignIcon[a]} size={15} /></Toolbar.ToggleItem>)}
+
         </Toolbar.ToggleGroup>
         <Toolbar.Separator />
         <Toolbar.Toggle size="icon-sm" pressed={pinned} onPressedChange={setPinned} aria-label="Pin note"><Icon name="bookmark" size={15} /></Toolbar.Toggle>
         <Toolbar.Button size="icon-sm" aria-label="Insert link"><Icon name="link" size={15} /></Toolbar.Button>
       </Toolbar>
       <p className={cn('m-0 rounded-[var(--r-md)] bg-[var(--bg)] px-3 py-2 text-[13px]', alignCls, marks.includes('bold') && 'font-semibold', marks.includes('italic') && 'italic', marks.includes('underline') && 'underline')}>
-        Ship the onboarding redesign by Friday.{pinned && <Badge tone="accent" size="sm" className="ml-1.5 align-middle not-italic">Pinned</Badge>}
+        Ship the onboarding redesign by Friday.{pinned && <Badge tone="accent" size="sm" className="ms-1.5 align-middle not-italic">Pinned</Badge>}
       </p>
       <div className="flex flex-wrap items-center gap-2">
         <ToggleGroup type="single" variant="outline" size="sm" defaultValue="week" aria-label="Range">

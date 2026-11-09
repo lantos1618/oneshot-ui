@@ -21,7 +21,7 @@ import { execFileSync } from 'node:child_process'
 
 const root = new URL('..', import.meta.url).pathname
 const BUNDLES = {
-  ui: ['core', 'motion', 'virtual', 'overlay', 'forms', 'navigation', 'feedback', 'data', 'layout', 'appearance', 'provider'],
+  ui: ['core', 'helpers', 'shared', 'locale', 'safe', 'theme', 'hooks', 'icons', 'slot', 'primitives', 'formcontrol', 'motion', 'virtual', 'overlay', 'formkit', 'fields', 'select', 'inputs', 'pickers', 'upload', 'forms', 'navigation', 'feedback', 'data', 'layout', 'appearance', 'provider'],
   'ui-charts': ['charts', 'diagramkit', 'gantt', 'statechart', 'trace', 'network', 'diagrams', 'geoworld', 'geoland', 'geo'],
   'ui-content': ['editor', 'datagrid', 'scheduler', 'code', 'markdown', 'media', 'collab', 'pages'],
   'ui-ai': ['aistream', 'ai', 'aichat', 'aiagent'],

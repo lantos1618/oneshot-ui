@@ -1,40 +1,85 @@
 import { useEffect, useId, useLayoutEffect, useRef, useState, type ReactNode, type KeyboardEvent as RKeyboardEvent } from 'react'
 import { AnimatePresence, motion } from 'motion/react'
-import { Avatar, Button, Icon, type IconName, Spinner, cn, inputClass, isCoarsePointer, safeUrl, spring, useOutside, useRoving, useTheme } from './core'
+import { Avatar, Button, Icon, type IconName, type MessageKeyOf, Spinner, cn, defineMessages, logicalArrow, useLocale, useMessages, inputClass, isCoarsePointer, safeUrl, spring, useOutside, useRoving, useTheme } from './core'
 import { play, shake } from './motion'
 import { FloatingPanel, MenuLabel } from './overlay'
-import { OptionList, type Option } from './forms'
+import { OptionList } from './select'
+import { type Option } from './fields'
 
 /* ════════════════════════════════════════════════════════════════════════════
  * FORMS: editors and smart inputs (rich text, mentions, save bar, signature, address, emoji)
  * ══════════════════════════════════════════════════════════════════════════ */
 
-const EditorGlyph = ({ d }: { d: IconName }) => <Icon name={d} size={15} />
+/** The editors' and smart inputs' strings (machine-drafted de/ar). Override one with `<UIProvider messages={{ 'editor.placeholder': … }}>`. */
+export const EDITOR_MESSAGES = defineMessages('editor', {
+  en: {
+    bold: 'Bold', italic: 'Italic', underline: 'Underline', strike: 'Strikethrough', h1: 'Heading 1', h1Name: 'H1 heading', h2: 'Heading 2', h2Name: 'H2 heading',
+    paragraph: 'Paragraph', bullets: 'Bulleted list', numbered: 'Numbered list', quote: 'Quote', code: 'Inline code', link: 'Link',
+    writeHint: 'Start writing… type # for a heading, - for a list', editor: 'Editor', formatting: 'Formatting', selectionFormatting: 'Selection formatting',
+    stats: '{words, plural, one {# word} other {# words}} · {minutes} min read', saving: 'Saving…', linkPlaceholder: 'Paste a link, Enter to apply', linkUrl: 'Link URL',
+    messageBox: 'Message', messagePlaceholder: 'Write a message…{hint, select, both { try @ or /} people { try @} commands { try /} other {}}',
+    commands: 'Commands', people: 'People', mentionHint: '↑ ↓ to choose, Enter to insert', mentionTapHint: 'Type @ or /, then tap a name',
+    unsaved: 'Unsaved changes', saveChanges: 'Save changes', savingLabel: 'Saving',
+    signatureStrokes: 'Signature, {count, plural, one {# stroke} other {# strokes}}', signatureArea: 'Signature area, draw with mouse, pen or finger', signHere: 'Sign here',
+    addressPlaceholder: 'Start typing, e.g. Bahn', address: 'Address', suggestions: 'Suggestions', city: 'City', postcode: 'Postcode', country: 'Country',
+    emojiCategories: 'Emoji categories', searchEmoji: 'Search emoji', recent: 'Recent', noEmoji: 'No emoji found for “{query}”',
+    smileys: 'Smileys', gestures: 'Gestures', nature: 'Nature', food: 'Food', objects: 'Objects',
+    reactionPlaceholder: 'Add a reaction or type', pickEmoji: 'Pick emoji', emoji: 'Emoji', reactions: 'Reactions', removeReaction: '{emoji} {count}, remove one',
+  },
+  de: {
+    bold: 'Fett', italic: 'Kursiv', underline: 'Unterstrichen', strike: 'Durchgestrichen', h1: 'Überschrift 1', h1Name: 'H1 Überschrift', h2: 'Überschrift 2', h2Name: 'H2 Überschrift',
+    paragraph: 'Absatz', bullets: 'Aufzählung', numbered: 'Nummerierte Liste', quote: 'Zitat', code: 'Inline-Code', link: 'Link',
+    writeHint: 'Schreib los… # für eine Überschrift, - für eine Liste', editor: 'Editor', formatting: 'Formatierung', selectionFormatting: 'Auswahl formatieren',
+    stats: '{words, plural, one {# Wort} other {# Wörter}} · {minutes} Min. Lesezeit', saving: 'Wird gespeichert…', linkPlaceholder: 'Link einfügen, Enter zum Übernehmen', linkUrl: 'Link-URL',
+    messageBox: 'Nachricht', messagePlaceholder: 'Nachricht schreiben…{hint, select, both { probier @ oder /} people { probier @} commands { probier /} other {}}',
+    commands: 'Befehle', people: 'Personen', mentionHint: '↑ ↓ zum Auswählen, Enter zum Einfügen', mentionTapHint: 'Tippe @ oder /, dann auf einen Namen',
+    unsaved: 'Ungespeicherte Änderungen', saveChanges: 'Änderungen speichern', savingLabel: 'Wird gespeichert',
+    signatureStrokes: 'Unterschrift, {count, plural, one {# Strich} other {# Striche}}', signatureArea: 'Unterschriftsfeld, mit Maus, Stift oder Finger zeichnen', signHere: 'Hier unterschreiben',
+    addressPlaceholder: 'Tippe, z. B. Bahn', address: 'Adresse', suggestions: 'Vorschläge', city: 'Ort', postcode: 'Postleitzahl', country: 'Land',
+    emojiCategories: 'Emoji-Kategorien', searchEmoji: 'Emoji suchen', recent: 'Zuletzt', noEmoji: 'Kein Emoji für „{query}“ gefunden',
+    smileys: 'Smileys', gestures: 'Gesten', nature: 'Natur', food: 'Essen', objects: 'Objekte',
+    reactionPlaceholder: 'Reaktion hinzufügen oder tippen', pickEmoji: 'Emoji auswählen', emoji: 'Emoji', reactions: 'Reaktionen', removeReaction: '{emoji} {count}, eine entfernen',
+  },
+  ar: {
+    bold: 'غامق', italic: 'مائل', underline: 'تسطير', strike: 'يتوسطه خط', h1: 'عنوان 1', h1Name: 'H1 عنوان', h2: 'عنوان 2', h2Name: 'H2 عنوان',
+    paragraph: 'فقرة', bullets: 'قائمة نقطية', numbered: 'قائمة مرقمة', quote: 'اقتباس', code: 'شيفرة ضمن السطر', link: 'رابط',
+    writeHint: 'ابدأ الكتابة… اكتب # لعنوان، و- لقائمة', editor: 'المحرر', formatting: 'التنسيق', selectionFormatting: 'تنسيق التحديد',
+    stats: '{words, plural, zero {لا كلمات} one {كلمة واحدة} two {كلمتان} few {# كلمات} many {# كلمة} other {# كلمة}} · {minutes} د قراءة', saving: 'جارٍ الحفظ…',
+    linkPlaceholder: 'الصق رابطًا، ثم Enter للتطبيق', linkUrl: 'عنوان الرابط',
+    messageBox: 'رسالة', messagePlaceholder: 'اكتب رسالة…{hint, select, both { جرّب @ أو /} people { جرّب @} commands { جرّب /} other {}}',
+    commands: 'الأوامر', people: 'الأشخاص', mentionHint: '↑ ↓ للاختيار، Enter للإدراج', mentionTapHint: 'اكتب @ أو / ثم انقر على اسم',
+    unsaved: 'تغييرات غير محفوظة', saveChanges: 'حفظ التغييرات', savingLabel: 'جارٍ الحفظ',
+    signatureStrokes: 'توقيع، {count, plural, zero {لا خطوط} one {خط واحد} two {خطان} few {# خطوط} many {# خطًا} other {# خط}}', signatureArea: 'منطقة التوقيع، ارسم بالفأرة أو القلم أو الإصبع', signHere: 'وقّع هنا',
+    addressPlaceholder: 'ابدأ الكتابة، مثل Bahn', address: 'العنوان', suggestions: 'اقتراحات', city: 'المدينة', postcode: 'الرمز البريدي', country: 'الدولة',
+    emojiCategories: 'فئات الرموز التعبيرية', searchEmoji: 'ابحث عن رمز تعبيري', recent: 'الأخيرة', noEmoji: 'لا توجد رموز تعبيرية لـ”{query}“',
+    smileys: 'وجوه', gestures: 'إيماءات', nature: 'طبيعة', food: 'طعام', objects: 'أشياء',
+    reactionPlaceholder: 'أضف تفاعلًا أو اكتب', pickEmoji: 'اختر رمزًا تعبيريًا', emoji: 'رمز تعبيري', reactions: 'التفاعلات', removeReaction: '{emoji} {count}، إزالة واحد',
+  },
+})
+type EditorKey = MessageKeyOf<typeof EDITOR_MESSAGES>
+
+const EditorGlyph = ({ d, flip }: { d: IconName; flip?: boolean }) => <Icon name={d} size={15} className={flip ? 'ui-flip' : undefined} />
 
 /* Rich text ─────────────────────────────────────────────────────────────────── */
 
-type RteTool = { cmd: string; label: string; glyph: ReactNode; keys?: string; /** accessible name when it differs from `label` (it must start with the visible glyph text) */ name?: string }
-const RTE_TOOLS: (RteTool | '|')[] = [
-  { cmd: 'bold', label: 'Bold', glyph: <b>B</b>, keys: '⌘B' }, { cmd: 'italic', label: 'Italic', glyph: <i className="font-serif">I</i>, keys: '⌘I' },
-  { cmd: 'underline', label: 'Underline', glyph: <u>U</u>, keys: '⌘U' }, { cmd: 'strikeThrough', label: 'Strikethrough', glyph: <s>S</s> }, '|',
-  { cmd: 'h2', label: 'Heading 1', name: 'H1 heading', glyph: 'H1' }, { cmd: 'h3', label: 'Heading 2', name: 'H2 heading', glyph: 'H2' }, { cmd: 'p', label: 'Paragraph', glyph: '¶' }, '|',
-  { cmd: 'insertUnorderedList', label: 'Bulleted list', glyph: <EditorGlyph d="listBullet" /> }, { cmd: 'insertOrderedList', label: 'Numbered list', glyph: <EditorGlyph d="listOrdered" /> },
-  { cmd: 'blockquote', label: 'Quote', glyph: <EditorGlyph d="quote" /> }, { cmd: 'code', label: 'Inline code', glyph: <EditorGlyph d="code" /> },
-  { cmd: 'link', label: 'Link', glyph: <EditorGlyph d="link" />, keys: '⌘K' },
+type RteTool = { cmd: string; label: EditorKey; glyph: ReactNode; keys?: string; /** accessible name when it differs from `label` (it must start with the visible glyph text) */ name?: EditorKey }
+// the B / I / U / S / H1 / H2 / ¶ glyphs are the formatting marks themselves, the same in every language (i18n-ignore)
+const RTE_TOOLS: (RteTool | '|')[] = [ // i18n-ignore
+  { cmd: 'bold', label: 'bold', glyph: <b>B</b>, keys: '⌘B' }, { cmd: 'italic', label: 'italic', glyph: <i className="font-serif">I</i>, keys: '⌘I' }, // i18n-ignore
+  { cmd: 'underline', label: 'underline', glyph: <u>U</u>, keys: '⌘U' }, { cmd: 'strikeThrough', label: 'strike', glyph: <s>S</s> }, '|', // i18n-ignore
+  { cmd: 'h2', label: 'h1', name: 'h1Name', glyph: 'H1' }, { cmd: 'h3', label: 'h2', name: 'h2Name', glyph: 'H2' }, { cmd: 'p', label: 'paragraph', glyph: '¶' }, '|',
+  { cmd: 'insertUnorderedList', label: 'bullets', glyph: <EditorGlyph d="listBullet" flip /> }, { cmd: 'insertOrderedList', label: 'numbered', glyph: <EditorGlyph d="listOrdered" flip /> }, // `flip` adds ui-flip
+  { cmd: 'blockquote', label: 'quote', glyph: <EditorGlyph d="quote" flip /> }, { cmd: 'code', label: 'code', glyph: <EditorGlyph d="code" /> }, // `flip` adds ui-flip
+  { cmd: 'link', label: 'link', glyph: <EditorGlyph d="link" />, keys: '⌘K' },
 ]
 const RTE_BUBBLE = ['bold', 'italic', 'underline', 'link']
-/**
- * The showcase's sample document (pass it as `defaultValue` to get the demo; the editor itself starts empty).
- * @deprecated Sample content: import it from `@lyndon/ui/examples`. It leaves the main entry in 0.5.
- */
-export const RTE_SAMPLE = '<h2>Launch notes</h2><p>We’re shipping the new <b>pricing page</b> on Thursday. The yearly plan now saves <i>20%</i>, and the toggle sits above the cards.</p><ul><li>Legal review is done</li><li>Images are final</li></ul><blockquote>Ship small, ship often.</blockquote>'
 const RTE_MD: Record<string, string> = { '#': 'h2', '##': 'h3', '-': 'insertUnorderedList', '*': 'insertUnorderedList', '1.': 'insertOrderedList', '>': 'blockquote' }
 const rteContent =
   'min-h-[200px] px-4 py-4 text-sm leading-[1.7] outline-none [@media(pointer:coarse)]:text-base [&_a]:text-[var(--accent)] [&_a]:underline ' +
   '[&_blockquote]:m-0 [&_blockquote]:mb-2.5 [&_blockquote]:rounded-[var(--r-md)] [&_blockquote]:bg-[var(--muted)] [&_blockquote]:px-3 [&_blockquote]:py-2 [&_blockquote]:text-[var(--fg2)] [&_blockquote]:italic ' +
   '[&_code]:rounded-[var(--r-sm)] [&_code]:bg-[var(--muted)] [&_code]:px-1 [&_code]:font-[family-name:var(--mono)] [&_code]:text-xs ' +
   '[&_h2]:m-0 [&_h2]:mb-2 [&_h2]:text-[22px] [&_h2]:font-semibold [&_h2]:tracking-tight [&_h3]:mt-3 [&_h3]:mb-1.5 [&_h3]:text-base [&_h3]:font-semibold ' +
-  '[&_ol]:m-0 [&_ol]:mb-2.5 [&_ol]:list-decimal [&_ol]:pl-5 [&_p]:m-0 [&_p]:mb-2.5 [&_ul]:m-0 [&_ul]:mb-2.5 [&_ul]:list-disc [&_ul]:pl-5'
+  '[&_ol]:m-0 [&_ol]:mb-2.5 [&_ol]:list-decimal [&_ol]:ps-5 [&_p]:m-0 [&_p]:mb-2.5 [&_ul]:m-0 [&_ul]:mb-2.5 [&_ul]:list-disc [&_ul]:ps-5'
 
 /* Sanitizer: one allowlist for everything that becomes editor HTML (defaultValue, drops, onChange output) ── */
 
@@ -99,9 +144,11 @@ const EDITOR_FOREIGN_INPUT = ['insertFromDrop', 'insertFromPaste', 'insertFromPa
  * Everything that becomes HTML (`defaultValue`, dropped content, the `onChange` output) goes through `sanitize`
  * (default `sanitizeRichText`; pass DOMPurify with your own config if you need more). Paste inserts plain text.
  */
-export function RichTextEditor({ defaultValue = '', placeholder = 'Start writing… type # for a heading, - for a list', onChange, sanitize = sanitizeRichText, className, 'aria-label': ariaLabel = 'Editor' }:
+export function RichTextEditor({ defaultValue = '', placeholder: placeholderProp, onChange, sanitize = sanitizeRichText, className, 'aria-label': ariaLabelProp }:
   { defaultValue?: string; placeholder?: string; onChange?: (html: string) => void; sanitize?: (html: string) => string; className?: string; 'aria-label'?: string }) {
   const host = useRef<HTMLDivElement>(null), body = useRef<HTMLDivElement>(null), bar = useRef<HTMLDivElement>(null)
+  const t = useMessages(EDITOR_MESSAGES), { t: tc } = useLocale()
+  const placeholder = placeholderProp ?? t('writeHint'), ariaLabel = ariaLabelProp ?? t('editor')
   const saved = useRef<Range | null>(null)
   const [active, setActive] = useState<string[]>([])
   const [bubble, setBubble] = useState<{ x: number; y: number; below?: boolean } | null>(null)
@@ -225,29 +272,29 @@ export function RichTextEditor({ defaultValue = '', placeholder = 'Start writing
     if (cmd.startsWith('insert')) document.execCommand(cmd); else document.execCommand('formatBlock', false, cmd)
     sync(); changed()
   }
-  const tools = RTE_TOOLS.filter((t): t is RteTool => t !== '|')
+  const tools = RTE_TOOLS.filter((x): x is RteTool => x !== '|')
   const toolbarKeys = useRoving(tools.length, () => {}, { orientation: 'horizontal', index: tab, onMove: n => { setTab(n); bar.current?.querySelectorAll<HTMLElement>('button')[n]?.focus() } })
-  const toolBtn = (t: RteTool, inBubble: boolean) => {
-    const on = active.includes(t.cmd), i = tools.indexOf(t)
+  const toolBtn = (tool: RteTool, inBubble: boolean) => {
+    const on = active.includes(tool.cmd), i = tools.indexOf(tool), label = t(tool.label)
     return (
-      <motion.button type="button" key={t.cmd} whileTap={{ scale: 0.85 }} aria-label={t.name ?? t.label} title={t.keys ? `${t.label} ${t.keys}` : t.label} aria-pressed={on}
-        tabIndex={inBubble ? -1 : i === tab ? 0 : -1} onMouseDown={e => e.preventDefault()} onClick={() => { if (!inBubble) setTab(i); exec(t.cmd) }}
+      <motion.button type="button" key={tool.cmd} whileTap={{ scale: 0.85 }} aria-label={tool.name ? t(tool.name) : label} title={tool.keys ? `${label} ${tool.keys}` : label} aria-pressed={on}
+        tabIndex={inBubble ? -1 : i === tab ? 0 : -1} onMouseDown={e => e.preventDefault()} onClick={() => { if (!inBubble) setTab(i); exec(tool.cmd) }}
         className={cn('grid h-[30px] min-w-[30px] flex-none cursor-pointer place-items-center rounded-[var(--r-md)] border-0 px-1.5 text-[13px] font-semibold transition-colors [@media(pointer:coarse)]:h-9 [@media(pointer:coarse)]:min-w-9',
           inBubble ? (on ? 'bg-[color-mix(in_srgb,var(--on-primary)_15%,transparent)] text-[var(--on-primary)]' : 'bg-transparent text-[color-mix(in_srgb,var(--on-primary)_75%,transparent)] hover:bg-[color-mix(in_srgb,var(--on-primary)_15%,transparent)] hover:text-[var(--on-primary)]')
             : on ? 'bg-[var(--muted)] text-[var(--fg)]' : 'bg-transparent text-[var(--fg2)] hover:bg-[var(--muted)] hover:text-[var(--fg)]')}>
-        {t.glyph}
+        {tool.glyph}
       </motion.button>
     )
   }
   return (
     <div ref={host} className={cn('relative rounded-[var(--r-lg)] border border-[var(--line)] bg-[var(--card)]', className)}>
-      <div ref={bar} role="toolbar" aria-label="Formatting" className="flex flex-wrap gap-0.5 border-b border-[var(--line)] p-1.5 [@media(pointer:coarse)]:gap-1"
+      <div ref={bar} role="toolbar" aria-label={t('formatting')} className="flex flex-wrap gap-0.5 border-b border-[var(--line)] p-1.5 [@media(pointer:coarse)]:gap-1"
         onKeyDown={e => { if (e.key !== 'Enter') toolbarKeys.onKeyDown(e) }}>
-        {RTE_TOOLS.map((t, i) => t === '|' ? <span key={i} className="mx-1 my-1 w-px bg-[var(--line)]" /> : toolBtn(t, false))}
+        {RTE_TOOLS.map((x, i) => x === '|' ? <span key={i} className="mx-1 my-1 w-px bg-[var(--line)]" /> : toolBtn(x, false))}
       </div>
       <div className="relative">
-      {empty && <span aria-hidden className="pointer-events-none absolute top-4 left-4 text-sm text-[var(--fg3)] [@media(pointer:coarse)]:text-base">{placeholder}</span>}
-      <div ref={body} contentEditable suppressContentEditableWarning role="textbox" aria-multiline aria-label={ariaLabel} aria-placeholder={placeholder} spellCheck={false}
+      {empty && <span aria-hidden className="pointer-events-none absolute top-4 start-4 text-sm text-[var(--fg3)] [@media(pointer:coarse)]:text-base">{placeholder}</span>}
+      <div ref={body} contentEditable suppressContentEditableWarning dir="auto" role="textbox" aria-multiline aria-label={ariaLabel} aria-placeholder={placeholder} spellCheck={false}
         className={rteContent} onInput={() => { sync(); changed() }} onKeyDown={onKeyDown} onKeyUp={sync} onMouseUp={sync} onTouchEnd={() => setTimeout(sync, 0)}
         onPaste={e => { e.preventDefault(); document.execCommand('insertText', false, e.clipboardData.getData('text/plain')) }}
         onDragStart={() => { ownDrag.current = true }} onDragEnd={() => { ownDrag.current = false }}
@@ -259,19 +306,20 @@ export function RichTextEditor({ defaultValue = '', placeholder = 'Start writing
         }} />
       </div>
       <div className="flex justify-between border-t border-[var(--line)] px-3 py-2 text-xs text-[var(--fg3)]">
-        <span className="tabular-nums">{words} words · {Math.max(1, Math.round(words / 220))} min read</span>
+        <span className="tabular-nums">{t('stats', { words, minutes: Math.max(1, Math.round(words / 220)) })}</span>
         <AnimatePresence mode="wait" initial={false}>
           <motion.span key={String(saving)} initial={{ opacity: 0, y: 3 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0, y: -3 }} transition={{ duration: 0.15 }} className="flex items-center gap-1" aria-live="polite">
-            {saving ? 'Saving…' : <><Icon name="check" size={12} className="text-[var(--ok)]" />Saved</>}
+            {saving ? t('saving') : <><Icon name="check" size={12} className="text-[var(--ok)]" />{tc('common.saved')}</>}
           </motion.span>
         </AnimatePresence>
       </div>
       <AnimatePresence>
         {bubble && (
-          <motion.div key="bubble" role="toolbar" aria-label="Selection formatting" initial={{ opacity: 0, y: 4 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0, transition: { duration: 0.1 } }} transition={spring(0.3, 0.25)}
+          <motion.div key="bubble" role="toolbar" aria-label={t('selectionFormatting')} initial={{ opacity: 0, y: 4 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0, transition: { duration: 0.1 } }} transition={spring(0.3, 0.25)}
+            // centred on the selection (a physical x from its rects), so it stays physical in RTL: rtl-lint-ignore
             className={cn('absolute z-10 flex max-w-[calc(100%-8px)] -translate-x-1/2 gap-0.5 rounded-[var(--r-md)] bg-[var(--primary)] p-1 shadow-[var(--shadow)]', !bubble.below && '-translate-y-full')} style={{ left: bubble.x, top: bubble.y }}>
             {link === null ? tools.filter(t => RTE_BUBBLE.includes(t.cmd)).map(t => toolBtn(t, true)) : (
-              <input autoFocus value={link} onChange={e => setLink(e.target.value)} placeholder="Paste a link, Enter to apply" aria-label="Link URL"
+              <input autoFocus value={link} onChange={e => setLink(e.target.value)} placeholder={t('linkPlaceholder')} aria-label={t('linkUrl')} dir="ltr"
                 onKeyDown={e => { if (e.key === 'Enter') { e.preventDefault(); applyLink(link) } if (e.key === 'Escape') { e.preventDefault(); e.stopPropagation(); setLink(null); restore(); sync() } }}
                 onBlur={() => { setLink(null); setBubble(null) }}
                 className="h-[30px] w-[230px] max-w-full min-w-0 rounded-[var(--r-sm)] border-0 [@media(pointer:coarse)]:h-9 bg-[color-mix(in_srgb,var(--on-primary)_12%,transparent)] px-2 text-[13px] text-[var(--on-primary)] outline-none placeholder:text-[color-mix(in_srgb,var(--on-primary)_60%,transparent)]" />
@@ -289,18 +337,6 @@ export type MentionPerson = { id: string; name: string; sub?: string }
 export type MentionCommand = { cmd: string; hint: string }
 /** What MentionsInput sends: plain text interleaved with mention and command tokens. `id` is the person's id or the command for tokens. */
 export type MentionSegment = { type: 'text' | 'mention' | 'command'; value: string; id?: string }
-/**
- * The showcase's sample people and commands (pass them as `people` / `commands`; the input itself starts with none).
- * @deprecated Sample content: import it from `@lyndon/ui/examples`. It leaves the main entry in 0.5.
- */
-export const MENTION_PEOPLE: MentionPerson[] = [
-  { id: 'al', name: 'Alex Lee', sub: 'Design' }, { id: 'bk', name: 'Bea Kim', sub: 'Product' }, { id: 'cm', name: 'Chris Moe', sub: 'Engineering' },
-  { id: 'dn', name: 'Dana Ng', sub: 'Research' }, { id: 'ep', name: 'Eli Park', sub: 'Sales' },
-]
-/** @deprecated Sample content: import it from `@lyndon/ui/examples`. It leaves the main entry in 0.5. */
-export const MENTION_COMMANDS: MentionCommand[] = [
-  { cmd: '/todo', hint: 'Create a task' }, { cmd: '/remind', hint: 'Set a reminder' }, { cmd: '/poll', hint: 'Start a poll' }, { cmd: '/giphy', hint: 'Insert a GIF' }, { cmd: '/code', hint: 'Code block' },
-]
 const MENTION_TOKEN = 'inline-block rounded-[var(--r-sm)] bg-[var(--accent-soft)] px-1.5 leading-normal font-medium text-[var(--accent)]'
 const MENTION_CMD = 'inline-block rounded-[var(--r-sm)] bg-[var(--warn-soft)] px-1.5 leading-normal font-medium text-[var(--warn)]'
 
@@ -313,7 +349,8 @@ const MENTION_CMD = 'inline-block rounded-[var(--r-sm)] bg-[var(--warn-soft)] px
  */
 export function MentionsInput({ people = [], commands = [], placeholder: ph, onSend, className }:
   { people?: MentionPerson[]; commands?: MentionCommand[]; placeholder?: string; className?: string; onSend?: (segments: MentionSegment[], text: string) => void }) {
-  const placeholder = ph ?? `Write a message…${people.length && commands.length ? ' try @ or /' : people.length ? ' try @' : commands.length ? ' try /' : ''}`
+  const t = useMessages(EDITOR_MESSAGES), { t: tc } = useLocale()
+  const placeholder = ph ?? t('messagePlaceholder', { hint: people.length && commands.length ? 'both' : people.length ? 'people' : commands.length ? 'commands' : 'none' })
   const host = useRef<HTMLDivElement>(null), ed = useRef<HTMLDivElement>(null), lid = useId()
   const made = useRef(new WeakSet<Node>()) // tokens this component created; nothing else becomes a segment
   const [pop, setPop] = useState<{ type: '@' | '/'; q: string; x: number; y: number } | null>(null)
@@ -391,11 +428,11 @@ export function MentionsInput({ people = [], commands = [], placeholder: ph, onS
   }
   return (
     <div ref={host} className={cn('relative flex flex-col gap-3', className)}>
-      <div ref={ed} contentEditable suppressContentEditableWarning role="textbox" aria-multiline aria-label="Message" data-ph={placeholder} spellCheck={false}
+      <div ref={ed} contentEditable suppressContentEditableWarning role="textbox" aria-multiline aria-label={t('messageBox')} data-ph={placeholder} spellCheck={false}
         aria-controls={open ? lid : undefined} aria-activedescendant={open ? `${lid}-${idx}` : undefined} aria-autocomplete="list"
         className={cn(inputClass, '!h-auto min-h-[90px] !py-2.5 text-sm leading-relaxed whitespace-pre-wrap empty:before:text-[var(--fg3)] empty:before:content-[attr(data-ph)]')}
         onInput={() => { const el = ed.current!; if (!el.textContent && !el.querySelector('[data-kind]')) el.innerHTML = ''; detect() }}
-        onKeyUp={e => { if (['ArrowLeft', 'ArrowRight', 'Home', 'End'].includes(e.key)) detect() }}
+        onKeyUp={e => { if (['ArrowLeft', 'ArrowRight', 'Home', 'End'].includes(e.key)) detect() }} // a caret move either way re-checks the token before it: rtl-lint-ignore
         onBlur={() => setTimeout(() => setPop(null), 150)}
         onPaste={e => { e.preventDefault(); document.execCommand('insertText', false, e.clipboardData.getData('text/plain')) }}
         onDragOver={e => { e.dataTransfer.dropEffect = 'copy' }}
@@ -407,23 +444,24 @@ export function MentionsInput({ people = [], commands = [], placeholder: ph, onS
           else if (e.key === 'Escape') { e.preventDefault(); e.stopPropagation(); setPop(null) }
           else rove(e)
         }} />
-      {/* zero-size anchor at the caret; the shared floating panel flips and clamps itself from there */}
+      {/* zero-size anchor at the caret (a physical x from the caret's rect); the shared floating panel flips and clamps itself from there */}
+      {/* rtl-lint-ignore */}
       <div className="absolute" style={{ left: pop?.x ?? 0, top: (pop?.y ?? 0) - 6 }}>
         <FloatingPanel open={open} placement="bottom-start" role="presentation" className="max-h-60 w-[230px] overflow-auto overscroll-contain">
-          <MenuLabel>{pop?.type === '/' ? 'Commands' : 'People'}</MenuLabel>
-          <OptionList id={lid} label={pop?.type === '/' ? 'Commands' : 'People'} options={options} active={idx} query={pop?.type === '@' ? pop.q : undefined}
+          <MenuLabel>{t(pop?.type === '/' ? 'commands' : 'people')}</MenuLabel>
+          <OptionList id={lid} label={t(pop?.type === '/' ? 'commands' : 'people')} options={options} active={idx} query={pop?.type === '@' ? pop.q : undefined}
             isSelected={() => false} onPick={i => insert(items[i])} onHover={setIdx} />
         </FloatingPanel>
       </div>
       <div className="flex items-center justify-between gap-2">
-        <span className="text-xs text-[var(--fg3)] [@media(hover:none)]:hidden">↑ ↓ to choose, Enter to insert</span>
-        <span className="hidden text-xs text-[var(--fg3)] [@media(hover:none)]:inline">Type @ or /, then tap a name</span>
-        <Button size="sm" variant="primary" onClick={send}>Send</Button>
+        <span className="text-xs text-[var(--fg3)] [@media(hover:none)]:hidden">{t('mentionHint')}</span>
+        <span className="hidden text-xs text-[var(--fg3)] [@media(hover:none)]:inline">{t('mentionTapHint')}</span>
+        <Button size="sm" variant="primary" onClick={send}>{tc('common.send')}</Button>
       </div>
       <AnimatePresence mode="popLayout">
         {sent && (
           <motion.div key={sent.id} initial={{ opacity: 0, y: 8 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0 }} transition={spring(0.3, 0.35)}
-            className="ml-auto w-fit max-w-full rounded-[var(--r-lg)] rounded-br-[5px] bg-[var(--primary)] px-3 py-2 text-[13px] leading-snug whitespace-pre-wrap text-[var(--on-primary)]">
+            className="ms-auto w-fit max-w-full rounded-[var(--r-lg)] rounded-ee-[5px] bg-[var(--primary)] px-3 py-2 text-[13px] leading-snug whitespace-pre-wrap text-[var(--on-primary)]">
             {sent.segs.map((s, i) => s.type === 'text' ? <span key={i}>{s.value}</span>
               : <span key={i} className="rounded-[var(--r-sm)] bg-[color-mix(in_srgb,var(--on-primary)_18%,transparent)] px-1 font-medium">{s.value}</span>)}
           </motion.div>
@@ -451,21 +489,23 @@ export function useFormDraft<T extends object>(initial: T) {
  * Save bar for a form with unsaved changes: slides up inside its (relative, overflow-hidden) container while `open`.
  * Bump `shake` to wiggle it after a failed validation. `saving` swaps the Save label for a spinner.
  */
-export function UnsavedChangesBar({ open, message = 'Unsaved changes', onReset, onSave, saving, shake: wiggle = 0, saveLabel = 'Save changes', className }:
+export function UnsavedChangesBar({ open, message: messageProp, onReset, onSave, saving, shake: wiggle = 0, saveLabel: saveLabelProp, className }:
   { open: boolean; message?: ReactNode; onReset: () => void; onSave: () => void; saving?: boolean; shake?: number; saveLabel?: string; className?: string }) {
   const ref = useRef<HTMLDivElement>(null)
+  const t = useMessages(EDITOR_MESSAGES), { t: tc } = useLocale()
+  const message = messageProp ?? t('unsaved'), saveLabel = saveLabelProp ?? t('saveChanges')
   useEffect(() => { if (wiggle) shake(ref.current, 4) }, [wiggle])
   return (
     <AnimatePresence>
       {open && (
         <motion.div key="bar" initial={{ y: 80 }} animate={{ y: 0 }} exit={{ y: 80, transition: { duration: 0.2 } }} transition={spring(0.25, 0.4)} className={cn('absolute inset-x-3 bottom-3 z-10', className)}>
-          <div ref={ref} role="region" aria-label="Unsaved changes"
-            className="flex items-center gap-2 rounded-[var(--r-md)] bg-[var(--primary)] py-2 pr-2 pl-3 text-[13px] text-[var(--on-primary)] shadow-[var(--shadow)]">
+          <div ref={ref} role="region" aria-label={t('unsaved')}
+            className="flex items-center gap-2 rounded-[var(--r-md)] bg-[var(--primary)] py-2 pe-2 ps-3 text-[13px] text-[var(--on-primary)] shadow-[var(--shadow)]">
             <span className="h-[7px] w-[7px] flex-none rounded-full bg-[var(--warn)]" />
             <motion.span key={String(message)} initial={{ opacity: 0 }} animate={{ opacity: 1 }} className="min-w-0 flex-1 truncate" aria-live="polite">{message}</motion.span>
-            <Button size="sm" disabled={saving} onClick={onReset} className="!border-[color-mix(in_srgb,var(--on-primary)_30%,transparent)] !bg-transparent !text-[var(--on-primary)] hover:!bg-[color-mix(in_srgb,var(--on-primary)_12%,transparent)]">Reset</Button>
+            <Button size="sm" disabled={saving} onClick={onReset} className="!border-[color-mix(in_srgb,var(--on-primary)_30%,transparent)] !bg-transparent !text-[var(--on-primary)] hover:!bg-[color-mix(in_srgb,var(--on-primary)_12%,transparent)]">{tc('common.reset')}</Button>
             <Button size="sm" onClick={onSave} disabled={saving} className="min-w-[104px] !border-[var(--on-primary)] !bg-[var(--on-primary)] !text-[var(--primary)]">
-              {saving ? <Spinner label="Saving" /> : saveLabel}
+              {saving ? <Spinner label={t('savingLabel')} /> : saveLabel}
             </Button>
           </div>
         </motion.div>
@@ -488,6 +528,7 @@ export function SignaturePad({ onConfirm, height = 170, className }: { onConfirm
   const strokes = useRef<SigPoint[][]>([]), cur = useRef<SigPoint[] | null>(null), dpr = useRef(1)
   const [count, setCount] = useState(0)
   const [done, setDone] = useState(false)
+  const t = useMessages(EDITOR_MESSAGES), { t: tc } = useLocale()
   const redraw = () => {
     const c = cv.current, g = c?.getContext('2d'); if (!c || !g) return
     g.clearRect(0, 0, c.width, c.height)
@@ -525,7 +566,7 @@ export function SignaturePad({ onConfirm, height = 170, className }: { onConfirm
     <div className={cn('flex flex-col gap-3', className)}>
       <div ref={box} style={{ height }} className={cn('relative touch-none overflow-hidden rounded-[var(--r-md)] border bg-[var(--card)] transition-[border-color,box-shadow]',
         done ? 'border-[var(--ok)] shadow-[0_0_0_3px_var(--ok-soft)]' : 'border-[var(--line)]')}>
-        <canvas ref={cv} role="img" aria-label={count ? `Signature, ${count} stroke${count > 1 ? 's' : ''}` : 'Signature area, draw with mouse, pen or finger'}
+        <canvas ref={cv} role="img" aria-label={count ? t('signatureStrokes', { count }) : t('signatureArea')}
           className="absolute inset-0 h-full w-full cursor-crosshair touch-none"
           onPointerDown={e => { e.currentTarget.setPointerCapture(e.pointerId); setDone(false); cur.current = [pt(e, 2.2)]; strokes.current.push(cur.current); setCount(strokes.current.length); redraw() }}
           onPointerMove={e => {
@@ -535,12 +576,12 @@ export function SignaturePad({ onConfirm, height = 170, className }: { onConfirm
             p.w = Math.max(0.9, Math.min(3.2, target * 0.6 + l.w * 0.4)); s.push(p); redraw()
           }}
           onPointerUp={() => { cur.current = null }} onPointerCancel={() => { cur.current = null }} />
-        <motion.span initial={false} animate={{ opacity: count ? 0 : 1 }} className="pointer-events-none absolute right-5 bottom-[34px] left-9 border-t border-dashed border-[var(--line2)] pt-1 text-[11px] text-[var(--fg3)]">Sign here</motion.span>
-        <span aria-hidden className="pointer-events-none absolute bottom-[38px] left-[18px] text-[13px] text-[var(--fg3)]">✕</span>
+        <motion.span initial={false} animate={{ opacity: count ? 0 : 1 }} className="pointer-events-none absolute end-5 bottom-[34px] start-9 border-t border-dashed border-[var(--line2)] pt-1 text-[11px] text-[var(--fg3)]">{t('signHere')}</motion.span>
+        <span aria-hidden className="pointer-events-none absolute bottom-[38px] start-[18px] text-[13px] text-[var(--fg3)]">✕</span>
       </div>
       <div className="flex flex-wrap items-center justify-between gap-2">
-        <div className="flex gap-2"><Button size="sm" disabled={!count} onClick={undo}>Undo</Button><Button size="sm" disabled={!count} onClick={clear}>Clear</Button></div>
-        <Button size="sm" variant="primary" onClick={confirm}>Confirm</Button>
+        <div className="flex gap-2"><Button size="sm" disabled={!count} onClick={undo}>{tc('common.undo')}</Button><Button size="sm" disabled={!count} onClick={clear}>{tc('common.clear')}</Button></div>
+        <Button size="sm" variant="primary" onClick={confirm}>{tc('common.confirm')}</Button>
       </div>
     </div>
   )
@@ -566,8 +607,10 @@ function AddressFlashField({ id, label, value, onChange, flash }: { id: string; 
  * (the typed part bolded, city and country beside it). Picking one (click, or ↑ ↓ Enter) fills City, Postcode and Country
  * one after another with a brief highlight. Escape closes the list without closing a dialog around it.
  */
-export function AddressAutocomplete({ addresses, onChange, placeholder = 'Start typing, e.g. Bahn', label = 'Address', className }:
+export function AddressAutocomplete({ addresses, onChange, placeholder: placeholderProp, label: labelProp, className }:
   { addresses: AddressRecord[]; onChange?: (a: AddressRecord) => void; placeholder?: string; label?: ReactNode; className?: string }) {
+  const t = useMessages(EDITOR_MESSAGES)
+  const placeholder = placeholderProp ?? t('addressPlaceholder'), label = labelProp ?? t('address')
   const [q, setQ] = useState('')
   const [open, setOpen] = useState(false)
   const [rest, setRest] = useState({ city: '', postcode: '', country: '' })
@@ -600,14 +643,14 @@ export function AddressAutocomplete({ addresses, onChange, placeholder = 'Start 
             else rove(e)
           }} />
         <FloatingPanel open={shown} matchWidth flip="scroll" role="presentation" className="max-h-64 overflow-auto overscroll-contain">
-          <OptionList id={lid} label="Suggestions" options={options} active={Math.min(idx, Math.max(0, items.length - 1))} query={term} isSelected={() => false}
+          <OptionList id={lid} label={t('suggestions')} options={options} active={Math.min(idx, Math.max(0, items.length - 1))} query={term} isSelected={() => false}
             onPick={i => choose(items[i])} onHover={setIdx} />
         </FloatingPanel>
       </div>
       <div className="grid grid-cols-[minmax(0,2fr)_minmax(0,1fr)] gap-2.5">
-        <AddressFlashField id={`${base}-city`} label="City" value={rest.city} flash={flash.city} onChange={v => setRest(r => ({ ...r, city: v }))} />
-        <AddressFlashField id={`${base}-zip`} label="Postcode" value={rest.postcode} flash={flash.postcode} onChange={v => setRest(r => ({ ...r, postcode: v }))} />
-        <div className="col-span-full"><AddressFlashField id={`${base}-country`} label="Country" value={rest.country} flash={flash.country} onChange={v => setRest(r => ({ ...r, country: v }))} /></div>
+        <AddressFlashField id={`${base}-city`} label={t('city')} value={rest.city} flash={flash.city} onChange={v => setRest(r => ({ ...r, city: v }))} />
+        <AddressFlashField id={`${base}-zip`} label={t('postcode')} value={rest.postcode} flash={flash.postcode} onChange={v => setRest(r => ({ ...r, postcode: v }))} />
+        <div className="col-span-full"><AddressFlashField id={`${base}-country`} label={t('country')} value={rest.country} flash={flash.country} onChange={v => setRest(r => ({ ...r, country: v }))} /></div>
       </div>
     </div>
   )
@@ -630,6 +673,8 @@ const EMOJI_NAMES: Record<string, string> = {
   '🍎': 'apple', '🍔': 'burger', '🍩': 'donut', '🎂': 'cake birthday', '🍷': 'wine', '💡': 'idea bulb', '🏆': 'trophy win', '🎯': 'target goal', '💻': 'laptop computer', '📅': 'calendar date', '🐛': 'bug',
 }
 const EMOJI_ALL = EMOJI_CATEGORIES.flatMap(c => c[2].split(' '))
+/** EMOJI_CATEGORIES' names as message keys, by position. */
+const EMOJI_CAT_KEYS = ['smileys', 'gestures', 'nature', 'food', 'objects'] as const
 
 /**
  * Emoji panel: category tabs, a search field (shows "N results" or an empty state), a Recent row, and an 8-column grid
@@ -638,6 +683,8 @@ const EMOJI_ALL = EMOJI_CATEGORIES.flatMap(c => c[2].split(' '))
 export function EmojiPicker({ onPick, onClose, recent = [], className }: { onPick: (e: string) => void; onClose?: () => void; recent?: string[]; className?: string }) {
   const [cat, setCat] = useState(0)
   const [q, setQ] = useState('')
+  const t = useMessages(EDITOR_MESSAGES), { t: tc, dir } = useLocale()
+  const catName = (i: number) => EMOJI_CAT_KEYS[i] ? t(EMOJI_CAT_KEYS[i]) : EMOJI_CATEGORIES[i][1]
   const grid = useRef<HTMLDivElement>(null), tabs = useRef<HTMLDivElement>(null)
   const term = q.trim().toLowerCase()
   const tabKeys = useRoving(EMOJI_CATEGORIES.length, () => {}, { orientation: 'horizontal', index: cat,
@@ -649,17 +696,18 @@ export function EmojiPicker({ onPick, onClose, recent = [], className }: { onPic
   )
   const onGridKey = (e: RKeyboardEvent) => {
     const btns = [...(grid.current?.querySelectorAll<HTMLElement>('[data-emoji-grid] button') ?? [])], i = btns.indexOf(document.activeElement as HTMLElement)
-    const d = ({ ArrowRight: 1, ArrowLeft: -1, ArrowDown: 8, ArrowUp: -8 } as Record<string, number>)[e.key]
+    const d = ({ ArrowRight: 1, ArrowLeft: -1, ArrowDown: 8, ArrowUp: -8 } as Record<string, number>)[logicalArrow(e.key, dir)]
     if (!d || i < 0) return
     e.preventDefault(); btns[Math.max(0, Math.min(btns.length - 1, i + d))]?.focus()
   }
   return (
     <div ref={grid} className={cn('w-[300px] max-w-[calc(100vw-32px)]', className)} onKeyDown={e => { if (e.key === 'Escape') { e.stopPropagation(); onClose?.() } else onGridKey(e) }}>
-      <div ref={tabs} role="tablist" aria-label="Emoji categories" className="flex gap-0.5 border-b border-[var(--line)] p-1.5" onKeyDown={e => { if (['ArrowLeft', 'ArrowRight', 'Home', 'End'].includes(e.key)) { e.stopPropagation(); tabKeys.onKeyDown(e) } }}>
+      {/* the tab arrows go to useRoving, which mirrors them in RTL: rtl-lint-ignore */}
+      <div ref={tabs} role="tablist" aria-label={t('emojiCategories')} className="flex gap-0.5 border-b border-[var(--line)] p-1.5" onKeyDown={e => { if (['ArrowLeft', 'ArrowRight', 'Home', 'End'].includes(e.key)) { e.stopPropagation(); tabKeys.onKeyDown(e) } }}>
         {EMOJI_CATEGORIES.map(([icon, name], i) => {
           const on = i === cat && !term
           return (
-            <button type="button" key={name} role="tab" aria-selected={on} tabIndex={i === cat ? 0 : -1} aria-label={name} title={name} onClick={() => { setCat(i); setQ('') }}
+            <button type="button" key={name} role="tab" aria-selected={on} tabIndex={i === cat ? 0 : -1} aria-label={catName(i)} title={catName(i)} onClick={() => { setCat(i); setQ('') }}
               className={cn('relative h-[30px] flex-1 cursor-pointer rounded-[var(--r-md)] border-0 bg-transparent text-base transition-opacity [@media(pointer:coarse)]:h-9', on ? 'opacity-100' : 'opacity-55 hover:opacity-90')}>
               {on && <motion.span layoutId="emoji-tab" className="absolute inset-0 rounded-[var(--r-md)] bg-[var(--muted)]" transition={spring(0.2, 0.4)} />}
               <span className="relative">{icon}</span>
@@ -667,16 +715,16 @@ export function EmojiPicker({ onPick, onClose, recent = [], className }: { onPic
           )
         })}
       </div>
-      <div className="px-2 pt-2"><input autoFocus={!isCoarsePointer()} value={q} onChange={e => setQ(e.target.value)} placeholder="Search emoji" aria-label="Search emoji" className={cn(inputClass, '!h-[30px]')} /></div>
+      <div className="px-2 pt-2"><input autoFocus={!isCoarsePointer()} value={q} onChange={e => setQ(e.target.value)} placeholder={t('searchEmoji')} aria-label={t('searchEmoji')} className={cn(inputClass, '!h-[30px]')} /></div>
       {recent.length > 0 && !term && (
         <>
-          <div className="px-2.5 pt-1.5 text-[11px] text-[var(--fg3)]">Recent</div>
+          <div className="px-2.5 pt-1.5 text-[11px] text-[var(--fg3)]">{t('recent')}</div>
           <div data-emoji-grid className="grid grid-cols-8 gap-0.5 px-2 pt-1">{recent.map((e, i) => cell(e, i, 'r'))}</div>
         </>
       )}
-      <div className="px-2.5 pt-1.5 text-[11px] text-[var(--fg3)]" aria-live="polite">{term ? `${list.length} result${list.length === 1 ? '' : 's'}` : EMOJI_CATEGORIES[cat][1]}</div>
+      <div className="px-2.5 pt-1.5 text-[11px] text-[var(--fg3)]" aria-live="polite">{term ? tc('status.resultsCount', { count: list.length }) : catName(cat)}</div>
       <div data-emoji-grid className="grid max-h-[200px] grid-cols-8 gap-0.5 overflow-auto overscroll-contain p-2 [@media(pointer:coarse)]:max-h-[min(240px,40dvh)]">
-        {list.length ? list.map((e, i) => cell(e, i, 'g')) : <span className="col-span-full p-2.5 text-center text-xs text-[var(--fg3)]">No emoji found for “{q.trim()}”</span>}
+        {list.length ? list.map((e, i) => cell(e, i, 'g')) : <span className="col-span-full p-2.5 text-center text-xs text-[var(--fg3)]">{t('noEmoji', { query: q.trim() })}</span>}
       </div>
     </div>
   )
@@ -686,7 +734,8 @@ export function EmojiPicker({ onPick, onClose, recent = [], className }: { onPic
  * Text field with an emoji button: the picker inserts at the caret and remembers recent picks, and every pick also adds
  * a reaction chip with a count below (click a chip to take one back).
  */
-export function EmojiInput({ placeholder = 'Add a reaction or type', onChange, className }: { placeholder?: string; onChange?: (text: string) => void; className?: string }) {
+export function EmojiInput({ placeholder: placeholderProp, onChange, className }: { placeholder?: string; onChange?: (text: string) => void; className?: string }) {
+  const t = useMessages(EDITOR_MESSAGES), placeholder = placeholderProp ?? t('reactionPlaceholder')
   const [text, setText] = useState('')
   const [open, setOpen] = useState(false)
   const [recent, setRecent] = useState<string[]>([])
@@ -706,19 +755,19 @@ export function EmojiInput({ placeholder = 'Add a reaction or type', onChange, c
   return (
     <div className={cn('flex flex-col gap-2.5', className)}>
       <div ref={wrap} className="relative">
-        <input ref={input} value={text} onChange={e => { setText(e.target.value); onChange?.(e.target.value) }} placeholder={placeholder} aria-label={placeholder} className={cn(inputClass, '!pr-10')} />
-        <motion.button ref={btn} type="button" whileTap={{ scale: 0.85 }} aria-label="Pick emoji" aria-haspopup="dialog" aria-expanded={open} onClick={() => setOpen(!open)}
-          className="absolute top-1/2 right-1 grid h-7 w-7 -translate-y-1/2 cursor-pointer place-items-center rounded-[var(--r-md)] border-0 bg-transparent text-base hover:bg-[var(--muted)] [@media(pointer:coarse)]:h-8 [@media(pointer:coarse)]:w-8">😊</motion.button>
-        <FloatingPanel open={open} placement="bottom-end" role="dialog" aria-label="Emoji" className="!p-0">
+        <input ref={input} value={text} onChange={e => { setText(e.target.value); onChange?.(e.target.value) }} placeholder={placeholder} aria-label={placeholder} className={cn(inputClass, '!pe-10')} />
+        <motion.button ref={btn} type="button" whileTap={{ scale: 0.85 }} aria-label={t('pickEmoji')} aria-haspopup="dialog" aria-expanded={open} onClick={() => setOpen(!open)}
+          className="absolute top-1/2 end-1 grid h-7 w-7 -translate-y-1/2 cursor-pointer place-items-center rounded-[var(--r-md)] border-0 bg-transparent text-base hover:bg-[var(--muted)] [@media(pointer:coarse)]:h-8 [@media(pointer:coarse)]:w-8">😊</motion.button>
+        <FloatingPanel open={open} placement="bottom-end" role="dialog" aria-label={t('emoji')} className="!p-0">
           <EmojiPicker recent={recent} onPick={pick} onClose={() => { setOpen(false); btn.current?.focus() }} />
         </FloatingPanel>
       </div>
       {counts.length > 0 && (
-        <div className="flex flex-wrap gap-1.5" aria-label="Reactions">
+        <div className="flex flex-wrap gap-1.5" role="group" aria-label={t('reactions')}>
           <AnimatePresence initial={false} mode="popLayout">
             {counts.map(([e, n]) => (
               <motion.button type="button" key={e} layout initial={{ scale: 0.6, opacity: 0 }} animate={{ scale: 1, opacity: 1 }} exit={{ scale: 0.6, opacity: 0, transition: { duration: 0.12 } }} transition={spring(0.5, 0.35)}
-                onClick={() => unreact(e)} aria-label={`${e} ${n}, remove one`}
+                onClick={() => unreact(e)} aria-label={t('removeReaction', { emoji: e, count: n })}
                 className="inline-flex cursor-pointer items-center gap-1 rounded-full border border-[var(--accent)] bg-[var(--accent-soft)] px-2 py-1 text-[13px] leading-none select-none">
                 {e}
                 <span className="relative inline-flex h-[1em] overflow-hidden font-[family-name:var(--mono)] text-[11px] font-medium text-[var(--fg2)]">

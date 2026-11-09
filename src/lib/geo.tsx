@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useRef, useState, useSyncExternalStore, type PointerEvent as ReactPointerEvent, type ReactNode } from 'react'
 import { motion, useInView, useReducedMotion } from 'motion/react'
-import { Button, Skeleton, TOUCH, clamp, cn, isTouch, maxOf, minOf, onMouseLeave, safeColor, useOutside, useTheme } from './core'
+import { Button, Skeleton, TOUCH, clamp, cn, defineMessages, isTouch, maxOf, minOf, onMouseLeave, safeColor, useLocale, useMessages, useOutside, useTheme } from './core'
 import { SegmentedControl } from './forms'
 import { PointerTooltip, usePointerTooltip } from './overlay'
 import { useFrameLoop } from './motion'
@@ -44,6 +44,25 @@ export const loadGlobeLand = (): Promise<number[]> => geoLand.load()
 export const useWorldMap = (): WorldMapData | null => useGeoLazy(geoWorld, false)
 
 
+/** WorldMap and Globe strings (machine-drafted de/ar). Country and city names are data: pass them translated. */
+export const GEO_MESSAGES = defineMessages('geo', {
+  en: {
+    noData: 'No data', mapLabel: 'World map by {metric}', hub: 'Regional hub', low: 'Low', high: 'High', top: 'Top countries · {metric}', tapSpot: ' · tap to spotlight',
+    autoOn: 'Auto-rotate on', autoOff: 'Auto-rotate off', globe: 'Rotating globe with routes between cities', routes: 'Live routes', spinHint: ' · drag the globe sideways to spin it',
+    route: '{from} → {to}', ms: '{n} ms',
+  },
+  de: {
+    noData: 'Keine Daten', mapLabel: 'Weltkarte nach {metric}', hub: 'Regionaler Knotenpunkt', low: 'Niedrig', high: 'Hoch', top: 'Top-Länder · {metric}', tapSpot: ' · tippen zum Hervorheben',
+    autoOn: 'Automatisch drehen: an', autoOff: 'Automatisch drehen: aus', globe: 'Rotierender Globus mit Routen zwischen Städten', routes: 'Live-Routen', spinHint: ' · Globus seitlich ziehen, um ihn zu drehen',
+    route: '{from} → {to}', ms: '{n} ms',
+  },
+  ar: {
+    noData: 'لا بيانات', mapLabel: 'خريطة العالم حسب {metric}', hub: 'مركز إقليمي', low: 'منخفض', high: 'مرتفع', top: 'أعلى الدول، {metric}', tapSpot: '، انقر للإبراز',
+    autoOn: 'الدوران التلقائي مفعّل', autoOff: 'الدوران التلقائي متوقف', globe: 'كرة أرضية دوّارة مع مسارات بين المدن', routes: 'المسارات المباشرة', spinHint: '، اسحب الكرة أفقيًا لتدويرها',
+    route: '{from} ← {to}', ms: '{n} مللي ث',
+  },
+})
+
 /* World map ───────────────────────────────────────────────────────────────── */
 
 export type MapMetric = { key: string; label: string; format: (v: number) => string; short?: (v: number) => string }
@@ -74,12 +93,13 @@ export function WorldMap({ data, metrics, hubs = [], names = {}, top = 8, map, c
   const onScreen = useInView(ref) // hub pulses only run while the map is visible
   const reduce = useReducedMotion()
   const { tip, show, hide } = usePointerTooltip()
+  const m = useMessages(GEO_MESSAGES)
   const listRef = useRef<HTMLDivElement>(null)
   // touch: the leave that follows a tap is ignored; the next tap outside the map (or outside the list) clears instead
   useOutside([ref], () => setHover(null), !!hover)
   useOutside([listRef], () => setSpot(null), !!spot)
   const M = metrics.find(m => m.key === metric) ?? metrics[0]
-  const countryTip = (n: string) => <><b className="font-semibold">{n}</b><br /><span className="text-[var(--fg2)]">{data[n] ? M.format(data[n]![metric]) : 'No data'}</span></>
+  const countryTip = (n: string) => <><b className="font-semibold">{n}</b><br /><span className="text-[var(--fg2)]">{data[n] ? M.format(data[n]![metric]) : m('noData')}</span></>
   const max = maxOf(Object.values(data).filter(Boolean).map(v => v![metric] ?? 0), 1)
   const fill = (n: string) => { const v = data[n]?.[metric]; if (v == null) return 'var(--muted)'; const t = v / max; return geoRamp(GEO_STEPS[t < 0.1 ? 0 : t < 0.25 ? 1 : t < 0.45 ? 2 : t < 0.7 ? 3 : 4]) }
   const xs = world ? geoCentres(world) : []
@@ -91,7 +111,7 @@ export function WorldMap({ data, metrics, hubs = [], names = {}, top = 8, map, c
       <div className="grid items-start gap-5 md:grid-cols-[minmax(0,1fr)_230px]">
         <div className="flex min-w-0 flex-col gap-2">
           <div className="relative" aria-busy={!world}>
-          <svg ref={ref} viewBox={`0 0 ${W} ${H}`} role="img" aria-label={`World map by ${M.label.toLowerCase()}`} className="block h-auto w-full" onPointerLeave={onMouseLeave(() => { setHover(null); hide() })}>
+          <svg ref={ref} viewBox={`0 0 ${W} ${H}`} role="img" aria-label={m('mapLabel', { metric: M.label.toLowerCase() })} className="block h-auto w-full" onPointerLeave={onMouseLeave(() => { setHover(null); hide() })}>
             <g>
               {world?.countries.map(([id, n, d], i) => (
                 <motion.path key={id + n} d={d} initial={{ opacity: reduce ? 1 : 0 }} animate={inView ? { opacity: spot && spot !== n ? 0.35 : 1 } : undefined}
@@ -106,8 +126,8 @@ export function WorldMap({ data, metrics, hubs = [], names = {}, top = 8, map, c
                 <g key={n}>
                   <circle cx={x} cy={y} r={2.6} fill="var(--c3)" stroke="var(--card)" strokeWidth={1} pointerEvents="none" />
                   <circle cx={x} cy={y} r={7} fill="transparent" className="cursor-pointer"
-                    onPointerEnter={() => setHover(null)} onPointerDown={e => { setHover(null); show(e, <><b className="font-semibold">{n}</b><br /><span className="text-[var(--fg2)]">Regional hub</span></>) }}
-                    onPointerMove={e => show(e, <><b className="font-semibold">{n}</b><br /><span className="text-[var(--fg2)]">Regional hub</span></>)} />
+                    onPointerEnter={() => setHover(null)} onPointerDown={e => { setHover(null); show(e, <><b className="font-semibold">{n}</b><br /><span className="text-[var(--fg2)]">{m('hub')}</span></>) }}
+                    onPointerMove={e => show(e, <><b className="font-semibold">{n}</b><br /><span className="text-[var(--fg2)]">{m('hub')}</span></>)} />
                 </g>
               ))}
             </g>
@@ -118,22 +138,22 @@ export function WorldMap({ data, metrics, hubs = [], names = {}, top = 8, map, c
           {!reduce && hubs.map(([n, x, y], i) => <GeoHubPulse key={n} x={x / W} y={y / H} size={(19.2 / W) * 100} delay={i * 270} active={onScreen} />)}
           </div>
           <div className="flex flex-wrap items-center gap-2 text-[11px] text-[var(--fg3)]">
-            <span>Low</span><span className="flex gap-0.5">{GEO_STEPS.map(s => <i key={s} className="block h-2 w-[22px] rounded-[var(--r-sm)]" style={{ background: geoRamp(s) }} />)}</span><span>High</span>
-            <span className="ml-2.5 inline-flex items-center gap-1"><i className="inline-block h-2 w-2 rounded-[var(--r-sm)] bg-[var(--muted)]" />No data</span>
+            <span>{m('low')}</span><span className="flex gap-0.5">{GEO_STEPS.map(s => <i key={s} className="block h-2 w-[22px] rounded-[var(--r-sm)]" style={{ background: geoRamp(s) }} />)}</span><span>{m('high')}</span>
+            <span className="ms-2.5 inline-flex items-center gap-1"><i className="inline-block h-2 w-2 rounded-[var(--r-sm)] bg-[var(--muted)]" />{m('noData')}</span>
           </div>
         </div>
         <div ref={listRef} className="flex flex-col gap-0.5">
-          <div className="mb-1.5 text-xs text-[var(--fg3)]">Top countries · {M.label}<span className="hidden [@media(pointer:coarse)]:inline"> · tap to spotlight</span></div>
+          <div className="mb-1.5 text-xs text-[var(--fg3)]">{m('top', { metric: M.label })}<span className="hidden [@media(pointer:coarse)]:inline">{m('tapSpot')}</span></div>
           {ranked.map(([n, v], i) => (
             <div key={n} className={cn('flex cursor-default items-center gap-2 rounded-[var(--r-md)] px-1.5 py-1 text-xs hover:bg-[var(--muted)]', TOUCH.tap36, spot === n && 'bg-[var(--muted)]')}
               onPointerEnter={e => { if (!isTouch(e)) setSpot(n) }} onPointerDown={e => { if (isTouch(e)) setSpot(s => (s === n ? null : n)) }} onPointerLeave={onMouseLeave(() => setSpot(null))}>
               <span className="min-w-0 flex-1 truncate">{names[n] ?? n}</span>
               <span className="h-[5px] w-11 flex-none overflow-hidden rounded-[var(--r-sm)] bg-[var(--muted)]">
-                {/* scaleX from the left, not width: the bar grows without a layout per frame */}
-                <motion.i key={metric} className="block h-full origin-left rounded-[var(--r-sm)] bg-[var(--accent)]" initial={{ scaleX: reduce ? v[metric] / ranked[0][1][metric] : 0 }}
+                {/* scaleX from the start edge, not width: the bar grows without a layout per frame */}
+                <motion.i key={metric} className="block h-full origin-left rounded-[var(--r-sm)] rtl:origin-right bg-[var(--accent)]" initial={{ scaleX: reduce ? v[metric] / ranked[0][1][metric] : 0 }}
                   animate={inView ? { scaleX: v[metric] / ranked[0][1][metric] } : undefined} transition={{ duration: 0.6, delay: i * 0.04, ease: [0.22, 1, 0.36, 1] }} />
               </span>
-              <span className="w-[46px] text-right font-[family-name:var(--mono)] text-[11px] text-[var(--fg2)]">{(M.short ?? M.format)(v[metric])}</span>
+              <span className="w-[46px] text-end font-[family-name:var(--mono)] text-[11px] text-[var(--fg2)]">{(M.short ?? M.format)(v[metric])}</span>
             </div>
           ))}
         </div>
@@ -158,7 +178,7 @@ function GeoHubPulse({ x, y, size, delay, active }: { x: number; y: number; size
   }, [delay])
   useEffect(() => { const a = anim.current; if (!a) return; if (active) a.play(); else a.pause() }, [active])
   return <span ref={ref} aria-hidden className="pointer-events-none absolute aspect-square rounded-full border-[1.5px] border-[var(--c3)] opacity-0"
-    style={{ left: `${x * 100}%`, top: `${y * 100}%`, width: `${size}%`, transform: 'translate(-50%,-50%)' }} />
+    style={{ left: `${x * 100}%`, top: `${y * 100}%`, width: `${size}%`, transform: 'translate(-50%,-50%)' }} /> // rtl-lint-ignore: map coordinates
 }
 
 /* Globe ───────────────────────────────────────────────────────────────────── */
@@ -198,6 +218,7 @@ export function Globe({ hubs, routes, land: landProp, height = 440, className }:
   const land = landProp ?? loadedLand ?? GEO_NO_LAND
   const reduce = useReducedMotion()
   const [auto, setAuto] = useState(!reduce)
+  const m = useMessages(GEO_MESSAGES), { fmt } = useLocale()
   const [hl, setHl] = useState(-1)
   const cvRef = useRef<HTMLCanvasElement>(null)
   const visible = useInView(cvRef, { amount: 0.05 })
@@ -260,7 +281,7 @@ export function Globe({ hubs, routes, land: landProp, height = 440, className }:
       const [x, y, z] = proj(geoVec(lon, lat)); if (z < 0) return
       if (!still) { const p = ((now / 1000 + i * 0.3) % 2) / 2; g.strokeStyle = geoRgba(hubC, (1 - p) * 0.7 * z); g.lineWidth = 1.2; g.beginPath(); g.arc(x, y, 3 + p * 10, 0, Math.PI * 2); g.stroke() }
       g.fillStyle = geoRgba(hubC, 1); g.beginPath(); g.arc(x, y, 3, 0, Math.PI * 2); g.fill()
-      if (z > 0.35) { g.font = `500 11px ${st.font}`; g.fillStyle = geoRgba(fg, Math.min(1, (z - 0.35) * 3)); g.fillText(n, x + 7, y + 4) }
+      if (z > 0.35) { g.font = `500 11px ${st.font}`; g.textAlign = 'left'; g.fillStyle = geoRgba(fg, Math.min(1, (z - 0.35) * 3)); g.fillText(n, x + 7, y + 4) }
     })
   }
   useFrameLoop(visible, draw)
@@ -277,19 +298,19 @@ export function Globe({ hubs, routes, land: landProp, height = 440, className }:
     <div key={i} className={cn('flex cursor-default items-center gap-2 rounded-[var(--r-md)] p-2 text-xs', TOUCH.tap36, hl === i && 'bg-[var(--muted)]')}
       onPointerEnter={e => { if (!isTouch(e)) setHl(i) }} onPointerDown={e => { if (isTouch(e)) setHl(h => (h === i ? -1 : i)) }}
       onPointerLeave={onMouseLeave(() => setHl(-1))} tabIndex={0} onFocus={() => setHl(i)} onBlur={() => setHl(-1)}>
-      <i className="h-2 w-2 flex-none rounded-full" style={{ background: safeColor(r.color) }} /><span className="flex-1">{hubs[r.from][0]} → {hubs[r.to][0]}</span>
-      <b className="font-[family-name:var(--mono)] text-[11px] font-medium text-[var(--fg2)]">{latency[i]} ms</b>
+      <i className="h-2 w-2 flex-none rounded-full" style={{ background: safeColor(r.color) }} /><span className="flex-1">{m('route', { from: hubs[r.from][0], to: hubs[r.to][0] })}</span>
+      <b className="font-[family-name:var(--mono)] text-[11px] font-medium text-[var(--fg2)]">{m('ms', { n: fmt.number(latency[i]) })}</b>
     </div>
   )
   return (
     <div className={cn('flex flex-col gap-3', className)}>
-      <div className="flex justify-end"><Button size="sm" className={TOUCH.tap36} aria-pressed={auto} onClick={() => setAuto(a => !a)}>{auto ? 'Auto-rotate on' : 'Auto-rotate off'}</Button></div>
+      <div className="flex justify-end"><Button size="sm" className={TOUCH.tap36} aria-pressed={auto} onClick={() => setAuto(a => !a)}>{auto ? m('autoOn') : m('autoOff')}</Button></div>
       <div className="grid items-center gap-5 md:grid-cols-[minmax(0,1fr)_230px]">
-        <motion.canvas ref={cvRef} role="img" aria-label="Rotating globe with routes between cities" style={{ height: `min(${height}px, calc(100vw - 32px))` }}
+        <motion.canvas ref={cvRef} role="img" aria-label={m('globe')} style={{ height: `min(${height}px, calc(100vw - 32px))` }}
           className={cn('block w-full touch-pan-y', grab ? 'cursor-grabbing' : 'cursor-grab')}
           initial={{ opacity: 0, scale: 0.92 }} animate={inView ? { opacity: 1, scale: 1 } : undefined} transition={{ duration: 0.8, ease: [0.22, 1, 0.36, 1] }}
           onPointerDown={down} onPointerMove={move} onPointerUp={up} onPointerCancel={up} />
-        <div ref={routesRef} className="flex flex-col gap-0.5"><div className="mb-1.5 text-xs text-[var(--fg3)]">Live routes<span className="hidden [@media(pointer:coarse)]:inline"> · drag the globe sideways to spin it</span></div>{routes.map(row)}</div>
+        <div ref={routesRef} className="flex flex-col gap-0.5"><div className="mb-1.5 text-xs text-[var(--fg3)]">{m('routes')}<span className="hidden [@media(pointer:coarse)]:inline">{m('spinHint')}</span></div>{routes.map(row)}</div>
       </div>
     </div>
   )

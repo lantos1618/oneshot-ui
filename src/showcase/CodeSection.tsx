@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react'
 import { useReducedMotion } from 'motion/react'
-import { Citation, CodeBlock, CodeTabs, Diff, InlineCode, InstallCommand, Kbd, Markdown, type Source, Terminal, useViewport } from '../lib'
+import { Citation, CodeBlock, CodeTabs, Diff, InlineCode, InstallCommand, Kbd, Markdown, type Source, Terminal, markdownCodeBlock, useViewport } from '../lib'
 import { Section, Spec, SpecAction } from './kit'
 
 const IMPORT_CODE = `import { createFlow } from './flow';
@@ -138,9 +138,9 @@ function MarkdownStreamDemo({ still }: { still: boolean }) {
     // the finished answer sits invisibly underneath, so the card has its final height from the start (no layout shift);
     // rendered as a stream too, so its tables get the same fixed column widths as the live copy
     <div ref={ref} className="grid max-w-[72ch]">
-      <div aria-hidden inert className="invisible col-start-1 row-start-1"><Markdown streaming caret={false} renderCitation={mdCite}>{MD_ANSWER}</Markdown></div>
+      <div aria-hidden inert className="invisible col-start-1 row-start-1"><Markdown streaming caret={false} renderCitation={mdCite} renderCode={markdownCodeBlock}>{MD_ANSWER}</Markdown></div>
       <div className="col-start-1 row-start-1 min-w-0" aria-live="off">
-        <Markdown streaming={shown < MD_ANSWER.length} renderCitation={mdCite}>{MD_ANSWER.slice(0, shown)}</Markdown>
+        <Markdown streaming={shown < MD_ANSWER.length} renderCitation={mdCite} renderCode={markdownCodeBlock}>{MD_ANSWER.slice(0, shown)}</Markdown>
       </div>
     </div>
   )

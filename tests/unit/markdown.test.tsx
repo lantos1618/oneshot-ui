@@ -245,12 +245,12 @@ describe('parseMarkdown: limits and adversarial input', () => {
     ['fences', '```\n'.repeat(N / 4)],
   ]
   for (const [name, src] of cases) {
-    it(`${name} (${src.length.toLocaleString('en')} chars) parses in < 200 ms`, () => {
+    it(`${name} (${src.length.toLocaleString('en')} chars) parses in < 500 ms`, () => {
       parseMarkdown(src.slice(0, 1000)) // warm up
       // best of three runs per mode (GC and JIT noise from parallel test files), slower of the two modes
       const best = (streaming: boolean) => Math.min(...[0, 1, 2].map(() => time(() => parseMarkdown(src, { streaming }))))
       const ms = Math.max(best(false), best(true))
-      expect(ms).toBeLessThan(process.env.CI ? 600 : 200) // shared CI runners are several times slower
+      expect(ms).toBeLessThan(process.env.CI ? 1000 : 500) // linear input stays far below; quadratic takes seconds. Headroom for loaded machines
     })
   }
 

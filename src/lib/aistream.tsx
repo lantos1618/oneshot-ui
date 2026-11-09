@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
+import { uiShared } from './core'
 
 /* ════════════════════════════════════════════════════════════════════════════
  * 11a. AI STREAM: the message model (parts), a chunk reducer, stream parsers and useAiChat
@@ -48,6 +49,7 @@ export type AiSourcePart = { type: 'source'; url: string; title?: string; snippe
 export type AiFilePart = { type: 'file'; name: string; mediaType: string; url?: string; size?: number; file?: File }
 /** Custom data for your own renderer (MessageParts' `renderData`). */
 export type AiDataPart = { type: 'data'; name: string; data: unknown; id?: string }
+/** A failed reply. `message` is what the model or your `send` reported, or '' (renderers then show a generic "Something went wrong" in the reader's language). */
 export type AiErrorPart = { type: 'error'; message: string }
 export type AiPart = AiTextPart | AiReasoningPart | AiToolPart | AiSourcePart | AiFilePart | AiDataPart | AiErrorPart
 export type AiMessage = {
@@ -79,9 +81,10 @@ export type AiChunk =
 // (messages: Conversation virtualises long logs, so the cap only bounds memory; older messages drop off the top)
 export const AI_LIMITS = { partChars: 200_000, argsChars: 100_000, parts: 400, messages: 2_000, lineChars: 1_000_000, errorChars: 2_000 }
 
-let aiSeq = 0
+/** The id counter, page-wide (shared by every copy of the library, so ids from different drop-in files never collide). */
+const aiSeq = uiShared('ai-seq', () => ({ n: 0 }))
 /** A fresh id for a message or part ("msg-…"), unique within the page. */
-export const aiId = (prefix = 'ai') => `${prefix}-${Date.now().toString(36)}${(++aiSeq).toString(36)}`
+export const aiId = (prefix = 'ai') => `${prefix}-${Date.now().toString(36)}${(++aiSeq.n).toString(36)}`
 
 const aiCap = (s: string, n: number) => s.length > n ? s.slice(0, n) : s
 const aiStr = (v: unknown, n = AI_LIMITS.errorChars) => aiCap(typeof v === 'string' ? v : v instanceof Error ? v.message : (() => { try { return JSON.stringify(v) ?? String(v) } catch { return String(v) } })(), n)
@@ -173,7 +176,7 @@ export function applyAiChunk(messages: AiMessage[], chunk: AiChunk | string): Ai
       break
     }
     case 'error':
-      add({ type: 'error', message: aiStr(c.message ?? 'Something went wrong') || 'Something went wrong' })
+      add({ type: 'error', message: aiStr(c.message ?? '') }) // '' → the renderer says "Something went wrong" in the reader's language
       status = 'error'
       break
     default: return messages
@@ -215,7 +218,7 @@ export function toAiChunk(e: unknown): AiChunk | null {
     case 'file': return typeof o.url === 'string' ? { type: 'file', url: o.url, mediaType: String(o.mediaType ?? 'application/octet-stream'), ...(o.name ?? o.filename ? { name: String(o.name ?? o.filename) } : {}) } : null
     case 'data': return typeof o.name === 'string' ? { type: 'data', name: o.name, data: o.data, ...withId } : null
     case 'finish': case 'abort': return { type: 'finish' }
-    case 'error': return { type: 'error', message: aiStr(o.message ?? o.errorText ?? 'Something went wrong') }
+    case 'error': return { type: 'error', message: aiStr(o.message ?? o.errorText ?? '') }
     default:
       if (t.startsWith('data-') && t.length > 5) return { type: 'data', name: t.slice(5), data: o.data, ...withId }
       return null
@@ -418,7 +421,7 @@ export function useAiChat({ send, initialMessages = [], onFinish, onError, onApp
       finish(err)
     } catch (err) {
       if (g !== gen.current || ac.signal.aborted) return
-      live.current = applyAiChunk(live.current, { type: 'error', message: aiStr(err) || 'Something went wrong' })
+      live.current = applyAiChunk(live.current, { type: 'error', message: aiStr(err) })
       flush(); setStatus('error'); setError(err)
       finish(err ?? new Error('Something went wrong'))
     } finally { if (ctl.current === ac) ctl.current = null }

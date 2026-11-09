@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useState } from 'react'
 import {
-  BarList, BoxViolinChart, BulletChart, Button, CalendarHeatmap, Chart, DensityHistogram, DonutChart, ForestPlot, FunnelChart, Gauge, Heatmap, LOCALE, RadarChart, RegressionChart, ScatterChart, SegmentedControl, Slider, SparkChart, SparkTile, Switch, TOUCH, TickerTable, Treemap, dayKey, useViewport, type ChartDatum, type TickerRow,
+  BarList, BoxViolinChart, BulletChart, Button, CalendarHeatmap, Chart, DensityHistogram, DonutChart, ForestPlot, FunnelChart, Gauge, Heatmap, RadarChart, RegressionChart, ScatterChart, SegmentedControl, Slider, SparkChart, SparkTile, Switch, TOUCH, TickerTable, Treemap, dayKey, useLocale, useViewport, type ChartDatum, type TickerRow,
 } from '../lib'
 import { describeSample } from '../examples'
 import { Row, Section, Spec, SpecAction } from './kit'
@@ -91,10 +91,13 @@ const CHART_TAP = TOUCH.tap36
 const CHART_SEG = 'self-start'
 
 // candlestick days as dates (fixed start, so server and client render the same labels)
-const candleDate = (t: unknown) => new Intl.DateTimeFormat('en-GB', { day: 'numeric', month: 'short', timeZone: 'UTC' }).format(Date.UTC(2026, 9, 1) + (Number(t) - 1) * 864e5)
+/** Day t of October 2026 as "3 Oct" in the page's locale. */
+const candleDate = (t: unknown, fmt: ReturnType<typeof useLocale>['fmt']) => fmt.date(Date.UTC(2026, 9, 1) + (Number(t) - 1) * 864e5, { day: 'numeric', month: 'short', timeZone: 'UTC' })
 const ebNote = { sd: 'Standard deviation: spread of the data', se: 'Standard error: precision of the mean', ci: 'Non-overlapping 95% CIs suggest a real difference' }
 
 export function ChartsSection() {
+  const { fmt } = useLocale()
+  const fixed = (v: unknown, d: number) => fmt.number(Number(v), { minimumFractionDigits: d, maximumFractionDigits: d })
   const [range, setRange] = useState('30D')
   const [gauge, setGauge] = useState(68)
   const [ebData, setEbData] = useState(genErrorBars)
@@ -146,7 +149,7 @@ export function ChartsSection() {
           tooltip={d => <><div className="mb-1 font-medium">{String(d.l)}</div><div className="text-[var(--fg2)]">{d.kind === 'total' || d.kind === 'end' ? <>Total <b className="ui-num text-[var(--fg)]">{d.to}</b></> : <><b className="ui-num text-[var(--fg)]">{d.text}</b> (running {d.to})</>}</div></>} />
       </Spec>
       <Spec title="Combo bar + line" desc="Volume and rate, two axes">
-        <Chart data={COMBO} x="d" rightFormat={v => `${v}%`}
+        <Chart data={COMBO} x="d" rightFormat={v => fmt.percent(v / 100, 0)}
           series={[{ key: 'orders', label: 'Orders', type: 'bar', color: 'var(--line2)' }, { key: 'conv', label: 'Conversion %', color: 'var(--c2)', axis: 'right', points: true, curve: 'monotone' }]} />
       </Spec>
       <Spec title="Histogram" desc="Distribution of one variable">
@@ -156,24 +159,24 @@ export function ChartsSection() {
         <ScatterChart points={BUBBLES} xDomain={[0, 100]} yDomain={[0, 100]} />
       </Spec>
       <Spec title="Funnel" desc="Drop-off through steps. Hover or tap a step.">
-        <FunnelChart format={v => v.toLocaleString(LOCALE)} steps={[{ label: 'Visits', value: 10000 }, { label: 'Signups', value: 4100 }, { label: 'Activated', value: 1900 }, { label: 'Paid', value: 820 }]} />
+        <FunnelChart format={v => fmt.number(v)} steps={[{ label: 'Visits', value: 10000 }, { label: 'Signups', value: 4100 }, { label: 'Activated', value: 1900 }, { label: 'Paid', value: 820 }]} />
       </Spec>
       <Spec title="Gauge" desc="One value against a target" actions={<SpecAction onClick={() => setGauge(Math.round(20 + Math.random() * 78))}>Randomise</SpecAction>}>
         <Gauge value={gauge} color="var(--c2)" label="of quarterly target" numberFormat={{ style: 'unit', unit: 'percent', maximumFractionDigits: 0 }} />
       </Spec>
       <Spec title="Candlestick" desc="Open, high, low, close">
-        <Chart data={CANDLES} x="t" xFormat={candleDate} label="Candlestick: daily price" zero={false} gap={0.3} legend={false} rightFormat={v => v.toFixed(0)}
+        <Chart data={CANDLES} x="t" xFormat={t => candleDate(t, fmt)} label="Candlestick: daily price" zero={false} gap={0.3} legend={false} rightFormat={v => fixed(v, 0)}
           series={[{ key: 'c', from: 'o', type: 'float', axis: 'right', label: 'Price', colorOf: d => (Number(d.c) >= Number(d.o) ? 'var(--ok)' : 'var(--bad)'), whisker: { low: 'l', high: 'h' } }]}
           tooltip={d => <>
-            <div className="mb-1 font-medium">{candleDate(d.t)}</div>
-            <div className="ui-num text-[var(--fg2)]">O <b className="text-[var(--fg)]">{Number(d.o).toFixed(1)}</b>  C <b className="text-[var(--fg)]">{Number(d.c).toFixed(1)}</b></div>
-            <div className="ui-num text-[var(--fg2)]">H <b className="text-[var(--fg)]">{Number(d.h).toFixed(1)}</b>  L <b className="text-[var(--fg)]">{Number(d.l).toFixed(1)}</b></div>
+            <div className="mb-1 font-medium">{candleDate(d.t, fmt)}</div>
+            <div className="ui-num text-[var(--fg2)]">O <b className="text-[var(--fg)]">{fixed(d.o, 1)}</b>  C <b className="text-[var(--fg)]">{fixed(d.c, 1)}</b></div>
+            <div className="ui-num text-[var(--fg2)]">H <b className="text-[var(--fg)]">{fixed(d.h, 1)}</b>  L <b className="text-[var(--fg)]">{fixed(d.l, 1)}</b></div>
           </>} />
       </Spec>
       <ChartsLiveSparks />
       <Spec title="Heatmap" desc="Activity by day and hour">
         <Heatmap cell={18} rows={CHART_DAYS} cols={Array.from({ length: 12 }, (_, i) => `${8 + i}h`)} value={(r, c) => HEAT[r][c]} color="var(--c2)"
-          label={(r, c) => `${CHART_DAYS[r]} ${8 + c}:00`} format={n => `${n} events`} />
+          label={(r, c) => `${CHART_DAYS[r]} ${8 + c}:00`} format={n => `${fmt.number(n)} events`} />
       </Spec>
       <Spec title="Calendar heatmap" desc="Daily contributions, last 26 weeks">
         <CalendarHeatmap values={CALENDAR} end={new Date(2026, 10, 8)} />
@@ -191,9 +194,9 @@ export function ChartsSection() {
       </Spec>
       <Spec title="Error bars" desc="Group means with uncertainty" actions={<SpecAction onClick={() => setEbData(genErrorBars())}>Resample</SpecAction>}>
         <SegmentedControl aria-label="Error bar" size="sm" className={CHART_SEG} value={ebMode} onChange={v => setEbMode(v as 'sd' | 'se' | 'ci')} options={[{ value: 'sd', label: 'SD' }, { value: 'se', label: 'SE' }, { value: 'ci', label: '95% CI' }]} />
-        <Chart data={ebRows} x="g" height={190} domain={[20, 75]} zero={false} gap={0.55} legend={false} format={v => v.toFixed(0)}
+        <Chart data={ebRows} x="g" height={190} domain={[20, 75]} zero={false} gap={0.55} legend={false} format={v => fixed(v, 0)}
           series={[{ key: 'm', from: 'floor', type: 'float', label: 'Mean', colorOf: (_, i) => EB_COLORS[i], whisker: { low: 'lo', high: 'hi', caps: true } }]}
-          tooltip={d => <><div className="mb-1 font-medium">{d.g}</div><div className="ui-num">{Number(d.m).toFixed(1)} ± {Number(d.e).toFixed(1)} <span className="text-[var(--fg3)]">({ebMode === 'ci' ? '95% CI' : ebMode.toUpperCase()}, n={d.n})</span></div></>} />
+          tooltip={d => <><div className="mb-1 font-medium">{d.g}</div><div className="ui-num">{fixed(d.m, 1)} ± {fixed(d.e, 1)} <span className="text-[var(--fg3)]">({ebMode === 'ci' ? '95% CI' : ebMode.toUpperCase()}, n={fmt.number(Number(d.n))})</span></div></>} />
         <span className="block min-h-[2lh] text-xs text-[var(--fg3)]">{ebNote[ebMode]}</span>
       </Spec>
       <Spec title="Box and violin" desc="Distributions per group, outliers marked" actions={<SpecAction onClick={() => setBvData(genBoxes())}>Resample</SpecAction>}>

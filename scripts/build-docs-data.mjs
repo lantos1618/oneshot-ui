@@ -26,7 +26,7 @@ const AREAS = [
   ['charts', 'Charts'], ['diagrams', 'Diagrams and maps'], ['ai', 'AI'], ['collab', 'Collaboration'], ['theming', 'Theming'], ['blocks', 'Blocks and pages'],
 ]
 const AREA_OF_MODULE = {
-  core: 'primitives', motion: 'foundation', virtual: 'foundation', provider: 'foundation', overlay: 'overlays', forms: 'forms', navigation: 'navigation',
+  core: 'primitives', motion: 'foundation', virtual: 'foundation', provider: 'foundation', overlay: 'overlays', forms: 'forms', formkit: 'forms', fields: 'forms', inputs: 'forms', select: 'forms', pickers: 'forms', upload: 'forms', navigation: 'navigation',
   feedback: 'feedback', data: 'data', datagrid: 'data', layout: 'layout', editor: 'content', scheduler: 'layout', code: 'content', markdown: 'content',
   media: 'media', collab: 'collab', pages: 'blocks', charts: 'charts', diagrams: 'diagrams', gantt: 'diagrams', statechart: 'diagrams', trace: 'diagrams',
   network: 'diagrams', diagramkit: 'diagrams', geo: 'diagrams', aistream: 'ai', ai: 'ai', aichat: 'ai', aiagent: 'ai', appearance: 'theming',

@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react'
 import {
-  AICanvas, type AiChunk, type AiMessage, type AiToolPart, AgentComposer, Conversation, Message, MessageActions, PromptInput, Suggestions, aiMessageText, useAiChat, AgentPlan, AgentTransitMap, AssistantChat, Badge, Chart, ChatApproval, ChatCard, ChatChecklist, type ChatScript, SourceList, Citation, CodeBlock, sourceDomain, type ComposerModel, type ComposerAction, type ComposerReply, type ComposerSample, type ComposerSendMeta, ConfidenceField, type Connector, GhostTextInput, LOCALE, ModelComparison, PermissionRequest, type SlashCommand, type Source, SourcesPanel, SuggestedEdit, ThinkingSteps, VoiceInput, type StepStatus, type WorkspaceItem, sleep, useViewport,
+  AI_RICH_RENDERERS, AICanvas, CHAT_PARTS_MESSAGES, type AiChunk, type AiMessage, type AiToolPart, AgentComposer, Conversation, Message, MessageActions, PromptInput, Suggestions, aiMessageText, useAiChat, AgentPlan, AgentTransitMap, AssistantChat, Badge, Chart, ChatApproval, ChatCard, ChatChecklist, type ChatScript, SourceList, Citation, CodeBlock, sourceDomain, type ComposerModel, type ComposerAction, type ComposerReply, type ComposerSample, type ComposerSendMeta, ConfidenceField, type Connector, GhostTextInput, ModelComparison, PermissionRequest, type SlashCommand, type Source, SourcesPanel, SuggestedEdit, ThinkingSteps, VoiceInput, type StepStatus, type WorkspaceItem, sleep, useLocale, useMessages, useToast, useViewport,
 } from '../lib'
 import { AGENT_WORKFLOWS, AGENT_WORKFLOW_ORDER, AI_CANVAS_SAMPLE } from '../examples'
 import { Section, Spec, SpecAction } from './kit'
@@ -47,13 +47,7 @@ function respond(q: string): ChatScript {
       followUps: ['Top customers table', 'Write a retry snippet'] }
     case 'table': return { tool: ['Ranking customers', 'Ranked customers', 'customers.top(by="mrr", limit=5)'],
       versions: ['Your top five customers make up 31% of MRR. Two are on trial, worth a nudge before month end.'],
-      part: <ChatCard>
-        <div className="-mx-1 overflow-x-auto px-1 [contain:inline-size]"><table className="w-full min-w-[300px] border-collapse text-xs">
-          <thead><tr className="text-left text-[var(--fg3)]">{['Company', 'Plan', 'Status'].map(h => <th key={h} className="border-b border-[var(--line)] px-1.5 py-1 font-medium">{h}</th>)}<th className="border-b border-[var(--line)] px-1.5 py-1 text-right font-medium">MRR</th></tr></thead>
-          <tbody>{TOP.map(([c, p, s, m]) => <tr key={c} className="[&:not(:last-child)>td]:border-b [&>td]:border-[var(--line)]"><td className="px-1.5 py-[7px]">{c}</td><td className="px-1.5">{p}</td><td className="px-1.5"><Badge tone={s === 'Active' ? 'ok' : 'accent'}>{s}</Badge></td><td className="ui-num px-1.5 text-right">€{m.toLocaleString(LOCALE)}</td></tr>)}</tbody>
-        </table></div>
-        <a href="#data" className="mt-2 inline-flex min-h-8 items-center text-xs text-[var(--accent)] no-underline">Open in data grid →</a>
-      </ChatCard>,
+      part: <AiTopTable />,
       followUps: ['Chart MRR this year'] }
     case 'code': return { tool: ['Reading flow docs', 'Read flow docs', 'docs.search("retries backoff") → 3 pages'],
       versions: ['Here’s a retry wrapper with exponential backoff and jitter. It stops on 4xx errors, which won’t succeed on retry.'],
@@ -61,6 +55,20 @@ function respond(q: string): ChatScript {
     default: return { tool: ['Searching workspace', 'Searched workspace', 'search(query) → 0 exact matches'],
       versions: ['I didn’t find anything specific for that. Try a starter, or type / to see what I can show you.'], followUps: ['Summarise this week', 'Chart MRR this year'] }
   }
+}
+
+/** The "Top customers table" answer: amounts in the reader's locale. */
+function AiTopTable() {
+  const { fmt } = useLocale()
+  return (
+    <ChatCard>
+      <div className="-mx-1 overflow-x-auto px-1 [contain:inline-size]"><table className="w-full min-w-[300px] border-collapse text-xs">
+        <thead><tr className="text-start text-[var(--fg3)]">{['Company', 'Plan', 'Status'].map(h => <th key={h} className="border-b border-[var(--line)] px-1.5 py-1 text-start font-medium">{h}</th>)}<th className="border-b border-[var(--line)] px-1.5 py-1 text-end font-medium">MRR</th></tr></thead>
+        <tbody>{TOP.map(([c, p, s, m]) => <tr key={c} className="[&:not(:last-child)>td]:border-b [&>td]:border-[var(--line)]"><td className="px-1.5 py-[7px]">{c}</td><td className="px-1.5">{p}</td><td className="px-1.5"><Badge tone={s === 'Active' ? 'ok' : 'accent'}>{s}</Badge></td><td className="ui-num px-1.5 text-end">{fmt.money(m, 'EUR')}</td></tr>)}</tbody>
+      </table></div>
+      <a href="#data" className="mt-2 inline-flex min-h-8 items-center text-xs text-[var(--accent)] no-underline">Open in data grid <span className="ui-flip inline-block">→</span></a>
+    </ChatCard>
+  )
 }
 
 const THOUGHTS = [
@@ -110,6 +118,8 @@ function acDemoReply(text: string, files: File[], context: string[], { settings,
 /** The demo host: pretends to run an approved action; on deny it runs nothing, so it confirms that. */
 const acDemoApprove = async (_action: ComposerAction, approved: boolean) => { await sleep(approved ? 700 : 150); return true }
 
+const PERM_RECIPIENTS = ['Alex Lee', 'Ben Kim', 'Cara Mills']
+const PERM_DRAFT = { subject: 'Launch moved to Thursday', body: 'Hi all, quick heads up: we’re moving the launch from Tuesday to Thursday so legal can finish the terms review. Nothing else changes. Thanks for your patience.' }
 /** PermissionRequest wired to a pretend mail host: progress is simulated here, not in the component. */
 function PermissionDemo() {
   const [progress, setProgress] = useState<{ sent: number; total: number }>()
@@ -119,7 +129,8 @@ function PermissionDemo() {
     for (let i = 0; i <= 12; i++) { setProgress({ sent: i, total: 12 }); await sleep(110 + Math.random() * 90) }
   }
   return <>
-    <PermissionRequest reason="You asked to “let the launch list know about the delay”. Sending email is never automatic." progress={progress} onDecide={onDecide} onUndo={async () => { await sleep(500); return true }} />
+    <PermissionRequest title="Send an email to 12 people" reason="You asked to “let the launch list know about the delay”. Sending email is never automatic." recipients={PERM_RECIPIENTS} total={12} list="Launch list"
+      draft={PERM_DRAFT} progress={progress} onDecide={onDecide} onUndo={async () => { await sleep(500); return true }} />
     {got && <span className="text-xs text-[var(--fg3)]">The host received the subject “{got}”</span>}
   </>
 }
@@ -240,6 +251,7 @@ const LIVE_INITIAL: AiMessage[] = [
 /** Live chat wired to the fake model through useAiChat: Conversation + Message + MessageActions + Suggestions + PromptInput. */
 function LiveChatDemo({ older }: { older: number }) {
   const [model, setModel] = useState('fast')
+  const t = useMessages(CHAT_PARTS_MESSAGES)
   const chat = useAiChat({ send: liveModel, initialMessages: LIVE_INITIAL, onApprovalRequest: liveRunTool })
   const { setMessages } = chat
   useEffect(() => { // "Load 200 older": prepends history, so the log virtualises (and keeps your place if you scrolled up)
@@ -251,9 +263,9 @@ function LiveChatDemo({ older }: { older: number }) {
     <div className="flex min-w-0 flex-col gap-2.5">
       <Conversation busy={chat.busy} className="h-[min(400px,58dvh)]">
         {chat.messages.map((m, i) => (
-          <Message key={m.id} message={m} onDecideTool={chat.decideTool} onRetry={chat.regenerate}
+          <Message key={m.id} message={m} renderers={AI_RICH_RENDERERS} onDecideTool={chat.decideTool} onRetry={chat.regenerate}
             actions={m.role === 'assistant' && <MessageActions text={() => aiMessageText(m)} stopped={m.stopped} disabled={chat.busy}
-              onRetry={i === lastA ? chat.regenerate : undefined} retryLabel={m.stopped || m.status === 'error' ? 'Retry' : 'Regenerate'} />} />
+              onRetry={i === lastA ? chat.regenerate : undefined} retryLabel={m.stopped || m.status === 'error' ? t('retry') : t('regenerate')} />} />
         ))}
       </Conversation>
       <div className="-mx-1 overflow-x-auto px-1 pb-0.5 [scrollbar-width:none]"><Suggestions items={LIVE_SUGGESTIONS} onPick={q => chat.submit(q)} disabled={chat.busy} className="!flex-nowrap [&>button]:flex-none" /></div>
@@ -267,6 +279,7 @@ export function AISection() {
   const [replay, setReplay] = useState(0)
   const [planRun, setPlanRun] = useState(0)
   const [older, setOlder] = useState(0)
+  const toast = useToast()
   return (
     <Section id="ai" title="AI" desc="Streaming, showing work, asking permission, and being honest about uncertainty.">
       <Spec title="Live chat (real stream)" actions={<SpecAction onClick={() => setOlder(n => n + 1)}>Load 200 older</SpecAction>} desc="useAiChat over a local fake model that streams the same chunks a real one sends: reasoning, Markdown with citations and sources, a tool call that waits for your approval, and errors with Retry. Stop cancels the request through its AbortSignal; scroll up while it streams and it stops following. “Load 200 older” prepends history: past 60 messages the log renders only what is in view." span={3}>
@@ -276,7 +289,8 @@ export function AISection() {
         <AssistantChat defaultTurns={['Chart MRR this year']} starters={STARTERS} commands={COMMANDS} respond={respond} />
       </Spec>
       <Spec title="Chat composer" desc="A composer that doubles as a control panel: attach (+, drag, paste), add context from the workspace, pick a permission mode, configure the model, toggle connectors. Keep typing while it works and follow-ups queue. The first send glides it into the conversation." span={3}>
-        <AgentComposer onSend={acDemoReply} onApprovalRequest={acDemoApprove} items={AC_ITEMS} doc={AC_DOC} connectors={AC_CONNECTORS} models={AI_DEMO_MODELS} samples={AC_SAMPLES} hint="Try: “Summarise the invoice and draft a reminder”" />
+        <AgentComposer onSend={acDemoReply} onApprovalRequest={acDemoApprove} items={AC_ITEMS} doc={AC_DOC} connectors={AC_CONNECTORS} models={AI_DEMO_MODELS} samples={AC_SAMPLES} hint="Try: “Summarise the invoice and draft a reminder”"
+          onAddConnector={() => toast({ title: 'Connector directory', description: 'This would open the MCP / connector directory' })} />
       </Spec>
       <Spec title="Thinking steps" desc="Vertical stepper for reasoning. Click a finished step to read its detail." actions={<SpecAction onClick={() => setReplay(r => r + 1)}>Replay</SpecAction>}>
         <ThinkingSteps autoPlay replayKey={replay} steps={THOUGHTS} />

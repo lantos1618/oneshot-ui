@@ -138,7 +138,7 @@ export function MediaSection() {
         {demo ? <>
           <MiniAudioPlayer track={demo.shared} title="Night Drive" duration={24} />
           <VoiceNote src={demo.track.url} peaks={demo.track.peaks} duration={24} />
-        </> : <><Skeleton className="h-12 !rounded-full" /><Skeleton className="ml-auto h-11 w-full max-w-[280px] !rounded-[var(--r-lg)]" /></>}
+        </> : <><Skeleton className="h-12 !rounded-full" /><Skeleton className="ms-auto h-11 w-full max-w-[280px] !rounded-[var(--r-lg)]" /></>}
       </Spec>
       <Spec title="Avatar upload" desc="Pick a photo, crop it to a circle, zoom with the slider or a pinch">{demo ? <AvatarCropper src={demo.avatar} /> : <Skeleton className="h-40" />}</Spec>
     </Section>

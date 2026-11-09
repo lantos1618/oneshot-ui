@@ -1,6 +1,6 @@
-import { createContext, memo, useCallback, useContext, useEffect, useId, useMemo, useRef, useState, type RefObject } from 'react'
+import { createContext, memo, useCallback, useContext, useEffect, useId, useLayoutEffect, useMemo, useRef, useState, type RefObject } from 'react'
 import { AnimatePresence, motion } from 'motion/react'
-import { ActiveIndicator, AppearanceMenu, Button, type Command, CommandPalette, Dialog, DropdownMenu, Icon, type IconName, Kbd, MenuItem, THEMES, ThemeToggle, UIProvider, type UIDir, UI_MESSAGES_AR, UI_MESSAGES_DE, type UIMessages, cn, fmtFor, useHotkey, useLocale, useTheme, useToast } from '../lib'
+import { ActiveIndicator, AppearanceMenu, Button, type Command, CommandPalette, Dialog, DropdownMenu, Icon, type IconName, Kbd, MenuItem, THEMES, ThemeToggle, UIProvider, type UIDir, UI_MESSAGES_AR, UI_MESSAGES_DE, type UIMessages, cn, fmtFor, useHotkey, useLocale, useMessages, useTheme, useToast } from '../lib'
 import { AISection } from './AISection'
 import { ButtonsSection } from './ButtonsSection'
 import { ChartsSection } from './ChartsSection'
@@ -17,7 +17,7 @@ import { MotionSection } from './MotionSection'
 import { NavigationSection } from './NavigationSection'
 import { OverlaysSection } from './OverlaysSection'
 import { PagesSection } from './PagesSection'
-import { SECTIONS, SECTION_TAGS, ShellContext, type SpecEntry, flashSpec, specMatches, useSpecs } from './kit'
+import { SECTIONS, SECTION_TAGS, SHOWCASE_MSG, ShellContext, type SpecEntry, flashSpec, specMatches, useSpecs } from './kit'
 import { CodeDrawer } from './CodeDrawer'
 import { DesignQA, DesignQAButton, designQA } from './DesignQA'
 import { OVERLAY_DEMO_EVENT, type OverlayDemo } from './OverlaysSection'
@@ -34,8 +34,9 @@ const SHELL_SHORTCUTS: [string, [string[], string][]][] = [
 
 /** Grouped keyboard shortcuts for this page, opened with `?`. */
 function ShellShortcuts({ open, onOpenChange }: { open: boolean; onOpenChange: (v: boolean) => void }) {
+  const t = useMessages(SHOWCASE_MSG), { t: tc } = useLocale()
   return (
-    <Dialog open={open} onOpenChange={onOpenChange} title="Keyboard shortcuts" description="With a hardware keyboard. Single keys work anywhere except while typing." className="!max-w-[560px]">
+    <Dialog open={open} onOpenChange={onOpenChange} title={t('shortcuts')} description={t('shortcutsHint')} className="!max-w-[560px]">
       <div className="grid gap-x-6 gap-y-4 sm:grid-cols-2">
         {SHELL_SHORTCUTS.map(([group, items]) => (
           <div key={group}>
@@ -48,7 +49,7 @@ function ShellShortcuts({ open, onOpenChange }: { open: boolean; onOpenChange: (
           </div>
         ))}
       </div>
-      <div className="mt-4 flex justify-end"><Button size="sm" onClick={() => onOpenChange(false)}>Done</Button></div>
+      <div className="mt-4 flex justify-end"><Button size="sm" onClick={() => onOpenChange(false)}>{tc('common.done')}</Button></div>
     </Dialog>
   )
 }
@@ -117,12 +118,13 @@ const ShellSideNav = memo(function ShellSideNav({ ordered, query, setQuery, tota
     if (r.top < br.top + 8 || r.bottom > br.bottom - 8) box.scrollTo({ top: a.offsetTop - box.clientHeight / 2, behavior: shellReduce() ? 'auto' : 'smooth' })
   }, [activeSpec, active])
   const sectionLabel = Object.fromEntries(SECTIONS) as Record<string, string>
+  const t = useMessages(SHOWCASE_MSG)
   return (
-    <nav ref={sideRef} aria-label="Sections"
+    <nav ref={sideRef} aria-label={t('sections')}
       className="sticky top-[calc(env(safe-area-inset-top,0px)+76px)] hidden max-h-[calc(100vh-env(safe-area-inset-top,0px)-96px)] flex-col self-start overflow-auto pb-5 [scrollbar-width:thin] min-[900px]:flex">
       <div className="relative mb-2.5 flex-none">
         <Icon name="search" size={13} strokeWidth={2.2} className="pointer-events-none absolute top-[9.5px] start-[9px] text-[var(--fg3)]" />
-        <input ref={filterRef} value={query} onChange={e => setQuery(e.target.value)} placeholder="Search by name or use case" aria-label="Filter components by name or use case"
+        <input ref={filterRef} value={query} onChange={e => setQuery(e.target.value)} placeholder={t('filterPlaceholder')} aria-label={t('filterLabel')}
           onKeyDown={e => { if (e.key === 'Escape') { setQuery(''); e.currentTarget.blur() } }}
           className="h-8 w-full rounded-[var(--r-md)] border border-[var(--line)] bg-[var(--card)] pe-8 ps-7 text-[13px] text-[var(--fg)] outline-none placeholder:text-xs placeholder:text-[var(--fg3)] focus:border-[var(--fg3)] focus:shadow-[0_0_0_3px_var(--muted)]" />
         <Kbd className="ui-num pointer-events-none absolute top-[7px] end-1.5" aria-live="polite">{q ? total : '/'}</Kbd>
@@ -135,7 +137,7 @@ const ShellSideNav = memo(function ShellSideNav({ ordered, query, setQuery, tota
       </div>
       <div className="mt-3 flex min-h-[120px] flex-1 flex-col border-t border-[var(--line)] pt-2.5">
         <h2 id={subId} className="m-0 mb-1 flex flex-none items-baseline justify-between px-2.5 text-[11px] font-medium tracking-wide text-[var(--fg3)] uppercase">
-          <span className="truncate">{q ? 'Matches' : sectionLabel[active]}</span><span className="ui-num w-8 flex-none text-end normal-case">{subs.length}</span>
+          <span className="truncate">{q ? t('matches') : sectionLabel[active]}</span><span className="ui-num w-8 flex-none text-end normal-case">{subs.length}</span>
         </h2>
         <div ref={subRef} role="list" aria-labelledby={subId} className="relative min-h-0 flex-1 overflow-auto overscroll-contain [scrollbar-width:thin]">
           {subs.map((s, i) => (
@@ -147,7 +149,7 @@ const ShellSideNav = memo(function ShellSideNav({ ordered, query, setQuery, tota
                   activeSpec === s.id ? 'bg-[var(--muted)] text-[var(--fg)]' : 'text-[var(--fg2)]')}>{s.title}</a>
             </div>
           ))}
-          {q && !subs.length && <span className="block px-2.5 py-1 text-xs text-[var(--fg3)]">No matches</span>}
+          {q && !subs.length && <span className="block px-2.5 py-1 text-xs text-[var(--fg3)]">{t('noMatches')}</span>}
         </div>
       </div>
     </nav>
@@ -167,27 +169,30 @@ const ShellChipNav = memo(function ShellChipNav({ query, setQuery, total, search
   useEffect(() => {
     const row = chipsRef.current, chip = row?.querySelector<HTMLElement>(`[data-chip="${active}"]`)
     if (!row || !chip || !row.offsetParent) return
-    row.scrollTo({ left: chip.offsetLeft - row.clientWidth / 2 + chip.offsetWidth / 2, behavior: shellReduce() ? 'auto' : 'smooth' })
+    // centre the chip; in RTL scrollLeft counts from the right edge (0 down to negative)
+    const left = chip.offsetLeft - row.clientWidth / 2 + chip.offsetWidth / 2
+    row.scrollTo({ left: getComputedStyle(row).direction === 'rtl' ? left - (row.scrollWidth - row.clientWidth) : left, behavior: shellReduce() ? 'auto' : 'smooth' })
   }, [active, filtering])
   const done = () => { setQuery(''); setSearching(false) }
+  const t = useMessages(SHOWCASE_MSG), { t: tc, fmt } = useLocale()
   return (
-    <nav aria-label="Sections" className="sticky top-[calc(env(safe-area-inset-top,0px)+57px)] z-30 -mx-4 -mt-4 min-w-0 bg-[var(--bg)] px-[max(16px,env(safe-area-inset-left))] py-2 sm:-mx-5 sm:px-5 min-[900px]:hidden">
+    <nav aria-label={t('sections')} className="sticky top-[calc(env(safe-area-inset-top,0px)+57px)] z-30 -mx-4 -mt-4 min-w-0 bg-[var(--bg)] px-[max(16px,env(safe-area-inset-left))] py-2 sm:-mx-5 sm:px-5 min-[900px]:hidden">
       {filtering ? (
         <div role="search" className="flex items-center gap-2">
           <div className="relative min-w-0 flex-1">
             <Icon name="search" size={14} className="pointer-events-none absolute top-1/2 start-2.5 -translate-y-1/2 text-[var(--fg3)]" />
-            <input ref={filterRef} value={query} onChange={e => setQuery(e.target.value)} placeholder="Name or use case" aria-label="Filter components by name or use case" enterKeyHint="search"
+            <input ref={filterRef} value={query} onChange={e => setQuery(e.target.value)} placeholder={t('filterShort')} aria-label={t('filterLabel')} enterKeyHint="search"
               onKeyDown={e => { if (e.key === 'Escape') { done() } else if (e.key === 'Enter') e.currentTarget.blur() }}
               className="h-9 w-full rounded-[var(--r-md)] border border-[var(--line)] bg-[var(--card)] pe-12 ps-8 text-[13px] text-[var(--fg)] outline-none placeholder:text-[var(--fg3)] focus:border-[var(--fg3)] focus:shadow-[0_0_0_3px_var(--muted)]" />
-            <span className="ui-num pointer-events-none absolute top-1/2 end-2.5 -translate-y-1/2 text-xs text-[var(--fg3)]" aria-live="polite">{q ? `${total} found` : ''}</span>
+            <span className="ui-num pointer-events-none absolute top-1/2 end-2.5 -translate-y-1/2 text-xs text-[var(--fg3)]" aria-live="polite">{q ? t('found', { count: fmt.number(total) }) : ''}</span>
           </div>
-          <Button variant="ghost" onClick={done} className="flex-none !px-2.5">Cancel</Button>
+          <Button variant="ghost" onClick={done} className="flex-none !px-2.5">{tc('common.cancel')}</Button>
         </div>
       ) : (
         <div ref={chipsRef} className="-mx-[max(16px,env(safe-area-inset-left))] flex gap-1.5 overflow-x-auto px-[max(16px,env(safe-area-inset-left))] [scrollbar-width:none] sm:-mx-5 sm:px-5">
-          <button type="button" onClick={() => { setSearching(true); requestAnimationFrame(() => filterRef.current?.focus()) }} aria-label="Filter components"
+          <button type="button" onClick={() => { setSearching(true); requestAnimationFrame(() => filterRef.current?.focus()) }} aria-label={t('filterComponents')}
             className="inline-flex flex-none cursor-pointer items-center gap-1.5 rounded-[var(--r-md)] border border-[var(--line)] bg-[var(--card)] px-2.5 py-1.5 text-[13px] whitespace-nowrap text-[var(--fg2)]">
-            <Icon name="search" size={14} />Filter
+            <Icon name="search" size={14} />{t('filter')}
           </button>
           {SECTIONS.map(([id, label]) => <ShellSectionLink key={id} id={id} label={label} on={active === id} group={group} chip />)}
         </div>
@@ -228,7 +233,7 @@ const ShellLocaleContext = createContext<{ value: ShellLocale; set: (v: Partial<
 /** Header menu: pick the provider's locale (each shown in its own language) and force a direction. Saved per viewer. */
 function ShellLocaleMenu() {
   const { value, set } = useContext(ShellLocaleContext)
-  const { t, dir } = useLocale()
+  const { t, dir } = useLocale(), tm = useMessages(SHOWCASE_MSG)
   const own = (l: string) => fmtFor(l).displayName(l, 'language')
   return (
     <DropdownMenu placement={dir === 'rtl' ? 'bottom-start' : 'bottom-end'} className="max-sm:[&>button]:!w-9 max-sm:[&>button]:!px-0" trigger={
@@ -242,7 +247,7 @@ function ShellLocaleMenu() {
       <div aria-hidden className="mt-1 border-t border-[var(--line)] px-2 pt-2 pb-0.5 text-[11px] font-medium text-[var(--fg3)]">{t('locale.direction')}</div>
       {(['auto', 'ltr', 'rtl'] as const).map(d => (
         <MenuItem key={d} icon={value.dir === d ? 'check' : undefined} onSelect={() => set({ dir: d })} className={value.dir === d ? '' : '!ps-8'}>
-          <span className="whitespace-nowrap">{d === 'auto' ? `Auto (${t(dir === 'rtl' ? 'locale.rtl' : 'locale.ltr')})` : t(d === 'rtl' ? 'locale.rtl' : 'locale.ltr')}</span>
+          <span className="whitespace-nowrap">{d === 'auto' ? tm('auto', { dir: t(dir === 'rtl' ? 'locale.rtl' : 'locale.ltr') }) : t(d === 'rtl' ? 'locale.rtl' : 'locale.ltr')}</span>
         </MenuItem>
       ))}
     </DropdownMenu>
@@ -251,6 +256,7 @@ function ShellLocaleMenu() {
 
 function ShowcaseBody() {
   const { set, toggle, settings } = useTheme()
+  const tm = useMessages(SHOWCASE_MSG)
   const toast = useToast()
   const [palette, setPalette] = useState(false)
   const [appearance, setAppearance] = useState(false)
@@ -293,7 +299,7 @@ function ShowcaseBody() {
   const commands = useMemo(() => {
     const sectionLabel = Object.fromEntries(SECTIONS) as Record<string, string>
     const list: Command[] = [
-      ...SECTIONS.map(([id, label]) => ({ id: `go-${id}`, label: `Go to ${label}`, group: 'Navigate', icon: 'chevronRight' as IconName, keywords: [id, SECTION_TAGS[id] ?? ''], hint: 'Section', run: shellAfterPalette(() => shellJump(id)) })),
+      ...SECTIONS.map(([id, label]) => ({ id: `go-${id}`, label: `Go to ${label}`, group: 'Navigate', icon: 'layers' as IconName, keywords: [id, SECTION_TAGS[id] ?? ''], hint: 'Section', run: shellAfterPalette(() => shellJump(id)) })),
       ...ordered.map(s => ({ id: `spec-${s.id}`, label: s.title, group: 'Components', icon: 'layers' as IconName, keywords: [...s.tags, sectionLabel[s.section]], hint: s.desc, run: shellAfterPalette(() => goSpec(s)) })),
       { id: 'act-toggle', label: 'Toggle light / dark', group: 'Actions', icon: 'moon', shortcut: '⌘⇧L', keywords: ['theme', 'mode', 'dark mode', 'light mode', 'switch'], hint: 'Theme', run: () => api.current.toggle() },
       { id: 'act-settings', label: 'Open theme settings', group: 'Actions', icon: 'settings', keywords: ['appearance', 'colours', 'colors', 'customise', 'radius', 'font', 'palette'], hint: 'Appearance panel', run: () => setAppearance(true) },
@@ -319,7 +325,7 @@ function ShowcaseBody() {
     ]
     return list
   }, [ordered, goSpec, settings.variant, openFilter])
-  const paletteEl = useMemo(() => <CommandPalette open={palette} onOpenChange={setPalette} commands={commands} placeholder="Search components, use cases, actions, themes…" suggestion="chart" />, [palette, commands])
+  const paletteEl = useMemo(() => <CommandPalette open={palette} onOpenChange={setPalette} commands={commands} placeholder={tm('paletteSearch')} suggestion="chart" />, [palette, commands, tm])
 
   // The sections never depend on shell state. Keeping them in one memoised element means scrolling, typing in
   // the filter or opening overlays doesn't re-render (and make motion re-measure) the whole page.
@@ -335,12 +341,12 @@ function ShowcaseBody() {
     <ShellContext.Provider value={shell}>
       <header className="sticky top-[env(safe-area-inset-top,0px)] z-40 border-b border-[var(--line)] bg-[color-mix(in_srgb,var(--bg)_85%,transparent)] backdrop-blur-md">
         <div className="mx-auto flex h-14 max-w-[1320px] items-center gap-2 pr-[max(16px,env(safe-area-inset-right))] pl-[max(16px,env(safe-area-inset-left))] sm:gap-3 sm:px-5">
-          <span className="flex items-center gap-2 font-semibold tracking-tight whitespace-nowrap"><i className="inline-block h-[18px] w-[18px] rounded-[var(--r-sm)] bg-[var(--primary)]" />UI library</span>
-          <span className="hidden text-xs text-[var(--fg3)] sm:inline">React · Motion · Tailwind</span>
+          <span role="heading" aria-level={1} className="flex items-center gap-2 font-semibold tracking-tight whitespace-nowrap"><i className="inline-block h-[18px] w-[18px] rounded-[var(--r-sm)] bg-[var(--primary)]" />{tm('libraryName')}</span>
+          <span className="hidden text-xs text-[var(--fg3)] sm:inline">{tm('tagline')}</span>
           <span className="flex-1" />
           <Button onClick={() => setPalette(true)} className="max-[900px]:!w-9 max-[900px]:!px-0 min-[900px]:min-w-[220px] min-[900px]:!justify-between">
             {/* the visible words are the name (no aria-label to mismatch); below 900px only the icon shows, so the words stay for screen readers */}
-            <span className="flex items-center gap-2 font-normal text-[var(--fg3)]"><Icon name="search" size={14} /><span className="max-[900px]:sr-only">Search components</span></span>
+            <span className="flex items-center gap-2 font-normal text-[var(--fg3)]"><Icon name="search" size={14} /><span className="max-[900px]:sr-only">{tm('searchComponents')}</span></span>
             <span aria-hidden className="max-[900px]:hidden"><Kbd>⌘K</Kbd></span>
           </Button>
           <DesignQAButton />
@@ -358,7 +364,7 @@ function ShowcaseBody() {
             {q && total === 0 && (
               <motion.div initial={{ opacity: 0, y: 8 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0 }} transition={{ duration: 0.2 }}
                 className="rounded-[var(--r-lg)] border border-dashed border-[var(--line2)] p-10 text-center text-[var(--fg3)]">
-                No components match “{q}”.<Button size="sm" className="ms-2" onClick={() => { setQuery(''); openFilter(!matchMedia('(pointer: coarse)').matches) }}>Clear filter</Button>
+                {tm('noneMatch', { query: q })}<Button size="sm" className="ms-2" onClick={() => { setQuery(''); openFilter(!matchMedia('(pointer: coarse)').matches) }}>{tm('clearFilter')}</Button>
               </motion.div>
             )}
           </AnimatePresence>
@@ -376,10 +382,11 @@ function ShowcaseBody() {
 /** The CSP nonce the page was served with, if any (Vite's `html.cspNonce` puts it on <meta property="csp-nonce">). */
 const showcaseNonce = () => (typeof document === 'undefined' ? undefined : document.querySelector<HTMLMetaElement>('meta[property="csp-nonce"]')?.nonce || undefined)
 
-export default function Showcase() {
-  // en-GB on the server and the first client render (no mismatch); the viewer's saved choice applies after mount
-  const [loc, setLoc] = useState<ShellLocale>(SHELL_LOCALE_DEFAULT)
-  useEffect(() => { setLoc(shellLocaleRead()) }, [])
+export default function Showcase({ locale, dir = 'auto' }: { /** the server and first-render locale (default en-GB) */ locale?: string; dir?: UIDir | 'auto' } = {}) {
+  // `locale` (en-GB) on the server and the first client render (no mismatch); the viewer's saved choice applies before
+  // the first paint (a layout effect), so a saved Arabic page never flashes left to right
+  const [loc, setLoc] = useState<ShellLocale>(() => (locale ? { locale, dir } : SHELL_LOCALE_DEFAULT))
+  useLayoutEffect(() => { const saved = shellLocaleRead(); if (saved !== SHELL_LOCALE_DEFAULT || !locale) setLoc(saved) }, []) // eslint-disable-line react-hooks/exhaustive-deps
   const shellLocale = useMemo(() => ({
     value: loc,
     set: (v: Partial<ShellLocale>) => setLoc(cur => {

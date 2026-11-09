@@ -1,54 +1,97 @@
-import { createContext, useCallback, useContext, useEffect, useLayoutEffect, useRef, useState, type ReactNode } from 'react'
+import { createContext, useCallback, useContext, useEffect, useLayoutEffect, useRef, useState, useSyncExternalStore, type ReactNode } from 'react'
 import { AnimatePresence, type AnimationPlaybackControls, animate, motion, useAnimate, useInView, useMotionValue, useTransform, type Transition } from 'motion/react'
-import { AnimatedNumber, Badge, Button, type ButtonProps, Icon, IconButton, type IconName, Spinner, TONE_SOFT, type Tone, cn, floatingSurface, prefersReducedMotion, sleep, spring, useControllable } from './core'
+import { AnimatedNumber, Badge, Button, type ButtonProps, Icon, IconButton, type IconName, Spinner, TONE_SOFT, type Tone, cn, defineMessages, dirX, floatingSurface, prefersReducedMotion, sleep, spring, uiAddHost, uiShared, useControllable, useLocale, useMessages } from './core'
 import { CheckMark } from './forms'
 
 /* ════════════════════════════════════════════════════════════════════════════
  * 8. FEEDBACK
  * ══════════════════════════════════════════════════════════════════════════ */
 
+/** Feedback strings not in the core catalog (override with `<UIProvider messages={{ 'feedback.new': … }}>`). de/ar machine-drafted. */
+const FEEDBACK_MSG = defineMessages('feedback', {
+  en: {
+    new: 'New', holdToDelete: 'Hold to delete', deleted: 'Deleted', holdIdle: 'Release early to cancel', holdHolding: 'Keep holding…',
+    holdCancelled: 'Cancelled. Release early to cancel', backOnline: 'Back online.',
+  },
+  de: {
+    new: 'Neu', holdToDelete: 'Zum Löschen halten', deleted: 'Gelöscht', holdIdle: 'Früher loslassen, um abzubrechen', holdHolding: 'Weiter halten…',
+    holdCancelled: 'Abgebrochen. Früher loslassen, um abzubrechen', backOnline: 'Wieder online.',
+  },
+  ar: {
+    new: 'جديد', holdToDelete: 'اضغط مطولًا للحذف', deleted: 'تم الحذف', holdIdle: 'أفلت مبكرًا للإلغاء', holdHolding: 'استمر في الضغط…',
+    holdCancelled: 'أُلغي. أفلت مبكرًا للإلغاء', backOnline: 'عاد الاتصال.',
+  },
+})
+
 export type ToastInput = { title: ReactNode; description?: ReactNode; tone?: 'ok' | 'bad' | 'info'; action?: { label: string; onClick: () => void }; duration?: number }
 type ToastItem = ToastInput & { id: number }
-const ToastCtx = createContext<(t: ToastInput) => void>(() => {})
+/** A toast queue: the page-wide one (shared by every copy of the library) or a ToastProvider's own. */
+type ToastQueue = { items: ToastItem[]; max: number; listeners: Set<() => void> }
+const toastQueue = (max = 5): ToastQueue => ({ items: [], max, listeners: new Set() })
+const toastEmit = (q: ToastQueue) => q.listeners.forEach(l => l())
+const toastPush = (q: ToastQueue, t: ToastInput) => { q.items = [...q.items, { ...t, id: Date.now() + Math.random() }].slice(-q.max); toastEmit(q) }
+const toastRemove = (q: ToastQueue, id: number) => { q.items = q.items.filter(t => t.id !== id); toastEmit(q) }
+const toastNone: ToastItem[] = []
+/** The page-wide queue behind useToast() outside a ToastProvider (one per page, whichever files the components came from). */
+const toastPage = uiShared('toasts', () => toastQueue())
+const ToastCtx = createContext<((t: ToastInput) => void) | null>(null)
+/** Shows a toast in the page-wide region; the region mounts itself (in UIProvider's host) on the first toast. */
+function toastShow(t: ToastInput) { uiAddHost('toasts', ToastPageRegion); toastPush(toastPage, t) }
 /** const toast = useToast(); toast({ title: 'Saved', tone: 'ok', action: { label: 'Undo', onClick } }) */
-export const useToast = () => useContext(ToastCtx)
+export const useToast = () => useContext(ToastCtx) ?? toastShow
+
+/** The page-wide toast region (mounted through UIProvider's host outlet). */
+function ToastPageRegion() { return <ToastRegion queue={toastPage} /> }
 
 /**
- * Hosts toasts (UIProvider includes one). At most `max` (default 5) are on screen: a new toast drops the oldest, so a
- * burst of notifications can't pile up without limit. The region stays usable while a modal makes the page inert.
+ * Hosts its own toasts for the tree inside it. UIProvider no longer needs one (0.4): useToast() outside a ToastProvider
+ * uses the page-wide region. At most `max` (default 5) are on screen: a new toast drops the oldest, so a burst of
+ * notifications can't pile up without limit. The region stays usable while a modal makes the page inert.
  */
 export function ToastProvider({ children, max = 5 }: { children: ReactNode; max?: number }) {
-  const [items, setItems] = useState<ToastItem[]>([])
+  const [queue] = useState(() => toastQueue())
+  queue.max = Math.max(1, Math.floor(Number.isFinite(max) ? max : 5))
+  const push = useCallback((t: ToastInput) => toastPush(queue, t), [queue])
+  return (
+    <ToastCtx.Provider value={push}>
+      {children}
+      <ToastRegion queue={queue} />
+    </ToastCtx.Provider>
+  )
+}
+
+/** The fixed region the toasts of one queue stack in: bottom end corner (bottom right, bottom left in RTL), full width on phones. */
+function ToastRegion({ queue }: { queue: ToastQueue }) {
+  const { t } = useLocale()
+  const items = useSyncExternalStore(useCallback((cb: () => void) => { queue.listeners.add(cb); return () => { queue.listeners.delete(cb) } }, [queue]), () => queue.items, () => toastNone)
   const [heights, setHeights] = useState<Record<number, number>>({})
   const close = useCallback((id: number) => {
-    setItems(x => x.filter(t => t.id !== id))
+    toastRemove(queue, id)
     setHeights(({ [id]: _gone, ...rest }) => rest) // eslint-disable-line @typescript-eslint/no-unused-vars
-  }, [])
+  }, [queue])
   const report = useCallback((id: number, h: number) => setHeights(m => m[id] === h ? m : { ...m, [id]: h }), [])
-  const limit = Math.max(1, Math.floor(Number.isFinite(max) ? max : 5))
-  const push = useCallback((t: ToastInput) => setItems(x => [...x, { ...t, id: Date.now() + Math.random() }].slice(-limit)), [limit])
   // Every toast sits at the bottom of the region and is lifted by the heights of the newer toasts below it (a transform),
   // so a toast leaving or arriving moves the others with an animated transform, never by re-flowing the layout.
   const lift = new Map<number, number>()
   for (let k = items.length - 1, acc = 0; k >= 0; k--) { lift.set(items[k].id, acc); acc += (heights[items[k].id] ?? 0) + 8 }
   return (
-    <ToastCtx.Provider value={push}>
-      {children}
-      {/* one live region for all toasts (the toasts themselves carry no role, so nothing is announced twice) */}
-      <div role="region" aria-label="Notifications" data-modal-keep className="pointer-events-none fixed right-[max(16px,env(safe-area-inset-right))] bottom-[max(16px,env(safe-area-inset-bottom))] z-[80] h-0 w-[340px] max-w-[calc(100vw-32px)] max-[640px]:left-[max(12px,env(safe-area-inset-left))] max-[640px]:right-[max(12px,env(safe-area-inset-right))] max-[640px]:w-auto max-[640px]:max-w-none" aria-live="polite">
-        <AnimatePresence initial={false}>
-          {items.map(t => <Toast key={t.id} t={t} lift={lift.get(t.id) ?? 0} onSize={report} onClose={close} />)}
-        </AnimatePresence>
-      </div>
-    </ToastCtx.Provider>
+    // one live region for all toasts (the toasts themselves carry no role, so nothing is announced twice); the insets are
+    // physical because they include the safe areas: right in LTR, left in RTL (rtl-lint-ignore)
+    <div role="region" aria-label={t('feedback.notifications')} data-modal-keep className="pointer-events-none fixed right-[max(16px,env(safe-area-inset-right))] bottom-[max(16px,env(safe-area-inset-bottom))] z-[80] h-0 w-[340px] max-w-[calc(100vw-32px)] rtl:right-auto rtl:left-[max(16px,env(safe-area-inset-left))] max-[640px]:left-[max(12px,env(safe-area-inset-left))] max-[640px]:right-[max(12px,env(safe-area-inset-right))] max-[640px]:rtl:right-[max(12px,env(safe-area-inset-right))] max-[640px]:w-auto max-[640px]:max-w-none" aria-live="polite">
+      <AnimatePresence initial={false}>
+        {items.map(x => <Toast key={x.id} t={x} lift={lift.get(x.id) ?? 0} onSize={report} onClose={close} />)}
+      </AnimatePresence>
+    </div>
   )
 }
 
 /**
- * One toast. Dismiss with the ✕, by swiping it right (touch or mouse), or let it time out. Full width on phones.
- * The timer pauses while it is hovered, focused or being touched. `lift` is its distance above the region's bottom.
+ * One toast. Dismiss with the ✕, by swiping it toward the end edge (right, left in RTL; touch or mouse), or let it time
+ * out. Full width on phones. The timer pauses while it is hovered, focused or being touched. `lift` is its distance above
+ * the region's bottom.
  */
 function Toast({ t, lift, onSize, onClose: closeById }: { t: ToastItem; lift: number; onSize: (id: number, h: number) => void; onClose: (id: number) => void }) {
+  const { t: tr, dir } = useLocale()
   const [paused, setPaused] = useState(false)
   const left = useRef(t.duration ?? 4200)
   const box = useRef<HTMLDivElement>(null)
@@ -64,20 +107,20 @@ function Toast({ t, lift, onSize, onClose: closeById }: { t: ToastItem; lift: nu
     const start = Date.now(), timer = setTimeout(onClose, left.current)
     return () => { clearTimeout(timer); left.current -= Date.now() - start }
   }, [paused, onClose])
-  const tone = t.tone ?? 'ok'
+  const tone = t.tone ?? 'ok', rtl = dir === 'rtl'
   return (
     <motion.div ref={box} initial={{ opacity: 0, y: 20 - lift, scale: 0.95 }} animate={{ opacity: 1, y: -lift, scale: 1 }}
-      exit={{ opacity: 0, x: 60, transition: { duration: 0.2 } }} transition={spring(0.3, 0.45)}
-      drag="x" dragConstraints={{ left: 0, right: 0 }} dragElastic={{ left: 0.1, right: 0.9 }}
-      onDragStart={() => setPaused(true)} onDragEnd={(_, i) => { if (i.offset.x > 80 || i.velocity.x > 500) onClose(); else setPaused(false) }}
+      exit={{ opacity: 0, x: dirX(60, dir), transition: { duration: 0.2 } }} transition={spring(0.3, 0.45)}
+      drag="x" dragConstraints={{ left: 0, right: 0 }} dragElastic={rtl ? { left: 0.9, right: 0.1 } : { left: 0.1, right: 0.9 }}
+      onDragStart={() => setPaused(true)} onDragEnd={(_, i) => { if (dirX(i.offset.x, dir) > 80 || dirX(i.velocity.x, dir) > 500) onClose(); else setPaused(false) }}
       onPointerEnter={() => setPaused(true)} onPointerLeave={() => setPaused(false)} onPointerDown={() => setPaused(true)} onFocus={() => setPaused(true)} onBlur={() => setPaused(false)}
-      className={cn(floatingSurface, 'pointer-events-auto absolute right-0 bottom-0 flex max-w-full min-w-[260px] cursor-grab touch-pan-y items-center gap-3 p-3 pr-2 text-[13px] active:cursor-grabbing max-[640px]:left-0 max-[640px]:min-w-0')}>
+      className={cn(floatingSurface, 'pointer-events-auto absolute end-0 bottom-0 flex max-w-full min-w-[260px] cursor-grab touch-pan-y items-center gap-3 p-3 pe-2 text-[13px] active:cursor-grabbing max-[640px]:start-0 max-[640px]:min-w-0')}>
       <span className={cn('grid h-5 w-5 flex-none place-items-center rounded-full', tone === 'bad' ? TONE_SOFT.bad : tone === 'info' ? TONE_SOFT.accent : TONE_SOFT.ok)}>
         <Icon name={tone === 'bad' ? 'alert' : tone === 'info' ? 'info' : 'check'} size={11} strokeWidth={3} />
       </span>
       <div className="flex-1 select-none"><b className="block font-medium">{t.title}</b>{t.description && <span className="text-xs text-[var(--fg3)]">{t.description}</span>}</div>
       {t.action && <Button size="sm" onClick={() => { t.action!.onClick(); onClose() }}>{t.action.label}</Button>}
-      <IconButton icon="x" label="Dismiss notification" onClick={onClose} />
+      <IconButton icon="x" label={tr('feedback.dismissNotification')} onClick={onClose} />
     </motion.div>
   )
 }
@@ -97,10 +140,11 @@ export function Alert({ tone = 'accent', title, children, action, className }:
 
 const PROGRESS_TONE = { primary: 'bg-[var(--primary)]', ok: 'bg-[var(--ok)]', warn: 'bg-[var(--warn)]', bad: 'bg-[var(--bad)]', accent: 'bg-[var(--accent)]' } as const
 /** Linear progress bar; the fill springs to each new value. `label` names it for screen readers (default "Progress"; say what is progressing). */
-export function Progress({ value, max = 100, tone = 'primary', className, label = 'Progress' }:
+export function Progress({ value, max = 100, tone = 'primary', className, label }:
   { value: number; max?: number; tone?: keyof typeof PROGRESS_TONE; className?: string; label?: string }) {
+  const { t } = useLocale()
   return (
-    <div role="progressbar" aria-label={label} aria-valuenow={Math.round(value)} aria-valuemin={0} aria-valuemax={max} className={cn('h-1.5 overflow-hidden rounded-full bg-[var(--muted)]', className)}>
+    <div role="progressbar" aria-label={label ?? t('status.progress')} aria-valuenow={Math.round(value)} aria-valuemin={0} aria-valuemax={max} className={cn('h-1.5 overflow-hidden rounded-full bg-[var(--muted)]', className)}>
       <motion.div className={cn('h-full rounded-full transition-colors duration-300', PROGRESS_TONE[tone])} initial={false} animate={{ width: `${Math.min(100, (value / max) * 100)}%` }} transition={spring(0.1, 0.5)} />
     </div>
   )
@@ -110,8 +154,9 @@ export function Progress({ value, max = 100, tone = 'primary', className, label 
  * Circular progress with a percentage in the middle (or `label`). Pulses once when it reaches 100. `aria-label` names the
  * progressbar for screen readers (default "Progress").
  */
-export function ProgressRing({ value, size = 56, stroke = 5, label, tone = 'primary', className, 'aria-label': ariaLabel = 'Progress' }:
+export function ProgressRing({ value, size = 56, stroke = 5, label, tone = 'primary', className, 'aria-label': ariaLabel }:
   { value: number; size?: number; stroke?: number; label?: ReactNode; tone?: 'primary' | 'ok'; className?: string; 'aria-label'?: string }) {
+  const { t } = useLocale()
   const r = (size - stroke) / 2, c = 2 * Math.PI * r
   const [scope, animate] = useAnimate()
   const prev = useRef(value)
@@ -120,7 +165,7 @@ export function ProgressRing({ value, size = 56, stroke = 5, label, tone = 'prim
     prev.current = value
   }, [value, animate, scope])
   return (
-    <div ref={scope} className={cn('relative inline-grid place-items-center', className)} style={{ width: size, height: size }} role="progressbar" aria-label={ariaLabel} aria-valuenow={Math.round(value)} aria-valuemin={0} aria-valuemax={100}>
+    <div ref={scope} className={cn('relative inline-grid place-items-center', className)} style={{ width: size, height: size }} role="progressbar" aria-label={ariaLabel ?? t('status.progress')} aria-valuenow={Math.round(value)} aria-valuemin={0} aria-valuemax={100}>
       <svg width={size} height={size} className="-rotate-90">
         <circle cx={size / 2} cy={size / 2} r={r} fill="none" stroke="var(--muted)" strokeWidth={stroke} />
         <motion.circle cx={size / 2} cy={size / 2} r={r} fill="none" stroke={tone === 'ok' ? 'var(--ok)' : 'var(--primary)'} strokeWidth={stroke} strokeLinecap="round"
@@ -181,11 +226,12 @@ export function AutoHeight({ children, className }: { children: ReactNode; class
 }
 
 /** Three bouncing dots: someone (the assistant, a teammate) is typing. The bounce pauses while off screen. `label` is announced. */
-export function TypingDots({ label = 'Assistant is typing', className }: { label?: string; className?: string }) {
+export function TypingDots({ label, className }: { label?: string; className?: string }) {
+  const { t } = useLocale()
   const ref = useRef<HTMLSpanElement>(null)
   const onScreen = useInView(ref) // the bounce repeats forever: only run it while visible
   return (
-    <span ref={ref} role="status" aria-label={label} className={cn('inline-flex gap-1 py-1.5', className)}>
+    <span ref={ref} role="status" aria-label={label ?? t('status.assistantTyping')} className={cn('inline-flex gap-1 py-1.5', className)}>
       {[0, 1, 2].map(i => (
         <motion.span key={i} className="h-1.5 w-1.5 rounded-full bg-[var(--fg3)]" animate={onScreen ? { y: [0, -4, 0], opacity: [0.4, 1, 0.4] } : { y: 0, opacity: 0.6 }}
           transition={onScreen ? { duration: 0.7, repeat: Infinity, delay: i * 0.12 } : { duration: 0.15 }} />
@@ -195,15 +241,17 @@ export function TypingDots({ label = 'Assistant is typing', className }: { label
 }
 
 /** Dismissible banner. Collapses its height smoothly when closed; controllable (`open`/`onOpenChange`) so it can be shown again. */
-export function Banner({ children, badge = 'New', open, defaultOpen = true, onOpenChange, onDismiss, className }:
-  { children: ReactNode; badge?: ReactNode; open?: boolean; defaultOpen?: boolean; onOpenChange?: (open: boolean) => void; onDismiss?: () => void; className?: string }) {
+export function Banner({ children, badge, open, defaultOpen = true, onOpenChange, onDismiss, className }:
+  { children: ReactNode; /** default "New" in the locale; `null` for none */ badge?: ReactNode; open?: boolean; defaultOpen?: boolean; onOpenChange?: (open: boolean) => void; onDismiss?: () => void; className?: string }) {
   const [shown, setShown] = useControllable(open, defaultOpen, onOpenChange)
+  const { t } = useLocale(), tf = useMessages(FEEDBACK_MSG)
+  if (badge === undefined) badge = tf('new')
   return (
     <Collapse open={shown} className={className}>
-      <div role="status" className="flex items-center gap-2.5 rounded-[var(--r-md)] border border-[var(--line)] bg-[var(--card)] p-2 pl-3">
+      <div role="status" className="flex items-center gap-2.5 rounded-[var(--r-md)] border border-[var(--line)] bg-[var(--card)] p-2 ps-3">
         {badge && <Badge tone="accent" className="flex-none">{badge}</Badge>}
         <span className="flex-1 text-[13px]">{children}</span>
-        <IconButton icon="x" label="Dismiss" onClick={() => { setShown(false); onDismiss?.() }} />
+        <IconButton icon="x" label={t('common.dismiss')} onClick={() => { setShown(false); onDismiss?.() }} />
       </div>
     </Collapse>
   )
@@ -215,8 +263,9 @@ export function Banner({ children, badge = 'New', open, defaultOpen = true, onOp
  * Runs an async action: the button's width tweens down to a spinner square, then out to a green
  * “Saved” with a drawn check, then back. Content never stretches: only the frame's width animates.
  */
-export function AsyncButton({ onClick, children, successLabel = 'Saved', variant = 'primary', size, className, ...p }:
-  Omit<ButtonProps, 'onClick'> & { onClick: () => Promise<unknown>; successLabel?: string }) {
+export function AsyncButton({ onClick, children, successLabel: successProp, variant = 'primary', size, className, ...p }:
+  Omit<ButtonProps, 'onClick'> & { onClick: () => Promise<unknown>; /** default "Saved" in the locale */ successLabel?: string }) {
+  const { t } = useLocale(), successLabel = successProp ?? t('common.saved')
   const [state, setState] = useState<'idle' | 'loading' | 'done'>('idle')
   const [w, setW] = useState<number>()
   const probe = useRef<HTMLSpanElement>(null)
@@ -248,7 +297,7 @@ export function AsyncButton({ onClick, children, successLabel = 'Saved', variant
         </AnimatePresence>
       </Button>
       {/* invisible twin at natural width: what the frame tweens to */}
-      <span ref={probe} aria-hidden className="pointer-events-none invisible absolute top-0 left-0 w-max">
+      <span ref={probe} aria-hidden className="pointer-events-none invisible absolute top-0 start-0 w-max">
         <Button variant={variant} size={size} tabIndex={-1}><span className="flex items-center gap-1.5">{body(false)}</span></Button>
       </span>
     </motion.span>
@@ -259,9 +308,10 @@ export function AsyncButton({ onClick, children, successLabel = 'Saved', variant
 export function LikeButton({ count, liked: likedProp, defaultLiked = false, onChange, className }:
   { count: number; liked?: boolean; defaultLiked?: boolean; onChange?: (liked: boolean) => void; className?: string }) {
   const [liked, setLiked] = useControllable(likedProp, defaultLiked, onChange)
+  const { t } = useLocale()
   const total = count + (liked ? 1 : 0) - (defaultLiked ? 1 : 0)
   return (
-    <Button aria-pressed={liked} aria-label={`Like, ${total}`} className={className} onClick={() => setLiked(!liked)}>
+    <Button aria-pressed={liked} aria-label={t('feedback.like', { count: total })} className={className} onClick={() => setLiked(!liked)}>
       <motion.span animate={liked ? { scale: [1, 1.45, 1], rotate: [0, -12, 0] } : { scale: 1 }} transition={spring(0.5, 0.5)}
         className={liked ? 'text-[var(--bad)]' : ''}><Icon name="heart" fill={liked ? 'currentColor' : 'none'} /></motion.span>
       <AnimatedNumber value={total} />
@@ -296,12 +346,14 @@ export function useCopy(text?: string | (() => string), ms = 1300) {
  * in a polite live region next to the button. Icon-only for the icon sizes unless `iconOnly={false}`. The label keeps the
  * width of the longer of `label`/`copiedLabel`, so the button doesn't change size. Takes every other button prop.
  */
-export function CopyButton({ text, label = 'Copy', copiedLabel = 'Copied', failedLabel = 'Couldn’t copy', duration = 1500, size = 'icon', iconOnly = size === 'icon' || size === 'icon-sm' || size === 'icon-xs', variant, className, onCopy, ...rest }:
+export function CopyButton({ text, label: labelProp, copiedLabel: copiedProp, failedLabel: failedProp, duration = 1500, size = 'icon', iconOnly = size === 'icon' || size === 'icon-sm' || size === 'icon-xs', variant, className, onCopy, ...rest }:
   Omit<ButtonProps, 'onClick' | 'children' | 'size' | 'variant'> & {
     text: string | (() => string); label?: string; copiedLabel?: string; failedLabel?: string; duration?: number
     size?: ButtonProps['size']; iconOnly?: boolean; variant?: ButtonProps['variant']; className?: string; onCopy?: (ok: boolean) => void
   }) {
   const { copied, failed, copy } = useCopy(text, duration)
+  const { t } = useLocale()
+  const label = labelProp ?? t('common.copy'), copiedLabel = copiedProp ?? t('common.copied'), failedLabel = failedProp ?? t('common.copyFailed')
   const state = copied ? 'copied' : failed ? 'failed' : 'idle'
   const said = copied ? copiedLabel : failed ? failedLabel : label
   const small = size === 'icon-sm' || size === 'sm' || size === 'xs' || size === 'icon-xs'
@@ -314,7 +366,7 @@ export function CopyButton({ text, label = 'Copy', copiedLabel = 'Copied', faile
             className={cn('grid', copied ? 'text-[var(--ok)]' : failed ? 'text-[var(--bad)]' : '')}><Icon name={copied ? 'check' : failed ? 'alert' : 'copy'} size={small ? 14 : 16} strokeWidth={copied ? 3 : 2} /></motion.span>
         </AnimatePresence>
         {!iconOnly && (
-          <span className="grid text-left [&>span]:col-start-1 [&>span]:row-start-1">
+          <span className="grid text-start [&>span]:col-start-1 [&>span]:row-start-1">
             {failed ? <span>{failedLabel}</span> : <>
               <span className={cn(copied && 'invisible')}>{label}</span>
               <span className={cn(!copied && 'invisible')}>{copiedLabel}</span>
@@ -330,7 +382,6 @@ export function CopyButton({ text, label = 'Copy', copiedLabel = 'Copied', faile
 type HoldPhase = 'idle' | 'holding' | 'cancelled' | 'done'
 /** Shortest hold HoldToConfirm accepts, whatever `duration` says. */
 const HOLD_MIN_MS = 500
-const HOLD_STATUS: Record<HoldPhase, string> = { idle: 'Release early to cancel', holding: 'Keep holding…', cancelled: 'Cancelled. Release early to cancel', done: 'Deleted' }
 
 /**
  * Press and hold (pointer, touch, Space or Enter) to confirm a destructive action. The fill sweeps
@@ -340,12 +391,14 @@ const HOLD_STATUS: Record<HoldPhase, string> = { idle: 'Release early to cancel'
  * `duration` is at least 500 ms. It guards against slips, not against a hostile page: serve pages that use it with
  * `frame-ancestors 'none'` (or 'self') so another site can't frame it and coach a user into holding.
  */
-export function HoldToConfirm({ onConfirm, duration = 1200, children = 'Hold to delete', doneLabel = 'Deleted', resetAfter = 2000, status, className }:
-  { onConfirm: () => void; duration?: number; children?: ReactNode; doneLabel?: ReactNode; resetAfter?: number; status?: Partial<Record<HoldPhase, ReactNode>> | false; className?: string }) {
+export function HoldToConfirm({ onConfirm, duration = 1200, children, doneLabel, resetAfter = 2000, status, className }:
+  { onConfirm: () => void; duration?: number; /** default "Hold to delete" in the locale */ children?: ReactNode; /** default "Deleted" */ doneLabel?: ReactNode; resetAfter?: number; status?: Partial<Record<HoldPhase, ReactNode>> | false; className?: string }) {
+  const tf = useMessages(FEEDBACK_MSG), { dir } = useLocale()
   const [phase, setPhase] = useState<HoldPhase>('idle')
   const phaseRef = useRef<HoldPhase>('idle')
   const p = useMotionValue(0)
-  const clip = useTransform(p, v => `inset(0 ${100 - v * 100}% 0 0)`)
+  // the fill grows from the start edge: the clip trims the end side (right in LTR, left in RTL)
+  const clip = useTransform(p, v => dir === 'rtl' ? `inset(0 0 0 ${100 - v * 100}%)` : `inset(0 ${100 - v * 100}% 0 0)`)
   const ctl = useRef<AnimationPlaybackControls | null>(null), reset = useRef<ReturnType<typeof setTimeout>>(undefined)
   const [scope, animateEl] = useAnimate()
   const confirm = useRef(onConfirm); confirm.current = onConfirm
@@ -369,8 +422,9 @@ export function HoldToConfirm({ onConfirm, duration = 1200, children = 'Hold to 
     ctl.current?.stop(); set('cancelled')
     ctl.current = animate(p, 0, spring(0.1, 0.3))
   }
-  const label = phase === 'done' ? <><Icon name="check" size={13} strokeWidth={3} />{doneLabel}</> : children
-  const msg = status === false ? null : { ...HOLD_STATUS, ...status }[phase]
+  const label = phase === 'done' ? <><Icon name="check" size={13} strokeWidth={3} />{doneLabel ?? tf('deleted')}</> : children ?? tf('holdToDelete')
+  const said: Record<HoldPhase, ReactNode> = { idle: tf('holdIdle'), holding: tf('holdHolding'), cancelled: tf('holdCancelled'), done: tf('deleted') }
+  const msg = status === false ? null : { ...said, ...status }[phase]
   return (
     <div className={cn('flex flex-col items-start gap-2', className)}>
       <span ref={scope} className="inline-flex">
@@ -380,7 +434,8 @@ export function HoldToConfirm({ onConfirm, duration = 1200, children = 'Hold to 
           onPointerUp={stop} onPointerLeave={stop} onPointerCancel={stop} onContextMenu={e => e.preventDefault()}
           onKeyDown={e => { if ((e.key === ' ' || e.key === 'Enter') && !e.repeat) { e.preventDefault(); start() } }}
           onKeyUp={e => { if (e.key === ' ' || e.key === 'Enter') stop() }} onBlur={stop}>
-          <motion.span aria-hidden className="absolute inset-0 origin-left bg-[var(--bad)]" style={{ scaleX: p }} />
+          {/* rtl-lint-ignore: the fill grows from the start edge (rtl: twin) */}
+          <motion.span aria-hidden className="absolute inset-0 origin-left bg-[var(--bad)] rtl:origin-right" style={{ scaleX: p }} />
           <span className="relative flex items-center gap-1.5">{label}</span>
           <motion.span aria-hidden className="absolute inset-0 flex items-center justify-center gap-1.5 text-white" style={{ clipPath: clip }}>{label}</motion.span>
         </Button>
@@ -397,8 +452,9 @@ export function HoldToConfirm({ onConfirm, duration = 1200, children = 'Hold to 
  * edits are kept locally and counts down to the next automatic retry (calling `onRetry`), with a
  * "Retry now" link. Back online, it turns green with `backMessage` and hides itself after a moment.
  */
-export function OfflineIndicator({ online, onRetry, retryEvery = 5, backMessage = 'Back online. Synced 3 changes.', className }:
-  { online: boolean; onRetry?: () => void; retryEvery?: number; backMessage?: ReactNode; className?: string }) {
+export function OfflineIndicator({ online, onRetry, retryEvery = 5, backMessage, className }:
+  { online: boolean; onRetry?: () => void; retryEvery?: number; /** default "Back online." in the locale; say what synced, e.g. "Back online. Synced 3 changes." */ backMessage?: ReactNode; className?: string }) {
+  const { t, fmt } = useLocale(), tf = useMessages(FEEDBACK_MSG)
   const [mode, setMode] = useState<'hidden' | 'offline' | 'back'>(online ? 'hidden' : 'offline')
   const [left, setLeft] = useState(retryEvery)
   const [pulse, setPulse] = useState(0), [shake, setShake] = useState(0)
@@ -430,13 +486,14 @@ export function OfflineIndicator({ online, onRetry, retryEvery = 5, backMessage 
             {mode === 'offline' ? (
               <>
                 <motion.span key={pulse} className="flex-1" initial={pulse ? { opacity: 0.5 } : false} animate={{ opacity: 1 }} transition={{ duration: 0.3 }}>
-                  You’re offline. Edits are saved locally. Retrying in <b className="ui-num">{left}</b>s
+                  {/* the countdown is bold: split the message around its {seconds} placeholder */}
+                  {t('status.offline', { seconds: '\u0000' }).split('\u0000').flatMap((part, i) => i ? [<b key={i} className="ui-num">{fmt.number(left)}</b>, part] : [part])}
                 </motion.span>
                 <motion.button key={`r${shake}`} className="flex-none cursor-pointer border-0 bg-transparent p-0 text-xs font-semibold text-current underline [@media(pointer:coarse)]:-my-2 [@media(pointer:coarse)]:min-h-8 [@media(pointer:coarse)]:px-1"
                   animate={shake ? { x: [0, -3, 3, 0] } : undefined} transition={{ duration: 0.25 }}
-                  onClick={() => { retry.current?.(); count.current = retryEvery; setLeft(retryEvery); setShake(k => k + 1) }}>Retry now</motion.button>
+                  onClick={() => { retry.current?.(); count.current = retryEvery; setLeft(retryEvery); setShake(k => k + 1) }}>{t('common.retryNow')}</motion.button>
               </>
-            ) : <span className="flex-1">{backMessage}</span>}
+            ) : <span className="flex-1">{backMessage ?? tf('backOnline')}</span>}
           </motion.div>
         )}
       </AnimatePresence>

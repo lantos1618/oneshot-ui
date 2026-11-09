@@ -1,5 +1,5 @@
 import { useMemo } from 'react'
-import { DataFlow, type DiagramState, type DiagramTransition, Gantt, type GanttPhase, Globe, type GlobeHub, type GlobeRoute, NetworkGraph, ProcessFlow, Sankey, StateDiagram, StateMachine, TraceWaterfall, type TraceSpan, type WorldMapData, WorldMap, useToast, useWorldMap } from '../lib'
+import { DataFlow, type DiagramState, type DiagramTransition, Gantt, type GanttPhase, Globe, type GlobeHub, type GlobeRoute, NetworkGraph, ProcessFlow, Sankey, StateDiagram, StateMachine, TraceWaterfall, type TraceSpan, type WorldMapData, WorldMap, useLocale, useToast, useWorldMap, type LocaleFmt } from '../lib'
 import { AGENT_WORKFLOWS, AGENT_WORKFLOW_ORDER } from '../examples'
 import { Section, Spec } from './kit'
 
@@ -71,10 +71,11 @@ const mapDemoData = (world: WorldMapData | null) => {
   })
   return out
 }
-const MAP_METRICS = [
-  { key: 'users', label: 'Users', format: (v: number) => `${(v * 1.3).toFixed(1)}k users`, short: (v: number) => `${(v * 1.3).toFixed(1)}k` },
-  { key: 'rev', label: 'Revenue', format: (v: number) => `€${(v * 4.2).toFixed(0)}k` },
-  { key: 'growth', label: 'Growth', format: (v: number) => `+${v}%` },
+/** The map's metrics, formatted in the page's locale (compact users, euros, signed percent). */
+const mapMetrics = (fmt: LocaleFmt) => [
+  { key: 'users', label: 'Users', format: (v: number) => `${fmt.compact(v * 1300)} users`, short: (v: number) => fmt.compact(v * 1300) },
+  { key: 'rev', label: 'Revenue', format: (v: number) => fmt.number(v * 4200, { style: 'currency', currency: 'EUR', notation: 'compact', maximumFractionDigits: 0 }) },
+  { key: 'growth', label: 'Growth', format: (v: number) => fmt.number(v / 100, { style: 'percent', signDisplay: 'exceptZero' }) },
 ]
 const MAP_HUBS: [string, number, number][] = [['London', 299.8, 52.4], ['Zürich', 312.7, 60.1], ['New York', 186.6, 72.9], ['San Francisco', 110.1, 78.5], ['Singapore', 473, 149], ['Sydney', 538.1, 217.2], ['Tokyo', 518.6, 82.5], ['São Paulo', 224.3, 197]]
 const MAP_NAMES = { 'United States of America': 'United States', 'United Arab Emirates': 'UAE' }
@@ -120,6 +121,8 @@ function DgWorldMapDemo(p: Omit<Parameters<typeof WorldMap>[0], 'data'>) {
 
 export function DiagramsSection() {
   const toast = useToast()
+  const { fmt } = useLocale()
+  const metrics = useMemo(() => mapMetrics(fmt), [fmt])
   return (
     <Section id="diagrams" title="Diagrams & maps" desc="Plans, statecharts, traces, flows and maps. Drag, hover and fire events: everything is live and themed.">
       <Spec span={3} title="Gantt" desc="The plan: phases, progress, dependencies and milestones. Drag a bar to move it (on touch, hold it first), drag its right edge to change duration; dependants reschedule automatically.">
@@ -142,14 +145,14 @@ export function DiagramsSection() {
         <NetworkGraph nodes={NET_NODES} links={NET_LINKS} groups={NET_GROUPS} />
       </Spec>
       <Spec span={3} title="Process flow" desc="Workflow canvas. Run it to watch each step execute. Drag nodes, drag the canvas to pan, Ctrl/⌘ + scroll or pinch to zoom.">
-        <ProcessFlow nodes={PF_NODES} edges={PF_EDGES} steps={PF_STEPS} done={s => `Completed in ${s.toFixed(1)} s · 1,156 imported · 78 to review`}
+        <ProcessFlow nodes={PF_NODES} edges={PF_EDGES} steps={PF_STEPS} done={s => `Completed in ${fmt.duration(s * 1000)} · ${fmt.number(1156)} imported · ${fmt.number(78)} to review`}
           onComplete={() => toast({ title: 'Workflow complete', description: '1,156 imported, 78 need review', tone: 'ok' })} />
       </Spec>
       <Spec span={3} title="Data flow" desc="Sources stream into a processing engine and out to destinations. Hover or tap any node to trace its path.">
         <DataFlow sources={DF_SOURCES} targets={DF_TARGETS} />
       </Spec>
       <Spec span={3} title="Map" desc="Choropleth by country, hubs pulse. Hover or tap a country, or a row in the list.">
-        <DgWorldMapDemo metrics={MAP_METRICS} hubs={MAP_HUBS} names={MAP_NAMES} />
+        <DgWorldMapDemo metrics={metrics} hubs={MAP_HUBS} names={MAP_NAMES} />
       </Spec>
       <Spec span={3} title="Globe" desc="3D dot globe with live routes between hubs. Drag to spin (sideways on touch), it keeps its momentum.">
         <Globe hubs={GLOBE_HUBS} routes={GLOBE_ROUTES} />
