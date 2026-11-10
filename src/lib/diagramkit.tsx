@@ -1,11 +1,52 @@
-import { useLayoutEffect, useRef, useState } from 'react'
-import { Icon, TOUCH, clamp, cn, svgTranslate } from './core'
+import { useCallback, useEffect, useLayoutEffect, useRef, useState, type ReactNode, type Ref } from 'react'
+import { Icon, ScrollEdges, TOUCH, clamp, cn, setRef, svgTranslate, useScrollEdges } from './core'
 import { useFrameLoop } from './motion'
 
 /* Shared pieces of the diagram modules (gantt, statechart, trace, network): not part of the public API. */
 
 /** Collapse sets overflow: hidden, which would stop sticky labels inside it; clip vertically only. */
 export const DG_COLLAPSE_STICKY = '!overflow-x-visible !overflow-y-clip'
+
+/**
+ * Time tracks (Gantt, trace): rows are `grid-cols-[var(--dg-gutter)_1fr]`, a label cell pinned on the left and a lane
+ * where time runs left to right. DG_PIN pins the label cell over the lane while the track scrolls sideways.
+ */
+export const DG_PIN = 'sticky left-0 z-[3] h-full shadow-[1px_0_0_var(--line)]'
+export const DG_ROW = 'relative grid grid-cols-[var(--dg-gutter)_1fr] items-center'
+/** The accent "now" line of a time track (today, the playhead): place it in lane coordinates. */
+export const DG_NOW = 'pointer-events-none absolute top-0 bottom-0 w-[1.5px] bg-[var(--accent)]'
+
+/**
+ * The scroller of a time track: below `minWidth` the lanes scroll sideways inside it with the label gutter pinned, so
+ * only the right edge fades. Set `--dg-gutter` (the label column) on it or above it.
+ */
+export function DgTrack({ minWidth, hint, scrollerRef, className, contentClassName, children }:
+  { /** CSS length, or set it with contentClassName */ minWidth?: string; hint?: ReactNode; scrollerRef?: Ref<HTMLDivElement>; className?: string; contentClassName?: string; children: ReactNode }) {
+  const [edgesRef, edges] = useScrollEdges<HTMLDivElement>()
+  const ref = useCallback((el: HTMLDivElement | null) => { edgesRef(el); setRef(scrollerRef, el) }, [edgesRef, scrollerRef])
+  return (
+    <div className="relative">
+      <div ref={ref} className={cn('relative overflow-x-auto overscroll-x-contain', className)}><div className={contentClassName} style={{ minWidth }}>{children}</div></div>
+      <ScrollEdges left={false} right={edges.right} touched={edges.touched} hint={hint} />
+    </div>
+  )
+}
+
+/**
+ * A time track's header row: the gutter's title, then tick labels at `ticks` (fractions of the lane, 0…1) just right of
+ * each tick; a label at the very end hugs it from the left instead of running past the lane.
+ */
+export function DgTrackHead({ title, ticks, laneRef, className, tickClassName }:
+  { title: ReactNode; ticks: readonly { at: number; label: ReactNode }[]; laneRef?: Ref<HTMLDivElement>; className?: string; tickClassName?: string }) {
+  return (
+    <div className={cn('grid grid-cols-[var(--dg-gutter)_1fr] border-b border-[var(--line)] text-xs text-[var(--fg3)]', className)}>
+      <div className={cn('flex items-center bg-[var(--card)] ps-3', DG_PIN)}>{title}</div>
+      <div ref={laneRef} className="relative h-full border-s border-[var(--line)]">
+        {ticks.map(t => <span key={t.at} className={cn('absolute top-2.5 whitespace-nowrap', t.at > 0.995 ? '-translate-x-[calc(100%+6px)]' : 'translate-x-1.5', tickClassName)} style={{ left: `${t.at * 100}%` }}>{t.label}</span>)}
+      </div>
+    </div>
+  )
+}
 
 export const dgSafeId = (s: string) => s.replace(/[^a-zA-Z0-9_-]/g, '')
 /** Dotted canvas background used by the statecharts and the process flow. */
@@ -53,6 +94,29 @@ export function DgDot({ path, ms, ease, onDone }: { path: () => SVGPathElement |
     if (u >= 1) { setActive(false); onDone?.() }
   }, { coarseFps: 30 })
   return <circle ref={ref} r={5.5} fill="var(--accent)" stroke="var(--card)" strokeWidth={1.5} opacity={0} />
+}
+
+/** A dot on its way along edge `edge` (a path the diagram keeps by that key). */
+export type DgDotSpec = { key: string; edge: string; ms: number; ease?: 'linear' | 'inOut'; onDone?: () => void }
+/**
+ * The dots in flight on a diagram, at most `max`: `send(edge, ms, ease)` adds one and resolves when it arrives, or
+ * when it is dropped (pushed out by a newer one, `clear()`ed, or the diagram unmounts), so nothing awaiting a dot hangs.
+ */
+export function useDgDots(max = 24) {
+  const [dots, setDots] = useState<DgDotSpec[]>([])
+  const list = useRef<DgDotSpec[]>([]), pending = useRef(new Map<string, () => void>())
+  const settle = (key: string) => { const r = pending.current.get(key); pending.current.delete(key); r?.() }
+  const send = (edge: string, ms: number, ease?: DgDotSpec['ease']) => new Promise<void>(res => {
+    const key = `${edge}-${performance.now()}-${Math.random()}`
+    pending.current.set(key, res)
+    const onDone = () => { list.current = list.current.filter(d => d.key !== key); settle(key); setDots(list.current) }
+    list.current = [...list.current, { key, edge, ms, ease, onDone }]
+    while (list.current.length > Math.max(1, max)) { settle(list.current[0].key); list.current = list.current.slice(1) }
+    setDots(list.current)
+  })
+  const clear = () => { list.current.forEach(d => settle(d.key)); list.current = []; setDots([]) }
+  useEffect(() => () => { const p = pending.current; p.forEach(r => r()); p.clear() }, [])
+  return { dots, send, clear }
 }
 
 /**

@@ -1,5 +1,5 @@
 import { useMemo, useState } from 'react'
-import { SegmentedControl, useToast, type LocaleFmt, fmt } from '../lib'
+import { Button, SegmentedControl, useToast, type LocaleFmt, fmt } from '../lib'
 import { type TimeTag, type TimeTagKind } from '../lib/annotate'
 import { Gantt, type GanttPhase } from '../lib/gantt'
 import { Globe, type GlobeHub, type GlobeRoute, type WorldMapData, WorldMap, useWorldMap } from '../lib/geo'
@@ -48,6 +48,7 @@ const SD_TRANSITIONS: DiagramTransition[] = [
 const SD_HISTORY = { of: 'active', at: [282, 262] as [number, number], default: 'paying', d: 'M288,253 C300,210 300,150 300,136' }
 
 /* State machine: the agent workflows are AGENT_WORKFLOWS from the examples (the transit map in the AI section runs the same ones) */
+const SM_OPTIONS = { intake: 'request.received' }
 
 /* Trace: an agent run ───────────────────────────────────────────────────── */
 const TRACE: TraceSpan[] = ([
@@ -67,6 +68,9 @@ const TRACE: TraceSpan[] = ([
   ['br', 'cd', 'Create branch', 'Git', 'tool', 'branch', 15.9, 2.1, 0, 0],
   ['wp', 'cd', 'Write pricing page', 'GPT-6 Sol', 'llm', 'code', 18.3, 3.7, 0.06, 6000],
 ] as const).map(([id, parent, name, meta, kind, icon, start, duration, cost, tokens]) => ({ id, parent, name, meta, kind, icon, start, duration, cost, tokens }))
+/** The demo's two takes on the same run: the search succeeds first time, or fails part-way (429) and is retried. */
+const TRACE_OK = TRACE.filter(s => s.id !== 'ws2r')
+const TRACE_FAILED = TRACE.map(s => s.id === 'ws2' ? { ...s, duration: 2.6, error: '429 rate limited' } : s)
 
 /* Trace annotations: what happened around the run (ms from the trace start) */
 const TRACE_EVENT_KINDS: TimeTagKind[] = [
@@ -161,6 +165,7 @@ export function DiagramsSection() {
   const toast = useToast()
   const metrics = useMemo(() => mapMetrics(fmt), [fmt])
   const [variant, setVariant] = useState<TagsDayVariant>('light')
+  const [traceFail, setTraceFail] = useState(false)
   return (
     <Section id="diagrams" title="Diagrams & maps" desc="Plans, statecharts, traces, flows and maps. Drag, hover and fire events: everything is live and themed.">
       <Spec span={3} title="Gantt" desc="The plan: phases, progress, dependencies and milestones. Drag a bar to move it (on touch, hold it first), drag its right edge to change duration; dependants reschedule automatically.">
@@ -170,11 +175,11 @@ export function DiagramsSection() {
         <StateDiagram states={SD_STATES} transitions={SD_TRANSITIONS} initial="init" history={SD_HISTORY} />
       </Spec>
       <Spec span={3} title="State machine" desc="Statechart of the agent workflows, live. Lit states hold jobs right now, dots travel each transition as it happens, guards and fork / join are labelled.">
-        <StateMachine machines={AGENT_WORKFLOWS} order={AGENT_WORKFLOW_ORDER} />
+        <StateMachine machines={AGENT_WORKFLOWS} order={AGENT_WORKFLOW_ORDER} options={SM_OPTIONS} />
       </Spec>
       <Spec span={3} title="Trace waterfall" desc="What actually ran: nested spans on a shared timeline, streaming live, with deploys, approvals and retries flagged over the grid. Works for API requests, jobs or agent runs."
-        actions={<DgDaySwitch value={variant} onChange={setVariant} />} notes={DG_TRACE_NOTES}>
-        <TraceWaterfall spans={TRACE} total={22} subtitle="Launch the new pricing page by Friday" failure={{ span: 'ws2', at: 2.6, message: '429 rate limited', retry: 'ws2r' }}
+        actions={<><Button size="sm" aria-pressed={traceFail} onClick={() => setTraceFail(f => !f)}>{'Simulate failure'}</Button><DgDaySwitch value={variant} onChange={setVariant} /></>} notes={DG_TRACE_NOTES}>
+        <TraceWaterfall key={String(traceFail)} spans={traceFail ? TRACE_FAILED : TRACE_OK} total={22} subtitle="Launch the new pricing page by Friday"
           annotations={TRACE_EVENTS[variant]} annotationKinds={TRACE_EVENT_KINDS} />
       </Spec>
       <Spec title="Sankey" desc="Flows between stages. Hover or tap a ribbon or a node to isolate it.">
@@ -189,7 +194,7 @@ export function DiagramsSection() {
           onComplete={() => toast({ title: 'Workflow complete', description: '1,156 imported, 78 need review', tone: 'ok' })} />
       </Spec>
       <Spec span={3} title="Data flow" desc="Sources stream into a processing engine and out to destinations. Hover or tap any node to trace its path.">
-        <LazyDataFlow sources={DF_SOURCES} targets={DF_TARGETS} />
+        <LazyDataFlow sources={DF_SOURCES} targets={DF_TARGETS} simulate />
       </Spec>
       <Spec span={3} title="Map" desc="Choropleth by country, hubs pulse. Hover or tap a country, or a row in the list.">
         <DgWorldMapDemo metrics={metrics} hubs={MAP_HUBS} names={MAP_NAMES} />

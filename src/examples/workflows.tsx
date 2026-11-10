@@ -9,7 +9,7 @@ import type { WorkflowMachine } from '../lib/statechart'
  */
 export const AGENT_WORKFLOWS: Record<string, WorkflowMachine> = {
   feature: { name: 'Feature spec', event: 'doc.changed', start: 'index', emits: () => 'deploy.finished', states: {
-    index: { at: ['memory', 'Index'], label: 'Change detected', next: 'recall' },
+    index: { at: ['memory', 'Index'], trigger: true, label: 'Change detected', next: 'recall' },
     recall: { at: ['memory', 'Recall'], work: 1.0, label: 'Recall: load context', next: 'route' },
     route: { at: ['memory', 'Research'], orch: true, label: 'Research routes to Analyst', next: 'analyst' },
     analyst: { at: ['research', 'Analyst'], work: 2.2, label: 'Analyst: write spec', next: 'product' },
@@ -19,7 +19,7 @@ export const AGENT_WORKFLOWS: Record<string, WorkflowMachine> = {
     deploy: { at: ['research', 'Deploy'], work: 1.0, label: 'Deploy: ship', next: 'done' } } },
   purchase: { name: 'Purchase', event: 'invoice.received', start: 'index', emits: () => 'payment.booked',
     init: seq => ({ amount: [3400, 12000, 7800, 18500][seq % 4] }), title: j => `Purchase CHF ${(j.data.amount as number).toLocaleString(LOCALE)}`, states: {
-      index: { at: ['memory', 'Index'], label: 'Invoice detected', next: 'recall' },
+      index: { at: ['memory', 'Index'], trigger: true, label: 'Invoice detected', next: 'recall' },
       recall: { at: ['memory', 'Recall'], work: 0.8, label: 'Recall: vendor history', next: 'route' },
       route: { at: ['memory', 'Research'], orch: true, label: 'Research routes to Payments', next: 'pay' },
       pay: { at: ['payments', 'Pay agent'], work: 2.0, label: 'Pay agent: draft PO', next: 'finance' },
@@ -28,7 +28,7 @@ export const AGENT_WORKFLOWS: Record<string, WorkflowMachine> = {
       financeBack: { at: ['approvals', 'Finance'], orch: true, label: 'Back to Finance', next: 'ledger' },
       ledger: { at: ['payments', 'Ledger'], work: 1.0, label: 'Ledger: book entry', next: 'done' } } },
   regression: { name: 'Regression fix', short: 'Regression', event: 'test.failed', start: 'index', emits: () => 'deploy.finished', states: {
-    index: { at: ['memory', 'Index'], label: 'Failing test detected', next: 'recall' },
+    index: { at: ['memory', 'Index'], trigger: true, label: 'Failing test detected', next: 'recall' },
     recall: { at: ['memory', 'Recall'], work: 0.8, label: 'Recall: last green build', next: 'route' },
     route: { at: ['memory', 'Research'], orch: true, label: 'Research routes to Analyst', next: 'analyst' },
     analyst: { at: ['research', 'Analyst'], work: 1.6, label: 'Analyst: write fix', next: 'product' },

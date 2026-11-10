@@ -277,7 +277,7 @@ describe('visuals with a run', () => {
   })
   it('TraceWaterfall without a run is unchanged (spans + total)', () => {
     render(<TraceWaterfall spans={[{ id: 'r', name: 'Run', kind: 'agent', start: 0, duration: 4 }]} total={4} />)
-    expect(screen.getByRole('button', { name: 'Simulate failure' })).toBeDisabled()
+    expect(screen.queryByRole('button', { name: 'Simulate failure' })).toBeNull()
     expect(screen.queryByRole('listbox', { name: 'Events' })).toBeNull()
   })
   it('AgentTransitMap draws a run: steps in the table, stations, a summary', () => {

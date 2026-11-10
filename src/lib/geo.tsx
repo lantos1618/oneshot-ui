@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useRef, useState, useSyncExternalStore, type PointerEvent as ReactPointerEvent, type ReactNode } from 'react'
 import { motion, useInView, useReducedMotion } from 'motion/react'
-import { Button, Skeleton, TOUCH, clamp, cn, isTouch, maxOf, minOf, onMouseLeave, safeColor, useOutside, useTheme, fmt, useResizeObserver } from './core'
+import { Button, EASE_OUT, Skeleton, TOUCH, clamp, cn, colorResolver, isTouch, maxOf, minOf, onMouseLeave, safeColor, useOutside, usePointerDrag, useThemeVersion, fmt, useResizeObserver, type RGBA } from './core'
 import { SegmentedControl } from './fields'
 import { PointerTooltip, usePointerTooltip } from './overlay'
 import { useFrameLoop } from './motion'
@@ -10,32 +10,54 @@ export type WorldMapData = { w: number; h: number; countries: [string, string, s
 /** The size of the bundled map; the placeholder uses it, so the map never changes size when its data arrives. */
 const GEO_W = 600, GEO_H = 263
 
-/** One lazily imported data module: load() once, read it synchronously after, and subscribe to its arrival. */
+/**
+ * One lazily imported data module: load() once, read it synchronously after, and subscribe to its arrival. A failed
+ * load is kept as `failed` (and logged) until the next load() tries again.
+ */
 function geoLazy<T>(importer: () => Promise<T>) {
-  let value: T | null = null, pending: Promise<T> | null = null
+  let state: { value: T | null; failed: boolean } = { value: null, failed: false }, pending: Promise<T> | null = null
   const subs = new Set<() => void>()
-  const load = () => pending ??= importer().then(v => { value = v; subs.forEach(f => f()); return v }, e => { pending = null; throw e })
+  const set = (next: typeof state) => { state = next; subs.forEach(f => f()) }
+  const load = () => pending ??= importer().then(v => { set({ value: v, failed: false }); return v }, e => {
+    pending = null; console.error('@lyndon/ui: map data failed to load', e); set({ value: null, failed: true }); throw e
+  })
   const subscribe = (f: () => void) => { subs.add(f); return () => { subs.delete(f) } }
-  return { load, subscribe, get: () => value }
+  return { load, subscribe, get: () => state.value, state: () => state }
 }
 const geoWorld = geoLazy(() => import('./geoworld').then(m => m.WORLD_MAP as WorldMapData))
 const geoLand = geoLazy(() => import('./geoland').then(m => m.GLOBE_LAND))
-const geoNull = () => null
-/** Starts loading a lazy data module on mount; returns it once loaded (null on the server and during hydration). */
+const GEO_IDLE = { value: null, failed: false }
+const geoIdle = () => GEO_IDLE
+/**
+ * Starts loading a lazy data module on mount: `value` once loaded (null on the server and during hydration), `failed`
+ * after a failed load, and `retry` to load again. The failure itself is logged by the loader.
+ */
 function useGeoLazy<T>(lazy: ReturnType<typeof geoLazy<T>>, skip: boolean) {
-  const value = useSyncExternalStore(lazy.subscribe, lazy.get, geoNull)
-  useEffect(() => { if (!skip && !lazy.get()) lazy.load().catch(() => {}) }, [lazy, skip])
-  return value
+  const { value, failed } = useSyncExternalStore(lazy.subscribe, lazy.state, geoIdle)
+  const retry = () => { lazy.load().catch(() => {}) } // logged by the loader
+  useEffect(() => { if (!skip && !lazy.get()) retry() }, [lazy, skip]) // eslint-disable-line react-hooks/exhaustive-deps
+  return { value, failed: failed && !skip, retry }
+}
+/** In place of map data that failed to load: what happened and a way to try again. */
+function GeoUnavailable({ what, onRetry }: { what: string; onRetry: () => void }) {
+  return (
+    <div role="alert" className="absolute inset-0 grid place-content-center justify-items-center gap-2 text-sm text-[var(--fg2)]">
+      <span>{`${what} unavailable`}</span>
+      <Button size="sm" onClick={onRetry}>{'Retry'}</Button>
+    </div>
+  )
 }
 /** Loads the bundled world map (country outlines) once; later calls get the same promise. */
 export const loadWorldMap = (): Promise<WorldMapData> => geoWorld.load()
 /** Loads the bundled globe land points once; later calls get the same promise. */
 export const loadGlobeLand = (): Promise<number[]> => geoLand.load()
 /** The bundled world map, loaded on first use: null until it has arrived (always null during SSR and hydration). */
-export const useWorldMap = (): WorldMapData | null => useGeoLazy(geoWorld, false)
+export const useWorldMap = (): WorldMapData | null => useGeoLazy(geoWorld, false).value
 
 export type MapMetric = { key: string; label: string; format: (v: number) => string; short?: (v: number) => string }
-const GEO_STEPS = [12, 28, 46, 66, 88]
+const GEO_NO_METRIC: MapMetric = { key: '', label: 'Value', format: v => fmt.number(v) }
+/** The choropleth's five steps: [share of the largest value below which a country takes this step, accent %]. */
+const GEO_BANDS: readonly [number, number][] = [[0.1, 12], [0.25, 28], [0.45, 46], [0.7, 66], [Infinity, 88]]
 const geoRamp = (s: number) => `color-mix(in srgb, var(--accent) ${s}%, var(--line))`
 /** Horizontal centre of every country path (for the left-to-right entrance). */
 const geoCentreCache = new WeakMap<WorldMapData, number[]>()
@@ -52,9 +74,9 @@ export function WorldMap({ data, metrics, hubs = [], names = {}, top = 8, map, c
   { data: Record<string, Record<string, number> | null | undefined>; metrics: MapMetric[]; hubs?: [string, number, number][]; names?: Record<string, string>; top?: number
     /** country outlines (default: the bundled map, loaded lazily); hub coordinates are in its w×h box */
     map?: WorldMapData; className?: string }) {
-  const loaded = useGeoLazy(geoWorld, !!map)
-  const world = map ?? loaded, W = world?.w ?? GEO_W, H = world?.h ?? GEO_H
-  const [metric, setMetric] = useState(metrics[0].key)
+  const lazy = useGeoLazy(geoWorld, !!map)
+  const world = map ?? lazy.value, W = world?.w ?? GEO_W, H = world?.h ?? GEO_H
+  const [metric, setMetric] = useState(metrics[0]?.key ?? '')
   const [hover, setHover] = useState<string | null>(null)
   const [spot, setSpot] = useState<string | null>(null)
   const ref = useRef<SVGSVGElement>(null)
@@ -66,12 +88,13 @@ export function WorldMap({ data, metrics, hubs = [], names = {}, top = 8, map, c
   // touch: the leave that follows a tap is ignored; the next tap outside the map (or outside the list) clears instead
   useOutside([ref], () => setHover(null), !!hover)
   useOutside([listRef], () => setSpot(null), !!spot)
-  const M = metrics.find(m => m.key === metric) ?? metrics[0]
-  const countryTip = (n: string) => <><b className="font-semibold">{n}</b><br /><span className="text-[var(--fg2)]">{data[n] ? M.format(data[n]![metric]) : 'No data'}</span></>
-  const max = maxOf(Object.values(data).filter(Boolean).map(v => v![metric] ?? 0), 1)
-  const fill = (n: string) => { const v = data[n]?.[metric]; if (v == null) return 'var(--muted)'; const t = v / max; return geoRamp(GEO_STEPS[t < 0.1 ? 0 : t < 0.25 ? 1 : t < 0.45 ? 2 : t < 0.7 ? 3 : 4]) }
+  const M = metrics.find(m => m.key === metric) ?? metrics[0] ?? GEO_NO_METRIC
+  const countryTip = (n: string) => <><b className="font-semibold">{n}</b><br /><span className="text-[var(--fg2)]">{data[n]?.[metric] != null ? M.format(data[n]![metric]) : 'No data'}</span></>
+  const max = maxOf(Object.values(data).filter(Boolean).map(v => v![metric] ?? 0), 1) || 1
+  const fill = (n: string) => { const v = data[n]?.[metric]; if (v == null) return 'var(--muted)'; const t = v / max; return geoRamp(GEO_BANDS.find(([below]) => t < below)![1]) }
   const xs = world ? geoCentres(world) : []
-  const ranked = Object.entries(data).filter((e): e is [string, Record<string, number>] => !!e[1]).sort((a, b) => b[1][metric] - a[1][metric]).slice(0, top)
+  const ranked = Object.entries(data).filter((e): e is [string, Record<string, number>] => e[1]?.[metric] != null).sort((a, b) => b[1][metric] - a[1][metric]).slice(0, top)
+  const top1 = ranked[0]?.[1][metric] || 1
   const hovered = world?.countries.find(c => c[1] === hover)
   return (
     <div className={cn('flex flex-col gap-3', className)}>
@@ -101,12 +124,12 @@ export function WorldMap({ data, metrics, hubs = [], names = {}, top = 8, map, c
             </g>
           </svg>
           {/* until the outlines arrive: a shimmer over the (already full-size) empty map, so nothing moves when they do */}
-          {!world && <Skeleton className="pointer-events-none absolute inset-0 !rounded-[var(--r-lg)] opacity-60" />}
+          {!world && (lazy.failed ? <GeoUnavailable what={'Map'} onRetry={lazy.retry} /> : <Skeleton className="pointer-events-none absolute inset-0 !rounded-[var(--r-lg)] opacity-60" />)}
           {/* hub pulses: HTML rings over the map, animated on the compositor (transform + opacity), so they cost no layout */}
           {!reduce && hubs.map(([n, x, y], i) => <GeoHubPulse key={n} x={x / W} y={y / H} size={(19.2 / W) * 100} delay={i * 270} active={onScreen} />)}
           </div>
           <div className="flex flex-wrap items-center gap-2 text-[11px] text-[var(--fg3)]">
-            <span>{'Low'}</span><span className="flex gap-0.5">{GEO_STEPS.map(s => <i key={s} className="block h-2 w-[22px] rounded-[var(--r-sm)]" style={{ background: geoRamp(s) }} />)}</span><span>{'High'}</span>
+            <span>{'Low'}</span><span className="flex gap-0.5">{GEO_BANDS.map(([, s]) => <i key={s} className="block h-2 w-[22px] rounded-[var(--r-sm)]" style={{ background: geoRamp(s) }} />)}</span><span>{'High'}</span>
             <span className="ms-2.5 inline-flex items-center gap-1"><i className="inline-block h-2 w-2 rounded-[var(--r-sm)] bg-[var(--muted)]" />{'No data'}</span>
           </div>
         </div>
@@ -118,8 +141,8 @@ export function WorldMap({ data, metrics, hubs = [], names = {}, top = 8, map, c
               <span className="min-w-0 flex-1 truncate">{names[n] ?? n}</span>
               <span className="h-[5px] w-11 flex-none overflow-hidden rounded-[var(--r-sm)] bg-[var(--muted)]">
                 {/* scaleX from the start edge, not width: the bar grows without a layout per frame */}
-                <motion.i key={metric} className="block h-full origin-left rounded-[var(--r-sm)] bg-[var(--accent)]" initial={{ scaleX: reduce ? v[metric] / ranked[0][1][metric] : 0 }}
-                  animate={inView ? { scaleX: v[metric] / ranked[0][1][metric] } : undefined} transition={{ duration: 0.6, delay: i * 0.04, ease: [0.22, 1, 0.36, 1] }} />
+                <motion.i key={metric} className="block h-full origin-left rounded-[var(--r-sm)] bg-[var(--accent)]" initial={{ scaleX: reduce ? v[metric] / top1 : 0 }}
+                  animate={inView ? { scaleX: v[metric] / top1 } : undefined} transition={{ duration: 0.6, delay: i * 0.04, ease: EASE_OUT }} />
               </span>
               <span className="w-[46px] text-end font-[family-name:var(--mono)] text-[11px] text-[var(--fg2)]">{(M.short ?? M.format)(v[metric])}</span>
             </div>
@@ -150,26 +173,14 @@ function GeoHubPulse({ x, y, size, delay, active }: { x: number; y: number; size
 }
 
 export type GlobeHub = [name: string, lon: number, lat: number]
-export type GlobeRoute = { from: number; to: number; color: string; ms?: number }
+export type GlobeRoute = { from: number; to: number; color: string; /** measured latency; the list shows none without it */ ms?: number }
 type GeoVec = [number, number, number]
 const GEO_RAD = Math.PI / 180
 const geoVec = (lon: number, lat: number): GeoVec => [Math.cos(lat * GEO_RAD) * Math.sin(lon * GEO_RAD), Math.sin(lat * GEO_RAD), Math.cos(lat * GEO_RAD) * Math.cos(lon * GEO_RAD)]
 const geoSlerp = (a: GeoVec, b: GeoVec, t: number): GeoVec => { const d = Math.acos(Math.max(-1, Math.min(1, a[0] * b[0] + a[1] * b[1] + a[2] * b[2]))), s = Math.sin(d) || 1, k1 = Math.sin((1 - t) * d) / s, k2 = Math.sin(t * d) / s; return [a[0] * k1 + b[0] * k2, a[1] * k1 + b[1] * k2, a[2] * k1 + b[2] * k2] }
 
-/** Resolves CSS colours (including var(--token)) to [r, g, b] against an element, for canvas drawing. */
-function geoResolver(el: Element) {
-  const cv = document.createElement('canvas').getContext('2d')!, cs = getComputedStyle(el), cache = new Map<string, [number, number, number]>()
-  return (c: string): [number, number, number] => {
-    let hit = cache.get(c); if (hit) return hit
-    const v = c.startsWith('var(') ? cs.getPropertyValue(c.slice(4, -1).split(',')[0].trim()).trim() : c
-    cv.fillStyle = '#000'; cv.fillStyle = v || '#888'
-    const s = cv.fillStyle as string
-    hit = s.startsWith('#') ? [1, 3, 5].map(i => parseInt(s.slice(i, i + 2), 16)) as [number, number, number] : (s.match(/[\d.]+/g)?.slice(0, 3).map(Number) as [number, number, number]) ?? [128, 128, 128]
-    cache.set(c, hit); return hit
-  }
-}
 const GEO_NO_LAND: number[] = []
-const geoRgba = ([r, g, b]: [number, number, number], a: number) => `rgba(${r},${g},${b},${a})`
+const geoRgba = ([r, g, b, k]: RGBA, a: number) => `rgba(${r},${g},${b},${a * k})`
 
 /**
  * 3D dot globe on a canvas: land as dots, great-circle routes between hubs with travelling heads, pulsing hubs
@@ -177,11 +188,13 @@ const geoRgba = ([r, g, b]: [number, number, number], a: number) => `rgba(${r},$
  * highlight it. On touch only sideways drags spin it, so vertical swipes keep scrolling the page; on phones the canvas
  * is no taller than it is wide. Colours come from the theme tokens and are re-read when the theme changes. The land points
  * load on first render (`loadGlobeLand`) unless you pass `land`; the canvas has its final size from the start.
+ * Routes whose hubs don't exist are left out; a route lists its latency only when it has `ms`.
  */
-export function Globe({ hubs, routes, land: landProp, height = 440, className }:
+export function Globe({ hubs, routes: routesProp, land: landProp, height = 440, className }:
   { hubs: GlobeHub[]; routes: GlobeRoute[]; /** land sample points, [lon, lat, …] (default: the bundled set, loaded lazily) */ land?: number[]; height?: number; className?: string }) {
-  const loadedLand = useGeoLazy(geoLand, !!landProp)
-  const land = landProp ?? loadedLand ?? GEO_NO_LAND
+  const lazyLand = useGeoLazy(geoLand, !!landProp)
+  const land = landProp ?? lazyLand.value ?? GEO_NO_LAND
+  const routes = useMemo(() => routesProp.filter(r => hubs[r.from] && hubs[r.to]), [routesProp, hubs])
   const reduce = useReducedMotion()
   const [auto, setAuto] = useState(!reduce)
   const [hl, setHl] = useState(-1)
@@ -193,13 +206,12 @@ export function Globe({ hubs, routes, land: landProp, height = 440, className }:
     const A = geoVec(hubs[r.from][1], hubs[r.from][2]), B = geoVec(hubs[r.to][1], hubs[r.to][2]), dist = Math.acos(A[0] * B[0] + A[1] * B[1] + A[2] * B[2])
     return Array.from({ length: 49 }, (_, k) => { const t = k / 48, v = geoSlerp(A, B, t), h = 1 + Math.sin(t * Math.PI) * dist * 0.18; return [v[0] * h, v[1] * h, v[2] * h] as GeoVec })
   }), [routes, hubs])
-  const latency = useMemo(() => routes.map((r, i) => r.ms ?? Math.round(20 + ((i * 73 + 41) % 180))), [routes])
-  const S = useRef({ rotY: -10 * GEO_RAD, rotX: -20 * GEO_RAD, vY: 0, vX: 0, heads: routes.map((_, i) => (i * 0.37) % 1), drag: null as null | { x: number; y: number; t: number; touch?: boolean }, W: 0, H: 0, dpr: 1, col: null as null | ((c: string) => [number, number, number]), font: '' })
+  // route heads are filled on first draw, so routes added later animate too
+  const S = useRef({ rotY: -10 * GEO_RAD, rotX: -20 * GEO_RAD, vY: 0, vX: 0, heads: [] as number[], drag: null as null | { x: number; y: number; t: number; touch?: boolean }, W: 0, H: 0, dpr: 1, col: null as null | ((c: string) => RGBA), font: '' })
   const live = useRef({ auto, hl, reduce }); live.current = { auto, hl, reduce }
-  const [grab, setGrab] = useState(false)
   const routesRef = useRef<HTMLDivElement>(null)
   useOutside([routesRef], () => setHl(-1), hl >= 0)
-  const { tokens, dark } = useTheme()
+  const themeV = useThemeVersion(cvRef)
 
   // the shaded disc and its rim never move: they are drawn once (per size and theme) on a canvas underneath, so a frame
   // paints only the dots, routes and hubs
@@ -215,13 +227,13 @@ export function Globe({ hubs, routes, land: landProp, height = 440, className }:
     st.dpr = Math.min(2, devicePixelRatio || 1); st.W = cv.clientWidth; st.H = cv.clientHeight; cv.width = bg.width = st.W * st.dpr; cv.height = bg.height = st.H * st.dpr
     drawBg(); if (!looping.current) draw(0, performance.now())
   })
-  // canvas colours are resolved from the theme tokens: re-read them whenever the theme changes (works with
-  // UIProvider target="self" too, where nothing on <html> changes)
+  // canvas colours are resolved in the canvas's theme scope: re-read them whenever the theme changes (UIProvider
+  // target="self" too, where nothing on <html> changes)
   useEffect(() => {
     const cv = cvRef.current!, st = S.current
-    st.col = geoResolver(cv); st.font = getComputedStyle(cv).fontFamily
-    drawBg(); if (!looping.current) draw(0, performance.now()) // eslint-disable-line react-hooks/exhaustive-deps
-  }, [tokens, dark]) // eslint-disable-line react-hooks/exhaustive-deps
+    st.col = colorResolver(cv); st.font = getComputedStyle(cv).fontFamily
+    drawBg(); if (!looping.current) draw(0, performance.now())
+  }, [themeV]) // eslint-disable-line react-hooks/exhaustive-deps
   const draw = (dt: number, now: number) => {
     const cv = cvRef.current, st = S.current; if (!cv || !st.col || !st.W) return
     const g = cv.getContext('2d')!, { auto: spin, hl: h, reduce: still } = live.current, C = st.col
@@ -238,7 +250,8 @@ export function Globe({ hubs, routes, land: landProp, height = 440, className }:
     for (const v of pts) { const [x, y, z] = proj(v); if (z < -0.08) continue; buckets[z < 0 ? 0 : 1 + Math.min(7, Math.floor(z * 8))].push(x, y, 1.1 + Math.max(0, z) * 0.9) }
     buckets.forEach((b, k) => { if (!b.length) return; g.fillStyle = geoRgba(fg, k === 0 ? 0.08 : 0.25 + ((k - 0.5) / 8) * 0.6); for (let i = 0; i < b.length; i += 3) g.fillRect(b[i] - b[i + 2] / 2, b[i + 1] - b[i + 2] / 2, b[i + 2], b[i + 2]) })
     routes.forEach((r, i) => {
-      if (!still) st.heads[i] = (st.heads[i] + dt * (0.25 + ((i * 0.13) % 0.2))) % 1.6
+      const h0 = st.heads[i] ??= (i * 0.37) % 1
+      if (!still) st.heads[i] = (h0 + dt * (0.25 + ((i * 0.13) % 0.2))) % 1.6
       const t = still ? 1 : st.heads[i], on = h < 0 || h === i, col = C(r.color), P = arcs[i].map(proj)
       const stroke = (from: number, to: number) => { g.beginPath(); let moved = false; for (let k = from; k <= to; k++) { const [x, y, z] = P[k]; if (z < -0.05) { moved = false; continue } if (moved) g.lineTo(x, y); else g.moveTo(x, y); moved = true } g.stroke() }
       g.lineWidth = h === i ? 2.4 : 1.4; g.strokeStyle = geoRgba(col, on ? 0.35 : 0.08); stroke(0, 48)
@@ -256,27 +269,31 @@ export function Globe({ hubs, routes, land: landProp, height = 440, className }:
       if (z > 0.35) { g.font = `500 11px ${st.font}`; g.textAlign = 'left'; g.fillStyle = geoRgba(fg, Math.min(1, (z - 0.35) * 3)); g.fillText(n, x + 7, y + 4) }
     })
   }
+  // spin: usePointerDrag ends it on release, cancel or a lost capture, so the globe is never left grabbed
+  const spin = usePointerDrag({
+    onMove: p => {
+      const st = S.current; if (!st.drag) return
+      const R = Math.min(st.W, st.H) * 0.42, dx = p.x - st.drag.x, dy = st.drag.touch ? 0 : p.y - st.drag.y, dtm = Math.max(1, performance.now() - st.drag.t) / 1000
+      st.rotY += dx / R; st.rotX = clamp(st.rotX + dy / R, -1.2, 1.2); st.vY = (dx / R / dtm) * 0.6; st.vX = (dy / R / dtm) * 0.6
+      st.drag = { x: p.x, y: p.y, t: performance.now(), touch: st.drag.touch }
+      if (!looping.current) draw(0, performance.now())
+    },
+    onEnd: () => { const st = S.current; st.drag = null; if (Math.abs(st.vY) + Math.abs(st.vX) >= 0.002) { coasting.current = true; setCoast(true) } },
+  })
+  const grab = spin.dragging
+  const down = (e: ReactPointerEvent<HTMLCanvasElement>) => { const st = S.current; st.drag = { x: e.clientX, y: e.clientY, t: performance.now(), touch: isTouch(e) }; st.vY = st.vX = 0; spin.start(e) }
   // the loop runs only while something moves: auto-rotate, a drag or its momentum, or the route heads and hub pulses
   // (which reduced motion turns off); 30 fps on touch screens. Otherwise the globe is redrawn when it changes.
   const [coast, setCoast] = useState(false), coasting = useRef(false)
   const loopOn = visible && (auto || grab || coast || !reduce), looping = useRef(loopOn); looping.current = loopOn
   useFrameLoop(loopOn, draw, { coarseFps: 30 })
   useEffect(() => { if (!loopOn) draw(0, performance.now()) }, [loopOn, hl, pts]) // eslint-disable-line react-hooks/exhaustive-deps
-  const down = (e: ReactPointerEvent<HTMLCanvasElement>) => { const st = S.current; st.drag = { x: e.clientX, y: e.clientY, t: performance.now(), touch: isTouch(e) }; e.currentTarget.setPointerCapture(e.pointerId); st.vY = st.vX = 0; setGrab(true) }
-  const move = (e: ReactPointerEvent<HTMLCanvasElement>) => {
-    const st = S.current; if (!st.drag) return
-    const R = Math.min(st.W, st.H) * 0.42, dx = e.clientX - st.drag.x, dy = st.drag.touch ? 0 : e.clientY - st.drag.y, dtm = Math.max(1, performance.now() - st.drag.t) / 1000
-    st.rotY += dx / R; st.rotX = clamp(st.rotX + dy / R, -1.2, 1.2); st.vY = (dx / R / dtm) * 0.6; st.vX = (dy / R / dtm) * 0.6
-    st.drag = { x: e.clientX, y: e.clientY, t: performance.now(), touch: st.drag.touch }
-    if (!looping.current) draw(0, performance.now())
-  }
-  const up = () => { const st = S.current; st.drag = null; setGrab(false); if (Math.abs(st.vY) + Math.abs(st.vX) >= 0.002) { coasting.current = true; setCoast(true) } }
   const row = (r: GlobeRoute, i: number): ReactNode => (
     <div key={i} className={cn('flex cursor-default items-center gap-2 rounded-[var(--r-md)] p-2 text-xs', TOUCH.tap36, hl === i && 'bg-[var(--muted)]')}
       onPointerEnter={e => { if (!isTouch(e)) setHl(i) }} onPointerDown={e => { if (isTouch(e)) setHl(h => (h === i ? -1 : i)) }}
       onPointerLeave={onMouseLeave(() => setHl(-1))} tabIndex={0} onFocus={() => setHl(i)} onBlur={() => setHl(-1)}>
       <i className="h-2 w-2 flex-none rounded-full" style={{ background: safeColor(r.color) }} /><span className="flex-1">{`${hubs[r.from][0]} → ${hubs[r.to][0]}`}</span>
-      <b className="font-[family-name:var(--mono)] text-[11px] font-medium text-[var(--fg2)]">{`${fmt.number(latency[i])} ms`}</b>
+      {r.ms != null && <b className="font-[family-name:var(--mono)] text-[11px] font-medium text-[var(--fg2)]">{`${fmt.number(r.ms)} ms`}</b>}
     </div>
   )
   return (
@@ -284,10 +301,11 @@ export function Globe({ hubs, routes, land: landProp, height = 440, className }:
       <div className="flex justify-end"><Button size="sm" className={TOUCH.tap36} aria-pressed={auto} onClick={() => setAuto(a => !a)}>{auto ? 'Auto-rotate on' : 'Auto-rotate off'}</Button></div>
       <div className="grid items-center gap-5 md:grid-cols-[minmax(0,1fr)_230px]">
         <motion.div className="relative" style={{ height: `min(${height}px, calc(100vw - 32px))` }}
-          initial={{ opacity: 0, scale: 0.92 }} animate={inView ? { opacity: 1, scale: 1 } : undefined} transition={{ duration: 0.8, ease: [0.22, 1, 0.36, 1] }}>
+          initial={{ opacity: 0, scale: 0.92 }} animate={inView ? { opacity: 1, scale: 1 } : undefined} transition={{ duration: 0.8, ease: EASE_OUT }}>
           <canvas ref={bgRef} aria-hidden className="pointer-events-none absolute inset-0 block h-full w-full" />
           <canvas ref={cvRef} role="img" aria-label={'Rotating globe with routes between cities'} className={cn('relative block h-full w-full touch-pan-y', grab ? 'cursor-grabbing' : 'cursor-grab')}
-            onPointerDown={down} onPointerMove={move} onPointerUp={up} onPointerCancel={up} />
+            onPointerDown={down} />
+          {!landProp && lazyLand.failed && <GeoUnavailable what={'Globe'} onRetry={lazyLand.retry} />}
         </motion.div>
         <div ref={routesRef} className="flex flex-col gap-0.5"><div className="mb-1.5 text-xs text-[var(--fg3)]">{'Live routes'}<span className="hidden [@media(pointer:coarse)]:inline">{' · drag the globe sideways to spin it'}</span></div>{routes.map(row)}</div>
       </div>
