@@ -1,7 +1,6 @@
 import { useEffect, useLayoutEffect, useRef, useState, type DragEvent, type Ref } from 'react'
-import { AnimatePresence, motion, useIsPresent } from 'motion/react'
 import { type FormControlProps, useFormControl, Button, Icon, IconButton, cn, spring, plural, fmt, composeRefs } from './core'
-import { play } from './motion'
+import { PresenceList, play } from './motion'
 import { Progress } from './feedback'
 
 /** Uploads one file: report 0–100 through `onProgress`, stop when `signal` aborts (the row was removed), reject on failure. */
@@ -52,9 +51,9 @@ type FormsFile = { id: number; name: string; size: number; file?: File; status: 
 let formsFileSeq = 0
 const formsDefaultRows = (list: { name: string; size: number }[]): FormsFile[] => list.map(f => ({ name: f.name, size: f.size, id: ++formsFileSeq, status: 'done', attempt: 0 }))
 
-function FormsFileRow({ f, upload, onStatus, onRetry, onRemove }: { f: FormsFile; upload?: FileUploader; onStatus: (s: FormsFileStatus) => void; onRetry: () => void; onRemove: () => void }) {
+function FormsFileRow({ f, present, upload, onStatus, onRetry, onRemove, ref, ...presence }: { f: FormsFile; /** false once removed, while the row still animates out */ present: boolean
+  upload?: FileUploader; onStatus: (s: FormsFileStatus) => void; onRetry: () => void; onRemove: () => void; ref?: Ref<HTMLDivElement> }) {
   const [pct, setPct] = useState(0)
-  const present = useIsPresent() // false once removed, while the row still animates out
   const fns = useRef({ upload, onStatus }) // latest without restarting: inline props change identity every render
   useLayoutEffect(() => { fns.current = { upload, onStatus } })
   useEffect(() => {
@@ -70,9 +69,8 @@ function FormsFileRow({ f, upload, onStatus, onRetry, onRemove }: { f: FormsFile
   const status = f.status === 'ready' ? 'Ready' : f.status === 'uploading' ? `Uploading ${fmt.percent(Math.round(pct) / 100)}` : failed ? 'Upload failed' : uploaded ? 'Uploaded' : ''
   const size = f.size ? fmt.bytes(f.size) : ''
   return (
-    <motion.div layout="position" initial={{ height: 0, opacity: 0 }} animate={{ height: 'auto', opacity: 1 }}
-      exit={{ height: 0, opacity: 0, x: 20, transition: { opacity: { duration: 0.15 }, x: { duration: 0.15 }, height: { duration: 0.18, delay: 0.12 } } }}
-      transition={spring(0.2, 0.35)} className="overflow-hidden">
+    // leaving: slides out, then the row closes
+    <div ref={ref} {...presence} className="ui-grow [--ui-xo:20px] [&[data-ui-exit]]:[animation:ui-out_.15s_ease-in_forwards,ui-shrink_.18s_ease-out_.12s_forwards]">
       <div className="flex items-center gap-2.5 border-b border-[var(--line)] py-2 text-[13px]">
         <span className="grid h-8 w-8 flex-none place-items-center rounded-[var(--r-md)] bg-[var(--muted)] font-[family-name:var(--mono)] text-[11px] font-semibold text-[var(--fg2)] uppercase">{(f.name.split('.').pop() || 'file').slice(0, 4)}</span>
         <span className="min-w-0 flex-1">
@@ -83,7 +81,7 @@ function FormsFileRow({ f, upload, onStatus, onRetry, onRemove }: { f: FormsFile
         {failed && <Button size="xs" variant="ghost" onClick={onRetry}>Retry</Button>}
         <IconButton icon="x" label={`Remove ${f.name}`} onClick={onRemove} />
       </div>
-    </motion.div>
+    </div>
   )
 }
 
@@ -137,23 +135,23 @@ export function FileUpload({ onFiles, onReject, accept, multiple = true, maxSize
   const over = drop.over
   return (
     <div className={cn('relative flex flex-col', className)} onBlur={fc.onBlur}>
-      <motion.button ref={composeRefs(zone, ref)} type="button" {...fc.control} disabled={fc.disabled} animate={{ scale: over ? 1.02 : 1 }} transition={spring(0.3, 0.3)} onClick={() => input.current?.click()}
+      <button ref={composeRefs(zone, ref)} type="button" {...fc.control} disabled={fc.disabled} onClick={() => input.current?.click()}
         {...drop.props}
-        className={cn('mb-1 flex cursor-pointer flex-col items-center gap-1 rounded-[var(--r-md)] border-[1.5px] border-dashed p-4 text-center text-[13px] text-[var(--fg2)] transition-colors disabled:cursor-not-allowed disabled:bg-[var(--muted)] disabled:text-[var(--fg3)]',
-          over ? 'border-[var(--accent)] bg-[var(--accent-soft)]' : fc.invalid ? 'border-[var(--bad)] bg-transparent' : 'border-[var(--line2)] bg-transparent hover:bg-[var(--muted)] disabled:hover:bg-[var(--muted)]')}>
+        className={cn('mb-1 flex cursor-pointer flex-col items-center gap-1 rounded-[var(--r-md)] border-[1.5px] border-dashed p-4 text-center text-[13px] text-[var(--fg2)] transition-[color,background-color,border-color,scale] duration-300 ease-[var(--ui-spring)] disabled:cursor-not-allowed disabled:bg-[var(--muted)] disabled:text-[var(--fg3)]',
+          over ? 'scale-[1.02] border-[var(--accent)] bg-[var(--accent-soft)]' : fc.invalid ? 'border-[var(--bad)] bg-transparent' : 'border-[var(--line2)] bg-transparent hover:bg-[var(--muted)] disabled:hover:bg-[var(--muted)]')}>
         <Icon name="upload" size={20} className="text-[var(--fg3)]" />
         <span className="[@media(hover:none)]:hidden"><b className="font-medium text-[var(--fg)]">{multiple ? 'Drop files' : 'Drop a file'}</b> or click to browse</span>
         <span className="hidden [@media(hover:none)]:inline"><b className="font-medium text-[var(--fg)]">{multiple ? 'Choose files' : 'Choose a file'}</b></span>
         <span className="text-xs text-[var(--fg3)]">{hint ?? `${accept ? `Accepts ${accept.split(',').map(s => s.trim()).filter(Boolean).join(', ')}` : 'Any file type'}${maxSize ? `, up to ${fmt.bytes(maxSize)}` : ''}`}</span>
-      </motion.button>
+      </button>
       <input ref={input} type="file" hidden accept={accept} multiple={multiple} name={fieldName} form={fp.form} disabled={fc.disabled} onChange={e => { add(e.target.files); e.target.value = '' }} />
       {skipped && <p role="status" className="m-0 mb-1 text-xs text-[var(--bad)]">{skipped}</p>}
-      <AnimatePresence initial={false}>
-        {files.map(f => (
-          <FormsFileRow key={f.id} f={f} upload={upload} onStatus={status => patch(f.id, { status })} onRetry={() => { patch(f.id, { status: 'uploading', attempt: f.attempt + 1 }); fc.markEdited() }}
+      <PresenceList items={files} keyOf={f => f.id}>
+        {(f, { exiting }) => (
+          <FormsFileRow f={f} present={!exiting} upload={upload} onStatus={status => patch(f.id, { status })} onRetry={() => { patch(f.id, { status: 'uploading', attempt: f.attempt + 1 }); fc.markEdited() }}
             onRemove={() => { setFiles(x => x.filter(y => y.id !== f.id)); fc.markEdited() }} />
-        ))}
-      </AnimatePresence>
+        )}
+      </PresenceList>
       {fc.inputs}
     </div>
   )

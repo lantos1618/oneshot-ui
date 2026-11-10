@@ -1,6 +1,5 @@
 import { createContext, useContext, useEffect, useId, useRef, useState, type AriaAttributes, type FormEvent, type FormHTMLAttributes, type ReactNode, type Ref } from 'react'
-import { motion } from 'motion/react'
-import { FormFieldContext, type FormControlProps, type FormFieldState, useFormControl, Badge, ICONS, Icon, type IconName, cn, spring, useCoarsePointer, useRoving, composeRefs } from './core'
+import { FormFieldContext, type FormControlProps, type FormFieldState, useFormControl, Badge, ICONS, Icon, type IconName, cn, useRoving, composeRefs } from './core'
 import { ActiveIndicator } from './motion'
 
 /**
@@ -143,17 +142,16 @@ export function Switch({ label, className, ...props }: FormsToggleProps & { labe
   const t = useFormsToggle(props)
   const on = t.value
   const [flips, setFlips] = useState(0)
-  const coarse = useCoarsePointer() // touch: a larger, iOS-sized switch (52×32)
   const btn = (
     <button type="button" ref={t.ref} role="switch" aria-checked={on} aria-required={t.required || undefined} aria-readonly={t.readOnly || undefined} disabled={t.disabled}
       aria-label={typeof label === 'string' ? label : undefined} aria-labelledby={label ? undefined : t.labelledBy} {...t.control} {...formsAria(props)}
       onClick={() => { if (t.readOnly) return; t.set(!on); setFlips(f => f + 1) }}
       className={cn('relative h-[22px] w-[38px] flex-none cursor-pointer rounded-full border-0 p-0 transition-colors disabled:cursor-not-allowed disabled:opacity-50 aria-readonly:cursor-default [@media(pointer:coarse)]:h-8 [@media(pointer:coarse)]:w-[52px]',
         on ? 'bg-[var(--primary)]' : 'bg-[var(--line2)]', t.invalid && 'shadow-[0_0_0_2px_var(--bad)]', !label && className)}>
-      <motion.i className="absolute top-[3px] start-[3px] block h-4 w-4 [@media(pointer:coarse)]:h-[26px] [@media(pointer:coarse)]:w-[26px]" initial={false} animate={{ x: on ? (coarse ? 20 : 16) : 0 }} transition={spring(0.35, 0.4)}>
-        <motion.i key={flips} className="block h-full w-full rounded-full bg-[var(--card)] shadow-[0_1px_2px_rgba(0,0,0,.25)]"
-          initial={flips ? { scaleX: 1.3 } : false} animate={{ scaleX: 1 }} transition={spring(0.35, 0.4)} />
-      </motion.i>
+      <i className={cn('absolute top-[3px] start-[3px] block h-4 w-4 transition-transform duration-[400ms] ease-[var(--ui-spring)] motion-reduce:transition-none [@media(pointer:coarse)]:h-[26px] [@media(pointer:coarse)]:w-[26px]',
+        on && 'translate-x-4 [@media(pointer:coarse)]:translate-x-5')}>
+        <i key={flips} className={cn('block h-full w-full rounded-full bg-[var(--card)] shadow-[0_1px_2px_rgba(0,0,0,.25)]', flips > 0 && 'ui-pop [--ui-d:.4s] [--ui-s:1.3,1]')} />
+      </i>
     </button>
   )
   if (!label) return <span className="relative inline-flex" onBlur={t.onBlur}>{btn}{t.inputs}</span>
@@ -170,9 +168,11 @@ export function Switch({ label, className, ...props }: FormsToggleProps & { labe
  */
 export function CheckMark({ checked = true, size = 12, strokeWidth = 3.5, draw = false, delay = 0, duration, className }:
   { checked?: boolean; size?: number; strokeWidth?: number; draw?: boolean; delay?: number; duration?: number; className?: string }) {
+  const t = duration ?? (checked ? 0.3 : 0.15)
   return (
     <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={strokeWidth} strokeLinecap="round" strokeLinejoin="round" aria-hidden className={cn('flex-none', className)}>
-      <motion.path d={ICONS.check} initial={draw ? { pathLength: 0 } : false} animate={{ pathLength: checked ? 1 : 0 }} transition={{ duration: duration ?? (checked ? 0.3 : 0.15), delay }} />
+      <path d={ICONS.check} pathLength={1}
+        style={{ strokeDasharray: '1 2', strokeDashoffset: checked ? 0 : 1.05, transition: `stroke-dashoffset ${t}s ease-out ${delay}s`, animation: draw ? `ui-draw ${t}s ease-out ${delay}s backwards` : undefined }} />
     </svg>
   )
 }
@@ -180,13 +180,15 @@ export function CheckMark({ checked = true, size = 12, strokeWidth = 3.5, draw =
 /** The square box of a checkbox (filled with a drawn tick when checked; pops on change). For custom rows, lists and tables; the row carries the role. */
 export function CheckboxBox({ checked, size = 18, pop = true, className }: { checked: boolean; size?: number; pop?: boolean; className?: string }) {
   const small = size < 18
+  const [first] = useState(checked), [changed, setChanged] = useState(false)
+  if (!changed && checked !== first) setChanged(true)
   return (
-    <motion.span key={pop ? String(checked) : undefined} initial={false} animate={pop ? { scale: [1, 0.85, 1] } : undefined} transition={spring(0.5, 0.3)} aria-hidden
+    <span key={pop ? String(checked) : undefined} aria-hidden
       style={{ width: size, height: size }}
-      className={cn('grid flex-none place-items-center rounded-[var(--r-sm)] border-[1.5px] text-[var(--on-primary)] transition-colors',
+      className={cn(pop && changed && 'ui-pulse [--ui-d:.3s]', 'grid flex-none place-items-center rounded-[var(--r-sm)] border-[1.5px] text-[var(--on-primary)] transition-colors',
         checked ? 'border-[var(--primary)] bg-[var(--primary)]' : 'border-[var(--line2)]', className)}>
       <CheckMark checked={checked} size={Math.round(size * 0.66)} strokeWidth={small ? 4 : 3.5} duration={checked ? (small ? 0.25 : 0.3) : (small ? 0.12 : 0.15)} />
-    </motion.span>
+    </span>
   )
 }
 
@@ -256,7 +258,7 @@ export function RadioGroup({ options, value, defaultValue, onChange, label, clas
           <button type="button" key={o.value} {...rg.item(i)} role="radio" aria-checked={on} disabled={off(i)} onClick={() => set(o.value)}
             className="group/rd flex cursor-pointer items-center gap-2.5 border-0 bg-transparent p-0 text-start text-[13px] disabled:cursor-not-allowed disabled:text-[var(--fg3)] [@media(pointer:coarse)]:min-h-9">
             <span className={cn('grid h-[18px] w-[18px] flex-none place-items-center rounded-full border-[1.5px] group-disabled/rd:opacity-50', on ? 'border-[var(--primary)]' : fc.invalid ? 'border-[var(--bad)]' : 'border-[var(--line2)]')}>
-              <motion.i className="block h-2 w-2 rounded-full bg-[var(--primary)]" initial={false} animate={{ scale: on ? 1 : 0 }} transition={on ? spring(0.5, 0.35) : { duration: 0.1 }} />
+              <i className={cn('block h-2 w-2 rounded-full bg-[var(--primary)] transition-transform motion-reduce:transition-none', on ? 'duration-[350ms] ease-[var(--ui-spring-pop)]' : 'scale-0 duration-100')} />
             </span>
             <span>{o.label}{o.hint && <span className="block text-xs text-[var(--fg3)]">{o.hint}</span>}</span>
           </button>

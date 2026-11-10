@@ -1,12 +1,11 @@
 import { useEffect, useId, useLayoutEffect, useMemo, useRef, useState, type InputHTMLAttributes, type ReactNode, type Ref, type RefObject, type TextareaHTMLAttributes } from 'react'
-import { AnimatePresence, animate, motion, useTransform } from 'motion/react'
 import { AnimatedNumber, FormFieldContext, type FormControlProps, formDisabledClass, formReadOnlyClass, useFormControl, useFormFieldProps, Button, Icon, clamp, cn, numberFormat, hex2hue, hsl2hex, inputClass, isTouch, prefersReducedMotion, spring, useCoarsePointer, useDisclosure, usePointerDrag, useListbox, plural, fmt, LOCALE, composeRefs, snapToStep, typeaheadIndex, useFlash } from './core'
-import { play, shake } from './motion'
+import { ActiveIndicator, PresenceList, play, shake, useFlip } from './motion'
 import { FloatingPanel } from './overlay'
 import { FormsChip, useFormsAfterReset } from './formkit'
 import { inputShellClass, rangeInputClass, useRadioGroup, type Option } from './fields'
 import { OptionList } from './select'
-import { type Magnet, type MagnetHit, MagnetBubble, MagnetMarks, magnetKeyDirection, useMagnet, useMagnetSettle } from './magnet'
+import { MAGNET_SETTLE_CSS, type Magnet, type MagnetHit, MagnetBubble, MagnetMarks, magnetKeyDirection, useMagnet, useMagnetSettle } from './magnet'
 
 /**
  * Text input. Set `invalid` to show the error ring; it shakes once when it becomes invalid. Your `ref` reaches the <input>.
@@ -41,7 +40,7 @@ export function Textarea({ className, maxLength, value, defaultValue, onChange, 
     fitted.current = t.value
     const h0 = t.offsetHeight; t.style.height = 'auto'; const h1 = t.scrollHeight + TA_BORDER
     if (!anim || !h0 || h0 === h1 || prefersReducedMotion()) { t.style.height = h1 + 'px'; return }
-    t.style.height = h0 + 'px'; animate(t, { height: [h0, h1] }, { duration: 0.15 })
+    t.style.height = h1 + 'px'; t.animate?.({ height: [`${h0}px`, `${h1}px`] }, { duration: 150, easing: 'ease-out' })
   }
   useLayoutEffect(() => { if (ref.current && ref.current.value !== fitted.current) fit(false) })
   const left = maxLength ? maxLength - len : 0
@@ -57,8 +56,8 @@ export function Textarea({ className, maxLength, value, defaultValue, onChange, 
           <span ref={countRef} className={cn('ui-num inline-block text-xs transition-colors', TA_TONE[tone][0])}>{`${left} left`}</span>
           <svg width="18" height="18" viewBox="0 0 20 20" className="-rotate-90" aria-hidden>
             <circle cx="10" cy="10" r="8" fill="none" stroke="var(--line)" strokeWidth="2.5" />
-            <motion.circle cx="10" cy="10" r="8" fill="none" strokeWidth="2.5" strokeLinecap="round" strokeDasharray="50.27" className={cn('transition-[stroke]', TA_TONE[tone][1])}
-              initial={false} animate={{ strokeDashoffset: 50.27 * (1 - Math.min(1, len / maxLength)) }} transition={{ duration: 0.15 }} />
+            <circle cx="10" cy="10" r="8" fill="none" strokeWidth="2.5" strokeLinecap="round" strokeDasharray="50.27" className={cn('transition-[stroke,stroke-dashoffset] duration-150', TA_TONE[tone][1])}
+              style={{ strokeDashoffset: 50.27 * (1 - Math.min(1, len / maxLength)) }} />
           </svg>
         </div>
       )}
@@ -93,9 +92,9 @@ export function PasswordInput({ strength, rules = strength, className, onChange,
         <span className="absolute top-1/2 end-1 flex -translate-y-1/2">
           <Button size="icon-sm" variant="ghost" disabled={f.disabled} aria-label={(show ? 'Hide password' : 'Show password')} title={(show ? 'Hide password' : 'Show password')}
             className="text-[var(--fg3)] hover:text-[var(--fg)]" onClick={() => { setShow(!show); setFlips(f => f + 1) }}>
-            <motion.span key={flips} className="grid" initial={flips ? { scale: 0.7 } : false} animate={{ scale: 1 }} transition={spring(0.5, 0.3)}>
+            <span key={flips} className={cn('grid', flips > 0 && 'ui-pop [--ui-d:.3s] [--ui-s:.7]')}>
               <Icon name={show ? 'eyeOff' : 'eye'} size={15} />
-            </motion.span>
+            </span>
           </Button>
         </span>
       </div>
@@ -103,8 +102,8 @@ export function PasswordInput({ strength, rules = strength, className, onChange,
         <div className="grid grid-cols-4 gap-1" aria-hidden>
           {[0, 1, 2, 3].map(i => (
             <div key={i} className="h-1 overflow-hidden rounded-full bg-[var(--muted)]">
-              <motion.div className={cn('h-full origin-left transition-colors', PW_BAR[Math.max(0, score - 1)])} initial={false}
-                animate={{ scaleX: i < score ? 1 : 0 }} transition={{ duration: 0.25, delay: i < score && i >= from ? (i - from) * 0.05 : 0 }} />
+              <div className={cn('h-full origin-left motion-reduce:!transition-none', PW_BAR[Math.max(0, score - 1)])}
+                style={{ transform: `scaleX(${i < score ? 1 : 0})`, transition: `transform .25s ease-out ${i < score && i >= from ? (i - from) * 0.05 : 0}s, background-color .15s` }} />
             </div>
           ))}
         </div>
@@ -112,10 +111,9 @@ export function PasswordInput({ strength, rules = strength, className, onChange,
       {rules && (
         <div className="flex flex-wrap gap-x-3 gap-y-1 text-xs">
           {PW_RULES.map(([label], i) => (
-            <motion.span key={label + passed[i]} initial={passed[i] ? { scale: 0.9 } : false} animate={{ scale: 1 }} transition={spring(0.5, 0.3)}
-              className={cn('inline-block transition-colors', passed[i] ? 'text-[var(--ok)]' : 'text-[var(--fg3)]')}>
+            <span key={label + passed[i]} className={cn('inline-block transition-colors', passed[i] ? 'ui-pop text-[var(--ok)] [--ui-d:.3s] [--ui-s:.9]' : 'text-[var(--fg3)]')}>
               <span aria-hidden>{passed[i] ? '✓' : '○'} </span>{label}<span className="sr-only"> {(passed[i] ? '(met)' : '(not met)')}</span>
-            </motion.span>
+            </span>
           ))}
         </div>
       )}
@@ -129,7 +127,7 @@ export function PasswordInput({ strength, rules = strength, className, onChange,
  * drag is stopped on pointerdown and touchstart), the jump keys, a thumb position that settles with a spring, and focus
  * bookkeeping (we focus the input ourselves, which browsers count as focus-visible, so a pointer focus shows no ring).
  * The input stays for arrow keys, forms and screen readers. `inset` is the thumb's radius: its centre stops that far
- * short of each end. Spread `bind` on the input; draw the thumb at `thumbAt`.
+ * short of each end. Spread `bind` on the input; draw the thumb at `thumbAt` (with MAGNET_SETTLE_CSS while `settling`).
  */
 function useInputsMagnetRange({ input, magnets, min, max, step, value, locked, inset, set, describe, onSnap }: {
   input: RefObject<HTMLInputElement | null>; magnets?: readonly Magnet[] | null; min: number; max: number; step: number; value: number; locked: boolean; inset: number
@@ -156,8 +154,8 @@ function useInputsMagnetRange({ input, magnets, min, max, step, value, locked, i
     el.addEventListener('touchstart', stop, { passive: false })
     return () => el.removeEventListener('touchstart', stop)
   }, [on, locked, input])
-  const settled = useMagnetSettle(clamp((value - min) / (max - min || 1), 0, 1), kick)
-  const thumbAt = useTransform(settled, f => `calc(${inset}px + ${f} * (100% - ${2 * inset}px))`)
+  const { f, settling } = useMagnetSettle(clamp((value - min) / (max - min || 1), 0, 1), kick)
+  const thumbAt = `calc(${inset}px + ${f} * (100% - ${2 * inset}px))`
   const bind = on ? {
     'aria-keyshortcuts': 'PageUp PageDown',
     onPointerDown: (e: React.PointerEvent<HTMLInputElement>) => {
@@ -174,7 +172,7 @@ function useInputsMagnetRange({ input, magnets, min, max, step, value, locked, i
     onFocus: (e: React.FocusEvent<HTMLInputElement>) => { try { setFocusVisible(!pointerFocus && e.currentTarget.matches(':focus-visible')) } catch { setFocusVisible(false) } },
     onBlurCapture: () => { setFocusVisible(false); setPointerFocus(false) },
   } : {}
-  return { mg, on, dragging, focusVisible, pointerFocus, thumbAt, bind }
+  return { mg, on, dragging, focusVisible, pointerFocus, thumbAt, settling, bind }
 }
 
 /**
@@ -188,10 +186,10 @@ function InputsMagnetOverlay({ hm, magnets, min, max, value, inset, locked, fade
     <span aria-hidden className={cn('pointer-events-none absolute inset-x-0 top-1/2 -translate-y-1/2 transition-opacity', faded && 'opacity-40', className)}>
       {children}
       <MagnetMarks magnets={magnets} min={min} max={max} value={value} inset={inset} />
-      <motion.span style={{ insetInlineStart: hm.thumbAt }} animate={{ scale: hm.dragging ? grow : 1 }} transition={spring(0.4, 0.3)}
-        className={cn('absolute top-1/2 rounded-full', thumbClassName, !hm.pointerFocus && 'group-has-[input:focus-visible]/mg:shadow-[0_0_0_2px_var(--card),0_0_0_4px_var(--accent)]')}>
+      <span style={{ insetInlineStart: hm.thumbAt, scale: hm.dragging ? `${grow}` : undefined, transition: `scale .3s var(--ui-spring)${hm.settling ? `, inset-inline-start ${MAGNET_SETTLE_CSS}` : ''}` }}
+        className={cn('absolute top-1/2 rounded-full motion-reduce:!transition-none', thumbClassName, !hm.pointerFocus && 'group-has-[input:focus-visible]/mg:shadow-[0_0_0_2px_var(--card),0_0_0_4px_var(--accent)]')}>
         <MagnetBubble label={hm.mg.at(value).label} show={(hm.dragging || hm.focusVisible) && !locked} />
-      </motion.span>
+      </span>
     </span>
   )
 }
@@ -225,7 +223,7 @@ export function Slider({ value, defaultValue, onChange, min: minProp = 0, max: m
   const shown = named ? steps[clamp(Math.round(v), 0, steps.length - 1)] : format ? format(v) : v
   const text = (n: number) => valueText?.(n) ?? fmt.number(n)
   const hm = useInputsMagnetRange({ input, magnets: named ? null : magnets, min, max, step, value: v, locked, inset: SLIDER_INSET, set, describe: text, onSnap })
-  const { mg, on, dragging, pointerFocus, thumbAt, bind } = hm
+  const { mg, on, dragging, pointerFocus, thumbAt, settling, bind } = hm
   const mark = on ? mg.at(v) : null
   return (
     // disabled: only the track and thumb fade; the label and value switch to --fg3 (still ≥4.5:1, never faded with opacity)
@@ -248,7 +246,7 @@ export function Slider({ value, defaultValue, onChange, min: minProp = 0, max: m
           <InputsMagnetOverlay hm={hm} magnets={magnets} min={min} max={max} value={v} inset={SLIDER_INSET} locked={locked} faded={disabled} grow={1.15}
             className="h-1.5" thumbClassName="-ms-2 -mt-2 h-4 w-4 bg-[var(--primary)] shadow-[0_1px_3px_rgba(0,0,0,.2)]">
             <span className="absolute inset-0 rounded-full bg-[var(--muted)]" />
-            <motion.span className="absolute inset-y-0 start-0 rounded-full bg-[var(--primary)]" style={{ width: thumbAt }} />
+            <span className="absolute inset-y-0 start-0 rounded-full bg-[var(--primary)]" style={{ width: thumbAt, transition: settling ? `width ${MAGNET_SETTLE_CSS}` : undefined }} />
           </InputsMagnetOverlay>
         )}
       </div>
@@ -365,17 +363,19 @@ export function TagInput({ value, defaultValue = [], onChange, placeholder: plac
   const fc = useFormControl<string[]>({ ...fp, value, defaultValue, onChange, serialize: t => t, filled: t => t.length > 0, focus: () => input.current?.focus(), onReset: () => setText('') })
   const tags = fc.value, set = fc.set, locked = fc.disabled || fc.readOnly
   const [dupe, flashDupe] = useFlash<string | null>(300, null)
+  const shell = useRef<HTMLDivElement>(null)
+  useFlip(shell)
   const add = () => {
     const x = text.trim(); if (!x) return
     if (tags.includes(x)) flashDupe(x); else set([...tags, x])
     setText('')
   }
   return (
-    <div className={cn(inputShellClass(fc.invalid), 'relative flex flex-wrap gap-1.5 p-1.5', fc.disabled ? 'cursor-not-allowed !bg-[var(--muted)] text-[var(--fg3)] hover:!border-[var(--line)]' : fc.readOnly && '!bg-[var(--muted)]', className)}
+    <div ref={shell} className={cn(inputShellClass(fc.invalid), 'relative flex flex-wrap gap-1.5 p-1.5', fc.disabled ? 'cursor-not-allowed !bg-[var(--muted)] text-[var(--fg3)] hover:!border-[var(--line)]' : fc.readOnly && '!bg-[var(--muted)]', className)}
       onBlur={e => { if (!e.currentTarget.contains(e.relatedTarget as Node | null)) add(); fc.onBlur(e) }}>
-      <AnimatePresence initial={false}>
-        {tags.map(tag => <FormsChip key={tag} label={tag} locked={locked} shake={dupe === tag} onRemove={() => set(tags.filter(x => x !== tag))} />)}
-      </AnimatePresence>
+      <PresenceList items={tags} keyOf={t => t}>
+        {tag => <FormsChip id={tag} label={tag} locked={locked} shake={dupe === tag} onRemove={() => set(tags.filter(x => x !== tag))} />}
+      </PresenceList>
       <input ref={composeRefs(input, ref)} {...fc.control} value={text} placeholder={fc.readOnly ? '' : placeholder} aria-label={fc.control.id && fc.labelledBy ? undefined : placeholder}
         disabled={fc.disabled} readOnly={fc.readOnly} aria-required={fc.required || undefined} onChange={e => setText(e.target.value)}
         onKeyDown={e => {
@@ -491,8 +491,7 @@ export function ColorPicker({ value, defaultValue = '#2563EB', onChange, swatche
   return (
     <div className={cn('relative flex flex-col gap-3', className)} onBlur={fc.onBlur}>
       <div className="flex items-center gap-3">
-        <motion.span key={pops} initial={pops ? { scale: 0.85, rotate: -8 } : false} animate={{ scale: 1, rotate: 0 }} transition={spring(0.5, 0.4)}
-          className="h-10 w-10 flex-none rounded-[var(--r-lg)] shadow-[inset_0_0_0_1px_rgba(0,0,0,.08)]" style={{ background: c }} aria-hidden />
+        <span key={pops} className={cn('h-10 w-10 flex-none rounded-[var(--r-lg)] shadow-[inset_0_0_0_1px_rgba(0,0,0,.08)]', pops > 0 && 'ui-pop [--ui-d:.4s] [--ui-r:-8deg] [--ui-s:.85]')} style={{ background: c }} aria-hidden />
         <FormFieldContext.Provider value={null}>
           <Input ref={composeRefs(hexRef, ref)} id={fc.control.id} aria-describedby={fc.control['aria-describedby']} value={text} onChange={e => { setText(e.target.value); const v = e.target.value.trim(); if (formsHexOk(v)) apply(v, 'hex') }}
             invalid={!formsHexOk(text.trim()) || fc.invalid} disabled={fc.disabled} readOnly={fc.readOnly} required={fc.required} spellCheck={false} className="!h-8 font-[family-name:var(--mono)]"
@@ -513,8 +512,8 @@ export function ColorPicker({ value, defaultValue = '#2563EB', onChange, swatche
         {swatches.map(s => {
           const on = s.toUpperCase() === c
           return (
-            <button type="button" key={s} aria-label={s} aria-pressed={on} disabled={locked} onClick={() => apply(s, 'swatch')} className="relative h-7 w-7 cursor-pointer rounded-full border-0 p-0 disabled:cursor-not-allowed [@media(pointer:coarse)]:h-8 [@media(pointer:coarse)]:w-8" style={{ background: s }}>
-              {on && <motion.span layoutId={group} className="absolute -inset-1 rounded-full border-2" style={{ borderColor: s }} transition={spring(0.3, 0.35)} />}
+            <button type="button" key={s} aria-label={s} aria-pressed={on} disabled={locked} onClick={() => apply(s, 'swatch')} className="relative h-7 w-7 cursor-pointer rounded-full border-0 p-0 disabled:cursor-not-allowed [@media(pointer:coarse)]:h-8 [@media(pointer:coarse)]:w-8" style={{ background: s, color: s }}>
+              {on && <ActiveIndicator group={group} className="!-inset-1 rounded-full border-2 border-current" />}
             </button>
           )
         })}
@@ -588,21 +587,21 @@ export function RangeSlider({ value, defaultValue, onChange, min = 0, max = 100,
   }
   const thumbLabel = (k: 0 | 1) => label ? (k ? `Maximum ${label.toLowerCase()}` : `Minimum ${label.toLowerCase()}`) : (k ? 'Maximum' : 'Minimum')
   const s0 = useMagnetSettle(pct(v[0]) / 100, kicks[0]), s1 = useMagnetSettle(pct(v[1]) / 100, kicks[1])
-  const pos = [useTransform(s0, f => `${f * 100}%`), useTransform(s1, f => `${f * 100}%`)] as const
-  const fillEnd = useTransform(s1, f => `${100 - f * 100}%`)
+  const pos = [`${s0.f * 100}%`, `${s1.f * 100}%`] as const
+  const settle = (on: boolean, prop: string) => (on ? `${prop} ${MAGNET_SETTLE_CSS}` : '')
   return (
     <div role="group" aria-label={label} aria-labelledby={label ? undefined : fc.labelledBy} aria-disabled={fc.disabled || undefined} id={fc.control.id} aria-describedby={fc.control['aria-describedby']}
       className={cn('relative', className)} onBlur={fc.onBlur}>
       {label && <div className="mb-2 flex justify-between text-[13px]"><span className={fc.disabled ? 'text-[var(--fg3)]' : 'text-[var(--fg2)]'}>{label}</span><span className={fc.disabled ? 'text-[var(--fg3)]' : 'font-medium'}>{<>{format(v[0])} to {format(v[1])}</>}</span></div>}
       <div ref={track} className={cn('relative h-5 touch-none transition-opacity [@media(pointer:coarse)]:-my-1.5 [@media(pointer:coarse)]:h-8', fc.disabled ? 'cursor-not-allowed opacity-40' : fc.readOnly ? 'cursor-default' : 'cursor-pointer')} onPointerDown={onTrackDown}>
         <div className={cn('absolute inset-x-0 top-2 h-1 rounded-full [@media(pointer:coarse)]:top-3.5', fc.invalid ? 'bg-[var(--bad-soft)] shadow-[0_0_0_1px_var(--bad)]' : 'bg-[var(--muted)]')} />
-        <motion.div className="absolute top-2 h-1 rounded-full bg-[var(--primary)] [@media(pointer:coarse)]:top-3.5" style={{ insetInlineStart: pos[0], insetInlineEnd: fillEnd }} />
+        <div className="absolute top-2 h-1 rounded-full bg-[var(--primary)] motion-reduce:!transition-none [@media(pointer:coarse)]:top-3.5"
+          style={{ insetInlineStart: pos[0], insetInlineEnd: `${100 - s1.f * 100}%`, transition: [settle(s0.settling, 'inset-inline-start'), settle(s1.settling, 'inset-inline-end')].filter(Boolean).join(',') || undefined }} />
         {own && <MagnetMarks magnets={magnets} min={min} max={max} value={v} />}
         {([0, 1] as const).map(k => (
-          <motion.button type="button" key={k} ref={el => { thumbs.current[k] = el; if (k === 0) composeRefs(ref)(el) }} role="slider" aria-label={thumbLabel(k)} aria-valuemin={min} aria-valuemax={max} aria-valuenow={v[k]}
+          <button type="button" key={k} ref={el => { thumbs.current[k] = el; if (k === 0) composeRefs(ref)(el) }} role="slider" aria-label={thumbLabel(k)} aria-valuemin={min} aria-valuemax={max} aria-valuenow={v[k]}
             aria-valuetext={own ? mg.valueText(v[k], valueText(v[k])) : valueText(v[k])} aria-keyshortcuts={own ? 'PageUp PageDown' : undefined}
             disabled={fc.disabled} aria-readonly={fc.readOnly || undefined} aria-invalid={fc.control['aria-invalid']}
-            animate={{ scale: dragging === k ? 1.15 : 1 }} transition={spring(0.4, 0.3)}
             onPointerDown={e => { e.stopPropagation(); mg.reset(); startDrag(k, e) }}
             onFocus={own ? e => { try { if (e.currentTarget.matches(':focus-visible')) setFocusK(k) } catch { /* old selector engines */ } } : undefined}
             onBlur={own ? () => setFocusK(null) : undefined}
@@ -614,10 +613,11 @@ export function RangeSlider({ value, defaultValue, onChange, min = 0, max = 100,
               if (to !== undefined) { e.preventDefault(); move(k, to) }
             }}
 
-            className={cn('absolute top-0 h-5 w-5 -translate-x-1/2 touch-none rounded-full border-0 bg-transparent p-0 [@media(pointer:coarse)]:h-8 [@media(pointer:coarse)]:w-8', locked ? fc.disabled ? 'cursor-not-allowed' : 'cursor-default' : dragging === k ? 'z-10 cursor-grabbing' : 'cursor-grab')} style={{ insetInlineStart: pos[k] }}>
+            className={cn('absolute top-0 h-5 w-5 -translate-x-1/2 touch-none rounded-full border-0 bg-transparent p-0 motion-reduce:!transition-none [@media(pointer:coarse)]:h-8 [@media(pointer:coarse)]:w-8', locked ? fc.disabled ? 'cursor-not-allowed' : 'cursor-default' : dragging === k ? 'z-10 cursor-grabbing' : 'cursor-grab')}
+            style={{ insetInlineStart: pos[k], scale: dragging === k ? '1.15' : undefined, transition: ['scale .3s var(--ui-spring)', settle((k ? s1 : s0).settling, 'inset-inline-start')].filter(Boolean).join(',') }}>
             <span aria-hidden className="absolute inset-0 rounded-full border-2 border-[var(--primary)] bg-[var(--card)] shadow-[0_1px_3px_rgba(0,0,0,.2)] [@media(pointer:coarse)]:inset-1" />
             {own && <MagnetBubble label={dragging === k ? dragLabel : mg.at(v[k]).label} show={(dragging === k || focusK === k) && !locked} />}
-          </motion.button>
+          </button>
         ))}
       </div>
       {mg.live}
@@ -731,8 +731,8 @@ export function PhoneInput({ countries = PHONE_COUNTRIES, value, defaultCountry 
             if (k >= 0) lb.setActive(k)
           }}
           className="flex flex-none cursor-pointer items-center gap-1 border-0 border-e border-[var(--line)] bg-[var(--muted)] px-2.5 text-sm outline-none hover:bg-[var(--line)] focus-visible:bg-[var(--line)] disabled:cursor-not-allowed disabled:hover:bg-[var(--muted)]">
-          <motion.span key={`f${swaps}`} initial={swaps ? { scale: 0.5, rotate: -20 } : false} animate={{ scale: 1, rotate: 0 }} transition={spring(0.5, 0.4)} className="leading-none">{country.flag}</motion.span>
-          <motion.span key={`c${swaps}`} initial={swaps ? { y: -6, opacity: 0 } : false} animate={{ y: 0, opacity: 1 }} transition={spring(0.4, 0.3)} className="ui-num text-xs text-[var(--fg2)]">{country.dial}</motion.span>
+          <span key={`f${swaps}`} className={cn('leading-none', swaps > 0 && 'ui-pop [--ui-d:.4s] [--ui-r:-20deg]')}>{country.flag}</span>
+          <span key={`c${swaps}`} className={cn('ui-num text-xs text-[var(--fg2)]', swaps > 0 && 'ui-in [--ui-y:-6px]')}>{country.dial}</span>
           <Icon name="chevronDown" size={10} strokeWidth={3} className="text-[var(--fg3)]" />
         </button>
         {/* the mask's ghost digits sit behind the number */}
@@ -818,7 +818,7 @@ export function CurrencyInput({ currencies = CURRENCIES, defaultCurrency, value,
         <button type="button" disabled={locked} aria-label={`Currency ${code}, change currency`}
           onClick={() => { const n = (ci + 1) % currencies.length; setCi(n); setDraft(null); onChange?.(v, currencies[n][0]); fc.markEdited() }}
           className="flex w-14 flex-none cursor-pointer items-center justify-center overflow-hidden border-0 border-e border-[var(--line)] bg-[var(--muted)] text-[13px] outline-none hover:bg-[var(--line)] focus-visible:bg-[var(--line)] disabled:cursor-not-allowed disabled:hover:bg-[var(--muted)]">
-          <motion.b key={code} initial={{ y: -8, opacity: 0 }} animate={{ y: 0, opacity: 1 }} transition={spring(0.4, 0.3)} className="font-semibold">{code}</motion.b>
+          <b key={code} className="ui-in font-semibold [--ui-y:-8px]">{code}</b>
         </button>
         <input ref={composeRefs(input, ref)} {...fc.control} aria-invalid={fc.invalid || bad || undefined} value={typing ? typing.text : currencyShow(currencyPlain(v), seps)} inputMode="decimal" autoComplete="off" placeholder={`0${seps.decimal}00`}
           aria-label={fc.labelledBy && !fp['aria-labelledby'] ? undefined : `Amount in ${code}`} disabled={fc.disabled} readOnly={fc.readOnly} aria-required={fc.required || undefined}

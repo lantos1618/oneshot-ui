@@ -17,8 +17,7 @@ const KNOWN = new Set<string>([])
 
 /** Core modules that still import motion while they move to the CSS animations in motion.tsx. Empty once that is done. */
 const MOTION_KNOWN = new Set<string>([
-  'primitives', 'magnet', 'overlay', 'formkit', 'fields', 'select', 'inputs', 'pickers', 'upload',
-  'navigation', 'feedback', 'data', 'layout', 'provider',
+  'overlay', 'navigation', 'feedback', 'data', 'layout', 'provider',
 ])
 
 type Edge = { to: string; typeOnly: boolean; dynamic: boolean; reexport: boolean }

@@ -1,7 +1,6 @@
-import { useEffect, useId, useLayoutEffect, useMemo, useRef, useState, useSyncExternalStore, type ReactNode, type Ref, type KeyboardEvent as RKeyboardEvent } from 'react'
-import { AnimatePresence, motion } from 'motion/react'
+import { useEffect, useId, useLayoutEffect, useMemo, useRef, useState, useSyncExternalStore, type CSSProperties, type ReactNode, type Ref, type KeyboardEvent as RKeyboardEvent } from 'react'
 import { FormFieldContext, LOCALE, type FormControlProps, formDate, useFormControl, Badge, Button, type HourCycle, Icon, type IconName, dateFormat, fmt, inputClass, addDays, addMonths, cn, isTouch, menuItemClass, sameDay, spring, startOfDay, useControllable, useDisclosure, usePointerDrag, useListbox, plural, composeRefs, memoOnce } from './core'
-import { play, shake } from './motion'
+import { Presence, Swap, play, shake } from './motion'
 import { FloatingPanel, Popover, PopoverContent, usePopover } from './overlay'
 import { formsTriggerClass } from './formkit'
 import { SegmentedControl, inputShellClass } from './fields'
@@ -718,16 +717,15 @@ export function Calendar({ selected, onSelect, range, onRangeChange, month: init
       onBlur={e => { if (!wrap.current?.contains(e.relatedTarget as Node)) { wantFocus.current = false; setKbd(false) } }}>
       <div className="relative">
         <div className={cn('relative', view !== 'days' && 'invisible')} inert={view !== 'days'}>
-          <div className="relative overflow-hidden">
-            <AnimatePresence initial={false} mode="popLayout" custom={dir}>
-              <motion.div key={+month} data-cal={+month} custom={dir} className={cn('flex gap-x-5 gap-y-4', n > 1 && 'flex-col sm:flex-row', onRangeChange && 'touch-pan-y [-webkit-touch-callout:none]')}
-                variants={{ in: (d: number) => ({ x: (d * 40), opacity: 0 }), c: { x: 0, opacity: 1 }, out: (d: number) => ({ x: (d * -40), opacity: 0 }) }}
-                initial="in" animate="c" exit="out" transition={spring(0.1, 0.3)} onKeyDown={onKey}
-                onPointerLeave={() => setHover(null)} onPointerMove={onMove} onPointerUp={cancelHold} onPointerCancel={cancelHold}
+          {/* the leaving month slides out the way the new one came from (the direction is read when it leaves) */}
+          <div className="relative overflow-hidden" style={{ '--cal-dir': dir } as CSSProperties}>
+            <Swap k={+month}>
+              <div data-cal={+month} className={cn('ui-in flex gap-x-5 gap-y-4 [--ui-d:.3s] [--ui-do:.2s] [--ui-e:var(--ui-spring-soft)] [--ui-x:calc(var(--cal-dir)*40px)] [--ui-xo:calc(var(--cal-dir)*-40px)]', n > 1 && 'flex-col sm:flex-row', onRangeChange && 'touch-pan-y [-webkit-touch-callout:none]')}
+                onKeyDown={onKey} onPointerLeave={() => setHover(null)} onPointerMove={onMove} onPointerUp={cancelHold} onPointerCancel={cancelHold}
                 onContextMenu={onRangeChange ? e => e.preventDefault() : undefined}>
                 {months.map(panel)}
-              </motion.div>
-            </AnimatePresence>
+              </div>
+            </Swap>
           </div>
           <button type="button" aria-label={'Previous month'} title={'Previous month'} onClick={() => go(-1)} disabled={!!lo && lo >= month} className={cn(navCls, 'start-0')}><Icon name="chevronLeft" size={15} /></button>
           <button type="button" aria-label={'Next month'} title={'Next month'} onClick={() => go(1)} disabled={!!hi && hi < end0} className={cn(navCls, 'end-0')}><Icon name="chevronRight" size={15} /></button>
@@ -813,9 +811,9 @@ export function DatePicker({ value, defaultValue = null, onChange, placeholder =
   return (
     <DatesPopoverField fc={fc} triggerRef={composeRefs(btn, ref)} open={open} onOpenChange={setOpen} invalid={!!datesDayProblem(d, c)} label="Choose a date" className={className}
       display={
-        <motion.span key={d ? +d : 0} initial={{ opacity: 0, y: 4 }} animate={{ opacity: 1, y: 0 }} transition={spring(0.3, 0.3)} className={cn('truncate', !d && 'text-[var(--fg3)]')}>
+        <span key={d ? +d : 0} className={cn('ui-in truncate [--ui-y:4px]', !d && 'text-[var(--fg3)]')}>
           {d ? datesDF({ weekday: 'short', day: 'numeric', month: 'short', year: 'numeric' }).format(d) : placeholder}
-        </motion.span>
+        </span>
       }>
       <Calendar selected={d} onSelect={x => pick(x)} autoFocus {...c} numberOfMonths={numberOfMonths} />
       <div className="mt-2 flex justify-between border-t border-[var(--line)] pt-2">
@@ -1333,15 +1331,14 @@ export function InlineDatePicker({ value, defaultValue = [null, null], onChange,
         options={[{ value: 'date', label: 'Date' }, { value: 'range', label: 'Date range' }]} />
       <div className="flex flex-wrap items-center gap-2">
         <DateField aria-label={mode === 'range' ? 'From date' : 'Date'} value={lo} onChange={commitFrom} {...c} className="min-w-[150px] flex-1" />
-        <AnimatePresence initial={false}>
+        <Presence>
           {mode === 'range' && (
-            <motion.div key="to" className="flex min-w-[150px] flex-1 items-center gap-2" initial={{ opacity: 0, x: -8 }} animate={{ opacity: 1, x: 0 }}
-              exit={{ opacity: 0, x: -8, transition: { duration: 0.12 } }} transition={spring(0.25, 0.35)}>
+            <div className="ui-in flex min-w-[150px] flex-1 items-center gap-2 [--ui-d:.35s] [--ui-do:.12s] [--ui-x:-8px]">
               <Icon name="chevronRight" size={14} className="text-[var(--fg3)]" />
               <DateField aria-label={'To date'} value={hi && lo && +hi !== +lo ? hi : null} onChange={commitTo} {...c} className="min-w-0 flex-1" />
-            </motion.div>
+            </div>
           )}
-        </AnimatePresence>
+        </Presence>
       </div>
       <Calendar key={jump ? `${jump.getFullYear()}-${jump.getMonth()}-${+jump}` : 'cal'} month={jump ?? lo ?? undefined} {...c}
         className="!w-full [@media(pointer:coarse)]:[&_button[aria-label$=month]]:!h-9 [@media(pointer:coarse)]:[&_button[aria-label$=month]]:!w-9"

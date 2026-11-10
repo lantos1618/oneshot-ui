@@ -1,7 +1,6 @@
-import { useEffect, useLayoutEffect, useRef, useState, type CSSProperties, type ReactNode, type Ref, type KeyboardEvent as RKeyboardEvent } from 'react'
-import { AnimatePresence, motion } from 'motion/react'
-import { type FormControlProps, Spinner, useFormControl, Button, Icon, type IconName, cn, inputClass, menuItemClass, spring, useCoarsePointer, useDisclosure, useListbox, composeRefs, plural, revealInScroller, scrollParent, typeaheadIndex } from './core'
-import { play } from './motion'
+import { useEffect, useLayoutEffect, useRef, useState, type CSSProperties, type ReactNode, type Ref, type RefObject, type KeyboardEvent as RKeyboardEvent } from 'react'
+import { type FormControlProps, Spinner, useFormControl, Button, Icon, type IconName, Chevron, cn, inputClass, menuItemClass, spring, useCoarsePointer, useDisclosure, useListbox, composeRefs, plural, revealInScroller, scrollParent, typeaheadIndex } from './core'
+import { PresenceList, play, useFlip } from './motion'
 import { FloatingPanel } from './overlay'
 import { useVirtual } from './virtual'
 import { FormsChip, formsTriggerClass } from './formkit'
@@ -63,7 +62,7 @@ export function OptionList({ options, active, isSelected, onPick, onHover, id, m
     // keyed by position: while a filter narrows the list the rows stay put and only their text changes, so nothing
     // slides up under the finger (no layout shift); rows added at the end still fade in
     return animated
-      ? <motion.div key={i} {...props} initial={{ opacity: 0, y: -3 }} animate={{ opacity: 1, y: 0 }} transition={{ duration: 0.18, delay: Math.min(i, 8) * 0.018 }}>{body}</motion.div>
+      ? <div key={i} {...props} className={cn(props.className, 'ui-in [--ui-d:.18s] [--ui-e:ease-out] [--ui-y:-3px]')} style={{ '--ui-delay': `${Math.min(i, 8) * 0.018}s` } as CSSProperties}>{body}</div>
       : <div key={i} {...props} {...v.setAria(i)} data-index={i} ref={v.measureElement} style={style}>{body}</div>
   }
   if (virtual) {
@@ -121,10 +120,10 @@ export function Select({ options, value, defaultValue = '', onChange, placeholde
         <span className={cn('flex min-w-0 items-center gap-2', mono && 'ui-num')}>
           {icon && <Icon name={icon} size={15} className="text-[var(--fg3)]" />}
           {options[sel]?.leading && <span className="leading-none">{options[sel].leading}</span>}
-          {options[sel]?.dot && <motion.span key={`d${v}`} initial={{ scale: 1.8 }} animate={{ scale: 1 }} transition={spring(0.5, 0.4)} className="h-2 w-2 flex-none rounded-full" style={{ background: options[sel].dot }} />}
-          <motion.span key={v} initial={{ opacity: 0, y: 4 }} animate={{ opacity: 1, y: 0 }} transition={spring(0.3, 0.3)} className={cn('truncate', sel < 0 && 'text-[var(--fg3)]')}>{options[sel]?.label ?? placeholder}</motion.span>
+          {options[sel]?.dot && <span key={`d${v}`} className="ui-pop h-2 w-2 flex-none rounded-full [--ui-d:.4s] [--ui-s:1.8]" style={{ background: options[sel].dot }} />}
+          <span key={v} className={cn('ui-in truncate [--ui-y:4px]', sel < 0 && 'text-[var(--fg3)]')}>{options[sel]?.label ?? placeholder}</span>
         </span>
-        {!fc.readOnly && <motion.span animate={{ rotate: open ? 180 : 0 }} className="text-[var(--fg3)]"><Icon name="chevronDown" size={14} /></motion.span>}
+        {!fc.readOnly && <Chevron open={open} />}
       </button>
       <FloatingPanel open={open} matchWidth className={cn('max-h-64 overflow-auto', mono && 'ui-num')} role="presentation">
         <OptionList id={lb.id} options={options} active={active} isSelected={o => o.value === v} onPick={pick} onHover={lb.setActive} />
@@ -252,7 +251,7 @@ export function Combobox({ options = [], loadOptions, debounce = 200, minChars =
   return (
     <div ref={wrap} className={cn('relative', className)} onBlur={fc.onBlur}>
       <span className="pointer-events-none absolute top-1/2 start-3 grid -translate-y-1/2 place-items-center text-[var(--fg3)]">
-        {leading ? <motion.span key={v} initial={{ scale: 0.5 }} animate={{ scale: 1 }} transition={spring(0.5, 0.35)} className="text-sm leading-none">{leading}</motion.span> : <Icon name="search" size={14} />}
+        {leading ? <span key={v} className="ui-pop text-sm leading-none">{leading}</span> : <Icon name="search" size={14} />}
       </span>
       <input ref={composeRefs(input, ref)} {...fc.control} {...lb.comboProps} aria-label={ariaLabel}
         aria-required={fc.required || undefined} disabled={fc.disabled} readOnly={fc.readOnly}
@@ -298,11 +297,12 @@ export function MultiSelect(props: MultiSelectProps) {
 }
 
 /** MultiSelect's chips: each value's label and colour dot, with a × while it can be edited. */
-function FormsChips({ values, optionOf, locked, onRemove, tabbable }: { values: string[]; optionOf: (v: string) => Option | undefined; locked: boolean; onRemove: (v: string) => void; tabbable: boolean }) {
+function FormsChips({ box, values, optionOf, locked, onRemove, tabbable }: { box: RefObject<HTMLDivElement | null>; values: string[]; optionOf: (v: string) => Option | undefined; locked: boolean; onRemove: (v: string) => void; tabbable: boolean }) {
+  useFlip(box)
   return (
-    <AnimatePresence initial={false} mode="popLayout">
-      {values.map(x => { const o = optionOf(x); return <FormsChip key={x} label={o?.label ?? x} dot={o?.dot} locked={locked} tabbable={tabbable} onRemove={() => onRemove(x)} /> })}
-    </AnimatePresence>
+    <PresenceList items={values} keyOf={x => x} pop>
+      {x => { const o = optionOf(x); return <FormsChip id={x} label={o?.label ?? x} dot={o?.dot} locked={locked} tabbable={tabbable} onRemove={() => onRemove(x)} /> }}
+    </PresenceList>
   )
 }
 
@@ -326,8 +326,8 @@ function FormsMultiStatic({ options = [], value, defaultValue = [], onChange, pl
         }}
         className={cn(inputClass, 'relative flex !h-auto min-h-9 flex-wrap items-center gap-1 py-1 !pe-8 focus-visible:border-[var(--fg3)]', locked ? fc.disabled ? 'cursor-not-allowed' : 'cursor-default' : 'cursor-pointer')}>
         {v.length === 0 && <span className="text-[var(--fg3)]">{placeholder}</span>}
-        <FormsChips values={v} optionOf={x => options.find(p => p.value === x)} locked={locked} tabbable={false} onRemove={x => set(v.filter(y => y !== x))} />
-        {!fc.readOnly && <motion.span animate={{ rotate: open ? 180 : 0 }} className="absolute end-3 top-[11px] text-[var(--fg3)]"><Icon name="chevronDown" size={14} /></motion.span>}
+        <FormsChips box={box} values={v} optionOf={x => options.find(p => p.value === x)} locked={locked} tabbable={false} onRemove={x => set(v.filter(y => y !== x))} />
+        {!fc.readOnly && <Chevron open={open} className="absolute end-3 top-[11px]" />}
       </div>
       <FloatingPanel open={open} matchWidth className="max-h-64 overflow-auto" role="presentation">
         <OptionList id={lb.id} multi options={options} active={lb.active} isSelected={o => v.includes(o.value)} onPick={toggle} onHover={lb.setActive} />
@@ -357,12 +357,13 @@ function FormsMultiAsync({ options = [], loadOptions, debounce = 200, minChars =
     set(v.includes(o.value) ? v.filter(x => x !== o.value) : [...v, o.value])
   }
   const lb = useListbox(list, toggle, { open, setOpen, input: true }), { active, setActive } = lb
+  const shell = useRef<HTMLDivElement>(null)
   return (
     <div ref={wrap} className={cn('relative', className)} onBlur={fc.onBlur}>
-      <div onPointerDown={e => { if (e.target !== input.current && !(e.target as HTMLElement).closest('button')) { e.preventDefault(); input.current?.focus() } }}
+      <div ref={shell} onPointerDown={e => { if (e.target !== input.current && !(e.target as HTMLElement).closest('button')) { e.preventDefault(); input.current?.focus() } }}
         className={cn(inputShellClass(fc.invalid), 'relative flex min-h-9 w-full flex-wrap items-center gap-1 py-1 ps-1.5 pe-8 text-[13px]',
           fc.disabled ? 'cursor-not-allowed bg-[var(--muted)] text-[var(--fg3)]' : fc.readOnly ? 'bg-[var(--muted)]' : 'cursor-text')}>
-        <FormsChips values={v} optionOf={index.optionOf} locked={locked} tabbable onRemove={x => set(v.filter(y => y !== x))} />
+        <FormsChips box={shell} values={v} optionOf={index.optionOf} locked={locked} tabbable onRemove={x => set(v.filter(y => y !== x))} />
         <input ref={composeRefs<HTMLInputElement>(input, ref as Ref<HTMLInputElement>)} {...fc.control} {...lb.comboProps} aria-label={ariaLabel} aria-required={fc.required || undefined} disabled={fc.disabled} readOnly={fc.readOnly}
           value={q} placeholder={v.length ? '' : placeholder} autoComplete="off"
           className="h-7 min-w-[8ch] flex-1 border-0 bg-transparent px-1 text-[13px] [color:inherit] outline-none placeholder:text-[var(--fg3)] disabled:cursor-not-allowed [@media(pointer:coarse)]:text-base"

@@ -1,8 +1,7 @@
 /** Primitives: surface, layer, focus and tone classes, Button, IconButton, Spinner, Badge, StatusIcon, run statuses, Chip, Kbd, Card, Avatar, Chevron, AnimatedNumber, ScrollEdges, sparklines. Part of @lyndon/ui/core. */
 import { type ButtonHTMLAttributes, type CSSProperties, type HTMLAttributes, type ReactNode, cloneElement as slotClone, type ReactElement as SlotElement, useMemo, useRef, useState } from 'react'
-import { AnimatePresence, motion, useInView } from 'motion/react'
-import { EASE_OUT_CSS, MOTION, cn, extent, variants } from './helpers'
-import { useWidth } from './hooks'
+import { EASE_OUT_CSS, cn, extent, variants } from './helpers'
+import { presenceProps, useInView, usePlayState, usePresence, useWidth } from './hooks'
 import { ICON_SIZE, Icon, type IconName, isIconName } from './icons'
 import { LOCALE, fmt, numberFormat, plural } from './locale'
 import { safeColor, safeMediaUrl } from './safe'
@@ -22,18 +21,17 @@ export function ScrollEdges({ left, right, touched, hint, fade = 'card', at = 'b
   { left: boolean; right: boolean; touched?: boolean; hint?: ReactNode; fade?: keyof typeof SCROLL_FADE; /** where the hint pill sits */ at?: 'top' | 'bottom'; className?: string }) {
   const [from, toR, toL] = SCROLL_FADE[fade]
   const label = hint === undefined ? 'Swipe for more' : hint
+  const pill = usePresence<HTMLSpanElement>(!!(right && !touched && label), { appear: true })
   return (
     <>
       <span aria-hidden className={cn('pointer-events-none absolute inset-y-0 left-0 z-[6] w-5 to-transparent transition-opacity duration-200', from, toR, left ? 'opacity-100' : 'opacity-0', className)} />
       <span aria-hidden className={cn('pointer-events-none absolute inset-y-0 right-0 z-[6] w-5 to-transparent transition-opacity duration-200', from, toL, right ? 'opacity-100' : 'opacity-0', className)} />
-      <AnimatePresence>
-        {right && !touched && label && (
-          <motion.span key="hint" aria-hidden initial={{ opacity: 0, x: 6 }} animate={{ opacity: 1, x: 0 }} exit={{ opacity: 0, transition: { duration: 0.15 } }}
-            className={cn('pointer-events-none absolute end-2 z-[7] hidden items-center gap-1 rounded-full bg-[color-mix(in_srgb,var(--fg)_86%,transparent)] px-2.5 py-1 text-[11px] font-medium text-[var(--card)] shadow-[var(--shadow)] [@media(pointer:coarse)]:flex', at === 'top' ? 'top-2' : 'bottom-2')}>
-            {label}<Icon name="chevronRight" size={12} strokeWidth={2.6} />
-          </motion.span>
-        )}
-      </AnimatePresence>
+      {pill.mounted && (
+        <span ref={pill.ref} aria-hidden {...presenceProps(pill)}
+          className={cn('ui-in pointer-events-none absolute end-2 z-[7] hidden items-center gap-1 rounded-full bg-[color-mix(in_srgb,var(--fg)_86%,transparent)] px-2.5 py-1 text-[11px] font-medium text-[var(--card)] shadow-[var(--shadow)] [--ui-x:6px] [--ui-xo:0] [@media(pointer:coarse)]:flex', at === 'top' ? 'top-2' : 'bottom-2')}>
+          {label}<Icon name="chevronRight" size={12} strokeWidth={2.6} />
+        </span>
+      )}
     </>
   )
 }
@@ -200,24 +198,11 @@ export function IconButton({ icon, label, className, size = 'icon-sm', variant =
   )
 }
 
-/**
- * `animation-play-state` for an infinite CSS animation (spinners): paused while the element is off screen, so nothing
- * keeps repainting where nobody can see it. One shared IntersectionObserver per element via motion's useInView.
- * (Components outside core can use motion's `useViewport().visible` the same way.)
- */
-function useSpinPause<T extends Element>() {
-  const ref = useRef<T>(null)
-  const visible = useInView(ref, { margin: '64px' })
-  const play = visible ? 'running' : 'paused'
-  // --ui-play reaches the ::after animations of .ui-shimmer and .ui-caret (play-state itself doesn't inherit)
-  return { ref, style: { animationPlayState: play, '--ui-play': play } as CSSProperties }
-}
-
 const SPINNER_TONE = { current: 'border-current', accent: 'border-[var(--accent)]', ok: 'border-[var(--ok)]', warn: 'border-[var(--warn)]', bad: 'border-[var(--bad)]' } as const
 
 /** Spinning ring (role=status, `label` default "Loading"). `tone` colours it; default is the text colour. */
 export function Spinner({ size = 14, tone = 'current', label, className }: { size?: number; tone?: keyof typeof SPINNER_TONE; label?: string; className?: string }) {
-  const pause = useSpinPause<HTMLSpanElement>() // stops spinning while off screen
+  const pause = usePlayState<HTMLSpanElement>() // stops spinning while off screen
   return <span ref={pause.ref} role="status" aria-label={label ?? 'Loading'} style={{ width: size, height: size, ...pause.style }}
     className={cn('inline-block flex-none animate-spin rounded-full border-2 border-e-transparent', SPINNER_TONE[tone], className)} />
 }
@@ -281,11 +266,11 @@ export function DeltaBadge({ value, lowerIsBetter, digits = 1, suffix = '%', tit
   if (!Number.isFinite(value)) return null
   const good = lowerIsBetter ? value < 0 : value >= 0
   return (
-    <motion.span key={`${value >= 0}${good}`} initial={{ scale: 0.85 }} animate={{ scale: 1 }} transition={MOTION.pop}
+    <span key={`${value >= 0}${good}`}
       title={title ?? `${(good ? 'Better' : 'Worse')} than the previous period`}
-      className={cn('ui-num inline-flex items-center rounded-full leading-none font-medium whitespace-nowrap', BADGE_SIZE.sm, good ? TONE_SOFT.ok : TONE_SOFT.bad, className)}>
+      className={cn('ui-pop ui-num inline-flex [--ui-s:.85] items-center rounded-full leading-none font-medium whitespace-nowrap', BADGE_SIZE.sm, good ? TONE_SOFT.ok : TONE_SOFT.bad, className)}>
       {value >= 0 ? '▲' : '▼'} {numberFormat(LOCALE, { minimumFractionDigits: digits, maximumFractionDigits: digits }).format(Math.abs(value))}{suffix}<span className="sr-only">{' ' + (good ? '(better)' : '(worse)')}</span>
-    </motion.span>
+    </span>
   )
 }
 
@@ -307,14 +292,13 @@ const STATUS_ICON_SPIN = 'animate-spin border-[var(--accent)] border-e-transpare
 export function StatusIcon({ status, size = 18, number, tone = 'primary', label, className }:
   { status: StatusIconStatus; size?: number; number?: number; tone?: 'primary' | 'ok'; label?: string; className?: string }) {
   const spin = status === 'active' && number === undefined
-  const pause = useSpinPause<HTMLSpanElement>() // the active ring stops spinning while off screen
+  const pause = usePlayState<HTMLSpanElement>() // the active ring stops spinning while off screen
+  const tick = usePresence(status === 'done') // pops when it turns done, not when it starts done
   return (
     <span ref={pause.ref} role={label ? 'img' : undefined} aria-label={label} aria-hidden={label ? undefined : true} style={{ width: size, height: size, fontSize: Math.max(10, Math.round(size * 0.5)), ...(spin ? pause.style : null) }}
       className={cn('relative z-[1] grid flex-none place-items-center rounded-full border-[1.5px] font-semibold leading-none not-italic transition-colors',
         spin ? STATUS_ICON_SPIN : status === 'done' && tone === 'ok' ? STATUS_ICON_DONE_OK : STATUS_ICON_CLASS[status], className)}>
-      <AnimatePresence initial={false}>
-        {status === 'done' && <motion.span key="d" className="grid" initial={{ scale: 0.5 }} animate={{ scale: 1 }} transition={MOTION.pop}><Icon name="check" size={Math.round(size * 0.55)} strokeWidth={3.5} /></motion.span>}
-      </AnimatePresence>
+      {status === 'done' && <span ref={tick.ref} className={cn('grid', tick.enter && 'ui-pop')}><Icon name="check" size={Math.round(size * 0.55)} strokeWidth={3.5} /></span>}
       {status === 'failed' && <Icon name="x" size={Math.round(size * 0.55)} strokeWidth={3.5} />}
       {status === 'cancelled' && <Icon name="minus" size={Math.round(size * 0.55)} strokeWidth={3} />}
       {status === 'warn' && <span aria-hidden>!</span>}
@@ -376,7 +360,7 @@ export function Chevron({ open, turn = 'half', size = 14, className }: { open: b
 
 /** Loading placeholder with a shimmer sweep (paused while off screen; off for reduced motion). */
 export function Skeleton({ className }: { className?: string }) {
-  const pause = useSpinPause<HTMLDivElement>()
+  const pause = usePlayState<HTMLDivElement>()
   return <div ref={pause.ref} style={pause.style} className={cn('ui-shimmer rounded-[var(--r-md)] bg-[var(--muted)]', className)} />
 }
 
@@ -427,10 +411,10 @@ export function AvatarStack({ names, max = 4, size = 32, caption, spread: canSpr
         onPointerEnter={e => e.pointerType === 'mouse' && setSpread(true)} onPointerLeave={e => e.pointerType === 'mouse' && setSpread(false)}
         onFocus={() => setSpread(true)} onBlur={() => setSpread(false)}>
         {[...shown, ...(extra > 0 ? [null] : [])].map((n, i) => (
-          <motion.span key={n ?? '+'} initial={false} animate={{ x: fan ? (i * 6) : 0 }} transition={MOTION.layout} className={cn(i > 0 && '-ms-2')} style={{ zIndex: 10 - i }}>
+          <span key={n ?? '+'} className={cn('transition-[translate] duration-[350ms] ease-[var(--ui-spring)] motion-reduce:transition-none', i > 0 && '-ms-2')} style={{ zIndex: 10 - i, translate: fan ? `${i * 6}px` : undefined }}>
             {n ? <Avatar name={n} size={size} />
               : <span className="grid place-items-center rounded-full border-2 border-[var(--card)] bg-[var(--muted)] text-xs font-semibold text-[var(--fg2)]" style={{ width: size, height: size }}>+{fmt.number(extra)}</span>}
-          </motion.span>
+          </span>
         ))}
       </div>
       {caption && <span className="text-xs text-[var(--fg3)]">{caption}</span>}

@@ -69,8 +69,8 @@ const MOTION_CSS = /* @__PURE__ */ (() => {
 .ui-pulse{animation:ui-pulse var(--ui-d,.35s) var(--ui-e,ease-out) var(--ui-delay,0s)}
 .ui-grow{display:grid;grid-template-rows:1fr;animation:ui-grow var(--ui-d,.3s) var(--ui-e,var(--ui-ease-out)) var(--ui-delay,0s) backwards}
 .ui-grow>*,.ui-collapse>*{min-height:0;overflow:hidden}
-.ui-collapse{display:grid;grid-template-rows:0fr;visibility:hidden;transition:grid-template-rows .3s var(--ui-ease-out),visibility 0s .3s}
-.ui-collapse[data-open]{grid-template-rows:1fr;visibility:visible;transition:grid-template-rows .3s var(--ui-ease-out)}
+.ui-collapse{display:grid;grid-template-rows:0fr;opacity:0;visibility:hidden;transition:grid-template-rows .3s var(--ui-ease-out),opacity .3s,visibility 0s .3s}
+.ui-collapse[data-open]{grid-template-rows:1fr;opacity:1;visibility:visible;transition:grid-template-rows .3s var(--ui-ease-out),opacity .3s}
 .ui-bob{animation:ui-bob 2.4s ease-in-out infinite;animation-play-state:var(--ui-play,running)}
 .ui-dot{animation:ui-dot 1s ease-in-out var(--ui-delay,0s) infinite;animation-play-state:var(--ui-play,running)}
 ${stagger}

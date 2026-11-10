@@ -1,6 +1,7 @@
 import { type ReactNode } from 'react'
-import { AnimatePresence, MotionConfig, motion } from 'motion/react'
-import { DEFAULT_THEME, FONT_CSS, FONT_HREF, THEME_MODES, THEME_LEGACY_KEY, THEME_STORAGE_KEY, THEME_TOKEN_NAMES, THEME_VALUE_SOURCE, TOKENS, ThemeProvider, type ThemeSettings, UIHosts, Button, Icon, type Palette, THEMES, type Theme, cn, spring, themeStyle, themeTokens, useTheme } from './core'
+import { MotionConfig } from 'motion/react'
+import { DEFAULT_THEME, FONT_CSS, FONT_HREF, THEME_MODES, THEME_LEGACY_KEY, THEME_STORAGE_KEY, THEME_TOKEN_NAMES, THEME_VALUE_SOURCE, TOKENS, ThemeProvider, type ThemeSettings, UIHosts, Button, Icon, type Palette, THEMES, type Theme, cn, themeStyle, themeTokens, useTheme } from './core'
+import { Swap } from './motion'
 
 export type UIProviderProps = {
   children: ReactNode
@@ -131,11 +132,11 @@ export function ThemeToggle({ className }: { className?: string }) {
   const { dark, toggle } = useTheme()
   return (
     <Button size="icon" aria-label={(dark ? 'Switch to light theme' : 'Switch to dark theme')} onClick={e => toggle(e.currentTarget)} className={className}>
-      <AnimatePresence mode="popLayout" initial={false}>
-        <motion.span key={String(dark)} initial={{ rotate: -90, scale: 0.5, opacity: 0 }} animate={{ rotate: 0, scale: 1, opacity: 1 }} exit={{ rotate: 90, scale: 0.5, opacity: 0 }} transition={spring(0.4, 0.4)}>
+      <Swap k={String(dark)}>
+        <span className="ui-in [--ui-d:.4s] [--ui-do:.25s] [--ui-r:-90deg] [--ui-ro:90deg] [--ui-s:.5]">
           <Icon name={dark ? 'moon' : 'sun'} />
-        </motion.span>
-      </AnimatePresence>
+        </span>
+      </Swap>
     </Button>
   )
 }

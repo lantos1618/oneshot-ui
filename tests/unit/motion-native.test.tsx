@@ -4,6 +4,7 @@ import { useRef, useState } from 'react'
 import { describe, expect, it, onTestFinished, vi } from 'vitest'
 import { springEasing, useInView, usePresence } from '../../src/lib/core'
 import { ActiveIndicator, Presence, PresenceList, Swap, play } from '../../src/lib/motion'
+import { TagInput } from '../../src/lib/forms'
 import { withMotion } from '../helpers'
 
 const points = (e: string) => e.slice('linear('.length, -1).split(',').map(Number)
@@ -94,6 +95,14 @@ describe('Presence, PresenceList and Swap', () => {
     expect(screen.getAllByRole('listitem', { hidden: true }).map(li => li.textContent)).toEqual(['a', 'b', 'c', 'd'])
     expect(screen.getByText('b')).toHaveAttribute('data-ui-exit')
     expect(screen.getByText('d')).not.toHaveAttribute('data-ui-still')
+  })
+
+  it('a component child (TagInput chips) gets the leaving attributes on its root element', () => {
+    render(<TagInput defaultValue={['design', 'research']} />)
+    stubAnimations(pendingAnimation().anim)
+    act(() => screen.getByRole('button', { name: 'Remove design' }).click())
+    expect(screen.getByText('design').closest('[data-ui-exit]')).toHaveAttribute('inert')
+    expect(screen.getByText('research').closest('[data-ui-exit]')).toBeNull()
   })
 
   it('Swap replaces its child when the key changes', () => {

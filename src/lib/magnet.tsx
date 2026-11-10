@@ -25,9 +25,9 @@
  * `magnetize` is the pure core (no React); `useMagnet` wraps it with state, bypass, feedback and keyboard helpers.
  * Slider, RangeSlider, ColorPicker (hue), SplitPane, the media seek bars (chapters) and Gantt (task edges) take it.
  */
-import { useEffect, useLayoutEffect, useMemo, useRef, type ReactNode } from 'react'
-import { AnimatePresence, animate, motion, useMotionValue, useReducedMotion } from 'motion/react'
-import { clamp, cn, haptic, isCoarsePointer, fmt, useLive } from './core'
+import { useEffect, useLayoutEffect, useMemo, useRef, useState, type ReactNode } from 'react'
+import { clamp, cn, haptic, isCoarsePointer, fmt, useLive, useReducedMotion } from './core'
+import { Presence } from './motion'
 
 /** A point magnet: a bare value, or a value with a label (announced and shown in the thumb's bubble), its own capture radius in px and a strength (scales capture and release). */
 export type MagnetPoint = { value: number; label?: string; /** capture radius, px */ radius?: number; /** 1 = normal, 1.5 = a firmer detent */ strength?: number }
@@ -292,25 +292,26 @@ export function useMagnet(options: UseMagnetOptions) {
   }
 }
 
+/** How long a thumb keeps easing onto its mark after a snap or a release (ms); MAGNET_SETTLE_CSS runs within it. */
+const MAGNET_SETTLE_MS = 240
+/** The settle transition for the thumb's and the fill's position: a quick, nearly critically damped spring. */
+export const MAGNET_SETTLE_CSS = '.22s var(--ui-spring-soft)'
+
 /**
- * A value (usually 0..1 along the track) that follows `target` instantly, except right after `kick` changes (a snap or a
- * release), when it springs there for a moment, so the thumb settles onto a mark instead of teleporting. No spring
- * under reduced motion. Feed it to a style through useTransform.
+ * Where a thumb is drawn (`f`, usually 0..1 along the track) and whether it is `settling`: true for a moment after `kick`
+ * changes (a snap or a release), so the thumb eases onto a mark instead of teleporting. While settling, give the position
+ * (left/width/inset) a transition of MAGNET_SETTLE_CSS; otherwise it follows `target` instantly. Never settles under reduced motion.
  */
 export function useMagnetSettle(target: number, kick: number) {
-  const mv = useMotionValue(target), reduce = useReducedMotion()
-  const seen = useRef(kick), until = useRef(0), ctl = useRef<{ stop: () => void } | null>(null)
-  useLayoutEffect(() => {
-    const kicked = seen.current !== kick; seen.current = kick
-    const now = typeof performance !== 'undefined' ? performance.now() : 0
-    if (kicked) until.current = now + 240
-    ctl.current?.stop()
-    // within the settle window every new target is reached by the same spring, so a release flows into the next moves
-    if (!reduce && now < until.current) ctl.current = animate(mv, target, { type: 'spring', stiffness: 700, damping: 38, mass: 0.6, restDelta: 0.0005 })
-    else { ctl.current = null; mv.jump(target) }
-  }, [target, kick, reduce, mv])
-  useEffect(() => () => ctl.current?.stop(), [])
-  return mv
+  const reduce = useReducedMotion()
+  const [seen, setSeen] = useState(kick), [settling, setSettling] = useState(false)
+  if (seen !== kick) { setSeen(kick); setSettling(true) }
+  useEffect(() => {
+    if (!settling) return
+    const t = setTimeout(() => setSettling(false), MAGNET_SETTLE_MS)
+    return () => clearTimeout(t)
+  }, [settling, kick])
+  return { f: target, settling: settling && !reduce }
 }
 
 const MAGNET_TICK = {
@@ -364,14 +365,13 @@ export function MagnetMarks({ magnets, min, max, value, inset = 0, tone = 'defau
 /** The label bubble above a thumb (the shared tooltip look). Put it inside the thumb; it pops in while `show`. */
 export function MagnetBubble({ label, show, className }: { label?: ReactNode; show: boolean; className?: string }) {
   return (
-    <AnimatePresence>
+    <Presence appear>
       {show && label != null && label !== '' && (
-        <motion.span key="b" aria-hidden initial={{ opacity: 0, y: 4, scale: 0.9 }} animate={{ opacity: 1, y: 0, scale: 1 }} exit={{ opacity: 0, y: 2, scale: 0.95, transition: { duration: 0.1 } }}
-          transition={{ type: 'spring', stiffness: 600, damping: 32 }}
-          className={cn('pointer-events-none absolute bottom-full left-1/2 z-10 mb-2 w-max -translate-x-1/2 rounded-[var(--r-md)] bg-[var(--primary)] px-2 py-1 text-xs whitespace-nowrap text-[var(--on-primary)] shadow-[var(--shadow)]', className)}>
+        <span aria-hidden
+          className={cn('ui-in pointer-events-none absolute bottom-full left-1/2 z-10 mb-2 w-max -translate-x-1/2 rounded-[var(--r-md)] bg-[var(--primary)] px-2 py-1 text-xs whitespace-nowrap text-[var(--on-primary)] shadow-[var(--shadow)] [--ui-d:.25s] [--ui-do:.1s] [--ui-s:.9] [--ui-so:.95] [--ui-y:4px] [--ui-yo:2px]', className)}>
           {label}
-        </motion.span>
+        </span>
       )}
-    </AnimatePresence>
+    </Presence>
   )
 }

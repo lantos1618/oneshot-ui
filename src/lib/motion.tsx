@@ -33,7 +33,8 @@ function PresenceItem({ exiting = false, enter = true, pop = false, onGone, chil
 /**
  * An optional child that animates out before it unmounts: `<Presence>{open && <div className="ui-in">…</div>}</Presence>`.
  * The child plays its `ui-in` entrance when it appears (not on the first render unless `appear`) and the `ui-out` exit
- * (`data-ui-exit`) when it goes; the last shown child stays rendered until its animations finish.
+ * (`data-ui-exit`) when it goes; the last shown child stays rendered until its animations finish. The child is a DOM
+ * element, or a component that passes `ref` and the props it doesn't know to its root element (the same for PresenceList and Swap).
  */
 export function Presence({ appear = false, children }: { appear?: boolean; children?: PresenceChild | null | false }) {
   const shown = isValidElement(children) ? children : null
@@ -61,17 +62,18 @@ function presenceMerge<T>(prev: PresenceRow<T>[], items: readonly T[], keyOf: (t
 
 /**
  * A keyed list whose removed items animate out in place (`data-ui-exit`) before they unmount, while added ones play
- * their entrance (`ui-in`; not on the first render unless `appear`). `children(item, { exiting, index })` returns one element per item.
+ * their entrance (`ui-in`; not on the first render unless `appear`). `children(item, { exiting, enter, index })` returns one element per item
+ * (`enter` is false for the items of the first render, for parts inside that have an entrance of their own).
  * `pop` takes a leaving item out of the flow at once, so the others close the gap straight away (with useFlip).
  */
-export function PresenceList<T>({ items, keyOf, appear = false, pop = false, children }: { items: readonly T[]; keyOf: (t: T) => Key; appear?: boolean; pop?: boolean; children: (t: T, s: { exiting: boolean; index: number }) => PresenceChild }) {
+export function PresenceList<T>({ items, keyOf, appear = false, pop = false, children }: { items: readonly T[]; keyOf: (t: T) => Key; appear?: boolean; pop?: boolean; children: (t: T, s: { exiting: boolean; enter: boolean; index: number }) => PresenceChild }) {
   const [rows, setRows] = useState(() => items.map(item => ({ key: keyOf(item), item, exiting: false, enter: appear })))
   const [seen, setSeen] = useState(items)
   let shown = rows
   if (seen !== items) { shown = presenceMerge(rows, items, keyOf); setSeen(items); setRows(shown) }
   return shown.map((r, index) => (
     <PresenceItem key={r.key} exiting={r.exiting} enter={r.enter} pop={pop} onGone={() => setRows(rs => rs.filter(x => x.key !== r.key || !x.exiting))}>
-      {children(r.item, { exiting: r.exiting, index })}
+      {children(r.item, { exiting: r.exiting, enter: r.enter, index })}
     </PresenceItem>
   ))
 }
@@ -87,14 +89,13 @@ export function Swap({ k, mode = 'pop', appear = false, children }: { k: Key; mo
   useLayoutEffect(() => { last.current = children })
   if (state.k !== k) setState(s => ({ k, first: false, gone: [...s.gone.filter(g => g.k !== k), { k: s.k, node: last.current }] }))
   const waiting = mode === 'wait' && state.gone.length > 0
-  return (
-    <>
-      {state.gone.map(g => (
-        <PresenceItem key={g.k} exiting pop={mode === 'pop'} onGone={() => setState(s => ({ ...s, gone: s.gone.filter(x => x !== g) }))}>{g.node}</PresenceItem>
-      ))}
-      {!waiting && <PresenceItem key={k} enter={appear || !state.first} pop={mode === 'pop'}>{children}</PresenceItem>}
-    </>
-  )
+  // one keyed list, so the child that leaves keeps its DOM node (and its measured box) when it moves to `gone`
+  return [
+    ...state.gone.map(g => (
+      <PresenceItem key={g.k} exiting pop={mode === 'pop'} onGone={() => setState(s => ({ ...s, gone: s.gone.filter(x => x !== g) }))}>{g.node}</PresenceItem>
+    )),
+    !waiting && <PresenceItem key={k} enter={appear || !state.first} pop={mode === 'pop'}>{children}</PresenceItem>,
+  ]
 }
 
 type SpringOptions = ReturnType<typeof spring>
