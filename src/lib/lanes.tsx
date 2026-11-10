@@ -560,6 +560,11 @@ export type LaneGraphOptions<N extends LaneNode = LaneNode> = LaneLayoutOptions<
   defaultSelected?: string | null; onSelect?: (id: string | null, row: LaneRow<N> | null) => void
   /** the row holding the Tab stop: controlled (`active` + `onActiveChange`) or internal */ active?: number; onActiveChange?: (index: number) => void
   /** 'ancestry' (default): hovering or focusing a row lights its first-parent line and dims the rest; 'none' */ highlight?: 'ancestry' | 'none'
+  /**
+   * the hovered node's id: controlled (`hovered` + `onHoverChange`, e.g. to light a row from something outside the list)
+   * or internal (the mouse). `onHoverChange` reports the mouse entering a row (its id) and leaving the list (null) either way.
+   */
+  hovered?: string | null; onHoverChange?: (id: string | null) => void
 }
 
 /** What useLaneGraph returns: the layout and the state LaneGraph renders from, for your own markup. */
@@ -567,7 +572,7 @@ export type LaneGraphState<N extends LaneNode = LaneNode> = {
   layout: LaneLayout<N>
   active: number; setActive: (index: number) => void
   selected: ReadonlySet<string>; select: (id: string | null) => void
-  hover: number | null; setHover: (index: number | null) => void
+  /** the hovered row (from `hovered` when controlled); setHover reports it through onHoverChange */ hover: number | null; setHover: (index: number | null) => void
   focused: boolean; setFocused: (focused: boolean) => void
   /** marks of the lit line (hovered, else the focused row), or null */ highlight: Uint8Array | null
   /** the row a key moves to from the active one (↑/↓, Home/End, PageUp/PageDown by `page`, ← parent, → child; Shift for the other one), or null */
@@ -582,7 +587,7 @@ const LANE_NONE: readonly string[] = []
  * own rows (with LaneGutter) or a different container.
  */
 export function useLaneGraph<N extends LaneNode>(source: readonly N[] | LaneLayout<N>, options: LaneGraphOptions<N> = {}): LaneGraphState<N> {
-  const { order, direction, pin, pinStart, palette, color, laneGroup, firstParentLanes, selected: selectedProp, defaultSelected = null, onSelect, active: activeProp, onActiveChange, highlight: mode = 'ancestry' } = options
+  const { order, direction, pin, pinStart, palette, color, laneGroup, firstParentLanes, selected: selectedProp, defaultSelected = null, onSelect, active: activeProp, onActiveChange, highlight: mode = 'ancestry', hovered, onHoverChange } = options
   const pinKey = (pin ?? LANE_NONE).join('\u0000')
   const layout = useMemo(() => ('rows' in source ? source as LaneLayout<N> : layoutLanes(source as readonly N[], { order, direction, pin: pinKey ? pinKey.split('\u0000') : [], pinStart, palette, color, laneGroup, firstParentLanes })),
     [source, order, direction, pinKey, pinStart, palette, color, laneGroup, firstParentLanes])
@@ -597,7 +602,15 @@ export function useLaneGraph<N extends LaneNode>(source: readonly N[] | LaneLayo
     const r = id == null ? -1 : layout.rowOf(id)
     onSelect?.(id, r >= 0 ? layout.rows[r] : null)
   }, [setSel, onSelect, layout])
-  const [hover, setHover] = useState<number | null>(null)
+  const [innerHover, setInnerHover] = useState<number | null>(null)
+  const hoveredRow = hovered == null ? -1 : layout.rowOf(hovered)
+  const hover = hovered === undefined ? innerHover : hoveredRow >= 0 ? hoveredRow : null
+  const reported = useRef<string | null>(null) // report changes only (a row's pointerenter and the list's pointerleave can repeat)
+  const setHover = useCallback((i: number | null) => {
+    setInnerHover(i)
+    const id = i == null ? null : layout.rows[i]?.node.id ?? null
+    if (id !== reported.current) { reported.current = id; onHoverChange?.(id) }
+  }, [layout, onHoverChange])
   const [focused, setFocused] = useState(false)
   const lit = mode === 'none' ? null : hover ?? (focused ? active : null)
   const highlight = useMemo(() => (lit != null && lit < count ? laneAncestry(layout, lit) : null), [layout, lit, count])
@@ -722,7 +735,8 @@ const LaneRowView = memo(function LaneRowView({ row, start, height, columns, gut
  * A graph drawn as a list: each node is a row with your content (`renderRow`) beside a gutter showing the lanes and
  * edges (LaneGutter), virtualised (100k rows render ~40). Rows are a fixed `rowHeight`, or 'auto' to be as tall as
  * their content (chat messages, cards), measured as they render. Click or Enter selects (`onActivate` to do more);
- * hover or focus lights the row's first-parent line and dims the rest. Keys: ↑/↓, Home/End, PageUp/Down; ← goes to
+ * hover or focus lights the row's first-parent line and dims the rest (`hovered` + `onHoverChange` drive the hover from
+ * outside, e.g. code that points at a node). Keys: ↑/↓, Home/End, PageUp/Down; ← goes to
  * the parent (Shift: the second parent), → to the child (Shift: another child); the graph is an LTR island, so these
  * don't mirror in RTL. Right-click, long-press, Shift+F10 or the Menu key call `onContextMenu`. Rows inserted above
  * keep the reader's place and fade in; `anchor="end"` keeps a chat-like list at its bottom.

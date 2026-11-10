@@ -3,6 +3,19 @@
 All notable changes to `@lyndon/ui`, newest first. While on 0.x, a minor release may break APIs; each breaking
 change is listed with how to migrate.
 
+## 0.8.1
+
+### Added
+- `LaneGraph` and `useLaneGraph` take `hovered` and `onHoverChange`, so another view can drive the hover highlight.
+- `CodeBlock` takes `marks`, `onTokenHover` and `onTokenClick` for character-precise highlights and token hover; `codeMarkRanges` helper.
+- `Swimlanes` `labels: 'auto' | 'always' | 'icon'` (keep lane names on narrow screens).
+
+### Changed
+- Showcase: "Tags over time" shows labelled swimlanes under every chart style and includes the state ribbon and chart-with-journal views (the separate "Timeline views" card is gone); the AST example underlines a node's exact characters and finds the node under the word you hover in the code.
+
+### Fixed
+- In dark mode a host page's white body could show behind the themed page; `UIProvider` now themes `body` as well as `html`.
+
 ## 0.8.0
 
 Graphs as rows: the Git graph's lanes are now a general-purpose component.

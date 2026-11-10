@@ -4,7 +4,7 @@
 > CSS variables (seven palette families, light and dark). Forms, overlays, navigation, data grid, charts, diagrams, maps,
 > media, AI chat and agent UIs. Every component is also a self-contained .tsx drop-in file.
 
-Version 0.8.0. Source: https://github.com/lantos1618/oneshot-ui. Docs: https://lantos1618.github.io/oneshot-ui/. Licence: MIT with a revenue threshold (free up to USD 200k ARR).
+Version 0.8.1. Source: https://github.com/lantos1618/oneshot-ui. Docs: https://lantos1618.github.io/oneshot-ui/. Licence: MIT with a revenue threshold (free up to USD 200k ARR).
 
 ## Use it
 
@@ -22,8 +22,8 @@ and motion. Attach the ones you need plus ui-provider.tsx; they share one UIProv
 - CLI (offline, from the installed package): `npx @lyndon/ui add data-grid dialog --dir src/components/ui`, `npx @lyndon/ui list`, `npx @lyndon/ui info data-grid`
 - shadcn CLI: `npx shadcn add https://lantos1618.github.io/oneshot-ui/r/data-grid.json` (pulls in ui-provider)
 - Index with sizes, exports and embedded components: https://lantos1618.github.io/oneshot-ui/index.json
-- The same files from npm: https://unpkg.com/@lyndon/ui@0.8.0/dist-registry/files/<name>.tsx
-- Whole library in one file (dist-single/ui-all.tsx, ~633.0k tokens): only for tools with a very large context; prefer the drop-ins
+- The same files from npm: https://unpkg.com/@lyndon/ui@0.8.1/dist-registry/files/<name>.tsx
+- Whole library in one file (dist-single/ui-all.tsx, ~636.4k tokens): only for tools with a very large context; prefer the drop-ins
 
 ## Foundation
 
@@ -1056,16 +1056,16 @@ Calendar with Day, Week, Month and Year views (plus 3-day on phones). In Day/Wee
 
 ## Code
 
-### Code block (`code-block`, ~15.0k tokens)
+### Code block (`code-block`, ~17.9k tokens)
 
-Code block: file name with icon, language badge, line numbers, highlighted lines, wrap toggle and copy. Pass `previous` to get a "Changes" toggle that shows an inline diff (computed the first time it's opened, then labelled +N −M; very large changes fall back to one removed and one added block); long code collapses behind a fade with "Show all N lines". Without `defaultWrap`, lines wrap by default when the block is narrower than 520px (phones).
+Code block: file name with icon, language badge, line numbers, highlighted lines, wrap toggle and copy. Pass `previous` to get a "Changes" toggle that shows an inline diff (computed the first time it's opened, then labelled +N −M; very large changes fall back to one removed and one added block); long code collapses behind a fade with "Show all N lines". Without `defaultWrap`, lines wrap by default when the block is narrower than 520px (phones). `marks` underline character ranges (CodeMark: wavy or solid, in any colour; a range over several lines underlines each line's part); `onTokenHover` / `onTokenClick` report the token under the mouse (offsets into `code`), for linking the code to something else (a syntax tree, a trace). Both are decorative and off in the Changes view.
 
 - File: https://lantos1618.github.io/oneshot-ui/files/code-block.tsx
 - Exports: CodeBlock, InlineCode, highlightCode, codeLanguageOf
 - Embeds: Button, CopyButton, Icon, Slot, Spinner
 - npm: motion, react
 
-### Code tabs (`code-tabs`, ~15.6k tokens)
+### Code tabs (`code-tabs`, ~17.1k tokens)
 
 The same example in several languages. Tabs slide, the box animates its height, Copy copies the open tab.
 
@@ -1074,7 +1074,7 @@ The same example in several languages. Tabs slide, the box animates its height, 
 - Embeds: ActiveIndicator, Button, CopyButton, Icon, ScrollEdges, Slot, Spinner
 - npm: motion, react
 
-### Diff (`diff`, ~18.6k tokens)
+### Diff (`diff`, ~20.1k tokens)
 
 Diff computed from `before` and `after` text (LCS line diff). Unified or split view, hunk header, old / new line numbers, +N / −M stats, syntax colours and copy (copies the new version). When the diff is narrower than 560px (phones) split view falls back to unified and the toggle hides, since two columns can't be read there.
 
@@ -1083,7 +1083,7 @@ Diff computed from `before` and `after` text (LCS line diff). Unified or split v
 - Embeds: ActiveIndicator, Badge, Button, CopyButton, FormFieldContext, Icon, SegmentedControl, Slot, Spinner
 - npm: motion, react
 
-### Install command (`install-command`, ~15.3k tokens)
+### Install command (`install-command`, ~16.8k tokens)
 
 Install command with package-manager tabs (sliding underline) and a Copy → Copied button.
 
@@ -1906,7 +1906,7 @@ A chart and its journal side by side (pattern H), linked both ways: hovering, fo
 - Embeds: Button, Icon, IconButton, Slot, Spinner, TagGlyph, TagJournal, VirtualList
 - npm: motion, react, react-dom
 
-### Git graph (`git-graph`, ~90.2k tokens)
+### Git graph (`git-graph`, ~92.0k tokens)
 
 Commit history graph (like VS Code's Git Graph or GitKraken): a LaneGraph preset with refs, author, relative date and hash columns, virtualised for 100k commits. Click or Enter opens details (a side panel, a sheet on phones: message, parents, refs, files and diffs from `loadCommit`); Shift+click a second commit compares the range (`loadDiff`). Hover or focus lights the first-parent ancestry. Keys: ↑/↓ rows, ← parent, → child, Home/End, PageUp/Down, `/` search, n/N next/previous match, Enter open, Escape close; Shift+F10, right-click or long-press opens the actions menu. Search, branch filter, first-parent and hide-merged views in the toolbar. New commits on top keep the reader's place.
 
@@ -1915,7 +1915,7 @@ Commit history graph (like VS Code's Git Graph or GitKraken): a LaneGraph preset
 - Embeds: ActiveIndicator, Avatar, Badge, Button, Chip, ContextMenuContent, ContextMenuRoot, ContextMenuTrigger, CopyButton, DialogClose, DialogRoot, DialogTitle, Diff, DropdownMenuContent, DropdownMenuRoot, DropdownMenuTrigger, FloatingPanel, FormFieldContext, Icon, IconButton, InlineCode, Kbd, LaneGraph, LaneGutter, Markdown, MenuCheckboxItem, MenuItem, MenuLabel, MenuSeparator, ModalLayer, OverlayPortal, PopoverContent, PopoverRoot, PopoverTrigger, ScrollEdges, SegmentedControl, SheetContent, SheetHeader, Slot, Spinner
 - npm: motion, react, react-dom
 
-### Lane graph (`lanes`, ~25.4k tokens)
+### Lane graph (`lanes`, ~25.7k tokens)
 
 Any DAG as rows: layoutLanes (headless: order, lanes, colours and each row's edges, O(n · lanes)), LaneGutter (one row's SVG slice, stretches to tall rows) and LaneGraph (a virtualised list of gutter + your renderRow, with selection, hover ancestry, keyboard moves along edges and live inserts). GitGraph is a preset of it.
 
@@ -1947,9 +1947,9 @@ What you were doing all day in one strip (pattern F: sleep stages, Toggl and Res
 - Embeds: TagGlyph, TagTooltip
 - npm: motion, react
 
-### Swimlanes (`swimlanes`, ~14.9k tokens)
+### Swimlanes (`swimlanes`, ~15.2k tokens)
 
-One lane per kind of tag on a shared time axis (pattern E: Dynatrace annotation tracks, LifeLines): dots for point tags, rounded pills for spans, an icon and label at the start of each lane, an optional chart on top (`top`) aligned to the same `start`–`end`. Dots closer than `mergePx` merge into a count chip; empty lanes say "None" (or hide with `hideEmpty`); more than `maxLanes` lanes scroll. Hover, focus or tap a mark for its tooltip. Keyboard: the lanes are one Tab stop, ←/→ move along a lane, ↑/↓ between lanes, Enter selects, Escape clears. Link it to other views with `activeId` / `onActiveChange`. The plot runs left to right in every locale; labels and tooltips follow the locale.
+One lane per kind of tag on a shared time axis (pattern E: Dynatrace annotation tracks, LifeLines): dots for point tags, rounded pills for spans, an icon and label at the start of each lane, an optional chart on top (`top`) aligned to the same `start`–`end`. Dots closer than `mergePx` merge into a count chip; empty lanes say "None" (or hide with `hideEmpty`); more than `maxLanes` lanes scroll. Hover, focus or tap a mark for its tooltip. Keyboard: the lanes are one Tab stop, ←/→ move along a lane, ↑/↓ between lanes, Enter selects, Escape clears. Link it to other views with `activeId` / `onActiveChange`. The plot runs left to right in every locale; labels and tooltips follow the locale. `labels="always"` keeps lane names on phones (a compact column) instead of the icon alone.
 
 - File: https://lantos1618.github.io/oneshot-ui/files/swimlanes.tsx
 - Exports: Swimlanes

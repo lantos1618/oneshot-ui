@@ -360,10 +360,25 @@ export type SwimlanesProps = TimelineLinkProps & {
   mergePx?: number
   /** time labels under the lanes (default true; turn off when `top` is a Chart, whose own time labels sit just above) */
   axis?: boolean
+  /**
+   * lane labels at the inline start: 'auto' (default) shows icon and name from 480px of width and the icon alone below
+   * that; 'always' keeps the name on narrow widths too, in a compact column (11px, wrapping to two lines); 'icon' never
+   * shows the name (the lane's accessible name and tooltip still carry it)
+   */
+  labels?: 'auto' | 'always' | 'icon'
   /** accessible name */
   label?: string
   className?: string
 }
+
+/** Swimlanes' label column width per `labels` mode (literal class strings for Tailwind). */
+const SWIM_LABEL_COL = { auto: '[--tl-lw:30px] @[480px]:[--tl-lw:112px]', always: '[--tl-lw:84px] @[480px]:[--tl-lw:112px]', icon: '[--tl-lw:30px]' } as const
+/** Swimlanes' label text per `labels` mode: hidden on narrow widths, compact and wrapping, or never shown. */
+const SWIM_LABEL_TEXT = {
+  auto: 'hidden truncate @[480px]:block',
+  always: 'line-clamp-2 text-[11px] leading-[1.1] [overflow-wrap:anywhere] @[480px]:text-xs @[480px]:leading-snug',
+  icon: 'hidden',
+} as const
 
 /**
  * One lane per kind of tag on a shared time axis (pattern E: Dynatrace annotation tracks, LifeLines): dots for point
@@ -372,8 +387,9 @@ export type SwimlanesProps = TimelineLinkProps & {
  * `hideEmpty`); more than `maxLanes` lanes scroll. Hover, focus or tap a mark for its tooltip. Keyboard: the lanes are
  * one Tab stop, ←/→ move along a lane, ↑/↓ between lanes, Enter selects, Escape clears. Link it to other views with
  * `activeId` / `onActiveChange`. The plot runs left to right in every locale; labels and tooltips follow the locale.
+ * `labels="always"` keeps lane names on phones (a compact column) instead of the icon alone.
  */
-export function Swimlanes({ tags, kinds: kindsProp, start: startProp, end: endProp, order = 'kinds', hideEmpty, top, topInset, maxLanes = 8, mergePx = 6, axis = true,
+export function Swimlanes({ tags, kinds: kindsProp, start: startProp, end: endProp, order = 'kinds', hideEmpty, top, topInset, maxLanes = 8, mergePx = 6, axis = true, labels = 'auto',
   activeId, defaultActiveId = null, onActiveChange, onSelect, label, className }: SwimlanesProps) {
   const start = timeTagMs(startProp), end = timeTagMs(endProp), span = Math.max(1, end - start)
   const kinds = useMemo(() => timelineKinds(kindsProp, tags), [kindsProp, tags])
@@ -417,7 +433,7 @@ export function Swimlanes({ tags, kinds: kindsProp, start: startProp, end: endPr
   return (
     <div className={cn('@container', className)}>
       {/* the plot runs left to right in every locale (an LTR island); lane labels and tooltips follow the locale */}
-      <div ref={box} dir="ltr" className="relative [--tl-lw:30px] [--tl-rp:16px] @[480px]:[--tl-lw:112px]">
+      <div ref={box} dir="ltr" className={cn('relative [--tl-rp:16px]', SWIM_LABEL_COL[labels] ?? SWIM_LABEL_COL.auto)}>
         {top && <div style={{ /* rtl-lint-ignore: inside the LTR plot island */ marginLeft: `calc(var(--tl-lw) - ${insetL}px)`, marginRight: `calc(var(--tl-rp) - ${insetR}px)` }}>{top}</div>}
         <div role="group" aria-roledescription={m('roledesc')} aria-label={label ?? m('lanes')} aria-describedby={`${ids}-sum`} {...nav.groupProps} className="relative">
           <span id={`${ids}-sum`} className="sr-only">{m('summary', { count: tags.length, from: fmt.time(start), to: fmt.time(end) })} {m('keys')}</span>
@@ -429,7 +445,7 @@ export function Swimlanes({ tags, kinds: kindsProp, start: startProp, end: endPr
                   className="grid grid-cols-[var(--tl-lw)_minmax(0,1fr)_var(--tl-rp)] items-center [contain-intrinsic-size:auto_26px] [content-visibility:auto]" style={{ height: laneH }}>
                   <div dir={dir} aria-hidden title={l.kind.label} className="flex min-w-0 items-center gap-1.5 pe-2 text-xs text-[var(--fg2)]">
                     <span className="grid h-4 w-4 flex-none place-items-center text-[13px] leading-none" style={{ color: safeColor(l.kind.color) }}>{l.kind.icon ?? <span className="h-2 w-2 rounded-full" style={{ background: safeColor(l.kind.color) }} />}</span>
-                    <span className="hidden truncate @[480px]:block">{l.kind.label}</span>
+                    <span className={SWIM_LABEL_TEXT[labels] ?? SWIM_LABEL_TEXT.auto}>{l.kind.label}</span>
                   </div>
                   <div className="relative h-[22px] rounded-full bg-[color-mix(in_srgb,var(--muted)_75%,transparent)]">
                     {!l.tags.length && <span dir={dir} className="absolute inset-y-0 start-2.5 flex items-center text-[11px] text-[var(--fg3)] italic">{m('none')}</span>}

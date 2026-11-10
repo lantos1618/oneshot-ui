@@ -4,7 +4,7 @@
 > CSS variables (seven palette families, light and dark). Forms, overlays, navigation, data grid, charts, diagrams, maps,
 > media, AI chat and agent UIs. Every component is also a self-contained .tsx drop-in file.
 
-Version 0.8.0. Source: https://github.com/lantos1618/oneshot-ui. Docs: https://lantos1618.github.io/oneshot-ui/. Licence: MIT with a revenue threshold (free up to USD 200k ARR).
+Version 0.8.1. Source: https://github.com/lantos1618/oneshot-ui. Docs: https://lantos1618.github.io/oneshot-ui/. Licence: MIT with a revenue threshold (free up to USD 200k ARR).
 
 ## Use it
 
@@ -22,8 +22,8 @@ and motion. Attach the ones you need plus ui-provider.tsx; they share one UIProv
 - CLI (offline, from the installed package): `npx @lyndon/ui add data-grid dialog --dir src/components/ui`, `npx @lyndon/ui list`, `npx @lyndon/ui info data-grid`
 - shadcn CLI: `npx shadcn add https://lantos1618.github.io/oneshot-ui/r/data-grid.json` (pulls in ui-provider)
 - Index with sizes, exports and embedded components: https://lantos1618.github.io/oneshot-ui/index.json
-- The same files from npm: https://unpkg.com/@lyndon/ui@0.8.0/dist-registry/files/<name>.tsx
-- Whole library in one file (dist-single/ui-all.tsx, ~633.0k tokens): only for tools with a very large context; prefer the drop-ins
+- The same files from npm: https://unpkg.com/@lyndon/ui@0.8.1/dist-registry/files/<name>.tsx
+- Whole library in one file (dist-single/ui-all.tsx, ~636.4k tokens): only for tools with a very large context; prefer the drop-ins
 
 ## Foundation
 
@@ -171,10 +171,10 @@ and motion. Attach the ones you need plus ui-provider.tsx; they share one UIProv
 
 ## Code
 
-- [code-block](https://lantos1618.github.io/oneshot-ui/files/code-block.tsx): Code block: file name with icon, language badge, line numbers, highlighted lines, wrap toggle and copy. (~15.0k tokens)
-- [code-tabs](https://lantos1618.github.io/oneshot-ui/files/code-tabs.tsx): The same example in several languages. (~15.6k tokens)
-- [diff](https://lantos1618.github.io/oneshot-ui/files/diff.tsx): Diff computed from `before` and `after` text (LCS line diff). (~18.6k tokens)
-- [install-command](https://lantos1618.github.io/oneshot-ui/files/install-command.tsx): Install command with package-manager tabs (sliding underline) and a Copy → Copied button. (~15.3k tokens)
+- [code-block](https://lantos1618.github.io/oneshot-ui/files/code-block.tsx): Code block: file name with icon, language badge, line numbers, highlighted lines, wrap toggle and copy. (~17.9k tokens)
+- [code-tabs](https://lantos1618.github.io/oneshot-ui/files/code-tabs.tsx): The same example in several languages. (~17.1k tokens)
+- [diff](https://lantos1618.github.io/oneshot-ui/files/diff.tsx): Diff computed from `before` and `after` text (LCS line diff). (~20.1k tokens)
+- [install-command](https://lantos1618.github.io/oneshot-ui/files/install-command.tsx): Install command with package-manager tabs (sliding underline) and a Copy → Copied button. (~16.8k tokens)
 - [terminal](https://lantos1618.github.io/oneshot-ui/files/terminal.tsx): Terminal: commands type out character by character, output streams in, then a prompt waits with a blinking cursor (paused off screen, steady under reduced motion). (~10.4k tokens)
 
 ## Media
@@ -294,12 +294,12 @@ and motion. Attach the ones you need plus ui-provider.tsx; they share one UIProv
 ## Other
 
 - [chart-with-journal](https://lantos1618.github.io/oneshot-ui/files/chart-with-journal.tsx): A chart and its journal side by side (pattern H), linked both ways: hovering, focusing or tapping a tag on either side lights it on the other, and the list scrolls the lit row into view without moving focus. (~23.1k tokens)
-- [git-graph](https://lantos1618.github.io/oneshot-ui/files/git-graph.tsx): Commit history graph (like VS Code's Git Graph or GitKraken): a LaneGraph preset with refs, author, relative date and hash columns, virtualised for 100k commits. (~90.2k tokens)
-- [lanes](https://lantos1618.github.io/oneshot-ui/files/lanes.tsx): Any DAG as rows: layoutLanes (headless: order, lanes, colours and each row's edges, O(n · lanes)), LaneGutter (one row's SVG slice, stretches to tall rows) and LaneGraph (a virtualised list of gutter + your renderRow, with selection, hover ancestry, keyboard moves along edges and live inserts). (~25.4k tokens)
+- [git-graph](https://lantos1618.github.io/oneshot-ui/files/git-graph.tsx): Commit history graph (like VS Code's Git Graph or GitKraken): a LaneGraph preset with refs, author, relative date and hash columns, virtualised for 100k commits. (~92.0k tokens)
+- [lanes](https://lantos1618.github.io/oneshot-ui/files/lanes.tsx): Any DAG as rows: layoutLanes (headless: order, lanes, colours and each row's edges, O(n · lanes)), LaneGutter (one row's SVG slice, stretches to tall rows) and LaneGraph (a virtualised list of gutter + your renderRow, with selection, hover ancestry, keyboard moves along edges and live inserts). (~25.7k tokens)
 - [magnet-bubble](https://lantos1618.github.io/oneshot-ui/files/magnet-bubble.tsx): The label bubble above a thumb (the shared tooltip look). (~653 tokens)
 - [magnet-marks](https://lantos1618.github.io/oneshot-ui/files/magnet-marks.tsx): The track decorations: a tick for each point (and each zone centre), a tinted band for each zone. (~1.7k tokens)
 - [state-ribbon](https://lantos1618.github.io/oneshot-ui/files/state-ribbon.tsx): What you were doing all day in one strip (pattern F: sleep stages, Toggl and RescueTime day bars): contiguous states coloured by kind, optional pins above for point tags (merged into counts when crowded) and bars below for spans. (~16.5k tokens)
-- [swimlanes](https://lantos1618.github.io/oneshot-ui/files/swimlanes.tsx): One lane per kind of tag on a shared time axis (pattern E: Dynatrace annotation tracks, LifeLines): dots for point tags, rounded pills for spans, an icon and label at the start of each lane, an optional chart on top (`top`) aligned to the same `start`–`end`. (~14.9k tokens)
+- [swimlanes](https://lantos1618.github.io/oneshot-ui/files/swimlanes.tsx): One lane per kind of tag on a shared time axis (pattern E: Dynatrace annotation tracks, LifeLines): dots for point tags, rounded pills for spans, an icon and label at the start of each lane, an optional chart on top (`top`) aligned to the same `start`–`end`. (~15.2k tokens)
 - [tag-glyph](https://lantos1618.github.io/oneshot-ui/files/tag-glyph.tsx): A tag's icon in a coloured ring; `active` grows it with a halo, `more` adds a "+N" badge on its end side (timeTagBadge wide). (~1.1k tokens)
 - [tag-journal](https://lantos1618.github.io/oneshot-ui/files/tag-journal.tsx): A time-ordered list of tags (pattern H: Oura and WHOOP journals): time, glyph, label and detail, optionally grouped by hour, virtualised so long days stay fast. (~22.5k tokens)
 - [tag-tooltip](https://lantos1618.github.io/oneshot-ui/files/tag-tooltip.tsx): Tooltip body for a tag: icon and label, the time (or from–to for a span) and the detail. (~2.7k tokens)

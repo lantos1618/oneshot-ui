@@ -1,7 +1,6 @@
-import { useLayoutEffect, useMemo, useRef, useState, type ReactNode } from 'react'
-import { motion, useReducedMotion } from 'motion/react'
-import { Chart, ChartWithJournal, DataFlow, type DiagramState, type DiagramTransition, Gantt, type GanttPhase, Globe, type GlobeHub, type GlobeRoute, NetworkGraph, ProcessFlow, Sankey, SegmentedControl, StateDiagram, StateMachine, StateRibbon, Swimlanes, Switch, Tabs, TraceWaterfall, cn, type TimeTag, type TimeTagKind, type TraceSpan, type WorldMapData, WorldMap, useLocale, useToast, useWorldMap, type LocaleFmt } from '../lib'
-import { AGENT_WORKFLOWS, AGENT_WORKFLOW_ORDER, TAGS_EVENT_KINDS, TAGS_KINDS, tagsDay, type TagsDay, type TagsDayVariant } from '../examples'
+import { useMemo, useState } from 'react'
+import { DataFlow, type DiagramState, type DiagramTransition, Gantt, type GanttPhase, Globe, type GlobeHub, type GlobeRoute, NetworkGraph, ProcessFlow, Sankey, SegmentedControl, StateDiagram, StateMachine, TraceWaterfall, type TimeTag, type TimeTagKind, type TraceSpan, type WorldMapData, WorldMap, useLocale, useToast, useWorldMap, type LocaleFmt } from '../lib'
+import { AGENT_WORKFLOWS, AGENT_WORKFLOW_ORDER, type TagsDayVariant } from '../examples'
 import { Section, Spec, type SpecNotes } from './kit'
 
 /* Gantt: a six-week launch plan ─────────────────────────────────────────── */
@@ -74,118 +73,15 @@ const TRACE_EVENTS: Record<TagsDayVariant, TimeTag[]> = {
   ]),
 }
 
-/* Tags over time (patterns E, F, H): the sample workday from the examples, light or busy */
-const TL_LANE_KINDS: TimeTagKind[] = [...TAGS_EVENT_KINDS, { kind: 'coffee', label: 'Coffee', icon: '☕', color: 'var(--c-neutral)' }]
-const tlEvents = (d: TagsDay) => d.tags.filter(t => TAGS_EVENT_KINDS.some(k => k.kind === t.kind))
-const TL_NOTES: Record<'lanes' | 'ribbon' | 'journal' | 'trace', SpecNotes> = {
-  lanes: { good: 'Scales to any number of kinds, and habits jump out: water in the morning, a smoke after lunch. Good for labelling and review tools.',
-    breaks: 'A row per kind costs height and feels clinical. Empty lanes look broken unless they say “None”; dense ones need count chips.' },
-  ribbon: { good: 'The whole day in one compact strip: good posture against slouching at a glance, with tags pinned above. Fits widgets and phones.',
-    breaks: 'Drops the points line, so the score story is gone. One-minute slivers need a minimum width and a bigger hit area to tap.' },
-  journal: { good: 'Every tag gets words, a time and edit or delete. Hovering either side lights up the other, and the list scrolls to follow.',
-    breaks: 'Needs width, so it stacks on phones, and there are two places to look. Long days need a scrolling, virtualised list.' },
-  trace: { good: 'Ties a deploy, an approval or a retry to exactly what the run was doing at that moment.',
-    breaks: 'Many events turn into a barcode: flags drop out to dots on their rules, and you hover to read them.' },
+/* Trace notes (the workday's swimlanes, state ribbon and journal moved into "Tags over time" in the charts section) */
+const DG_TRACE_NOTES: SpecNotes = {
+  good: 'Ties a deploy, an approval or a retry to exactly what the run was doing at that moment.',
+  breaks: 'Many events turn into a barcode: flags drop out to dots on their rules, and you hover to read them.',
 }
 
-/** The Light day / Busy day switch shared by the trace and timeline cards (one state, a control in each card's header). */
+/** The Light day / Busy day switch in the trace card's header (light or busy annotations around the run). */
 function DgDaySwitch({ value, onChange }: { value: TagsDayVariant; onChange: (v: TagsDayVariant) => void }) {
   return <SegmentedControl aria-label="Day" size="sm" value={value} onChange={v => onChange(v as TagsDayVariant)} options={[{ value: 'light', label: 'Light day' }, { value: 'busy', label: 'Busy day' }]} />
-}
-
-/** The points line as a plain area chart on a time axis (no annotations: the lanes carry the tags). */
-function DgPointsChart({ day, height = 150 }: { day: TagsDay; height?: number }) {
-  return <Chart data={day.points} x="t" xTime height={height} legend={false} label="Points over the day" series={[{ key: 'points', label: 'Points', type: 'area', color: 'var(--c4)' }]} />
-}
-
-/* Timeline views (patterns E, F, H): the same day as swimlanes, a state ribbon, or a chart with its journal, one tab each */
-const TL_TABS = [
-  { value: 'lanes', label: 'Swimlanes', notes: TL_NOTES.lanes,
-    desc: 'One lane per kind under the points line, on the same time axis (as in Dynatrace annotation tracks and the LifeLines patient timeline). Dots a few pixels apart merge into a count.' },
-  { value: 'ribbon', label: 'State ribbon', notes: TL_NOTES.ribbon,
-    desc: 'Posture as one strip of contiguous states, logged tags pinned above and lunch as a bar below (as in sleep-stage bars and Toggl or RescueTime day timelines).' },
-  { value: 'journal', label: 'Chart + journal', notes: TL_NOTES.journal,
-    desc: 'The points line with dots, and the day’s log beside it (as in Oura and WHOOP journals). Hover or focus either side to light up the other; the list scrolls to the lit tag.' },
-] as const
-
-/** 220 ms ease-out: a height change that starts with a tab or day switch ends inside the 0.5 s input window. */
-const DG_AUTOH_EASE = { duration: 0.22, ease: [0.22, 1, 0.36, 1] } as const
-/**
- * Height follows the content (instant under reduced motion), so a tab or day switch eases the card instead
- * of jumping. Like the library's AutoHeight, but a short tween (done within 0.5 s of the tap, so it never counts as a layout
- * shift, where a spring's tail would) and it clips only while it moves: tooltips and focus rings stay visible.
- */
-function DgAutoHeight({ children, className }: { children: ReactNode; className?: string }) {
-  const inner = useRef<HTMLDivElement>(null), reduce = useReducedMotion()
-  const [h, setH] = useState<number | 'auto'>('auto'), [moving, setMoving] = useState(false)
-  useLayoutEffect(() => {
-    const el = inner.current; if (!el) return
-    const ro = new ResizeObserver(() => setH(el.offsetHeight)); ro.observe(el)
-    return () => ro.disconnect()
-  }, [])
-  return (
-    <motion.div initial={false} animate={{ height: h }} transition={reduce ? { duration: 0 } : DG_AUTOH_EASE}
-      onAnimationStart={() => setMoving(true)} onAnimationComplete={() => setMoving(false)} className={cn(moving && 'overflow-hidden', className)}>
-      <div ref={inner}>{children}</div>
-    </motion.div>
-  )
-}
-
-/** "Timeline views": one card, three tabs (only the open one is mounted). The day switch, the toggles and deleted journal rows survive a tab switch.
- * Each view takes its own height and the card eases to it (a switch is a tap or a key, so it is not a layout shift). */
-function DgTimelineViews({ variant, setVariant }: { variant: TagsDayVariant; setVariant: (v: TagsDayVariant) => void }) {
-  const toast = useToast()
-  const { fmt } = useLocale()
-  const [view, setView] = useState<string>('lanes')
-  const [busiest, setBusiest] = useState(false)
-  const [hide, setHide] = useState(false)
-  const [picked, setPicked] = useState<TimeTag | null>(null)
-  const [removed, setRemoved] = useState<Set<string>>(new Set())
-  const [byHour, setByHour] = useState(false)
-  const day = tagsDay(variant)
-  const pins = day.tags.filter(t => t.end === undefined), bars = day.tags.filter(t => t.kind === 'lunch')
-  const journal = tlEvents(day).filter(t => !removed.has(t.id))
-  const del = (t: TimeTag) => {
-    setRemoved(r => new Set(r).add(t.id))
-    toast({ title: `Deleted ${t.label}`, description: fmt.time(+t.at), action: { label: 'Undo', onClick: () => setRemoved(r => { const n = new Set(r); n.delete(t.id); return n }) } })
-  }
-  const tab = TL_TABS.find(t => t.value === view) ?? TL_TABS[0]
-  return (
-    <Spec span={3} title="Timeline views" desc="The same workday as a lane per tag, a state ribbon, or a chart with its journal. The day switch applies to all three."
-      actions={<DgDaySwitch value={variant} onChange={setVariant} />} notes={{ good: <DgAutoHeight>{tab.notes.good}</DgAutoHeight>, breaks: <DgAutoHeight>{tab.notes.breaks}</DgAutoHeight> }}
-      keys={[[['Tab'], 'view, then its parts'], [['←', '→'], 'along a row'], [['↑', '↓'], 'between rows'], [['↵'], 'select'], [['Esc'], 'clear']]}>
-      <Tabs.Root value={view} onValueChange={v => { setView(v); setPicked(null) }}>
-        <Tabs.List aria-label="View">{TL_TABS.map(t => <Tabs.Trigger key={t.value} value={t.value}>{t.label}</Tabs.Trigger>)}</Tabs.List>
-        <DgAutoHeight>
-        <p className="m-0 mt-2 text-xs leading-snug text-[var(--fg3)]">{tab.desc}</p>
-        <Tabs.Content value="lanes" className="flex flex-col gap-3">
-          <div className="flex flex-wrap items-center gap-x-5 gap-y-2">
-            <Switch label="Busiest first" checked={busiest} onChange={setBusiest} />
-            <Switch label="Hide empty lanes" checked={hide} onChange={setHide} />
-            <span className="flex-1" />
-            <span aria-live="polite" className="text-xs text-[var(--fg3)]">{picked ? `Selected: ${picked.label}, ${fmt.time(+picked.at)}` : ''}</span>
-          </div>
-          <Swimlanes tags={tlEvents(day)} kinds={TL_LANE_KINDS} start={day.start} end={day.end} order={busiest ? 'count' : 'kinds'} hideEmpty={hide} axis={false} onSelect={setPicked}
-            top={<DgPointsChart day={day} />} />
-        </Tabs.Content>
-        <Tabs.Content value="ribbon" className="flex flex-col gap-3">
-          <StateRibbon states={day.states} pins={pins} bars={bars} kinds={TAGS_KINDS} start={day.start} end={day.end} label="Posture over the day" />
-          <div className="mt-2 max-w-[320px] rounded-[var(--r-lg)] border border-[var(--line)] p-3">
-            <div className="mb-2 flex items-baseline justify-between text-xs"><b className="font-semibold">Today</b><span className="text-[var(--fg3)]">Compact, for widgets</span></div>
-            <StateRibbon size="compact" states={day.states} pins={pins} kinds={TAGS_KINDS} start={day.start} end={day.end} legend={false} label="Posture over the day, compact" />
-          </div>
-        </Tabs.Content>
-        <Tabs.Content value="journal" className="flex flex-col gap-3">
-          <Switch label="Group by hour" checked={byHour} onChange={setByHour} className="self-start" />
-          <ChartWithJournal tags={journal} kinds={TAGS_KINDS} groupBy={byHour ? 'hour' : undefined} height={250} label="Today's journal"
-            onEdit={t => toast({ title: `Edit ${t.label}`, description: 'Open your edit form here.' })} onDelete={del}
-            chart={link => <Chart data={day.points} x="t" height={250} legend={false} label="Points with logged tags" series={[{ key: 'points', label: 'Points', type: 'area', color: 'var(--c4)' }]}
-              annotations={{ ...link, style: 'dots', spans: 'bands' }} />} />
-        </Tabs.Content>
-        </DgAutoHeight>
-      </Tabs.Root>
-    </Spec>
-  )
 }
 
 /* Map: seeded demo metrics per country ──────────────────────────────────── */
@@ -267,11 +163,10 @@ export function DiagramsSection() {
         <StateMachine machines={AGENT_WORKFLOWS} order={AGENT_WORKFLOW_ORDER} />
       </Spec>
       <Spec span={3} title="Trace waterfall" desc="What actually ran: nested spans on a shared timeline, streaming live, with deploys, approvals and retries flagged over the grid. Works for API requests, jobs or agent runs."
-        actions={<DgDaySwitch value={variant} onChange={setVariant} />} notes={TL_NOTES.trace}>
+        actions={<DgDaySwitch value={variant} onChange={setVariant} />} notes={DG_TRACE_NOTES}>
         <TraceWaterfall spans={TRACE} total={22} subtitle="Launch the new pricing page by Friday" failure={{ span: 'ws2', at: 2.6, message: '429 rate limited', retry: 'ws2r' }}
           annotations={TRACE_EVENTS[variant]} annotationKinds={TRACE_EVENT_KINDS} />
       </Spec>
-      <DgTimelineViews variant={variant} setVariant={setVariant} />
       <Spec title="Sankey" desc="Flows between stages. Hover or tap a ribbon or a node to isolate it.">
         <Sankey sources={[{ label: 'Organic', color: 'var(--c2)' }, { label: 'Paid', color: 'var(--c3)' }]} targets={[{ label: 'Signed up', color: 'var(--ok)' }, { label: 'Bounced', color: 'var(--fg3)' }, { label: 'Browsing', color: 'var(--warn)' }]}
           links={[[0, 0, 30], [0, 1, 18], [0, 2, 12], [1, 0, 15], [1, 1, 17], [1, 2, 8]]} height={300} />

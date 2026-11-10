@@ -622,7 +622,9 @@ Three layers in `@lyndon/ui/lanes`, each usable on its own:
 - `<LaneGraph nodes renderRow />`: the virtualised list of gutter + your row, with selection, hover/focus lighting a
   node's ancestry, ↑/↓, Home/End, ← parent / → child along edges, `onContextMenu`, `rowHeight="auto"` for rows sized by
   their content, `anchor="end"` for chat-like lists, and rows inserted above keeping the reader's place.
-  `useLaneGraph(nodes, options)` gives the same layout and state for your own markup.
+  `hovered` + `onHoverChange` (node ids) make the hover controlled, so something outside the list can light a row and
+  its ancestry (a word in a code panel, a point on a chart); without `hovered` the mouse drives it as before, and
+  `onHoverChange` still reports it. `useLaneGraph(nodes, options)` gives the same layout and state for your own markup.
 
 ```tsx
 import { LaneGraph } from '@lyndon/ui/lanes'
@@ -660,7 +662,9 @@ const nodes = messages.map(m => ({ id: m.id, parents: m.parentId ? [m.parentId] 
 - *Git*: `GitGraph`, the built-in preset below.
 - *Chat branches*: `chatBranchGraph(messages, leaf)` over `AiMessage & { parentId? | parents? }` (what `useAiChat` keeps,
   plus where it hangs); rows render `Message` at full height, `‹ 2 / 3 ›` switches branches, one message combines two.
-- *AST*: `parseAst(source)` (a small JavaScript subset) and `astLaneNodes(tree)`; hover a node to light its code.
+- *AST*: `parseAst(source)` (a small JavaScript subset), `astLaneNodes(tree)` and `astNodeAt(tree, start, end?)` (the
+  deepest node at a position). Linked both ways with a `CodeBlock`: hovering a row underlines exactly its characters
+  (`marks`), hovering a word lights its node's row through `hovered` (`onTokenHover`), clicking one selects it.
 - *Agent run*: steps with `after: [...]`, fanning out to tools and back in, with `StatusIcon` and durations.
 - *Dependencies*: packages above the packages they use (`parents` = dependencies); shared ones show up as merges.
 

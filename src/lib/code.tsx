@@ -1,4 +1,4 @@
-import { memo, useEffect, useId, useLayoutEffect, useMemo, useRef, useState, type ReactNode } from 'react'
+import { memo, useCallback, useEffect, useId, useLayoutEffect, useMemo, useRef, useState, type CSSProperties, type ReactNode } from 'react'
 import { motion, useReducedMotion } from 'motion/react'
 import { Button, Icon, IconButton, ScrollEdges, cn, defineMessages, sleep, spring, useControllable, useMediaQuery, useMessages, useRoving, useScrollEdges, useSize, useWidth } from './core'
 import { ActiveIndicator, SegmentedControl } from './forms'
@@ -142,7 +142,108 @@ export function codeLineDiff(before: string[], after: string[]): CodeDiffRow[] {
 
 /* ── shared pieces ─────────────────────────────────────────────────────────── */
 
-type CodeRow = { text: string; no?: number | null; kind?: 'hi' | 'add' | 'del' | 'hunk' | 'blank'; plain?: boolean }
+/**
+ * A character range of CodeBlock's `code` ([start, end) offsets) drawn as an underline with a soft tint, line by line
+ * (decorative: no ARIA; say what it means elsewhere). `color`: any CSS colour (default var(--accent)); `variant`:
+ * 'wavy' (default) or 'solid'.
+ */
+export type CodeMark = { start: number; end: number; color?: string; variant?: 'wavy' | 'solid' }
+/** The token under the pointer in a CodeBlock with `onTokenHover` / `onTokenClick`: [start, end) offsets into `code`, and its text. */
+export type CodeTokenRange = { start: number; end: number; text: string }
+
+/**
+ * Where ranges fall on each line: per line, `[start, end)` columns and the index of the range. A range that runs over
+ * several lines covers each line's part, without the indentation of the lines it continues on or the trailing spaces
+ * of the lines it continues from; empty parts are left out. `lines` are the code's lines without their newlines.
+ */
+export function codeMarkRanges(lines: readonly string[], ranges: readonly { start: number; end: number }[]): { start: number; end: number; mark: number }[][] {
+  const out = lines.map(() => [] as { start: number; end: number; mark: number }[])
+  const starts: number[] = []
+  for (let i = 0, at = 0; i < lines.length; i++) { starts.push(at); at += lines[i].length + 1 }
+  ranges.forEach((r, mark) => {
+    if (!(r.end > r.start) || !lines.length) return
+    let lo = 0, hi = lines.length - 1 // the line the range starts on (binary search: hovering calls this on every change)
+    while (lo < hi) { const mid = (lo + hi + 1) >> 1; if (starts[mid] <= r.start) lo = mid; else hi = mid - 1 }
+    for (let i = lo; i < lines.length && starts[i] < r.end; i++) {
+      const line = lines[i]
+      let a = Math.max(0, r.start - starts[i]), b = Math.min(line.length, r.end - starts[i])
+      if (r.start < starts[i]) while (a < b && /\s/.test(line[a])) a++ // continues from the line above: skip the indentation
+      if (r.end > starts[i] + line.length) while (b > a && /\s/.test(line[b - 1])) b-- // continues below: skip trailing spaces
+      if (b > a) out[i].push({ start: a, end: b, mark })
+    }
+  })
+  return out
+}
+
+/** A line cut into highlighted tokens and, between them, words, spaces and single punctuation marks: [s, e) columns and a class. */
+type CodeSegment = { s: number; e: number; cls?: string }
+const CODE_PIECE = /[\w$]+|\s+|[^\w$\s]/g
+function codeSegments(line: string, lang: CodeLanguage): CodeSegment[] {
+  if (line.length > CODE_HIGHLIGHT_MAX) return [{ s: 0, e: line.length }]
+  const out: CodeSegment[] = []
+  const gap = (from: number, to: number) => { for (const m of line.slice(from, to).matchAll(CODE_PIECE)) out.push({ s: from + m.index, e: from + m.index + m[0].length }) }
+  const [src, names] = CODE_LANGS[lang] ?? CODE_JS
+  const re = new RegExp(src.source, src.flags)
+  let last = 0, m: RegExpExecArray | null
+  while ((m = re.exec(line))) {
+    if (m[0] === '') { re.lastIndex++; continue }
+    gap(last, m.index)
+    let gi = 1; while (gi < m.length && m[gi] === undefined) gi++
+    const kind = names[gi - 1]
+    if (kind === 'pre') { gap(m.index, m.index + m[gi].length); out.push({ s: m.index + m[gi].length, e: m.index + m[0].length, cls: CODE_TOKEN_CLASS.kw }) }
+    else out.push({ s: m.index, e: m.index + m[0].length, cls: kind ? CODE_TOKEN_CLASS[kind] : undefined })
+    last = m.index + m[0].length
+  }
+  gap(last, line.length)
+  return out
+}
+const CODE_SEG_CACHE = new Map<string, CodeSegment[]>()
+function codeSegmentsCached(text: string, lang: CodeLanguage): CodeSegment[] {
+  const k = lang + '\u0000' + text
+  let v = CODE_SEG_CACHE.get(k)
+  if (!v) { v = codeSegments(text, lang); if (CODE_SEG_CACHE.size >= CODE_HL_CACHE_MAX) CODE_SEG_CACHE.delete(CODE_SEG_CACHE.keys().next().value!); CODE_SEG_CACHE.set(k, v) }
+  return v
+}
+
+/** A mark's part on one line (columns), with its look. */
+type CodeLineMark = { start: number; end: number; color: string; variant: 'wavy' | 'solid' }
+const CODE_MARK_VARIANT = { wavy: 'decoration-wavy', solid: 'decoration-solid' } as const
+/** The underline and tint of a mark; `--code-mark` is its colour (the caller's token, so it follows the theme). */
+const CODE_MARK = 'rounded-[var(--r-sm)] bg-[color-mix(in_srgb,var(--code-mark)_15%,transparent)] underline [text-decoration-color:var(--code-mark)] decoration-[1.5px] underline-offset-[3px] [text-decoration-skip-ink:none] [box-decoration-break:clone] [-webkit-box-decoration-break:clone]'
+
+/**
+ * One line's text with marks or token events. The line is cut into segments once (cached by text), each carrying its
+ * offsets in the code (`data-o`, `data-e`) so the pointer maps to a token without measuring; marked parts are wrapped in
+ * an underline. Memoised: a hover re-renders only the lines whose marks change.
+ */
+const CodeLineText = memo(function CodeLineText({ text, lang, plain, start, marks, interactive }: { text: string; lang: CodeLanguage; plain?: boolean; start: number; marks?: readonly CodeLineMark[]; markKey?: string; interactive: boolean }) {
+  if (!text) return ' '
+  if (!marks?.length && !interactive) return <>{plain ? text : codeHighlightCached(text, lang)}</>
+  const segs = plain ? [{ s: 0, e: text.length } as CodeSegment] : codeSegmentsCached(text, lang)
+  const out: ReactNode[] = []
+  let group: ReactNode[] = [], groupMark = -1, k = 0
+  const flush = () => {
+    if (!group.length) return
+    if (groupMark < 0) out.push(...group)
+    else { const m = marks![groupMark]; out.push(<span key={`m${k++}`} data-code-mark="" className={cn(CODE_MARK, CODE_MARK_VARIANT[m.variant])} style={{ '--code-mark': m.color } as CSSProperties}>{group}</span>) }
+    group = []
+  }
+  for (const seg of segs) {
+    for (let a = seg.s; a < seg.e;) {
+      // the mark covering this column (the last one wins), and where the next mark starts or ends
+      let mark = -1, b = seg.e
+      marks?.forEach((m, i) => { if (m.start <= a && a < m.end) mark = i; if (m.start > a && m.start < b) b = m.start; if (m.end > a && m.end < b) b = m.end })
+      if (mark !== groupMark) { flush(); groupMark = mark }
+      const piece = text.slice(a, b)
+      group.push(seg.cls || interactive ? <span key={k++} className={seg.cls} data-o={interactive ? start + seg.s : undefined} data-e={interactive ? start + seg.e : undefined}>{piece}</span> : piece)
+      a = b
+    }
+  }
+  flush()
+  return <>{out}</>
+}, (a, b) => a.text === b.text && a.lang === b.lang && a.plain === b.plain && a.start === b.start && a.markKey === b.markKey && a.interactive === b.interactive)
+
+type CodeRow = { text: string; no?: number | null; kind?: 'hi' | 'add' | 'del' | 'hunk' | 'blank'; plain?: boolean; /** offset of the line in the code */ start?: number; marks?: CodeLineMark[]; markKey?: string }
 const CODE_ROW_BG = { hi: 'bg-[color-mix(in_srgb,var(--accent)_10%,transparent)]', add: 'bg-[color-mix(in_srgb,var(--ok)_11%,transparent)]', del: 'bg-[color-mix(in_srgb,var(--bad)_10%,transparent)]', hunk: 'bg-[var(--muted)] text-[var(--fg3)]', blank: 'bg-[color-mix(in_srgb,var(--muted)_60%,transparent)]' }
 
 /** Highlighted lines are cached by language and text: re-renders, tab switches and remounts reuse the same elements. */
@@ -159,7 +260,8 @@ function codeHighlightCached(text: string, lang: CodeLanguage): ReactNode[] {
  * The rows of a code view. Memoised (by row content), and focusable with a label only while it actually scrolls,
  * so keyboard users can scroll it without adding a Tab stop to every short snippet.
  */
-const CodeRows = memo(function CodeRows({ rows, lang, wrap, numbers = true, label, className }: { rows: CodeRow[]; lang: CodeLanguage; wrap?: boolean; numbers?: boolean; label?: string; className?: string }) {
+const CodeRows = memo(function CodeRows({ rows, lang, wrap, numbers = true, label, className, onToken }: { rows: CodeRow[]; lang: CodeLanguage; wrap?: boolean; numbers?: boolean; label?: string; className?: string;
+  /** token events (keep its identity stable): the mouse moved onto a token (null: off the tokens), or a token was clicked */ onToken?: (type: 'hover' | 'click', at: { start: number; end: number } | null) => void }) {
   const t = useMessages(CODE_MESSAGES)
   const ref = useRef<HTMLPreElement>(null)
   const [scrolls, setScrolls] = useState(false)
@@ -168,9 +270,17 @@ const CodeRows = memo(function CodeRows({ rows, lang, wrap, numbers = true, labe
     const upd = () => setScrolls(el.scrollWidth > el.clientWidth + 1 || el.scrollHeight > el.clientHeight + 1)
     upd(); const ro = new ResizeObserver(upd); ro.observe(el); return () => ro.disconnect()
   }, [rows, wrap])
+  const tokenAt = (target: EventTarget) => {
+    const el = target instanceof Element ? target.closest<HTMLElement>('[data-o]') : null
+    return el ? { start: Number(el.dataset.o), end: Number(el.dataset.e) } : null
+  }
+  const mouse = (e: { pointerType?: string }) => !e.pointerType || e.pointerType === 'mouse' // a tap is a click, not a hover
   return (
     <pre ref={ref} dir="ltr" tabIndex={scrolls ? 0 : undefined} role={scrolls ? 'region' : undefined} aria-label={scrolls ? t('scrolls', { label: label ?? t('code') }) : undefined}
-      className={cn('relative m-0 overflow-auto py-2.5 font-[family-name:var(--mono)] text-xs leading-[1.65] [contain:inline-size] focus-visible:outline-2 focus-visible:-outline-offset-2 focus-visible:outline-[var(--accent)]', className)}>
+      onPointerOver={onToken && (e => { if (mouse(e)) onToken('hover', tokenAt(e.target)) })}
+      onPointerLeave={onToken && (e => { if (mouse(e)) onToken('hover', null) })}
+      onClick={onToken && (e => { const at = tokenAt(e.target); if (at) onToken('click', at) })}
+      className={cn('relative m-0 overflow-auto py-2.5 font-[family-name:var(--mono)] text-xs leading-[1.65] [contain:inline-size] focus-visible:outline-2 focus-visible:-outline-offset-2 focus-visible:outline-[var(--accent)]', onToken && '[&_[data-o]]:cursor-pointer', className)}>
       {rows.map((r, i) => (
         <span key={i} data-kind={r.kind} className={cn('flex min-h-[1.65em] pe-3', r.kind && CODE_ROW_BG[r.kind])}>
           {numbers && (
@@ -178,13 +288,17 @@ const CodeRows = memo(function CodeRows({ rows, lang, wrap, numbers = true, labe
               {r.no ?? ''}{r.kind === 'add' && <span className="absolute end-1 text-[var(--ok)]">+</span>}{r.kind === 'del' && <span className="absolute end-1 text-[var(--bad)]">−</span>}
             </span>
           )}
-          <span className={cn('min-w-0 flex-1', wrap ? 'break-words whitespace-pre-wrap' : 'whitespace-pre')}>{r.plain ? r.text : (r.text ? codeHighlightCached(r.text, lang) : ' ')}</span>
+          <span className={cn('min-w-0 flex-1', wrap ? 'break-words whitespace-pre-wrap' : 'whitespace-pre')}>
+            {r.marks || onToken
+              ? <CodeLineText text={r.text} lang={lang} plain={r.plain} start={r.start ?? 0} marks={r.marks} markKey={r.markKey} interactive={!!onToken} />
+              : r.plain ? r.text : (r.text ? codeHighlightCached(r.text, lang) : ' ')}
+          </span>
         </span>
       ))}
     </pre>
   )
-}, (a, b) => a.lang === b.lang && a.wrap === b.wrap && a.numbers === b.numbers && a.label === b.label && a.className === b.className
-  && a.rows.length === b.rows.length && a.rows.every((r, i) => { const q = b.rows[i]; return r.text === q.text && r.no === q.no && r.kind === q.kind && r.plain === q.plain }))
+}, (a, b) => a.lang === b.lang && a.wrap === b.wrap && a.numbers === b.numbers && a.label === b.label && a.className === b.className && a.onToken === b.onToken
+  && a.rows.length === b.rows.length && a.rows.every((r, i) => { const q = b.rows[i]; return r.text === q.text && r.no === q.no && r.kind === q.kind && r.plain === q.plain && r.start === q.start && r.markKey === q.markKey }))
 
 const CODE_HEAD = 'flex h-10 items-center gap-2 border-b border-[var(--line)] bg-[var(--card)] pe-1.5 ps-3 text-xs [@media(pointer:coarse)]:h-11'
 /** Header that may wrap onto a second row on narrow cards (no tabs inside, so no fixed height needed). */
@@ -236,9 +350,16 @@ function CodeHeaderTabs({ tabs, value, onChange, label }: { tabs: string[]; valu
  * Pass `previous` to get a "Changes" toggle that shows an inline diff (computed the first time it's opened, then labelled
  * +N −M; very large changes fall back to one removed and one added block); long code collapses behind
  * a fade with "Show all N lines". Without `defaultWrap`, lines wrap by default when the block is narrower than 520px (phones).
+ * `marks` underline character ranges (CodeMark: wavy or solid, in any colour; a range over several lines underlines
+ * each line's part); `onTokenHover` / `onTokenClick` report the token under the mouse (offsets into `code`), for
+ * linking the code to something else (a syntax tree, a trace). Both are decorative and off in the Changes view.
  */
-export function CodeBlock({ code, filename, language, lineNumbers = true, highlight = [], previous, defaultWrap, collapseAt = 300, className }:
-  { code: string; filename?: string; language?: CodeLanguage; lineNumbers?: boolean; highlight?: number[]; previous?: string; defaultWrap?: boolean; collapseAt?: number | false; className?: string }) {
+export function CodeBlock({ code, filename, language, lineNumbers = true, highlight = [], marks, onTokenHover, onTokenClick, previous, defaultWrap, collapseAt = 300, className }:
+  { code: string; filename?: string; language?: CodeLanguage; lineNumbers?: boolean; highlight?: number[]
+    /** character ranges to underline and tint */ marks?: readonly CodeMark[]
+    /** the mouse moved onto a token (word, operator, string…) or off the tokens (null) */ onTokenHover?: (token: CodeTokenRange | null) => void
+    /** a token was clicked or tapped */ onTokenClick?: (token: CodeTokenRange) => void
+    previous?: string; defaultWrap?: boolean; collapseAt?: number | false; className?: string }) {
   const t = useMessages(CODE_MESSAGES)
   const lang = language ?? codeLanguageOf(filename)
   const lines = useMemo(() => code.replace(/\n$/, '').split('\n'), [code])
@@ -252,9 +373,29 @@ export function CodeBlock({ code, filename, language, lineNumbers = true, highli
   const [open, setOpen] = useState(false)
   const [inner, { height: full }] = useSize<HTMLDivElement>()
   const hiKey = highlight.join(',')
-  const rows: CodeRow[] = useMemo(() => diffOn && diff
-    ? diff.map(r => ({ text: r.text, no: r.type === '-' ? r.a : r.b, kind: r.type === '+' ? 'add' : r.type === '-' ? 'del' : undefined }))
-    : lines.map((text, i) => ({ text, no: i + 1, kind: highlight.includes(i + 1) ? 'hi' : undefined })), [diffOn, diff, lines, hiKey]) // eslint-disable-line react-hooks/exhaustive-deps
+  const markKey = marks?.map(m => `${m.start}:${m.end}:${m.color ?? ''}:${m.variant ?? ''}`).join('|') ?? ''
+  const starts = useMemo(() => { let at = 0; return lines.map(l => { const s = at; at += l.length + 1; return s }) }, [lines])
+  const rows: CodeRow[] = useMemo(() => {
+    if (diffOn && diff) return diff.map(r => ({ text: r.text, no: r.type === '-' ? r.a : r.b, kind: r.type === '+' ? 'add' : r.type === '-' ? 'del' : undefined }))
+    const parts = marks?.length ? codeMarkRanges(lines, marks) : null
+    return lines.map((text, i): CodeRow => {
+      const ms = parts?.[i].map(p => ({ start: p.start, end: p.end, color: marks![p.mark].color ?? 'var(--accent)', variant: marks![p.mark].variant ?? 'wavy' }))
+      return { text, no: i + 1, kind: highlight.includes(i + 1) ? 'hi' : undefined, start: starts[i], ...(ms?.length ? { marks: ms, markKey: ms.map(m => `${m.start}:${m.end}:${m.color}:${m.variant}`).join('|') } : null) }
+    })
+  }, [diffOn, diff, lines, starts, hiKey, markKey]) // eslint-disable-line react-hooks/exhaustive-deps
+  // token events: one stable handler (CodeRows is memoised on it) that reads the latest callbacks and reports changes only
+  const tokenProps = useRef({ code, onTokenHover, onTokenClick }); tokenProps.current = { code, onTokenHover, onTokenClick }
+  const lastToken = useRef<string | null>(null)
+  const onToken = useCallback((type: 'hover' | 'click', at: { start: number; end: number } | null) => {
+    const { code: c, onTokenHover: hover, onTokenClick: click } = tokenProps.current
+    const token = at && { ...at, text: c.slice(at.start, at.end) }
+    if (type === 'click') { if (token) click?.(token); return }
+    const key = at ? `${at.start}:${at.end}` : null
+    if (key === lastToken.current) return
+    lastToken.current = key
+    hover?.(token)
+  }, [])
+  const tokens = !!(onTokenHover || onTokenClick) && !(diffOn && diff)
   const collapsible = collapseAt !== false && full > collapseAt + 40
   const height = !collapsible ? 'auto' : open ? full + 48 : collapseAt
   return (
@@ -275,7 +416,7 @@ export function CodeBlock({ code, filename, language, lineNumbers = true, highli
       <motion.div className="relative overflow-hidden" initial={false} animate={{ height }} transition={spring(0.12, 0.45)}>
         <div ref={inner}>
           <motion.div key={String(diffOn)} initial={{ opacity: 0.3 }} animate={{ opacity: 1 }} transition={{ duration: 0.2 }}>
-            <CodeRows rows={rows} lang={lang} wrap={wrap} numbers={lineNumbers} label={filename ?? t('code')} className={cn(!wrap && 'overflow-y-hidden')} />
+            <CodeRows rows={rows} lang={lang} wrap={wrap} numbers={lineNumbers} label={filename ?? t('code')} className={cn(!wrap && 'overflow-y-hidden')} onToken={tokens ? onToken : undefined} />
           </motion.div>
         </div>
         {collapsible && (

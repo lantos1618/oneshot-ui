@@ -286,6 +286,38 @@ describe('LaneGraph', () => {
     expect(onContextMenu).toHaveBeenCalledWith(expect.objectContaining({ node: nodes[1] }), expect.anything())
   })
 
+  it('lights a row from outside with controlled `hovered`, and reports the mouse with onHoverChange', () => {
+    const onHoverChange = vi.fn()
+    // renderRow sees the lit/dimmed state the gutter draws from
+    const lit = (row: { node: { title: string } }, state: { lit: boolean; dimmed: boolean }) => h('span', { 'data-state': state.lit ? 'lit' : state.dimmed ? 'dimmed' : 'none' }, row.node.title)
+    const states = () => screen.getAllByRole('row').map(r => `${r.textContent}:${r.querySelector('[data-state]')!.getAttribute('data-state')}`)
+    const props = { nodes, order: 'input' as const, direction: 'up' as const, renderRow: lit, onHoverChange }
+    const { rerender } = render(h(LaneGraph<(typeof nodes)[number]>, { ...props, hovered: 'left' }))
+    expect(states()).toEqual(['Root:lit', 'Left:lit', 'Right:dimmed', 'Join:dimmed']) // Left's first-parent line
+    rerender(h(LaneGraph<(typeof nodes)[number]>, { ...props, hovered: 'join' }))
+    expect(states()).toEqual(['Root:lit', 'Left:lit', 'Right:dimmed', 'Join:lit'])
+    // the mouse doesn't override a controlled value; it is reported, and the owner decides
+    fireEvent.pointerEnter(screen.getByRole('row', { name: 'Right' }), { pointerType: 'mouse' })
+    expect(onHoverChange).toHaveBeenLastCalledWith('right')
+    expect(states()).toEqual(['Root:lit', 'Left:lit', 'Right:dimmed', 'Join:lit'])
+    fireEvent.pointerLeave(screen.getByRole('grid'), { pointerType: 'mouse' })
+    expect(onHoverChange).toHaveBeenLastCalledWith(null)
+    rerender(h(LaneGraph<(typeof nodes)[number]>, { ...props, hovered: null }))
+    expect(states().every(x => x.endsWith(':none'))).toBe(true)
+    rerender(h(LaneGraph<(typeof nodes)[number]>, { ...props, hovered: 'gone' })) // an id not in the graph lights nothing
+    expect(states().every(x => x.endsWith(':none'))).toBe(true)
+  })
+
+  it('keeps hover internal when `hovered` is not passed', () => {
+    const onHoverChange = vi.fn()
+    render(h(LaneGraph<(typeof nodes)[number]>, { nodes, order: 'input', direction: 'up', renderRow: (row, state) => h('span', { 'data-lit': state.lit || undefined }, row.node.title), onHoverChange }))
+    fireEvent.pointerEnter(screen.getByRole('row', { name: 'Right' }), { pointerType: 'mouse' })
+    expect(onHoverChange).toHaveBeenCalledWith('right')
+    expect(screen.getByRole('row', { name: 'Right' }).querySelector('[data-lit]')).not.toBeNull()
+    fireEvent.pointerEnter(screen.getByRole('row', { name: 'Right' }), { pointerType: 'mouse' })
+    expect(onHoverChange).toHaveBeenCalledTimes(1) // changes only
+  })
+
   it("renders variable-height rows with rowHeight 'auto'", () => {
     render(h(LaneGraph<(typeof nodes)[number]>, { nodes, order: 'input', direction: 'up', rowHeight: 'auto', anchor: 'end', renderRow: row => h('p', { style: { height: 40 + row.index * 30 } }, row.node.title) }))
     const rows = screen.getAllByRole('row')

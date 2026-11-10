@@ -9,7 +9,7 @@ import { openCodeDrawer } from './CodeDrawer'
 
 /** Use-case tags per card title, copied from the original page. The filter and ⌘K match on them. */
 export const SPEC_TAGS: Record<string, string> = {
-  'Tags over time': 'charts, annotations, events, timeline, health, monitoring', 'Timeline views': 'diagrams, timeline, events, journal, health',
+  'Tags over time': 'charts, annotations, events, timeline, swimlanes, journal, health, monitoring',
   'Slider with magnets': 'user input, range, snapping, haptics, settings',
   'Accordion · composable': 'data, disclosure, composable, FAQ', 'Composable overlays': 'overlay, dialog, popover, tooltip, composable, asChild',
   'Context menu · composable': 'navigation, menu, right click, composable, keyboard', 'Links as buttons (asChild)': 'navigation, links, routing, asChild, buttons',

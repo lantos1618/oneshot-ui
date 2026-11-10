@@ -1,11 +1,12 @@
 // The "graphs as rows" examples (src/examples/graphs.tsx): each builder turns its data into lane nodes correctly
 // (the AST parser's tree, the dependency diamonds, the chat tree's forks and merge), and the chat example's
-// branch switcher, collapse and keys work.
+// branch switcher, collapse and keys work; the AST example links rows and code both ways (character-precise marks).
 import { act, fireEvent, render, screen, within } from '@testing-library/react'
 import { describe, expect, it } from 'vitest'
+import { codeMarkRanges } from '../../src/lib/code'
 import { layoutLanes } from '../../src/lib/lanes'
 import {
-  AGENT_RUN_SAMPLE, AST_SAMPLE, CHAT_TREE_SAMPLE, ChatBranchesExample, DEPENDENCY_SAMPLE, agentRunNodes, astLaneNodes, chatBranchGraph, chatFork, chatLeafOf, chatTreeHistory, dependencyNodes, parseAst,
+  AGENT_RUN_SAMPLE, AST_SAMPLE, AstGraphExample, CHAT_TREE_SAMPLE, ChatBranchesExample, DEPENDENCY_SAMPLE, agentRunNodes, astLaneNodes, astNodeAt, chatBranchGraph, chatFork, chatLeafOf, chatTreeHistory, dependencyNodes, parseAst,
   type AstNode,
 } from '../../src/examples/graphs'
 
@@ -40,6 +41,75 @@ describe('parseAst', () => {
     const L = layoutLanes(nodes, { order: 'input', direction: 'up' })
     expect(L.rows.map(r => r.node.id)).toEqual(nodes.map(x => x.id)) // a tree in source order is already topological
     expect(L.rows[2].children).toHaveLength(3) // the call forks to its callee and both arguments
+  })
+})
+
+describe('astNodeAt and code marks', () => {
+  const root = parseAst(AST_SAMPLE)
+  const label = (n: AstNode | null) => n && (n.label ? `${n.kind} ${n.label}` : n.kind)
+  const at = (word: string, from = 0) => { const i = AST_SAMPLE.indexOf(word, from); return [i, i + word.length] as const }
+
+  it('finds the deepest node containing a position or a token', () => {
+    expect(label(astNodeAt(root, ...at('price')))).toBe('Identifier price')
+    expect(label(astNodeAt(root, at('.price')[0]))).toBe('MemberExpression .price') // the dot belongs to the member access
+    expect(label(astNodeAt(root, 0, 5))).toBe('VariableDeclaration const total') // a keyword: its statement
+    expect(label(astNodeAt(root, ...at('"You saved "')))).toBe('StringLiteral "You saved "')
+    expect(label(astNodeAt(root, ...at(' > ', AST_SAMPLE.indexOf('if'))))).toBe('BinaryExpression >') // spaces around an operator
+    expect(label(astNodeAt(root, AST_SAMPLE.indexOf('\n') + 1))).toBe('ArrowFunction') // the indentation inside a multi-line arrow
+    expect(astNodeAt(root, AST_SAMPLE.length + 2)).toBeNull()
+  })
+
+  it('splits a multi-line node into each line\'s part, without indentation or trailing spaces', () => {
+    const arrow = astNodeAt(root, AST_SAMPLE.indexOf('=>'))!
+    const lines = AST_SAMPLE.split('\n')
+    const parts = codeMarkRanges(lines, [arrow])
+    expect(parts.map(p => p.map(r => lines[parts.indexOf(p)].slice(r.start, r.end)))).toEqual([['(sum, item) =>'], ['sum + item.price * item.qty'], [], []])
+    expect(codeMarkRanges(['a  ', '  b'], [{ start: 0, end: 7 }])).toEqual([[{ start: 0, end: 1, mark: 0 }], [{ start: 2, end: 3, mark: 0 }]])
+    expect(codeMarkRanges(['abc'], [{ start: 1, end: 1 }, { start: 1, end: 2 }])).toEqual([[{ start: 1, end: 2, mark: 1 }]]) // empty ranges draw nothing
+  })
+})
+
+describe('AstGraphExample', () => {
+  const marks = (c: HTMLElement) => [...c.querySelectorAll('[data-code-mark]')].map(m => m.textContent)
+  const row = (text: RegExp) => screen.getAllByRole('row').find(r => text.test(r.textContent ?? ''))!
+  const token = (c: HTMLElement, text: string) => [...c.querySelectorAll<HTMLElement>('pre [data-o]')].find(t => t.textContent === text)!
+  const lit = (r: HTMLElement) => r.querySelector('[data-lit]') != null
+
+  it('hovering a row underlines exactly its characters, line by line', () => {
+    const { container } = render(<AstGraphExample />)
+    expect(marks(container)).toEqual([])
+    fireEvent.pointerEnter(row(/^ArrowFunction/).querySelector('[role=gridcell]:last-child > div')!, { pointerType: 'mouse' })
+    expect(marks(container)).toEqual(['(sum, item) =>', 'sum + item.price * item.qty'])
+    expect(screen.getByText(/characters 26–70/)).toBeInTheDocument()
+    fireEvent.pointerEnter(row(/^Identifier\s*reduce/).querySelector('[role=gridcell]:last-child > div')!, { pointerType: 'mouse' })
+    expect(marks(container)).toEqual(['reduce']) // not the whole line
+  })
+
+  it('hovering a word in the code lights the deepest node\'s row and its ancestry; leaving clears', () => {
+    const { container } = render(<AstGraphExample />)
+    const pre = container.querySelector('pre')!
+    act(() => { fireEvent.pointerOver(token(container, 'reduce'), { pointerType: 'mouse' }) })
+    expect(marks(container)).toEqual(['reduce'])
+    expect(lit(row(/^Identifier\s*reduce/))).toBe(true) // LaneGraph's own hover highlight
+    expect(lit(row(/^MemberExpression/))).toBe(true) // …up its first-parent line
+    expect(lit(row(/^Identifier\s*cart/))).toBe(false)
+    act(() => { fireEvent.pointerOver(token(container, 'cart'), { pointerType: 'mouse' }) })
+    expect(lit(row(/^Identifier\s*cart/))).toBe(true)
+    expect(lit(row(/^Identifier\s*reduce/))).toBe(false)
+    act(() => { fireEvent.pointerLeave(pre, { pointerType: 'mouse' }) })
+    expect(marks(container)).toEqual([])
+    expect(screen.getAllByRole('row').some(lit)).toBe(false)
+  })
+
+  it('clicking a word selects its node and moves the Tab stop to its row', () => {
+    const { container } = render(<AstGraphExample />)
+    act(() => { fireEvent.pointerOver(token(container, 'reduce'), { pointerType: 'mouse' }) })
+    fireEvent.click(token(container, 'reduce'))
+    act(() => { fireEvent.pointerLeave(container.querySelector('pre')!, { pointerType: 'mouse' }) })
+    const r = row(/^Identifier\s*reduce/)
+    expect(r).toHaveAttribute('aria-selected', 'true')
+    expect(r).toHaveAttribute('tabindex', '0')
+    expect(marks(container)).toEqual(['reduce']) // the selection stays underlined
   })
 })
 

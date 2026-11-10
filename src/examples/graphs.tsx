@@ -1,16 +1,16 @@
-import { useCallback, useMemo, useState } from 'react'
+import { useCallback, useLayoutEffect, useMemo, useRef, useState } from 'react'
 import { Badge, Icon, IconButton, StatusIcon, cn, useLocale, type StatusIconStatus } from '../lib/core'
 import { Switch } from '../lib/forms'
-import { CodeBlock } from '../lib/code'
+import { CodeBlock, type CodeMark, type CodeTokenRange } from '../lib/code'
 import { Message, MessageActions } from '../lib/aichat'
 import { aiMessageText, type AiMessage } from '../lib/aistream'
-import { LaneGraph, type LaneNode, type LaneRow } from '../lib/lanes'
+import { LaneGraph, layoutLanes, type LaneGraphHandle, type LaneNode, type LaneRow, type LaneRowState } from '../lib/lanes'
 
 /* Graphs as rows: four small examples that feed different graph data into LaneGraph, each with its own renderRow.
  * The graph is always the same idea (nodes with parents, laid out by layoutLanes); only the rows differ.
  *
  *   chat branches   editing a message or regenerating an answer forks a branch; one message combines two branches
- *   AST             a short snippet parsed into a syntax tree; hover a node to see its code
+ *   AST             a short snippet parsed into a syntax tree, linked both ways with its code (row ↔ the characters it covers)
  *   agent run       steps that fan out and back in, with statuses and durations
  *   dependencies    packages and the packages they need: shared dependencies make diamonds
  *
@@ -198,7 +198,8 @@ export type AstNode = { id: string; kind: string; label?: string; start: number;
 export type AstLaneNode = LaneNode & { ast: AstNode; depth: number }
 
 /** The snippet the AST example parses. */
-export const AST_SAMPLE = `const total = cart.reduce((sum, item) => sum + item.price * item.qty, 0)
+export const AST_SAMPLE = `const total = cart.reduce((sum, item) =>
+  sum + item.price * item.qty, 0)
 const discount = total > 100 ? total * 0.1 : 0
 if (discount > 0) notify(user, "You saved " + discount)`
 
@@ -324,40 +325,90 @@ export function astLaneNodes(root: AstNode): AstLaneNode[] {
   return out
 }
 
+/**
+ * The deepest node whose span contains `[start, end)` (a token's range; `end` defaults to `start + 1`, one character):
+ * what a word in the code belongs to. The root when nothing deeper does; null outside the root's span.
+ */
+export function astNodeAt(root: AstNode, start: number, end = start + 1): AstNode | null {
+  if (start < root.start || end > root.end) return null
+  let at = root
+  for (;;) { const next = at.children.find(c => c.start <= start && end <= c.end); if (!next) return at; at = next }
+}
+
 /** Kinds by colour family, as full class strings. */
 const AST_KIND_CLASS: Record<string, string> = {
   Program: 'text-[var(--fg)]', VariableDeclaration: 'text-[var(--accent)]', IfStatement: 'text-[var(--accent)]', ExpressionStatement: 'text-[var(--accent)]', ReturnStatement: 'text-[var(--accent)]',
   Identifier: 'text-[var(--fg2)]', NumericLiteral: 'text-[var(--ok)]', StringLiteral: 'text-[var(--ok)]',
 }
-/** 1-based lines a source span touches. */
-const astLines = (src: string, start: number, end: number) => {
-  const first = src.slice(0, start).split('\n').length, last = src.slice(0, Math.max(start, end - 1)).split('\n').length
-  return Array.from({ length: last - first + 1 }, (_, k) => first + k)
-}
 
-/** The AST example: the parsed snippet as a tree of rows (kind, label, the code it covers); hover or focus a node to highlight its lines. */
+/**
+ * The AST example: the parsed snippet as a tree of rows (kind, label, the code it covers) beside the code. Hovering or
+ * focusing a row underlines exactly that node's characters in the code, in the row's lane colour; hovering a word in the
+ * code lights the deepest node containing it (LaneGraph's controlled `hovered`: its row and first-parent line, scrolled
+ * into view inside the list), and clicking one selects that node (solid underline). The rows are the accessible part;
+ * the marks are decoration.
+ */
 export function AstGraphExample({ source = AST_SAMPLE, height = 420 }: { source?: string; height?: number }) {
-  const nodes = useMemo(() => astLaneNodes(parseAst(source)), [source])
-  const [hot, setHot] = useState<number | null>(null)
+  const root = useMemo(() => parseAst(source), [source])
+  const layout = useMemo(() => layoutLanes(astLaneNodes(root), { order: 'input', direction: 'up' }), [root])
+  const graph = useRef<LaneGraphHandle>(null)
+  // the hovered node, and where the mouse is: on its row, or on a word of its code
+  const [hot, setHot] = useState<{ id: string; from: 'row' | 'code' } | null>(null)
   const [active, setActive] = useState(0)
-  const at = nodes[hot ?? active]?.ast
-  const renderRow = useCallback((row: LaneRow<AstLaneNode>) => {
+  const [selected, setSelected] = useState<string | null>(null)
+  const [focused, setFocused] = useState(false)
+  const selectedRow = selected == null ? -1 : layout.rowOf(selected)
+  const hotRow = hot ? layout.rowOf(hot.id) : -1
+  const resting = !hot && !focused
+  const shownRow = hotRow >= 0 ? hotRow : focused ? active : selectedRow >= 0 ? selectedRow : null
+  const shown = shownRow == null ? undefined : layout.rows[shownRow]
+  const at = shown?.node.ast
+  const marks = useMemo<CodeMark[]>(() => (at && shown ? [{ start: at.start, end: at.end, color: layout.palette[shown.color], variant: resting ? 'solid' : 'wavy' }] : []), [at, shown, layout, resting])
+
+  /* the list follows the code: scroll the row into view inside the list (not the page) */
+  const reveal = useCallback((i: number) => {
+    const el = graph.current?.element; if (!el || !el.clientHeight) return
+    const h = el.querySelector<HTMLElement>('[role=row]')?.offsetHeight || 32, top = i * h
+    if (top < el.scrollTop) el.scrollTop = top
+    else if (top + h > el.scrollTop + el.clientHeight) el.scrollTop = top + h - el.clientHeight
+  }, [])
+  const codeRow = hot?.from === 'code' ? hotRow : -1
+  useLayoutEffect(() => { if (codeRow >= 0) reveal(codeRow) }, [codeRow, reveal])
+
+  const onHoverChange = useCallback((id: string | null) => setHot(h => (id ? { id, from: 'row' } : h?.from === 'row' ? null : h)), [])
+  const nodeAt = (t: CodeTokenRange) => astNodeAt(root, t.start, t.end)
+  const onTokenHover = (t: CodeTokenRange | null) => { const n = t && nodeAt(t); setHot(h => (n ? { id: n.id, from: 'code' } : h?.from === 'code' ? null : h)) }
+  const onTokenClick = (t: CodeTokenRange) => {
+    const n = nodeAt(t), i = n ? layout.rowOf(n.id) : -1; if (!n || i < 0) return
+    setActive(i); setSelected(n.id); reveal(i)
+  }
+
+  const renderRow = useCallback((row: LaneRow<AstLaneNode>, state: LaneRowState) => {
     const n = row.node.ast, slice = source.slice(n.start, n.end).replace(/\s+/g, ' ')
     return (
-      <div className="flex h-full min-w-0 items-center gap-2 pe-3 font-[family-name:var(--mono)] text-xs" onPointerEnter={e => { if (e.pointerType === 'mouse') setHot(row.index) }}>
+      <div data-lit={state.lit || undefined} className="flex h-full min-w-0 items-center gap-2 pe-3 font-[family-name:var(--mono)] text-xs">
         <span className={cn('flex-none', AST_KIND_CLASS[n.kind] ?? 'text-[var(--fg)]')}>{n.kind}</span>
         {n.label && <Badge size="sm" className="flex-none font-[family-name:var(--mono)]">{n.label}</Badge>}
         {n.children.length > 0 && <span dir="ltr" className="min-w-0 truncate text-[var(--fg3)]">{slice}</span>}
       </div>
     )
   }, [source])
+  // the row the code points at looks hovered too (its :hover background can't be set from outside)
+  const rowClassName = useCallback((row: LaneRow<AstLaneNode>, state: LaneRowState) => (row.index === codeRow && !state.selected ? '!bg-[var(--muted)]' : undefined), [codeRow])
   return (
-    <div className="grid min-w-0 gap-3 md:grid-cols-[minmax(0,1fr)_minmax(0,1fr)]" onPointerLeave={() => setHot(null)}>
-      <LaneGraph nodes={nodes} order="input" direction="up" height={height} aria-label="Syntax tree" active={active} onActiveChange={setActive} renderRow={renderRow}
-        className="rounded-[var(--r-md)] border border-[var(--line)]" />
+    <div className="grid min-w-0 gap-3 md:grid-cols-[minmax(0,1fr)_minmax(0,1fr)]">
+      <div className="min-w-0" onFocus={() => setFocused(true)} onBlur={e => { if (!e.currentTarget.contains(e.relatedTarget as Node | null)) setFocused(false) }}>
+        <LaneGraph ref={graph} nodes={layout} height={height} aria-label="Syntax tree" active={active} onActiveChange={setActive}
+          selected={selected} onSelect={id => setSelected(id)} hovered={hot?.id ?? null} onHoverChange={onHoverChange} renderRow={renderRow} rowClassName={rowClassName}
+          className="rounded-[var(--r-md)] border border-[var(--line)]" />
+      </div>
       <div className="flex min-w-0 flex-col gap-2">
-        <CodeBlock code={source} filename="discount.ts" highlight={at ? astLines(source, at.start, at.end) : []} defaultWrap />
-        {at && <p className="m-0 text-xs text-[var(--fg2)]"><span className="font-medium text-[var(--fg)]">{at.kind}</span> · characters {at.start}–{at.end}{at.label ? ` · ${at.label}` : ''}</p>}
+        <CodeBlock code={source} filename="discount.ts" marks={marks} onTokenHover={onTokenHover} onTokenClick={onTokenClick} defaultWrap />
+        <p className="m-0 min-h-[1.5em] text-xs text-[var(--fg2)]">
+          {at
+            ? <><span className="font-medium text-[var(--fg)]">{at.kind}</span> · characters {at.start}–{at.end}{at.label ? ` · ${at.label}` : ''}</>
+            : 'Hover a row or a word in the code to link them; click a word to select its node.'}
+        </p>
       </div>
     </div>
   )

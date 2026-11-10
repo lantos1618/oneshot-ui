@@ -1,7 +1,7 @@
 import { useEffect, useLayoutEffect, useMemo, useRef, useState, type ReactNode } from 'react'
 import { motion, useReducedMotion } from 'motion/react'
 import {
-  BarList, BoxViolinChart, BulletChart, Button, CalendarHeatmap, Chart, TagGlyph, DensityHistogram, DonutChart, ForestPlot, FunnelChart, Gauge, Heatmap, RadarChart, RegressionChart, ScatterChart, SegmentedControl, Slider, SparkChart, SparkTile, Switch, TOUCH, Tabs, TickerTable, Treemap, cn, dayKey, useLocale, useViewport, type ChartDatum, type TickerRow, type TimeTag, type TimeTagStyle,
+  BarList, BoxViolinChart, BulletChart, Button, CalendarHeatmap, Chart, ChartWithJournal, TagGlyph, DensityHistogram, DonutChart, ForestPlot, FunnelChart, Gauge, Heatmap, RadarChart, RegressionChart, ScatterChart, SegmentedControl, Slider, SparkChart, SparkTile, StateRibbon, Swimlanes, Switch, TOUCH, Tabs, TickerTable, Treemap, cn, dayKey, useLocale, useToast, useViewport, type ChartDatum, type TickerRow, type TimeTag, type TimeTagStyle,
 } from '../lib'
 import { TAGS_EVENT_KINDS, TAGS_KINDS, describeSample, tagsDay, type TagsDayVariant } from '../examples'
 import { Row, Section, Spec, SpecAction } from './kit'
@@ -283,7 +283,7 @@ function ChartsTreemapDemo() {
   )
 }
 
-/* ── Tags over time: one workday drawn six ways, one tab each (only the open tab's chart is mounted), with one Light day / Busy day switch for all ── */
+/* ── Tags over time: one workday drawn six ways with swimlanes underneath, plus a state ribbon and a journal; one tab each (only the open tab is mounted), one Light day / Busy day switch for all ── */
 const TAGS_POSTURE_SPAN_KINDS = TAGS_KINDS.filter(k => ['slouching', 'moving', 'lying', 'lunch'].includes(k.kind))
 /** The legend under the chart: point kinds, plus the span kinds where spans are shaded. */
 const TAGS_POINT_KINDS = TAGS_EVENT_KINDS.filter(k => k.kind !== 'lunch'), TAGS_SPAN_LEGEND = [...TAGS_POINT_KINDS, ...TAGS_POSTURE_SPAN_KINDS]
@@ -331,38 +331,93 @@ function ChartsAutoHeight({ children, className }: { children: ReactNode; classN
   )
 }
 
-/** "Tags over time": the same day in six annotation styles, one tab each. The day switch, the width and the selection are shared across tabs. */
+/* The lanes under every chart tab: a lane per logged kind (habits and lunch); on Bands also the posture spells the chart shades. */
+const TAGS_LANE_KINDS = TAGS_EVENT_KINDS, TAGS_LANE_SPAN_KINDS = [...TAGS_EVENT_KINDS, ...TAGS_POSTURE_SPAN_KINDS.filter(k => k.kind !== 'lunch')]
+const tagsLaneEvents = (tags: TimeTag[]) => tags.filter(t => TAGS_EVENT_KINDS.some(k => k.kind === t.kind))
+/** Every tab of the card: the six annotation styles (a chart each, with lanes underneath), then the state ribbon and the journal. */
+const TAGS_VIEWS: { value: string; label: string; desc: string; good: string; breaks: string; chart?: (typeof TAGS_TABS)[number] }[] = [
+  ...TAGS_TABS.map(t => ({ value: t.style, label: t.label, desc: t.desc, good: t.good, breaks: t.breaks, chart: t })),
+  { value: 'ribbon', label: 'State ribbon',
+    desc: 'Posture as one strip of contiguous states, logged tags pinned above and lunch as a bar below (as in sleep-stage bars and Toggl or RescueTime day timelines).',
+    good: 'The whole day in one compact strip: good posture against slouching at a glance, with tags pinned above. Fits widgets and phones.',
+    breaks: 'Drops the points line, so the score story is gone. One-minute slivers need a minimum width and a bigger hit area to tap.' },
+  { value: 'journal', label: 'Chart + journal',
+    desc: 'The points line with dots, and the day’s log beside it (as in Oura and WHOOP journals). Hover or focus either side to light up the other; the list scrolls to the lit tag.',
+    good: 'Every tag gets words, a time and edit or delete. Hovering either side lights up the other, and the list scrolls to follow.',
+    breaks: 'Needs width, so it stacks on phones, and there are two places to look. Long days need a scrolling, virtualised list.' },
+]
+
+/**
+ * "Tags over time": the same day in six annotation styles, each with a labelled lane per kind underneath on the same time
+ * axis (the Lanes switch hides them), plus a state ribbon and a chart with its journal; one tab each, only the open one
+ * mounted. The day switch, the lanes switch, the width, the selection and deleted journal rows are shared across tabs.
+ */
 function ChartsTagsOverTime() {
   const { fmt } = useLocale()
+  const toast = useToast()
   const [variant, setVariant] = useState<TagsDayVariant>('light')
-  const [style, setStyle] = useState<string>('auto')
+  const [view, setView] = useState<string>('auto')
+  const [lanes, setLanes] = useState(true)
   const [width, setWidth] = useState(100)
   const [picked, setPicked] = useState<TimeTag | null>(null)
+  const [removed, setRemoved] = useState<Set<string>>(new Set())
+  const [byHour, setByHour] = useState(false)
   const day = tagsDay(variant)
-  const tab = TAGS_TABS.find(t => t.style === style) ?? TAGS_TABS[0]
+  const tab = TAGS_VIEWS.find(t => t.value === view) ?? TAGS_VIEWS[0]
+  const pins = day.tags.filter(t => t.end === undefined), bars = day.tags.filter(t => t.kind === 'lunch')
+  const journal = tagsLaneEvents(day.tags).filter(t => !removed.has(t.id))
+  const del = (t: TimeTag) => {
+    setRemoved(r => new Set(r).add(t.id))
+    toast({ title: `Deleted ${t.label}`, description: fmt.time(+t.at), action: { label: 'Undo', onClick: () => setRemoved(r => { const n = new Set(r); n.delete(t.id); return n }) } })
+  }
   return (
-    <Spec title="Tags over time" span={3} desc="One workday with logged tags, drawn six ways. Pick a view; the day switch applies to all of them."
-      actions={<SegmentedControl aria-label="Day" size="sm" value={variant} onChange={v => setVariant(v as TagsDayVariant)} options={[{ value: 'light', label: 'Light day' }, { value: 'busy', label: 'Busy day' }]} />}
+    <Spec title="Tags over time" span={3} desc="One workday with logged tags, drawn six ways with a lane per kind underneath on the same time axis, then as a state ribbon and as a chart with its journal. The day switch applies to every view."
+      actions={/* on phones the two controls stack (Lanes above the day switch), so the title keeps its width */
+        <div className="flex max-w-[11rem] flex-wrap items-center justify-end gap-1.5 sm:max-w-none">
+          <Switch label={<span className="text-xs text-[var(--fg2)]">Lanes</span>} checked={lanes} onChange={setLanes} disabled={!tab.chart} />
+          <SegmentedControl aria-label="Day" size="sm" value={variant} onChange={v => setVariant(v as TagsDayVariant)} options={[{ value: 'light', label: 'Light day' }, { value: 'busy', label: 'Busy day' }]} />
+        </div>}
       notes={{ good: <ChartsAutoHeight>{tab.good}</ChartsAutoHeight>, breaks: <ChartsAutoHeight>{tab.breaks}</ChartsAutoHeight> }}
-      keys={[[['Tab'], 'view, series, tags'], [['←', '→'], 'step'], [['↵'], 'select'], [['Esc'], 'clear']]}>
-      <Tabs.Root value={style} onValueChange={v => { setStyle(v); setPicked(null) }}>
-        <Tabs.List aria-label="Annotation style">{TAGS_TABS.map(t => <Tabs.Trigger key={t.style} value={t.style}>{t.label}</Tabs.Trigger>)}</Tabs.List>
+      keys={[[['Tab'], 'view, series, tags, lanes'], [['←', '→'], 'step'], [['↑', '↓'], 'between lanes'], [['↵'], 'select'], [['Esc'], 'clear']]}>
+      <Tabs.Root value={view} onValueChange={v => { setView(v); setPicked(null) }}>
+        <Tabs.List aria-label="View">{TAGS_VIEWS.map(t => <Tabs.Trigger key={t.value} value={t.value}>{t.label}</Tabs.Trigger>)}</Tabs.List>
         {/* each view takes its own height; switching (a tap or a key, so not a layout shift) eases the card to it */}
         <ChartsAutoHeight>
         <p className="m-0 mt-2 text-xs leading-snug text-[var(--fg3)]">{tab.desc}</p>
-        {TAGS_TABS.map(t => (
-          <Tabs.Content key={t.style} value={t.style} className="flex flex-col gap-3">
-            {t.style === 'auto' && <Slider label="Width" min={35} max={100} value={width} onChange={setWidth} format={v => `${v}%`} className="max-w-xs" />}
-            <div style={t.style === 'auto' ? { width: `${width}%` } : undefined}>
-              <Chart data={day.points} x="t" height={220} legend={false} label={`Points, ${t.name}`}
-                series={[{ key: 'points', label: 'Points', type: 'area', color: 'var(--c4)' }]}
-                annotations={{ tags: t.spans ? day.tags : day.tags.filter(g => g.end === undefined), kinds: TAGS_KINDS, style: t.style, spans: t.spans ? 'bands' : 'none', onSelect: setPicked, reserve: t.style === 'auto' ? 'max' : 'current' }} />
-            </div>
-            <div className="flex flex-wrap items-center gap-x-3 gap-y-1 text-xs text-[var(--fg2)]">
-              {(t.spans ? TAGS_SPAN_LEGEND : TAGS_POINT_KINDS).map(k => <span key={k.kind} className="inline-flex items-center gap-1"><TagGlyph icon={k.icon} color={k.color} size={16} aria-hidden />{k.label}</span>)}
-            </div>
-          </Tabs.Content>
-        ))}
+        {TAGS_TABS.map(t => {
+          const chart = (
+            <Chart data={day.points} x="t" height={220} legend={false} label={`Points, ${t.name}`}
+              series={[{ key: 'points', label: 'Points', type: 'area', color: 'var(--c4)' }]}
+              annotations={{ tags: t.spans ? day.tags : day.tags.filter(g => g.end === undefined), kinds: TAGS_KINDS, style: t.style, spans: t.spans ? 'bands' : 'none', onSelect: setPicked, reserve: t.style === 'auto' ? 'max' : 'current' }} />
+          )
+          return (
+            <Tabs.Content key={t.style} value={t.style} className="flex flex-col gap-3">
+              {t.style === 'auto' && <Slider label="Width" min={35} max={100} value={width} onChange={setWidth} format={v => `${v}%`} className="max-w-xs" />}
+              <div style={t.style === 'auto' ? { width: `${width}%` } : undefined}>
+                {/* the chart sits on the lanes (`top`), so its plot and the lanes share x: Chart's 40 / 10 px gutters line up with the lane column */}
+                {lanes ? <Swimlanes top={chart} axis={false} labels="always" tags={t.spans ? day.tags : tagsLaneEvents(day.tags)} kinds={t.spans ? TAGS_LANE_SPAN_KINDS : TAGS_LANE_KINDS}
+                  start={day.start} end={day.end} onSelect={setPicked} label={`Lanes, ${t.name}`} /> : chart}
+              </div>
+              <div className="flex flex-wrap items-center gap-x-3 gap-y-1 text-xs text-[var(--fg2)]">
+                {(t.spans ? TAGS_SPAN_LEGEND : TAGS_POINT_KINDS).map(k => <span key={k.kind} className="inline-flex items-center gap-1"><TagGlyph icon={k.icon} color={k.color} size={16} aria-hidden />{k.label}</span>)}
+              </div>
+            </Tabs.Content>
+          )
+        })}
+        <Tabs.Content value="ribbon" className="flex flex-col gap-3">
+          <StateRibbon states={day.states} pins={pins} bars={bars} kinds={TAGS_KINDS} start={day.start} end={day.end} label="Posture over the day" />
+          <div className="mt-2 max-w-[320px] rounded-[var(--r-lg)] border border-[var(--line)] p-3">
+            <div className="mb-2 flex items-baseline justify-between text-xs"><b className="font-semibold">Today</b><span className="text-[var(--fg3)]">Compact, for widgets</span></div>
+            <StateRibbon size="compact" states={day.states} pins={pins} kinds={TAGS_KINDS} start={day.start} end={day.end} legend={false} label="Posture over the day, compact" />
+          </div>
+        </Tabs.Content>
+        <Tabs.Content value="journal" className="flex flex-col gap-3">
+          <Switch label="Group by hour" checked={byHour} onChange={setByHour} className="self-start" />
+          <ChartWithJournal tags={journal} kinds={TAGS_KINDS} groupBy={byHour ? 'hour' : undefined} height={250} label="Today's journal"
+            onEdit={t => toast({ title: `Edit ${t.label}`, description: 'Open your edit form here.' })} onDelete={del}
+            chart={link => <Chart data={day.points} x="t" height={250} legend={false} label="Points with logged tags" series={[{ key: 'points', label: 'Points', type: 'area', color: 'var(--c4)' }]}
+              annotations={{ ...link, style: 'dots', spans: 'bands' }} />} />
+        </Tabs.Content>
         </ChartsAutoHeight>
       </Tabs.Root>
       <span aria-live="polite" className="-mt-1 min-h-[1lh] text-xs text-[var(--fg3)]">{picked ? `Selected: ${picked.label}, ${fmt.time(+picked.at)}` : ''}</span>

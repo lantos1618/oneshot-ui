@@ -182,7 +182,7 @@ const GRAPH_TABS = [
 const GRAPH_TAB_DESC: Record<(typeof GRAPH_TABS)[number]['value'], string> = {
   git: 'GitGraph, the built-in preset: refs, search, branch filter and compare. Click a commit for its diff; Shift+click a second to compare; right-click for actions.',
   chat: 'Editing a question or regenerating an answer forks a branch; the last message combines two. The active thread stays in the left lane; ‹ n / m › switches branches.',
-  ast: 'A three-line snippet parsed into a syntax tree. Hover or focus a node: its lines light up in the code.',
+  ast: 'A short snippet parsed into a syntax tree. Hover or focus a node to underline its exact characters in the code; hover a word in the code to find its node, click to select it.',
   agent: 'An agent run that fans out to three tools, joins, fails a test, fixes it and carries on.',
   deps: 'Packages above the packages they use: react is shared by four, so its lane merges in from all of them.',
 }
