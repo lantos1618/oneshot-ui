@@ -2,10 +2,11 @@ import { useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
 import { Badge, sleep, useToast, useViewport, fmt } from '../lib'
 import { PromptInput, AgentPlan, SourceList, Citation, sourceDomain, ConfidenceField, GhostTextInput, ModelComparison, PermissionRequest, type Source, SourcesPanel, SuggestedEdit, ThinkingSteps, VoiceInput, type StepStatus } from '../lib/ai'
 import { AICanvas, AgentTransitMap } from '../lib/aiagent'
-import { AI_RICH_RENDERERS, AgentComposer, Conversation, Message, MessageActions, Suggestions, AssistantChat, ChatApproval, ChatCard, ChatChecklist, type ChatScript, type ComposerModel, type ComposerAction, type ComposerReply, type ComposerSample, type ComposerSendMeta, type Connector, type SlashCommand, type WorkspaceItem } from '../lib/aichat'
+import { AI_RICH_RENDERERS, AgentComposer, Conversation, Message, MessageActions, Suggestions, AssistantChat, ChatCard, ChatChecklist, type ChatScript, type ComposerModel, type ComposerAction, type ComposerReply, type ComposerSample, type ComposerSendMeta, type Connector, type SlashCommand, type WorkspaceItem } from '../lib/aichat'
 import { type AiChunk, type AiMessage, type AiToolPart, aiMessageText, useAiChat } from '../lib/aistream'
 import { Chart } from '../lib/charts'
 import { CodeBlock } from '../lib/code'
+import { AI_DEMO_RISKY, ChatApproval } from '../examples/ai-demo'
 import { AGENT_WORKFLOWS, AGENT_WORKFLOW_ORDER, AI_CANVAS_SAMPLE, AGENT_RUN_FIXTURES, AgentRunLanes, type AgentRunFixture } from '../examples'
 import { Button, Icon, SegmentedControl, TabsContent, TabsList, TabsRoot, TabsTrigger } from '../lib'
 import { replayRun, useAgentRun, type AgentRunSource } from '../lib/agentrun'
@@ -100,11 +101,11 @@ const AC_DOC = 'Q3 revenue grew 18% to €2.4M, driven by annual Pro upgrades. C
 const AC_CONNECTORS: Connector[] = ([['Exa', 'Web search for agents', '#1F2937', true], ['GitHub', 'Repos, issues, pull requests', '#24292F', true], ['Linear', 'Issues and projects', '#5E6AD2', false], ['Slack', 'Channels and messages', '#4A154B', false], ['Google Drive', 'Docs, Sheets, Slides', '#1A73E8', true], ['Notion', 'Pages and databases', '#37352F', false], ['Postgres', 'MCP server · read-only SQL', '#336791', false], ['Filesystem', 'MCP server · local files', '#0F766E', false], ['Stripe', 'Payments and invoices', '#635BFF', false]] as const)
   .map(([name, desc, color, on]) => ({ name, desc, color, on }))
 const AI_DEMO_MODELS: ComposerModel[] = [
-  { name: 'Opus 5.5', vendor: 'Anthropic', speeds: ['Normal', 'Fast'], efforts: ['Low', 'Medium', 'High', 'Max'] },
-  { name: 'Sonnet 5.5', vendor: 'Anthropic', speeds: ['Normal', 'Fast'], efforts: ['Low', 'Medium', 'High'] },
+  { name: 'Opus 5.5', vendor: 'Anthropic', speeds: ['Normal', 'Fast'], efforts: ['Low', 'Medium', 'High', 'Max'], wordDelay: { Fast: 26 } },
+  { name: 'Sonnet 5.5', vendor: 'Anthropic', speeds: ['Normal', 'Fast'], efforts: ['Low', 'Medium', 'High'], wordDelay: { Fast: 26 } },
   { name: 'Haiku 5.5', vendor: 'Anthropic', speeds: ['Normal'], efforts: ['Low', 'Medium'] },
-  { name: 'Reasoner R2', vendor: 'Provider B', speeds: ['Normal', 'Priority'], efforts: ['Minimal', 'Low', 'Medium', 'High', 'Ultra'] },
-  { name: 'Open 70B', vendor: 'Fast host', speeds: ['Normal', 'Fast', 'Ultra fast'], efforts: ['Off', 'Low', 'High'] },
+  { name: 'Reasoner R2', vendor: 'Provider B', speeds: ['Normal', 'Priority'], efforts: ['Minimal', 'Low', 'Medium', 'High', 'Ultra'], wordDelay: { Priority: 30 } },
+  { name: 'Open 70B', vendor: 'Fast host', speeds: ['Normal', 'Fast', 'Ultra fast'], efforts: ['Off', 'Low', 'High'], wordDelay: { Fast: 26, 'Ultra fast': 14 } },
 ]
 const AC_SAMPLES: ComposerSample[] = [{ title: 'Attach sample', desc: 'Adds a demo report.pdf', files: () => [new File([new Uint8Array(248000)], 'Q3 report.pdf', { type: 'application/pdf' })] }]
 /**
@@ -114,7 +115,7 @@ const AC_SAMPLES: ComposerSample[] = [{ title: 'Attach sample', desc: 'Adds a de
 function acDemoReply(text: string, files: File[], context: string[], { settings, mode }: ComposerSendMeta): string | ComposerReply {
   const about = context[0] || files[0]?.name || 'that', more = context.length + files.length - 1
   const reply = `Looking at ${about}${more > 0 ? ` and ${more} more` : ''}. ${/fast|priority/i.test(settings.speed) ? 'Quick take:' : 'Here’s what I found:'} the key points are clear and I’ve drafted next steps below.`
-  const email = /send|email|remind/i.test(text), act = email || /create|open|post|deploy|delete/i.test(text)
+  const email = /send|email|remind/i.test(text), act = AI_DEMO_RISKY.test(text)
   if (!act || mode.id === 'yolo' || (mode.id === 'approve' && !email)) return reply // routine (or YOLO): no card
   return { text: reply, needsApproval: email
     ? { tool: 'gmail.send', summary: 'Send “Invoice #1042 is overdue” to the Northwind billing contacts', recipients: ['ap@northwind.example', 'sam.lee@northwind.example'],
@@ -370,7 +371,7 @@ export function AISection() {
         <GhostTextInput placeholder="Write a message" defaultValue="Thanks" suggestions={['Thanks for the quick turnaround!', 'Thanks, I’ll take a look today.', 'Let’s sync tomorrow at 10.', 'Looks great, ship it.']} />
       </Spec>
       <Spec title="Suggested edit" desc="Diff with accept and reject" span={2}>
-        <SuggestedEdit before="I just wanted to quickly reach out to let you know that the meeting will probably have to be moved a little bit later." after="The meeting is moving to 3 pm." />
+        <SuggestedEdit action="Make it concise" before="I just wanted to quickly reach out to let you know that the meeting will probably have to be moved a little bit later." onRequest={async () => { await sleep(800); return 'The meeting is moving to 3 pm.' }} />
       </Spec>
       <Spec title="Confidence flags" desc="Only uncertain fields marked">
         <div className="flex flex-col">
@@ -392,7 +393,7 @@ export function AISection() {
           ]} />
       </Spec>
       <Spec title="Model comparison" desc="Same prompt, three models, streamed side by side with latency, speed and cost. Vote for the best." span={3}>
-        <ModelComparison autoRun prompt="Summarise why our yearly plan should be 20% cheaper, in two sentences." models={[
+        <ModelComparison autoRun onVote={async () => { await sleep(300); return true }} prompt="Summarise why our yearly plan should be 20% cheaper, in two sentences." models={[
           { name: 'Fast', tier: 'Speed tier', color: 'var(--c4)', firstToken: 0.2, speed: 22, tps: 210, cost: '$0.0004', text: 'A 20% yearly discount matches what most SaaS companies offer. It is worth it because yearly customers churn much less, so you earn the discount back quickly.' },
           { name: 'Balanced', tier: 'Default tier', color: 'var(--accent)', firstToken: 0.5, speed: 12, tps: 96, cost: '$0.002', text: 'Twenty percent off yearly is the market norm, so it won’t look unusual. Because annual customers churn about 3× less and your yearly users stay ~31 months, the discount pays for itself within the first quarter.' },
           { name: 'Deep', tier: 'Reasoning tier', color: 'var(--c3)', firstToken: 1.4, speed: 7, tps: 44, cost: '$0.011', text: 'Price the yearly plan at €19/month (20% off). It aligns with the median benchmark, and with annual churn 3.4× lower and a 31-month average lifetime in your data, expected revenue per customer rises roughly 40% despite the discount.' },

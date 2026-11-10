@@ -1,6 +1,6 @@
 import { useEffect, useId, useLayoutEffect, useMemo, useRef, useState, type ReactNode, type RefObject } from 'react'
 import { AnimatePresence, motion, useAnimate, useInView, useReducedMotion } from 'motion/react'
-import { AnimatedNumber, Avatar, Badge, Button, Icon, IconButton, Kbd, Spinner, StatusIcon, TOUCH, cn, cssUrl, inputClass, safeColor, safeUrl, sleep, spring, surface, useControllable, useOutside, useMediaQuery, useRoving, type IconName, plural, fmt } from './core'
+import { AnimatedNumber, Avatar, Badge, Button, Chevron, EASE_OUT, Icon, IconButton, Kbd, REDUCED_MOTION_Q, Spinner, StatusIcon, TOUCH, cn, cssUrl, inputClass, safeColor, safeUrl, sleep, spring, surface, useControllable, useLatest, useLive, useOutside, useMediaQuery, useRoving, type IconName, plural, fmt } from './core'
 import { AutoHeight, Collapse, Progress, TypingDots, useToast } from './feedback'
 import { CheckMark, Checkbox, type Option } from './fields'
 import { OptionList } from './select'
@@ -9,9 +9,6 @@ import { FloatingPanel, MenuLabel, Tooltip, useHoverIntent } from './overlay'
 import { lcsDiff } from './code'
 import { useViewport } from './motion'
 import { Waveform } from './media'
-
-/** Seconds with one decimal ("3.2"). */
-const aiSecs = (fmt: { number: (n: number, o?: Intl.NumberFormatOptions) => string }, s: number, digits = 1) => fmt.number(s, { minimumFractionDigits: digits, maximumFractionDigits: digits })
 
 /** Text with a light sweeping across it. Use for in-progress labels ("Thinking…", "Reading 34 messages…"). */
 export function ShimmerText({ children, active = true, className }: { children: ReactNode; active?: boolean; className?: string }) {
@@ -40,17 +37,16 @@ export function ShimmerText({ children, active = true, className }: { children: 
  */
 export function useStreamedText(text: string, { cps = 60, start = true, unit = 'char', wordDelay = 45, live = false, onProgress }:
   { cps?: number; start?: boolean; unit?: 'char' | 'word'; wordDelay?: number; live?: boolean; onProgress?: () => void } = {}) {
-  const reduce = useMediaQuery('(prefers-reduced-motion: reduce)')
+  const reduce = useMediaQuery(REDUCED_MOTION_Q)
   const [st, setSt] = useState(() => ({ src: text, pos: 0 }))
-  const progress = useRef(onProgress); progress.current = onProgress
-  const src = useRef(text); src.current = text
+  const progress = useLatest(onProgress), src = useLatest(text)
   let { pos } = st
   if (st.src !== text) {
     // append-only? (compares the tail of what we had, so a long stream stays cheap to check)
     const prev = st.src, k = Math.min(prev.length, 256)
     const appended = text.length >= prev.length && text.startsWith(prev.slice(prev.length - k), prev.length - k)
     pos = appended ? Math.min(st.pos, text.length) : 0
-    setSt({ src: text, pos }) // adjust state while rendering (React re-renders before committing)
+    setSt({ src: text, pos }) // state derived from props: React re-renders before committing
   }
   const total = text.length
   const shown = reduce ? total : Math.min(pos, total)
@@ -61,7 +57,7 @@ export function useStreamedText(text: string, { cps = 60, start = true, unit = '
     // one interval while it is behind (reading the latest text from a ref, so a stream of updates doesn't reset it);
     // it stops once caught up and starts again when more text arrives
     const id = setInterval(() => {
-      if (word && Math.random() < 0.2) return // skip a tick now and then so words don't arrive at a metronome pace
+      if (word && Math.random() < 0.2) return // ~20% of ticks are skipped for an uneven word rhythm
       setSt(s => {
         const text = src.current, total = text.length
         if (s.src !== text || s.pos >= total) return s
@@ -77,7 +73,7 @@ export function useStreamedText(text: string, { cps = 60, start = true, unit = '
       progress.current?.()
     }, word ? Math.max(8, wordDelay * 0.85) : 1000 / (Math.max(1, cps) / 3))
     return () => clearInterval(id)
-  }, [behind, cps, unit, wordDelay, live])
+  }, [behind, cps, unit, wordDelay, live, progress, src])
   return { text: text.slice(0, shown), done: !live && shown >= total, shown, total }
 }
 
@@ -90,10 +86,10 @@ export function useStreamedText(text: string, { cps = 60, start = true, unit = '
 export function StreamingText({ text, playing = true, live = false, wordDelay = 45, onDone, onProgress, className, caret = true }:
   { text: string; playing?: boolean; live?: boolean; wordDelay?: number; onDone?: (shown: string) => void; onProgress?: () => void; className?: string; caret?: boolean }) {
   const { text: shown, done } = useStreamedText(text, { unit: 'word', wordDelay, start: playing, live, onProgress })
-  const doneRef = useRef(false), cb = useRef(onDone); cb.current = onDone
+  const doneRef = useRef(false), cb = useLatest(onDone)
   const finished = done || !playing
-  const shownRef = useRef(shown); shownRef.current = shown
-  useEffect(() => { if (!doneRef.current && finished) { doneRef.current = true; cb.current?.(shownRef.current) } }, [finished])
+  const shownRef = useLatest(shown)
+  useEffect(() => { if (!doneRef.current && finished) { doneRef.current = true; cb.current?.(shownRef.current) } }, [finished, cb, shownRef])
   return <span className={cn('whitespace-pre-wrap', !finished && caret && 'ui-caret', className)}>{shown}</span>
 }
 
@@ -160,7 +156,7 @@ export function useAttachments({ max = 10, maxSize = 20 * 1024 * 1024, accept, o
   { max?: number; maxSize?: number; accept?: string; onReject?: (files: File[], reason: 'type' | 'size' | 'count') => void } = {}) {
   const [files, setFiles] = useState<Attachment[]>([])
   const urls = useRef(new Set<string>()), fid = useRef(0), cur = useRef(files); cur.current = files
-  const cb = useRef(onReject); cb.current = onReject
+  const cb = useLatest(onReject)
   useEffect(() => { const u = urls.current; return () => { u.forEach(x => URL.revokeObjectURL(x)); u.clear() } }, [])
   const drop = (f: Attachment) => { if (f.url) { URL.revokeObjectURL(f.url); urls.current.delete(f.url) } }
   const add = (list: FileList | File[]) => {
@@ -185,13 +181,20 @@ export function useAttachments({ max = 10, maxSize = 20 * 1024 * 1024, accept, o
   const take = () => { const out = cur.current.map(f => f.file); clear(); return out }
   return { files, add, remove, clear, take }
 }
+/** The sentence a composer shows for files useAttachments refused ("“a.exe” isn’t an accepted type", "Up to 4 files"). */
+export function attachmentRejectNote(files: File[], reason: 'type' | 'size' | 'count', { max, maxSize = 20 * 1024 * 1024 }: { max: number; maxSize?: number }) {
+  const one = files.length === 1 ? `“${files[0].name}”` : ''
+  if (reason === 'type') return one ? `${one} isn’t an accepted type` : `${files.length} files aren’t an accepted type`
+  if (reason === 'size') return one ? `${one} is over ${fmt.bytes(maxSize)}` : `${files.length} files are over ${fmt.bytes(maxSize)}`
+  return `Up to ${max} files${one ? `: ${one} wasn’t added` : `: ${files.length} weren’t added`}`
+}
 /** What useAttachments returns: pass it to PromptInput's `attachmentState` to own the files yourself. */
 export type AttachmentState = ReturnType<typeof useAttachments>
 
 /**
  * An attachment tile: image preview (only `blob:`, `data:image/` or http(s) URLs, through `cssUrl`) or the file
  * extension, the name and size, and a remove button when `onRemove` is given (visible on hover, focus and touch).
- * `uploading` plays a short progress bar along the bottom.
+ * `uploading` (0–1) draws the upload's progress along the bottom.
  */
 export function AttachmentChip({ name, size, url, onRemove, uploading, className }:
   { name: string; size?: number; url?: string | null; onRemove?: () => void; uploading?: number; className?: string }) {
@@ -202,7 +205,8 @@ export function AttachmentChip({ name, size, url, onRemove, uploading, className
       <span className="grid h-10 w-10 flex-none place-items-center rounded-[var(--r-md)] bg-[var(--muted)] bg-cover bg-center font-[family-name:var(--mono)] text-[11px] font-bold text-[var(--fg2)]" style={preview !== 'none' ? { backgroundImage: preview } : undefined}>
         {preview !== 'none' ? '' : (name.split('.').pop() || 'file').slice(0, 4).toUpperCase()}</span>
       <span className="flex min-w-0 flex-col text-xs leading-tight"><b className="truncate font-medium">{name}</b>{size != null && <span className="text-[var(--fg3)]">{fmt.bytes(size)}</span>}</span>
-      {uploading != null && <motion.i className="absolute bottom-0 start-0 h-0.5 bg-[var(--accent)]" initial={{ width: '0%', opacity: 1 }} animate={{ width: '100%', opacity: [1, 1, 0] }} transition={{ duration: 0.6 + (uploading % 4) * 0.2, ease: 'easeOut', opacity: { duration: 0.6 + (uploading % 4) * 0.2 + 0.3, times: [0, 0.75, 1] } }} />}
+      {uploading != null && <motion.i role="progressbar" aria-label={`Uploading ${name}`} aria-valuemin={0} aria-valuemax={100} aria-valuenow={Math.round(Math.min(1, Math.max(0, uploading)) * 100)}
+        className="absolute bottom-0 start-0 h-0.5 bg-[var(--accent)]" initial={false} animate={{ width: `${Math.min(1, Math.max(0, uploading)) * 100}%`, opacity: uploading >= 1 ? 0 : 1 }} transition={{ duration: 0.25, ease: 'easeOut' }} />}
       {onRemove && <button type="button" aria-label={`Remove ${name}`} onClick={onRemove}
         className={cn('absolute top-1 end-1 grid h-[18px] w-[18px] cursor-pointer place-items-center rounded-full border-0 bg-[var(--fg)] text-[var(--bg)] opacity-0 transition-opacity group-hover/f:opacity-100 focus-visible:opacity-100 [@media(pointer:coarse)]:opacity-100', TOUCH.hit)}><Icon name="x" size={10} strokeWidth={3} /></button>}
     </motion.div>
@@ -263,17 +267,15 @@ export function PromptInput({ onSubmit, onStop, status = 'ready', value, default
     inputRef?: RefObject<HTMLTextAreaElement | null>; barRef?: RefObject<HTMLDivElement | null>
     /** what the drop overlay says (default: an upload icon and "Drop files to attach") */
     dropHint?: ReactNode
-    /** play an upload bar on each new file chip */
-    uploadProgress?: boolean
+    /** upload progress (0–1) of each file, shown as a bar on its chip; undefined: no bar */
+    uploadProgress?: (attachment: Attachment) => number | undefined
     /** animate the box's size and position (motion layout), e.g. when it moves from a hero into a conversation */
     layout?: boolean
     classNames?: { input?: string; bar?: string; send?: string } }) {
   const [text, setText] = useControllable(value, defaultValue, onChange)
   const [note, setNote] = useState('')
   const own = useAttachments({ max: maxFiles, maxSize: maxFileSize, accept, onReject: (f, why) => {
-    const one = f.length === 1 ? `“${f[0].name}”` : ''
-    setNote(why === 'type' ? (one ? `${one} isn’t an accepted type` : `${f.length} files aren’t an accepted type`)
-      : why === 'size' ? (one ? `${one} is over ${fmt.bytes(maxFileSize!)}` : `${f.length} files are over ${fmt.bytes(maxFileSize!)}`) : `Up to ${maxFiles} files`)
+    setNote(attachmentRejectNote(f, why, { max: maxFiles, maxSize: maxFileSize }))
     onReject?.(f, why)
   } })
   const att = attachmentState ?? own
@@ -307,7 +309,7 @@ export function PromptInput({ onSubmit, onStop, status = 'ready', value, default
       <motion.div layout={layout ? 'position' : undefined}>
         {header}
         {att.files.length > 0 && <div className="mb-2 flex flex-wrap gap-1.5">
-          <AnimatePresence initial={false}>{att.files.map(f => <AttachmentChip key={f.id} name={f.file.name} size={f.file.size} url={f.url} uploading={uploadProgress ? f.id : undefined} onRemove={() => { att.remove(f.id); ref.current?.focus() }} />)}</AnimatePresence>
+          <AnimatePresence initial={false}>{att.files.map(f => <AttachmentChip key={f.id} name={f.file.name} size={f.file.size} url={f.url} uploading={uploadProgress?.(f)} onRemove={() => { att.remove(f.id); ref.current?.focus() }} />)}</AnimatePresence>
         </div>}
         <textarea ref={ref} rows={1} value={text} placeholder={placeholder ?? 'Ask anything…'} aria-label={label ?? 'Message'} disabled={disabled} autoFocus={autoFocus} onChange={e => setText(e.target.value)}
           onKeyDown={e => { if (e.key === 'Enter' && !e.shiftKey && !e.nativeEvent.isComposing) { e.preventDefault(); send() } }}
@@ -348,14 +350,14 @@ export type ThoughtStep = { label: string; detail?: string; sources?: string[]; 
 function AiThinkClock({ clock, live }: { clock: () => number; live: boolean }) {
   const [, tick] = useState(0)
   useEffect(() => { if (!live) return; const t = setInterval(() => tick(n => n + 1), 100); return () => clearInterval(t) }, [live])
-  return <span className="tabular-nums">{`${aiSecs(fmt, clock())}s`}</span>
+  return <span className="tabular-nums">{fmt.seconds(clock())}</span>
 }
 
 /** One step row of ThinkingSteps (also used, invisible, to reserve the tallest layout). */
 function AiThoughtRow({ s, st, last, detail, srcs, time, animate, expandable, expanded, onToggle }:
   { s: ThoughtStep; st: StepStatus; last: boolean; detail: string; srcs: number; time?: number; animate: boolean; expandable?: boolean; expanded?: boolean; onToggle?: () => void }) {
   // one line: the label truncates and the time has its own slot, so a time appearing never wraps the row
-  const label = <><span className="min-w-0 truncate">{s.label}</span>{time !== undefined && <span className="flex-none text-[11px] font-normal tabular-nums text-[var(--fg3)]">{`${aiSecs(fmt, time)}s`}</span>}</>
+  const label = <><span className="min-w-0 truncate">{s.label}</span>{time !== undefined && <span className="flex-none text-[11px] font-normal tabular-nums text-[var(--fg3)]">{fmt.seconds(time)}</span>}</>
   return (
     <li className="grid grid-cols-[22px_1fr] gap-2.5">
       <div className="flex flex-col items-center pt-px">
@@ -432,7 +434,7 @@ export function ThinkingSteps({ steps, summary, defaultOpen = true, autoPlay = f
   const finished = autoPlay && play.cur >= steps.length
   const header = !autoPlay ? summary
     : play.running ? <ShimmerText>{'Thinking…'} <AiThinkClock clock={() => clock.current()} live={onScreen} /></ShimmerText>
-    : finished ? <>{summary ?? `Thought for ${aiSecs(fmt, play.elapsed, 0)}s · ${plural(steps.length, 'step')}`}</> : 'Thinking…'
+    : finished ? <>{summary ?? `Thought for ${fmt.seconds(play.elapsed, 0)} · ${plural(steps.length, 'step')}`}</> : 'Thinking…'
   const rows = (detailed: boolean) => steps.map((s, i) => {
     const st = statusOf(s, i)
     return <AiThoughtRow key={i} s={s} st={st} last={i === steps.length - 1} detail={detailed ? s.detail ?? '' : ''} srcs={detailed ? Infinity : 0}
@@ -479,18 +481,11 @@ export function ThinkingSteps({ steps, summary, defaultOpen = true, autoPlay = f
 }
 
 /**
- * Plan first, then live progress. Pass `steps` with statuses to drive it yourself, or plain labels and it runs
- * itself: Run shows "Step i of n", stays disabled while running, then offers "Run again".
+ * A plan and its progress: each step's status (StatusIcon), a done count and a progress bar. Drive it from your agent's
+ * events; a step given as a plain string is pending.
  */
-export function AgentPlan({ steps, onDone, className }: { steps: (string | { label: string; status: StepStatus })[]; onDone?: () => void; className?: string }) {
-  const controlled = typeof steps[0] === 'object'
-  const [cur, setCur] = useState(-1), [ran, setRan] = useState(false)
-  const running = cur >= 0 && cur < steps.length
-  const run = async () => {
-    for (let i = 0; i < steps.length; i++) { setCur(i); await sleep(800 + Math.random() * 500) }
-    setCur(steps.length); setRan(true); onDone?.()
-  }
-  const items = steps.map((s, i) => typeof s === 'object' ? s : { label: s, status: (i < cur ? 'done' : i === cur ? 'active' : 'pending') as StepStatus })
+export function AgentPlan({ steps, className }: { steps: (string | { label: string; status: StepStatus })[]; className?: string }) {
+  const items = steps.map(s => typeof s === 'object' ? s : { label: s, status: 'pending' as StepStatus })
   const done = items.filter(s => s.status === 'done').length
   return (
     <div className={cn('flex flex-col gap-2.5', className)}>
@@ -503,19 +498,24 @@ export function AgentPlan({ steps, onDone, className }: { steps: (string | { lab
           </motion.li>
         ))}
       </ol>
-      {!controlled && <div className="flex items-center gap-2.5">
-        <Button size="sm" variant="primary" disabled={running} onClick={run}><span className="grid [&>*]:[grid-area:1/1]"><span aria-hidden className="invisible">{'Run again'}</span><span>{ran ? 'Run again' : 'Run'}</span></span></Button>
-        <span className="text-xs tabular-nums text-[var(--fg3)]" aria-live="polite">{running ? `Step ${cur + 1} of ${steps.length}` : cur >= steps.length ? 'Done' : ''}</span>
-      </div>}
     </div>
   )
 }
 
-/** PermissionRequest's strings. */
-
-type PermState = 'ask' | 'edit' | 'sending' | 'sent' | 'failed' | 'undoing' | 'undone' | 'undo-failed' | 'denied'
+type PermState = 'ask' | 'edit' | 'sending' | 'sent' | 'failed' | 'undoing' | 'undone' | 'undo-failed' | 'denying' | 'denied'
 /** What PermissionRequest's onDecide may return: a promise that settles when the host finished (false or a rejection = it failed). */
 export type PermissionOutcome = void | boolean | Promise<void | boolean>
+/** PermissionRequest's wording for the action it asks about (default: sending an email). */
+export type PermissionCopy = {
+  title: string; always: string; allow: string; editTitle: string; sendNow: string; working: string; waiting: string
+  /** title once the host confirmed it, given the recipient count */ done: (n: number) => string
+  undo: string; undone: string; undoneSub: (n: number) => string; failedTitle: string
+}
+export const PERMISSION_EMAIL_COPY: PermissionCopy = {
+  title: 'Send an email', always: 'Always allow emails to this list', allow: 'Allow and send', editTitle: 'Edit before sending', sendNow: 'Send now',
+  working: 'Sending…', waiting: 'Waiting for the mail app', done: n => `Sent to ${plural(n, 'person', 'people')}`,
+  undo: 'Undo send', undone: 'Send undone', undoneSub: n => `Nothing reached the ${plural(n, 'recipient')}. The draft is saved.`, failedTitle: 'Not sent',
+}
 function PermResult({ icon, tone, title, sub }: { icon: ReactNode; tone: 'ok' | 'muted'; title: ReactNode; sub: ReactNode }) {
   return (
     <div className="flex items-start gap-3 p-3">
@@ -533,38 +533,57 @@ const permStack = 'max-sm:flex-col-reverse max-sm:items-stretch max-sm:[&>span]:
 /**
  * Ask before acting: say what, to whom, and why. Preview the payload (`recipients`, `total`, `list` and the `draft`), edit the draft,
  * then Allow or Deny. The host does the work: `onDecide(allowed, always, draft)` gets the draft as edited, and may
- * return a promise that settles when sending finished (false or a rejection shows "Not sent"). Pass `progress`
- * ({ sent, total }) to show "n of 12 delivered" while it runs. With `onUndo`, a countdown ring offers Undo for
- * `undoSeconds`; "Nothing reached the recipients" is shown only when onUndo resolves true. Every state swap animates height.
+ * return a promise that settles when it finished (false or a rejection shows "Not sent"; on Deny, true confirms nothing
+ * ran). Pass `progress` ({ sent, total }) to show "n of 12 delivered" while it runs. With `onUndo`, a countdown ring offers Undo for
+ * `undoSeconds`; "Nothing reached the recipients" is shown only when onUndo resolves true. `copy` rewords it for an
+ * action other than email. Every state swap animates height.
  */
 export function PermissionRequest({ title, app = 'inbox', reason, recipients = AI_NO_RECIPIENTS, total = recipients.length, list = '', draft: initialDraft = AI_EMPTY_DRAFT,
-  undoSeconds = 10, onDecide, onUndo, progress, className }:
+  undoSeconds = 10, onDecide, onUndo, progress, copy: copyProp, className }:
   { title?: string; app?: IconName; reason: ReactNode; recipients?: string[]; total?: number; list?: string; draft?: { subject: string; body: string }; undoSeconds?: number
     onDecide?: (allowed: boolean, always: boolean, draft: { subject: string; body: string }) => PermissionOutcome
-    onUndo?: () => Promise<boolean>; progress?: { sent: number; total: number }; className?: string }) {
+    onUndo?: () => Promise<boolean>; progress?: { sent: number; total: number }; copy?: Partial<PermissionCopy>; className?: string }) {
+  const copy = { ...PERMISSION_EMAIL_COPY, ...copyProp }
   const [state, setState] = useState<PermState>('ask')
   const [draft, setDraft] = useState(initialDraft)
   const [always, setAlways] = useState(false)
   const [preview, setPreview] = useState(false)
   const [left, setLeft] = useState(undoSeconds)
-  const [confirmed, setConfirmed] = useState(false) // the host said it finished (promise resolved, or progress complete)
+  const [confirmed, setConfirmed] = useState(false) // the host said it finished (allow) or that nothing ran (deny)
   const [settled, setSettled] = useState(false) // onDecide's promise (if any) has resolved
+  const [say, liveRegion] = useLive()
   const gen = useRef(0)
   const sent = Math.min(progress?.sent ?? 0, progress?.total ?? total), of = progress?.total ?? total
-  const finish = (ok: boolean, sure: boolean) => { if (!ok) { setState('failed'); return } setConfirmed(sure); setLeft(undoSeconds); setState('sent') }
+  const finish = (ok: boolean, sure: boolean) => {
+    if (!ok) { setState('failed'); say(copy.failedTitle); return }
+    setConfirmed(sure); setLeft(undoSeconds); setState('sent')
+    say(onUndo ? `${sure ? copy.done(of) : 'Approved'}. Undo is available for ${undoSeconds} seconds.` : sure ? copy.done(of) : 'Approved')
+  }
+  /** onDecide's outcome: true / false, or undefined when it returned nothing to wait on; throws when it failed. */
+  const outcome = async (allowed: boolean, g: number): Promise<boolean | undefined | null> => {
+    const out = onDecide?.(allowed, always, draft)
+    const r = out && typeof (out as Promise<unknown>).then === 'function' ? await out : out
+    return g === gen.current ? (r === undefined ? undefined : r !== false) : null
+  }
   const send = async () => {
     const g = ++gen.current; setState('sending'); setSettled(false)
-    let out: PermissionOutcome
-    try { out = onDecide?.(true, always, draft) } catch { finish(false, false); return }
-    if (out && typeof (out as Promise<unknown>).then === 'function') {
+    const promised = (() => { try { const o = onDecide?.(true, always, draft); return o } catch { return false as const } })()
+    if (promised && typeof (promised as Promise<unknown>).then === 'function') {
       let r: void | boolean
-      try { r = await out } catch { if (g === gen.current) finish(false, false); return }
+      try { r = await promised } catch { if (g === gen.current) finish(false, false); return }
       if (g !== gen.current) return
       if (r === false) return finish(false, false)
       if (!progress || progress.sent >= progress.total) finish(true, true); else setSettled(true)
-    } else if (out === false) finish(false, false)
+    } else if (promised === false) finish(false, false)
     else if (!progress) finish(true, false) // the host returned nothing to wait on: don't claim delivery
     else setSettled(true)
+  }
+  const deny = async () => {
+    const g = ++gen.current; setState('denying')
+    let sure = false
+    try { sure = (await outcome(false, g)) === true } catch { sure = false }
+    if (g !== gen.current) return
+    setConfirmed(sure); setState('denied'); say('Declined')
   }
   useEffect(() => { // with progress: done when every item is reported (and onDecide's promise, if any, resolved)
     if (state === 'sending' && settled && progress && progress.sent >= progress.total) finish(true, true)
@@ -577,7 +596,8 @@ export function PermissionRequest({ title, app = 'inbox', reason, recipients = A
     if (!onUndo) return
     const g = ++gen.current; setState('undoing')
     let ok = false; try { ok = (await onUndo()) === true } catch { ok = false }
-    if (g === gen.current) setState(ok ? 'undone' : 'undo-failed')
+    if (g !== gen.current) return
+    setState(ok ? 'undone' : 'undo-failed'); say(ok ? copy.undone : 'Couldn’t undo')
   }
   const reset = () => { gen.current++; setState('ask'); setPreview(false) }
   const C = 2 * Math.PI * 8
@@ -587,7 +607,7 @@ export function PermissionRequest({ title, app = 'inbox', reason, recipients = A
       <div className="p-3">
         <div className="flex items-start gap-3">
           <span className="grid h-9 w-9 flex-none place-items-center rounded-[var(--r-md)] bg-[var(--muted)]"><Icon name={app} size={18} /></span>
-          <div className="min-w-0 flex-1"><div className="text-sm leading-tight font-semibold">{title ?? 'Send an email'}</div><div className="mt-0.5 text-xs text-[var(--fg3)]">{'Assistant is asking · just now'}</div></div>
+          <div className="min-w-0 flex-1"><div className="text-sm leading-tight font-semibold">{title ?? copy.title}</div><div className="mt-0.5 text-xs text-[var(--fg3)]">{'Assistant is asking'}</div></div>
           <Badge tone="warn">{'Needs approval'}</Badge>
         </div>
         <div className="mt-3 flex items-start gap-2 rounded-[var(--r-md)] bg-[var(--muted)] px-2.5 py-2 text-xs leading-snug text-[var(--fg2)]"><Icon name="info" size={14} className="mt-px text-[var(--fg3)]" /><span>{reason}</span></div>
@@ -596,7 +616,7 @@ export function PermissionRequest({ title, app = 'inbox', reason, recipients = A
           <span className="flex flex-none">{recipients.slice(0, 3).map((n, i) => <Avatar key={n} name={n} size={24} className={cn('[@media(pointer:coarse)]:!h-7 [@media(pointer:coarse)]:!w-7 [@media(pointer:coarse)]:!text-[11px]', i ? '-ms-2' : '')} />)}
             {total > 3 && <span className="-ms-2 grid h-6 w-6 place-items-center rounded-full border-2 border-[var(--card)] bg-[var(--muted)] text-[11px] font-semibold text-[var(--fg2)] [@media(pointer:coarse)]:h-7 [@media(pointer:coarse)]:w-7 [@media(pointer:coarse)]:text-[11px]">+{fmt.number(total - 3)}</span>}</span>
           <span className="min-w-0 flex-1 truncate max-sm:whitespace-normal"><b className="font-medium">{list}</b> <span className="text-xs text-[var(--fg3)]">· “{draft.subject}”</span></span>
-          <motion.span className="grid text-[var(--fg3)]" animate={{ rotate: preview ? 180 : 0 }}><Icon name="chevronDown" size={12} strokeWidth={2.5} /></motion.span>
+          <Chevron open={preview} size={12} className="text-[var(--fg3)]" />
         </button>
         <Collapse open={preview}>
           <div className="mt-2 rounded-[var(--r-md)] border border-[var(--line)] bg-[var(--bg)] p-3 text-[13px]">
@@ -604,11 +624,11 @@ export function PermissionRequest({ title, app = 'inbox', reason, recipients = A
             <p className="m-0 mt-2 leading-relaxed whitespace-pre-wrap text-[var(--fg2)]">{draft.body}</p>
           </div>
         </Collapse>
-        <div className="mt-3"><Checkbox checked={always} onChange={setAlways}><span className="text-xs text-[var(--fg2)]">{'Always allow emails to this list'}</span></Checkbox></div>
+        <div className="mt-3"><Checkbox checked={always} onChange={setAlways}><span className="text-xs text-[var(--fg2)]">{copy.always}</span></Checkbox></div>
       </div>
       <div className={cn(permActs, permStack)}>
-        <Button size="sm" variant="ghost" onClick={() => { setState('denied'); onDecide?.(false, false, draft) }}>{'Deny'}</Button><span className="flex-1" />
-        <Button size="sm" onClick={() => setState('edit')}>{'Edit draft'}</Button><Button size="sm" variant="primary" onClick={send}>{'Allow and send'}</Button>
+        <Button size="sm" variant="ghost" onClick={deny}>{'Deny'}</Button><span className="flex-1" />
+        <Button size="sm" onClick={() => setState('edit')}>{'Edit draft'}</Button><Button size="sm" variant="primary" onClick={send}>{copy.allow}</Button>
       </div>
     </div>
   )
@@ -617,7 +637,7 @@ export function PermissionRequest({ title, app = 'inbox', reason, recipients = A
       <div className="p-3">
         <div className="flex items-start gap-3">
           <span className="grid h-9 w-9 flex-none place-items-center rounded-[var(--r-md)] bg-[var(--muted)]"><Icon name={app} size={18} /></span>
-          <div><div className="text-sm leading-tight font-semibold">{'Edit before sending'}</div><div className="mt-0.5 text-xs text-[var(--fg3)]">{`To ${list} · ${plural(total, 'person', 'people')}`}</div></div>
+          <div><div className="text-sm leading-tight font-semibold">{copy.editTitle}</div><div className="mt-0.5 text-xs text-[var(--fg3)]">{`To ${list} · ${plural(total, 'person', 'people')}`}</div></div>
         </div>
         <label className="mt-3 mb-1 block text-xs font-medium">{'Subject'}
           <input autoFocus value={draft.subject} onChange={e => setDraft({ ...draft, subject: e.target.value })} className={cn(inputClass, 'mt-1 !h-8 text-xs font-normal [@media(pointer:coarse)]:!h-10', TOUCH.input)} /></label>
@@ -626,23 +646,23 @@ export function PermissionRequest({ title, app = 'inbox', reason, recipients = A
       </div>
       <div className={cn(permActs, permStack)}>
         <Button size="sm" variant="ghost" onClick={() => setState('ask')}>{'Back'}</Button><span className="flex-1" />
-        <Button size="sm" variant="primary" type="submit" disabled={!draft.subject.trim()}>{'Send now'}</Button>
+        <Button size="sm" variant="primary" type="submit" disabled={!draft.subject.trim()}>{copy.sendNow}</Button>
       </div>
     </form>
   )
-  else if (state === 'sending' || state === 'undoing') body = (
+  else if (state === 'sending' || state === 'undoing' || state === 'denying') body = (
     <div className="flex items-start gap-3 p-3">
       <span className="grid h-9 w-9 flex-none place-items-center rounded-[var(--r-md)] bg-[var(--muted)]"><Spinner /></span>
-      <div className="flex-1"><div className="text-sm font-semibold">{state === 'undoing' ? 'Undoing…' : 'Sending…'}</div>
+      <div className="flex-1"><div className="text-sm font-semibold">{state === 'undoing' ? 'Undoing…' : state === 'denying' ? 'Declining…' : copy.working}</div>
         {state === 'sending' && progress ? <>
           <div className="mt-0.5 flex items-center gap-1 text-xs text-[var(--fg3)]"><AnimatedNumber value={sent} /> of {of} delivered</div>
           <Progress value={sent} max={of} label={`Delivered ${sent} of ${of}`} className="mt-2.5" /></>
-          : <div className="mt-0.5 text-xs text-[var(--fg3)]">{state === 'undoing' ? 'Asking the app to recall it' : app === 'inbox' ? 'Waiting for the mail app' : 'Waiting for the app'}</div>}</div>
+          : <div className="mt-0.5 text-xs text-[var(--fg3)]">{state === 'undoing' ? 'Asking the app to recall it' : state === 'denying' ? 'Telling the app' : copy.waiting}</div>}</div>
     </div>
   )
   else if (state === 'sent') body = (
     <div>
-      <PermResult tone="ok" title={confirmed ? `Sent to ${plural(of, 'person', 'people')}` : 'Approved'} sub={<><span>“{draft.subject}”</span>{!confirmed && ' · handed to the app to send'}{always && ' · Future emails to this list won’t ask'}</>}
+      <PermResult tone="ok" title={confirmed ? copy.done(of) : 'Approved'} sub={<><span>“{draft.subject}”</span>{!confirmed && ' · handed to the app'}{always && ' · Future requests like this won’t ask'}</>}
         icon={<CheckMark size={18} strokeWidth={3} draw delay={0.1} duration={0.4} />} />
       <div className={permActs}>
         {onUndo && <svg width="16" height="16" viewBox="0 0 20 20" className="flex-none" aria-hidden>
@@ -650,22 +670,23 @@ export function PermissionRequest({ title, app = 'inbox', reason, recipients = A
           <motion.circle cx="10" cy="10" r="8" fill="none" stroke="var(--fg2)" strokeWidth="2.5" strokeLinecap="round" strokeDasharray={C} transform="rotate(-90 10 10)"
             initial={{ strokeDashoffset: 0 }} animate={{ strokeDashoffset: C * (1 - left / undoSeconds) }} transition={{ duration: 1, ease: 'linear' }} />
         </svg>}
-        <span className="text-xs tabular-nums text-[var(--fg3)]" aria-live="polite">{onUndo && left > 0 ? `Undo available for ${left} s` : confirmed ? 'Delivered' : 'Sent to the app'}</span><span className="flex-1" />
-        {onUndo && left > 0 ? <Button size="sm" onClick={undo}>{'Undo send'}</Button> : <Button size="sm" onClick={reset}>{'Start over'}</Button>}
+        <span className="text-xs tabular-nums text-[var(--fg3)]">{onUndo && left > 0 ? `Undo available for ${left} s` : confirmed ? 'Delivered' : 'Sent to the app'}</span><span className="flex-1" />
+        {onUndo && left > 0 ? <Button size="sm" onClick={undo}>{copy.undo}</Button> : <Button size="sm" onClick={reset}>{'Start over'}</Button>}
       </div>
     </div>
   )
   else body = (
     <div>
-      {state === 'undone' ? <PermResult tone="muted" icon={<Icon name="undo" size={18} strokeWidth={2.5} />} title={'Send undone'} sub={`Nothing reached the ${plural(of, 'recipient')}. The draft is saved.`} />
-        : state === 'undo-failed' ? <PermResult tone="muted" icon={<Icon name="info" size={18} strokeWidth={2.5} />} title={'Couldn’t undo'} sub={'The app couldn’t recall it, so it may already have been delivered.'} />
-        : state === 'failed' ? <PermResult tone="muted" icon={<Icon name="x" size={18} strokeWidth={2.5} />} title={'Not sent'} sub={'The app reported a problem. Nothing was confirmed as delivered.'} />
-        : <PermResult tone="muted" icon={<Icon name="x" size={18} strokeWidth={2.5} />} title={'Not sent'} sub={'You declined, and the app was told not to send this email.'} />}
-      <div className={permActs}><span className="flex-1" /><Button size="sm" onClick={reset}>{state === 'denied' ? 'Undo' : 'Back to request'}</Button></div>
+      {state === 'undone' ? <PermResult tone="muted" icon={<Icon name="undo" size={18} strokeWidth={2.5} />} title={copy.undone} sub={copy.undoneSub(of)} />
+        : state === 'undo-failed' ? <PermResult tone="muted" icon={<Icon name="info" size={18} strokeWidth={2.5} />} title={'Couldn’t undo'} sub={'The app couldn’t recall it, so it may already have gone through.'} />
+        : state === 'failed' ? <PermResult tone="muted" icon={<Icon name="x" size={18} strokeWidth={2.5} />} title={copy.failedTitle} sub={'The app reported a problem. Nothing was confirmed as done.'} />
+        : <PermResult tone="muted" icon={<Icon name="x" size={18} strokeWidth={2.5} />} title={'Declined'} sub={confirmed ? 'The app confirmed nothing was run.' : 'You declined this request.'} />}
+      <div className={permActs}><span className="flex-1" /><Button size="sm" onClick={reset}>{state === 'denied' ? 'Review again' : 'Back to request'}</Button></div>
     </div>
   )
   return (
     <div className={cn(surface.card, 'overflow-hidden text-[13px] shadow-[0_1px_2px_rgba(0,0,0,.04)]', className)}>
+      {liveRegion}
       <AutoHeight>
         <AnimatePresence mode="wait" initial={false}>
           <motion.div key={state} initial={{ opacity: 0, y: 6 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0, transition: { duration: 0.12 } }} transition={{ duration: 0.25 }}>{body}</motion.div>
@@ -682,7 +703,6 @@ export function PermissionRequest({ title, app = 'inbox', reason, recipients = A
  * expanded cards). `letter` and `color` style its tile (default: the title's first letter on the accent).
  */
 export type Source = { title: string; url?: string; domain?: string; snippet?: string; letter?: string; color?: string }
-/** Source chips', citations' and SourcesPanel's strings. */
 /** Host name of a source link; relative or malformed URLs show as written instead of throwing. */
 const aiHost = (url: string) => { try { return new URL(url).hostname || url } catch { return url } }
 /** A source's short label: its `domain`, else its URL's host. */
@@ -750,8 +770,6 @@ export function Citation({ n, source, className }: { n: number; source: Source; 
   )
 }
 
-/** GhostTextInput, SuggestedEdit, ConfidenceField, VoiceInput and ModelComparison strings. */
-
 /**
  * Inline completion: the rest of the best-matching suggestion shows in grey after what you typed; Tab accepts it
  * (with a small bump). The hint line under it is a button too, so a tap accepts on touch screens. Pass `suggestions`, or a `suggest(text)` function.
@@ -760,11 +778,14 @@ export function GhostTextInput({ suggestions, suggest, placeholder, value, defau
   { suggestions?: string[]; suggest?: (text: string) => string | null; placeholder?: string; value?: string; defaultValue?: string; onChange?: (v: string) => void; className?: string }) {
   const [v, setV] = useControllable(value, defaultValue, onChange)
   const [bump, setBump] = useState(0)
+  const [say, live] = useLive({ debounce: 600 })
   const full = !v ? null : suggestions ? suggestions.find(s => s.toLowerCase().startsWith(v.toLowerCase()) && s.length > v.length) ?? null : (() => { const r = suggest?.(v); return r ? v + r : null })()
   const rest = full ? full.slice(v.length) : null
   const accept = () => { if (full) { setV(full); setBump(b => b + 1) } }
+  useEffect(() => { if (full) say(`Suggestion: ${full}. Press Tab to accept.`) }, [full, say])
   return (
     <div className={cn('flex flex-col gap-1.5', className)}>
+      {live}
       <motion.div key={bump} animate={bump ? { scale: [1.02, 1] } : undefined} transition={spring(0.4, 0.3)} className="relative">
         <div aria-hidden className="pointer-events-none absolute inset-0 flex items-center overflow-hidden border border-transparent px-3 text-[13px] whitespace-pre [@media(pointer:coarse)]:text-base">
           <span className="invisible">{v}</span><span className="text-[var(--fg3)]">{rest}</span>
@@ -772,7 +793,7 @@ export function GhostTextInput({ suggestions, suggest, placeholder, value, defau
         <input value={v} placeholder={placeholder} onChange={e => setV(e.target.value)} aria-label={'Message with suggestions'} autoComplete="off"
           onKeyDown={e => { if (e.key === 'Tab' && full) { e.preventDefault(); accept() } }} className={cn(inputClass, 'relative !bg-transparent [@media(pointer:coarse)]:!h-11', TOUCH.input)} />
       </motion.div>
-      <span className="flex min-h-6 items-center text-xs text-[var(--fg3)]" aria-live="polite">{rest
+      <span className="flex min-h-6 items-center text-xs text-[var(--fg3)]">{rest
         ? <button type="button" onMouseDown={e => e.preventDefault()} onClick={accept}
             className="-mx-1.5 inline-flex min-h-6 min-w-0 cursor-pointer items-center gap-1.5 rounded-[var(--r-md)] border-0 bg-transparent px-1.5 text-start text-xs text-[var(--fg3)] hover:bg-[var(--muted)] hover:text-[var(--fg)] [@media(pointer:coarse)]:min-h-9 [@media(pointer:coarse)]:bg-[var(--muted)] [@media(pointer:coarse)]:text-[var(--fg2)]">
             <span className="[@media(pointer:coarse)]:hidden">Press <Kbd>Tab</Kbd> or click to accept</span>
@@ -811,14 +832,24 @@ export function wordDiff(a: string, b: string): DiffSeg[] {
 }
 
 /**
- * Proposed rewrite. "Make it concise" shows "Rewriting…", then a word-level diff (struck deletions, green insertions,
- * staggered in) with counts. Accept applies it with an "Applied" badge and Undo; Reject goes back.
+ * Proposed rewrite as a word-level diff (struck deletions, green insertions, staggered in) with counts. Accept applies
+ * it with an "Applied" badge and Undo; Reject goes back. With `after` the diff shows at once; with `onRequest` an
+ * `action` button asks for the rewrite ("Rewriting…" until it resolves; a rejection is shown with Try again).
  */
-export function SuggestedEdit({ before, after, action, onResolve, className }: { before: string; after: string; action?: string; onResolve?: (accepted: boolean) => void; className?: string }) {
-  const [state, setState] = useState<'idle' | 'rewriting' | 'review' | 'applied'>('idle')
-  const segs = wordDiff(before, after)
+export function SuggestedEdit({ before, after: given, onRequest, action, onResolve, className }:
+  { before: string; after?: string; /** fetches the rewrite when the person asks for it */ onRequest?: () => Promise<string>; action?: string; onResolve?: (accepted: boolean) => void; className?: string }) {
+  const [after, setAfter] = useState(given)
+  const [state, setState] = useState<'idle' | 'rewriting' | 'review' | 'applied' | 'failed'>(given !== undefined ? 'review' : 'idle')
+  const gen = useRef(0)
+  useEffect(() => () => { gen.current++ }, [])
+  const segs = useMemo(() => after === undefined ? [] : wordDiff(before, after), [before, after])
   const dels = segs.filter(s => s.t === '-').length, ins = segs.filter(s => s.t === '+').length
-  const go = async () => { setState('rewriting'); await sleep(800); setState('review') }
+  const go = async () => {
+    if (!onRequest) return
+    const g = ++gen.current; setState('rewriting')
+    try { const r = await onRequest(); if (g === gen.current) { setAfter(r); setState('review') } } catch { if (g === gen.current) setState('failed') }
+  }
+  const back = () => setState(onRequest ? 'idle' : 'review')
   let n = 0
   return (
     <div className={cn('flex flex-col gap-2.5', className)}>
@@ -830,15 +861,16 @@ export function SuggestedEdit({ before, after, action, onResolve, className }: {
         )) : state === 'applied' ? after : before}
       </motion.p>
       <div className="flex min-h-[30px] flex-wrap items-center gap-2">
-        {state === 'idle' && <Button size="sm" variant="primary" onClick={go}>{action ?? 'Make it concise'}</Button>}
+        {state === 'idle' && onRequest && <Button size="sm" variant="primary" onClick={go}>{action ?? 'Suggest an edit'}</Button>}
         {state === 'rewriting' && <ShimmerText className="text-xs">{'Rewriting…'}</ShimmerText>}
+        {state === 'failed' && <><span role="alert" className="text-xs text-[var(--bad)]">{'The rewrite failed.'}</span><Button size="sm" onClick={go}>{'Try again'}</Button></>}
         {state === 'review' && <>
           <Button size="sm" variant="primary" onClick={() => { setState('applied'); onResolve?.(true) }}>{'Accept'}</Button>
-          <Button size="sm" onClick={() => { setState('idle'); onResolve?.(false) }}>{'Reject'}</Button>
+          <Button size="sm" onClick={() => { back(); onResolve?.(false) }}>{'Reject'}</Button>
           <span className="text-xs text-[var(--fg3)]">{`${dels} removed, ${ins} added`}</span></>}
         {state === 'applied' && <>
           <motion.span initial={{ scale: 0.6 }} animate={{ scale: 1 }} transition={spring(0.5, 0.35)}><Badge tone="ok"><Icon name="check" size={11} strokeWidth={3} />{'Applied'}</Badge></motion.span>
-          <Button size="sm" variant="ghost" onClick={() => setState('idle')}>{'Undo'}</Button></>}
+          <Button size="sm" variant="ghost" onClick={() => setState('review')}>{'Undo'}</Button></>}
       </div>
     </div>
   )
@@ -893,34 +925,32 @@ export function ConfidenceField({ label, value, confidence, threshold = 0.8, pro
 const AI_VOICE_BARS = Array.from({ length: 28 }, (_, i) => (6 + ((i * 7) % 22)) / 32)
 const AI_VOICE_FLAT = AI_VOICE_BARS.map(() => 0)
 /**
- * Mic button with a live waveform. While listening, interim words appear in grey; when you stop, the transcript
- * settles into its final form. Controlled with `listening` / `onListeningChange`, or uncontrolled.
- * Feed it what your speech API heard so far as `transcript` (it reveals the words as they arrive); with none it just
- * listens and reports an empty result.
+ * Mic button with a live waveform. While listening, the words heard so far appear in grey as they arrive; when
+ * listening stops (the button, or `listening` turning false), the transcript settles into its final form and
+ * `onResult(text)` fires. Controlled with `listening` / `onListeningChange`, or uncontrolled. Feed it what your speech
+ * API heard so far as `transcript`; with none it just listens and reports an empty result.
  */
 export function VoiceInput({ transcript = '', listening: lc, onListeningChange, onResult, className }:
   { transcript?: string; listening?: boolean; onListeningChange?: (v: boolean) => void; onResult?: (text: string) => void; className?: string }) {
   const [listening, setListening] = useControllable(lc, false, onListeningChange)
-  const [heard, setHeard] = useState(0)
   const [final, setFinal] = useState<string | null>(null)
-  const words = transcript.split(' ').filter(Boolean)
+  const heard = useStreamedText(listening ? transcript : '', { unit: 'word', wordDelay: 380, live: listening }).text
+  const latest = useLatest({ transcript, onResult })
+  const was = useRef(listening)
   useEffect(() => {
-    if (!listening) return
-    setHeard(0); setFinal(null)
-    const t = setInterval(() => setHeard(h => Math.min(words.length, h + 1)), 380)
-    return () => clearInterval(t)
-  }, [listening, words.length])
-  const toggle = () => {
-    if (listening) { const text = words.join(' '); setFinal(text || null); onResult?.(text) }
-    setListening(!listening)
-  }
+    if (was.current === listening) return
+    was.current = listening
+    if (listening) { setFinal(null); return }
+    const text = latest.current.transcript.trim().replace(/\s+/g, ' ')
+    setFinal(text || null); latest.current.onResult?.(text)
+  }, [listening, latest])
   return (
     <div className={cn('flex flex-col gap-2', className)}>
       <div className="flex items-center gap-3">
         <span className="relative flex-none">
           {listening && <motion.span aria-hidden className="absolute inset-0 rounded-full bg-[var(--bad)]" initial={{ opacity: 0.5, scale: 1 }} animate={{ opacity: 0, scale: 1.7 }} transition={{ duration: 1.2, repeat: Infinity, ease: 'easeOut' }} />}
           <motion.span key={String(listening)} animate={{ scale: [1.1, 1] }} transition={spring(0.5, 0.3)} className="block">
-            <Button variant={listening ? 'danger' : 'primary'} size="icon" aria-pressed={listening} aria-label={listening ? 'Stop listening' : 'Start listening'} onClick={toggle} className="!rounded-full">
+            <Button variant={listening ? 'danger' : 'primary'} size="icon" aria-pressed={listening} aria-label={listening ? 'Stop listening' : 'Start listening'} onClick={() => setListening(!listening)} className="!rounded-full">
               <Icon name={listening ? 'stop' : 'mic'} fill={listening ? 'currentColor' : 'none'} size={15} />
             </Button>
           </motion.span>
@@ -928,7 +958,7 @@ export function VoiceInput({ transcript = '', listening: lc, onListeningChange, 
         <Waveform peaks={listening ? AI_VOICE_BARS : AI_VOICE_FLAT} live={listening} played={listening ? 1 : 0} tone="ink" barWidth={3} minHeight={12.5} intro={false} className="h-8 min-w-0 flex-1 gap-1 overflow-hidden" />
       </div>
       <div className="min-h-[20px] text-[13px]" aria-live="polite">
-        {listening ? <span className="text-[var(--fg3)]">{heard ? <>{words.slice(0, heard).join(' ')}<span className="ui-caret" /></> : 'Listening… tap to stop'}</span>
+        {listening ? <span className="text-[var(--fg3)]">{heard ? <>{heard}<span className="ui-caret" /></> : 'Listening… tap to stop'}</span>
           : final ? <motion.span initial={{ opacity: 0.4, filter: 'blur(2px)' }} animate={{ opacity: 1, filter: 'blur(0px)' }} transition={{ duration: 0.35 }} className="font-medium text-[var(--fg)]">“{final}”</motion.span>
           : <span className="text-xs text-[var(--fg3)]">{'Tap to talk'}</span>}
       </div>
@@ -953,9 +983,9 @@ export function SourcesPanel({ answer, sources, className }: { answer: string; s
     <div className={cn('@container', className)}><div className="grid gap-3 @[560px]:grid-cols-[minmax(0,1fr)_280px]">
       <p className={cn(surface.card, 'm-0 px-4 py-3 text-sm leading-[1.8]')}>
         {parts.map((p, k) => {
-          const m = p.match(/^\[(\d+)\]$/); if (!m) return <span key={k}>{p}</span>
-          const i = Number(m[1]) - 1
-          return <button key={k} {...hover(i)} aria-label={`Source ${i + 1}: ${sources[i]?.title ?? ''}`} onClick={() => { toggle(i, true); setPin(i); setNudge(n => ({ i, k: n.k + 1 })) }}
+          const m = p.match(/^\[(\d+)\]$/), i = m ? Number(m[1]) - 1 : -1
+          if (!sources[i]) return <span key={k}>{p}</span>
+          return <button key={k} {...hover(i)} aria-label={`Source ${i + 1}: ${sources[i].title}`} onClick={() => { toggle(i, true); setPin(i); setNudge(n => ({ i, k: n.k + 1 })) }}
             className={cn('mx-0.5 inline-grid h-[17px] min-w-[17px] cursor-pointer place-items-center rounded-[var(--r-sm)] border-0 px-1 align-[1px] text-[11px] font-semibold transition-colors', TOUCH.hit,
               hot === i ? 'bg-[var(--accent)] text-[var(--card)]' : 'bg-[var(--muted)] text-[var(--fg2)]')}>{fmt.number(i + 1)}</button>
         })}
@@ -993,15 +1023,25 @@ function AiSourceCardView({ s, n, hot, open, nudge, bind, onToggle }:
 export type CompareModel = { name: string; tier: string; color: string; /** seconds before the first token */ firstToken: number; /** words per second while streaming */ speed: number; text: string; tps: number; cost: string }
 type McState = { phase: 'idle' | 'thinking' | 'streaming' | 'done'; words: number }
 /**
- * Same prompt, several models streamed side by side at their own speeds: thinking dots, first-token time, tokens/s
- * and cost. Vote for the best answer (a toast confirms). Run restarts all of them. `autoRun` starts the first run by
- * itself the first time the comparison scrolls into view.
+ * Same prompt, several models' answers (`text`, played back at each model's `firstToken` and `speed`) side by side:
+ * thinking dots, first-token time, tokens/s and cost. The thumbs up marks the best answer and calls `onVote`; a toast
+ * says "Vote recorded" only when `onVote` returns (or resolves to) true, and a rejection is shown as a failed vote. Run
+ * restarts all of them. `autoRun` starts the first run by itself the first time the comparison scrolls into view.
  */
-export function ModelComparison({ prompt, models, autoRun = false, className }: { prompt: string; models: CompareModel[]; autoRun?: boolean; className?: string }) {
+export function ModelComparison({ prompt, models, autoRun = false, onVote, className }:
+  { prompt: string; models: CompareModel[]; autoRun?: boolean; /** record the vote; true (or a promise of true) confirms it */ onVote?: (model: CompareModel, index: number) => void | boolean | Promise<void | boolean>; className?: string }) {
   const toast = useToast()
   const [st, setSt] = useState<McState[]>(models.map(() => ({ phase: 'idle', words: 0 })))
   const [win, setWin] = useState(-1)
-  const gen = useRef(0)
+  const gen = useRef(0), voteGen = useRef(0)
+  const vote = async (m: CompareModel, i: number) => {
+    setWin(i)
+    if (!onVote) return
+    const g = ++voteGen.current
+    let ok: void | boolean
+    try { ok = await onVote(m, i) } catch { if (g === voteGen.current) toast({ title: 'Vote not recorded', description: 'The app reported a problem.', tone: 'bad' }); return }
+    if (ok === true && g === voteGen.current) toast({ title: 'Vote recorded', description: `${m.name} wins this round`, tone: 'ok' })
+  }
   const reduce = useReducedMotion()
   const run = () => {
     const g = ++gen.current; setWin(-1)
@@ -1031,7 +1071,7 @@ export function ModelComparison({ prompt, models, autoRun = false, className }: 
         {models.map((m, i) => {
           const s = st[i], started = s.phase === 'streaming' || s.phase === 'done'
           return (
-            <motion.div key={m.name} animate={win === i ? { scale: [1, 1.02, 1] } : { scale: 1 }} transition={spring(0.5, 0.35)}
+            <motion.div key={m.name} animate={win === i ? { scale: [1, 1.02, 1] } : { scale: 1 }} transition={{ duration: 0.35, ease: EASE_OUT }}
               className={cn('flex flex-col border-[var(--line)] md:min-h-[200px] transition-[box-shadow,background] max-md:[&+&]:border-t md:[&+&]:border-s',
                 win === i && 'relative z-[1] bg-[color-mix(in_srgb,var(--ok)_6%,var(--card))] shadow-[inset_0_0_0_1.5px_var(--ok),0_0_0_3px_var(--ok-soft)]')}>
               <div className="flex items-start gap-2.5 px-3 pt-3 pb-1 text-[13px]">
@@ -1041,7 +1081,7 @@ export function ModelComparison({ prompt, models, autoRun = false, className }: 
                 <span className="w-[60px] flex-none text-end text-[11px] leading-7 text-[var(--fg3)]">{s.phase === 'thinking' ? 'Thinking…' : s.phase === 'streaming' ? 'Streaming' : ''}</span>
                 <IconButton icon="thumbUp" label={`Mark ${m.name} as best`} aria-pressed={win === i} tone={win === i ? 'default' : 'muted'}
                   className={win === i ? '!bg-[var(--ok-soft)] text-[var(--ok)]' : ''}
-                  onClick={() => { setWin(i); toast({ title: 'Vote recorded', description: `${m.name} wins this round`, tone: 'ok' }) }} />
+                  onClick={() => { void vote(m, i) }} />
               </div>
               <div className="flex gap-3 border-b border-[var(--line)] px-3 pb-2.5 text-[11px] text-[var(--fg3)]">
                 {/* fixed-width tabular cells: the numbers arriving never push the labels */}

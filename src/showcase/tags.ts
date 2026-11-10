@@ -443,7 +443,7 @@ export const TAG_ITEM_TAGS: Readonly<Record<string, readonly TagId[]>> = {
   'ui-provider': ['theming', 'accessible'], utils: ['devtools'],
   hooks: ['keyboard', 'touch', 'composable'], motion: ['animated'], 'virtual-list': ['virtualised'], icon: ['theming'], slot: ['composable'], 'ui-hosts': ['composable'],
   'ai-stream': ['streaming', 'async', 'chat', 'agents'], 'agent-run': ['agents', 'monitoring', 'streaming', 'real-time'], 'appearance-menu': ['settings'], 'appearance-panel': ['settings'], 'theme-toggle': ['settings'], 'theme-preview': ['comparison'],
-  'tool-call': ['agents'], 'tool-card': ['agents'], 'approval-card': ['review', 'agents'], 'chat-approval': ['review', 'agents'], 'chat-card': ['chat'], 'chat-checklist': ['chat', 'planning'],
+  'tool-call': ['agents'], 'tool-card': ['agents'], 'approval-card': ['review', 'agents'], 'chat-card': ['chat'], 'chat-checklist': ['chat', 'planning'],
   'ai-renderers-provider': ['chat', 'composable'], 'chat-composer': ['chat', 'uploads'], 'animated-list': ['notifications', 'animated'], 'streaming-text': ['streaming', 'animated'], 'shimmer-text': ['animated'], 'typing-dots': ['chat', 'animated'],
   card: ['dashboards'], chip: ['filtering'], collapse: ['animated'], 'scroll-edges': ['touch'], lightbox: ['keyboard', 'touch'], waveform: ['animated'],
   'date-time-field': ['scheduling', 'keyboard'], 'nav-list': ['keyboard'], steps: ['onboarding'], 'magnet-bubble': ['touch'], 'magnet-marks': ['touch'],
