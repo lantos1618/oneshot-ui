@@ -1,6 +1,6 @@
-import { memo, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type CSSProperties, type KeyboardEvent as RKeyboardEvent, type ReactElement, type ReactNode } from 'react'
+import { memo, useCallback, useId, useEffect, useLayoutEffect, useMemo, useRef, useState, type CSSProperties, type KeyboardEvent as RKeyboardEvent, type ReactElement, type ReactNode } from 'react'
 import { AnimatePresence, motion } from 'motion/react'
-import { Button, Icon, IconButton, clamp, ScrollEdges, Skeleton, Spinner, TOUCH, cn, dateFormat, spring, surface, useCoarsePointer, useControllable, usePointerDrag, useScrollEdges, useWidth, plural, fmt, LOCALE, useLive } from './core'
+import { Button, Icon, IconButton, clamp, ScrollEdges, Skeleton, Spinner, TOUCH, cn, dateFormat, spring, surface, useCoarsePointer, useControllable, usePointerDrag, useScrollEdges, useWidth, plural, fmt, LOCALE, useLive, useLatestState, compareCells, nextSort, ariaSort, downloadBlob, onColorLabel, type TableSort } from './core'
 import { Popover, PopoverContent, PopoverTrigger } from './overlay'
 import { SegmentedControl, inputShellClass } from './fields'
 import { Select } from './select'
@@ -15,6 +15,10 @@ export type GridColumn<T> = {
   /** displayed (and searched) text; defaults to the value, dates as "12 Mar 2025" */ text?: (row: T) => string
   /** custom cell, e.g. a badge. `content` is the text with search matches highlighted */ render?: (row: T, content: ReactNode) => ReactNode
   /** double-click to edit (default: text and number columns without options) */ editable?: boolean
+  /**
+   * Turns the edited text into the stored value. Return an Error to reject it: the editor stays open and shows the
+   * message. Default: number columns need a finite number (as typed, no rounding); other columns store the text as typed.
+   */ parse?: (text: string) => unknown
   /** start pinned to this side (sticky while the rest scrolls); the Columns menu changes it. */ pin?: GridPinSide
   /** start hidden; the Columns menu shows it */ hidden?: boolean
 }
@@ -23,6 +27,10 @@ export type GridGroup = { id: string; j: 'AND' | 'OR'; c: GridFilterNode[] }
 export type GridFilterNode = GridCondition | GridGroup
 
 const GRID_OPS = { text: ['is', 'is not', 'contains'], number: ['>', '<', '=', '≥', '≤'] }
+type GridNumOp = '>' | '<' | '=' | '≥' | '≤'
+const GRID_NUM_OPS: Record<GridNumOp, (a: number, b: number) => boolean> = { '>': (a, b) => a > b, '<': (a, b) => a < b, '=': (a, b) => a === b, '≥': (a, b) => a >= b, '≤': (a, b) => a <= b }
+/** A filter value that a number column can compare with. */
+const gridNum = (v: unknown) => v === null || v === undefined || (typeof v === 'string' && !v.trim()) ? NaN : Number(v)
 let gridSeq = 0
 const gridId = () => `gf${++gridSeq}`
 const gridIsGroup = (n: GridFilterNode): n is GridGroup => 'c' in n
@@ -107,14 +115,22 @@ function gridMark(text: string, matches: RegExpMatchArray[] | undefined): ReactN
 /* ---- text query: serialise, parse, highlight ---- */
 /** Column labels by key and keys by lower-cased key/label. Maps, so names like `constructor` or `__proto__` are just unknown fields. */
 type GridSchema = { label: Map<string, string>; field: Map<string, string>; kind: (k: string) => 'text' | 'number'; options: (k: string) => string[] | undefined }
-const gridQv = (v: string) => /^[\w.-]+$/.test(v) ? v : `"${v}"`
+/** One token of the text query: a quoted value (with \" and \\ escapes), an operator, a bracket or a bare word. */
+const GRID_TOKEN = String.raw`"(?:[^"\\]|\\.)*"|>=|<=|≥|≤|[<>=()]|[^\s"<>=()]+`
+const GRID_TOKEN_RE = new RegExp(GRID_TOKEN, 'g')
+const GRID_TOKEN_SPLIT = new RegExp(`(${GRID_TOKEN}|\\s+)`)
+const GRID_OP_WORDS = new Set([...GRID_OPS.text.flatMap(o => o.split(' ')), ...GRID_OPS.number, '>=', '<=', '(', ')'])
+const gridQv = (v: string) => /^[\w.-]+$/.test(v) ? v : `"${v.replace(/[\\"]/g, '\\$&')}"`
+const gridUnquote = (t: string) => t.startsWith('"') ? t.slice(1, -1).replace(/\\(.)/g, '$1') : t
+/** How a field is written in the text query: its label in lower case, or its key when the label has spaces. */
+const gridFieldToken = (key: string, label: string) => /\s/.test(label) ? key : label.toLowerCase()
 function gridSerialise(n: GridFilterNode, s: GridSchema, top = true): string {
-  if (!gridIsGroup(n)) { const l = s.label.get(n.f[0]) ?? n.f[0]; return `${/\s/.test(l) ? n.f[0] : l.toLowerCase()} ${n.f[1]} ${gridQv(n.f[2])}` }
+  if (!gridIsGroup(n)) return `${gridFieldToken(n.f[0], s.label.get(n.f[0]) ?? n.f[0])} ${n.f[1]} ${gridQv(n.f[2])}`
   const inner = n.c.map(x => gridSerialise(x, s, false)).join(` ${n.j} `)
   return top || n.c.length < 2 ? inner : `(${inner})`
 }
 function gridParse(q: string, s: GridSchema): GridGroup {
-  const toks = q.match(/"[^"]*"|>=|<=|≥|≤|[<>=()]|[^\s"<>=()]+/g) || []
+  const toks = q.match(GRID_TOKEN_RE) || []
   let i = 0
   const cond = (): GridCondition => {
     const f = s.field.get((toks[i] || '').toLowerCase())
@@ -126,7 +142,8 @@ function gridParse(q: string, s: GridSchema): GridGroup {
     if (!ops.includes(op)) throw new Error(`“${toks[i + 1] || '…'}” isn’t an operator for ${s.label.get(f) ?? f} (try ${ops.join(', ')})`)
     const raw = toks[i + 2]
     if (raw === undefined || raw === ')') throw new Error(`Missing value for ${s.label.get(f) ?? f}`)
-    let v = raw.replace(/^"|"$/g, '')
+    let v = gridUnquote(raw)
+    if (s.kind(f) === 'number' && !Number.isFinite(gridNum(v))) throw new Error(`${s.label.get(f) ?? f} needs a number, not “${v}”`)
     const opts = s.options(f)
     if (opts) { const m = opts.find(x => x.toLowerCase() === v.toLowerCase()); if (!m && op !== 'contains') throw new Error(`${s.label.get(f) ?? f} is one of ${opts.join(', ')}`); v = m || v }
     i += 3
@@ -154,20 +171,23 @@ function gridParse(q: string, s: GridSchema): GridGroup {
   return tree
 }
 function gridHighlight(q: string, s: GridSchema): ReactNode {
-  return q.split(/("[^"]*"|\s+|>=|<=|≥|≤|[<>=()])/).map((t, k) => {
+  return q.split(GRID_TOKEN_SPLIT).map((t, k) => {
     const l = t.toLowerCase()
     if (!t || /^\s+$/.test(t)) return t
     if (s.field.has(l)) return <span key={k} className="font-semibold text-[var(--accent)]">{t}</span>
     if (l === 'and' || l === 'or') return <span key={k} className="font-semibold text-[var(--c3)]">{t}</span>
-    if (['is', 'not', 'contains', '>', '<', '=', '>=', '<=', '≥', '≤', '(', ')'].includes(l)) return <span key={k} className="text-[var(--fg2)]">{t}</span>
+    if (GRID_OP_WORDS.has(l)) return <span key={k} className="text-[var(--fg2)]">{t}</span>
     return <span key={k} className="text-[color-mix(in_srgb,var(--ok)_80%,var(--fg))]">{t}</span>
   })
 }
 
+/** The light pill inside a coloured filter block (field, operator, value, all/any): theme tokens, readable in both themes. */
+const GRID_BLOCK_PILL = 'bg-[var(--card)] text-[var(--fg)]'
+
 /* ---- library Select (keyboard, type-ahead) restyled for chips, blocks and the toolbar ---- */
 const GRID_PICK = {
   chip: 'flex h-full min-w-0 shrink [@media(pointer:coarse)]:[&>button]:text-[13px] [&>button]:h-full [&>button]:w-auto [&>button]:min-w-0 [&>button]:max-w-[180px] [&>button]:gap-1 [&>button]:rounded-none [&>button]:border-y-0 [&>button]:border-s-0 [&>button]:bg-transparent [&>button]:px-2 [&>button]:text-xs [&>button]:text-[var(--fg)]',
-  block: '[@media(pointer:coarse)]:[&>button]:h-8 [@media(pointer:coarse)]:[&>button]:text-[13px] [&>button]:h-6 [&>button]:w-auto [&>button]:gap-1 [&>button]:rounded-[var(--r-lg)] [&>button]:border-0 [&>button]:bg-white [&>button]:px-2 [&>button]:text-xs [&>button]:font-semibold [&>button]:text-[#18181B] [&>button_svg]:text-[#71717A] [&>div]:text-[var(--fg)] [&>div]:font-normal',
+  block: '[@media(pointer:coarse)]:[&>button]:h-8 [@media(pointer:coarse)]:[&>button]:text-[13px] [&>button]:h-6 [&>button]:w-auto [&>button]:gap-1 [&>button]:rounded-[var(--r-lg)] [&>button]:border-0 [&>button]:bg-[var(--card)] [&>button]:px-2 [&>button]:text-xs [&>button]:font-semibold [&>button]:text-[var(--fg)] [&>button_svg]:text-[var(--fg3)] [&>div]:text-[var(--fg)] [&>div]:font-normal',
   toolbar: '[@media(pointer:coarse)]:[&>button]:h-9 [@media(pointer:coarse)]:[&>button]:text-[13px] [&>button]:h-7 [&>button]:w-auto [&>button]:min-w-[110px] [&>button]:px-2 [&>button]:text-xs [&>button]:text-[var(--fg)]',
 } as const
 function GridPick({ value, options, onChange, label, variant, className }:
@@ -222,38 +242,53 @@ function useGridToolbar(ref: React.RefObject<HTMLElement | null>) {
 function GridFilterBuilder({ tree, onChange, schema, fields, defaultField, count }:
   { tree: GridGroup; onChange: (t: GridGroup) => void; schema: GridSchema; fields: [string, string][]; defaultField: string; count: ReactNode }) {
   const [mode, setMode] = useState<'bricks' | 'text' | 'blocks'>('bricks')
-  const [qText, setQText] = useState('')
-  const [qErr, setQErr] = useState<string | null>(null)
+  // what was typed in Text mode and the tree it produced: when the filter changes from elsewhere, the text follows it
+  const [draft, setDraft] = useState<{ text: string; tree: GridGroup; err: string | null } | null>(null)
+  const current = draft?.tree === tree ? draft : null
+  const qText = current ? current.text : mode === 'text' ? gridSerialise(tree, schema) : ''
+  const qErr = current?.err ?? null
+  const [sayErr, errLive] = useLive({ debounce: 700 })
   const [focusNew, setFocusNew] = useState<string | null>(null)
   const ref = useRef(tree); ref.current = tree
   const bar = useRef<HTMLDivElement>(null)
+  const errId = useId()
   useGridToolbar(bar)
   const set = (t: GridGroup) => { ref.current = t; onChange(t) }
-  const newCond = (field = defaultField): GridCondition => ({ id: gridId(), f: [field, GRID_OPS[schema.kind(field)][schema.kind(field) === 'number' ? 0 : 2], schema.options(field)?.[0] ?? ''] })
+  /** A new condition on `field`: numbers start at '>', options at 'is' their first value, free text at 'contains'. */
+  const gridDefaultCond = (field: string): GridCondition['f'] => {
+    const opts = schema.options(field)
+    return [field, schema.kind(field) === 'number' ? '>' : opts ? 'is' : 'contains', opts?.[0] ?? '']
+  }
+  const newCond = (field = defaultField): GridCondition => ({ id: gridId(), f: gridDefaultCond(field) })
   const setField = (id: string, i: 0 | 1 | 2, v: string) => set(gridUpdate(ref.current, id, n => {
     if (gridIsGroup(n)) return n
-    if (i === 0) return { ...n, f: [v, GRID_OPS[schema.kind(v)][0], schema.options(v)?.[0] ?? ''] }
+    if (i === 0) return { ...n, f: gridDefaultCond(v) }
     const f = [...n.f] as GridCondition['f']; f[i] = v; return { ...n, f }
   }))
   const remove = (id: string) => set(gridRemove(ref.current, id)[0])
   const flat = tree.c.every(n => !gridIsGroup(n))
-  const switchMode = (m: string) => { if (m === 'text') { setQText(gridSerialise(ref.current, schema)); setQErr(null) } setMode(m as typeof mode) }
+  const switchMode = (m: string) => { setDraft(null); setMode(m as typeof mode) }
   const applyText = (q: string) => {
-    setQText(q)
-    if (!q.trim()) { set({ ...ref.current, c: [] }); setQErr(null); return }
-    try { const t = gridParse(q, schema); set({ ...t, id: ref.current.id }); setQErr(null) } catch (e) { setQErr((e as Error).message) }
+    let next: GridGroup = ref.current, err: string | null = null
+    if (!q.trim()) next = { ...ref.current, c: [] }
+    else try { next = { ...gridParse(q, schema), id: ref.current.id } } catch (e) { err = (e as Error).message }
+    setDraft({ text: q, tree: next, err })
+    if (next !== ref.current) set(next)
+    if (err) sayErr(err)
   }
 
   const condFields = (n: GridCondition, variant: 'chip' | 'block') => {
     const [k, op, v] = n.f, opts = schema.options(k)
-    const sel = variant === 'chip' ? 'h-full min-w-0 shrink border-0 border-e border-[var(--line)] bg-transparent px-2 text-xs text-[var(--fg)]' : 'h-6 rounded-[var(--r-lg)] border-0 bg-white px-2 text-xs font-semibold text-[#18181B]'
+    const sel = variant === 'chip' ? 'h-full min-w-0 shrink border-0 border-e border-[var(--line)] bg-transparent px-2 text-xs text-[var(--fg)]' : cn('h-6 rounded-[var(--r-lg)] border-0 px-2 text-xs font-semibold', GRID_BLOCK_PILL)
     return (
       <>
         <GridPick label={'Field'} variant={variant} value={k} options={fields} onChange={x => setField(n.id, 0, x)} className={variant === 'chip' ? '[&>button]:font-semibold' : undefined} />
         <GridPick label={'Operator'} variant={variant} value={op} options={GRID_OPS[schema.kind(k)].map(o => [o, o])} onChange={x => setField(n.id, 1, x)} />
         {opts && op !== 'contains'
           ? <GridPick label={'Value'} variant={variant} value={v} options={opts.map(o => [o, o])} onChange={x => setField(n.id, 2, x)} />
-          : <input aria-label={'Value'} value={v} placeholder={'value'} size={variant === 'block' ? 6 : undefined} autoFocus={focusNew === n.id}
+          : <input aria-label={'Value'} value={v} inputMode={schema.kind(k) === 'number' ? 'decimal' : undefined}
+            aria-invalid={(schema.kind(k) === 'number' && v.trim() !== '' && !Number.isFinite(gridNum(v))) || undefined}
+            title={schema.kind(k) === 'number' && v.trim() !== '' && !Number.isFinite(gridNum(v)) ? 'Not a number: this filter is ignored' : undefined} placeholder={'value'} size={variant === 'block' ? 6 : undefined} autoFocus={focusNew === n.id}
             onFocus={() => focusNew === n.id && setFocusNew(null)} onChange={e => setField(n.id, 2, e.target.value)}
             className={cn(sel, '[@media(pointer:coarse)]:text-base', variant === 'chip' ? 'w-[90px] min-w-[48px] outline-none' : 'outline-none focus:shadow-[0_0_0_2px_rgba(255,255,255,.6)] [@media(pointer:coarse)]:h-8')} />}
       </>
@@ -293,20 +328,22 @@ function GridFilterBuilder({ tree, onChange, schema, fields, defaultField, count
     <div className="flex w-full flex-col gap-1">
       <div className={cn(inputShellClass(!!qErr), GRID_FOCUS_RING, 'relative h-[30px] w-full min-w-[240px] !rounded-[var(--r-md)] [@media(pointer:coarse)]:h-10')}>
         <div ref={mirror} aria-hidden className={cn('pointer-events-none absolute inset-0 overflow-hidden px-2.5 font-[family-name:var(--mono)] text-xs leading-[28px] whitespace-pre text-[var(--fg)] [@media(pointer:coarse)]:leading-[38px]', TOUCH.input)}>{gridHighlight(qText, schema)} </div>
-        <input value={qText} autoFocus spellCheck={false} autoComplete="off" aria-label={'Filter query'} aria-invalid={!!qErr || undefined}
+        <input value={qText} autoFocus spellCheck={false} autoComplete="off" aria-label={'Filter query'} aria-invalid={!!qErr || undefined} aria-describedby={errId}
           onChange={e => { applyText(e.target.value); if (mirror.current) mirror.current.scrollLeft = e.target.scrollLeft }}
           onScroll={e => { if (mirror.current) mirror.current.scrollLeft = e.currentTarget.scrollLeft }}
           onKeyUp={e => { if (mirror.current) mirror.current.scrollLeft = e.currentTarget.scrollLeft }}
           className={cn('absolute inset-0 w-full border-0 bg-transparent px-2.5 font-[family-name:var(--mono)] text-xs leading-[28px] whitespace-pre text-transparent caret-[var(--fg)] [@media(pointer:coarse)]:leading-[38px] outline-none selection:bg-[color-mix(in_srgb,var(--accent)_30%,transparent)]', TOUCH.input)} />
       </div>
       <div className="flex flex-wrap items-center gap-1 px-0.5 pt-0.5">
-        <span role="status" className={cn('text-xs', qErr ? 'text-[var(--bad)]' : qText.trim() ? 'text-[var(--ok)]' : 'text-[var(--fg3)]')}>
+        {/* visual only: errors are announced (debounced) through errLive, so typing isn't read out on every key */}
+        <span id={errId} className={cn('text-xs', qErr ? 'text-[var(--bad)]' : qText.trim() ? 'text-[var(--ok)]' : 'text-[var(--fg3)]')}>
           {qErr ?? (qText.trim() ? '✓ Valid query' : 'No filter · showing everything')}
         </span>
+        {errLive}
         <span className="flex-1" />
         {fields.map(([k, l]) => (
           <button key={k} onClick={e => {
-            const v = qText.trimEnd(), next = (v ? v + (/\b(and|or)$/i.test(v) ? ' ' : ' and ') : '') + (/\s/.test(l) ? k : l.toLowerCase()) + ' '
+            const v = qText.trimEnd(), next = (v ? v + (/\b(and|or)$/i.test(v) ? ' ' : ' and ') : '') + gridFieldToken(k, l) + ' '
             applyText(next); const inp = (e.currentTarget.closest('[data-fb]') as HTMLElement).querySelector('input'); inp?.focus(); inp?.setSelectionRange(next.length, next.length)
           }} className={cn('cursor-pointer rounded-[var(--r-sm)] border border-[var(--line)] bg-[var(--card)] px-1.5 py-0.5 font-[family-name:var(--mono)] text-[11px] text-[var(--fg2)] hover:border-[var(--accent)] hover:text-[var(--accent)] [@media(pointer:coarse)]:px-2 [@media(pointer:coarse)]:text-xs', TOUCH.tap)}>{l.toLowerCase()}</button>
         ))}
@@ -320,29 +357,31 @@ function GridFilterBuilder({ tree, onChange, schema, fields, defaultField, count
     onMove: (id, list, index) => { const [t, n] = gridRemove(ref.current, id); if (n) set(gridInsert(t, list, index, n)) },
   })
   const BC: Record<string, string> = { cond: 'var(--accent)', AND: 'var(--c3)', OR: 'var(--c4)' }
-  const blockBase = 'relative mb-2 rounded-[var(--r-md)] text-xs font-semibold text-white bg-[color-mix(in_srgb,var(--bc)_90%,#000)] shadow-[0_2px_0_color-mix(in_srgb,var(--bc)_60%,#000)]'
+  // white text on the block colour darkened by onColorLabel (4.5:1 in both themes); the notch below inherits that fill
+  const blockStyle = (k: string) => ({ '--bc': BC[k], ...onColorLabel(BC[k]) }) as CSSProperties
+  const blockBase = 'relative mb-2 rounded-[var(--r-md)] text-xs font-semibold shadow-[0_2px_0_color-mix(in_srgb,var(--bc)_35%,#000)]'
   const grip = (id: string) => <span {...sort.handleProps(id)} aria-label={'Drag block'} role="img" className={cn('cursor-grab touch-none px-0.5 text-[13px] opacity-75 select-none hover:opacity-100 [@media(pointer:coarse)]:-my-1 [@media(pointer:coarse)]:grid [@media(pointer:coarse)]:h-8 [@media(pointer:coarse)]:w-7 [@media(pointer:coarse)]:place-items-center', TOUCH.input)}>⠿</span>
-  const x = (id: string, what: 'removeBlock' | 'removeGroup') => <button onClick={() => remove(id)} aria-label={what === 'removeBlock' ? 'Remove block' : 'Remove group'} className="ms-0.5 grid h-5 w-5 flex-none cursor-pointer place-items-center rounded-full border-0 bg-black/15 text-white hover:bg-black/30 [@media(pointer:coarse)]:h-8 [@media(pointer:coarse)]:w-8"><Icon name="x" size={10} strokeWidth={3} /></button>
+  const x = (id: string, label: 'Remove block' | 'Remove group') => <button onClick={() => remove(id)} aria-label={label} className="ms-0.5 grid h-5 w-5 flex-none cursor-pointer place-items-center rounded-full border-0 bg-black/15 text-white hover:bg-black/30 [@media(pointer:coarse)]:h-8 [@media(pointer:coarse)]:w-8"><Icon name="x" size={10} strokeWidth={3} /></button>
   const block = (n: GridFilterNode, root = false): ReactNode => {
     const ghost = sort.dragging === n.id && 'opacity-40 !shadow-none outline-[1.5px] outline-dashed outline-[var(--line2)]'
     if (!gridIsGroup(n)) return (
-      <motion.div key={n.id} layout="position" transition={spring(0.2, 0.35)} {...sort.itemProps(n.id)} style={{ '--bc': BC.cond } as CSSProperties}
+      <motion.div key={n.id} layout="position" transition={spring(0.2, 0.35)} {...sort.itemProps(n.id)} style={blockStyle('cond')}
         initial={{ opacity: 0, y: -6, scale: 0.96 }} animate={{ opacity: 1, y: 0, scale: 1 }}
-        className={cn(blockBase, 'flex w-max max-w-full flex-wrap items-center gap-1.5 py-[7px] pe-2 ps-1.5 before:absolute before:top-0 before:start-[18px] before:h-1 before:w-4 before:rounded-b before:bg-black/15 after:absolute after:-bottom-1.5 after:start-[18px] after:h-1.5 after:w-4 after:rounded-b after:bg-[color-mix(in_srgb,var(--bc)_90%,#000)]', ghost)}>
-        {grip(n.id)}<span className="opacity-90">{'where'}</span>{condFields(n, 'block')}{x(n.id, 'removeBlock')}
+        className={cn(blockBase, 'flex w-max max-w-full flex-wrap items-center gap-1.5 py-[7px] pe-2 ps-1.5 before:absolute before:top-0 before:start-[18px] before:h-1 before:w-4 before:rounded-b before:bg-black/15 after:absolute after:-bottom-1.5 after:start-[18px] after:h-1.5 after:w-4 after:rounded-b after:bg-inherit', ghost)}>
+        {grip(n.id)}<span className="opacity-90">{'where'}</span>{condFields(n, 'block')}{x(n.id, 'Remove block')}
       </motion.div>
     )
     return (
-      <motion.div key={n.id} layout={root ? false : 'position'} transition={spring(0.2, 0.35)} {...(root ? {} : sort.itemProps(n.id))} style={{ '--bc': BC[n.j] } as CSSProperties}
+      <motion.div key={n.id} layout={root ? false : 'position'} transition={spring(0.2, 0.35)} {...(root ? {} : sort.itemProps(n.id))} style={blockStyle(n.j)}
         initial={root ? false : { opacity: 0, y: -6, scale: 0.96 }} animate={{ opacity: 1, y: 0, scale: 1 }} className={cn(blockBase, 'w-full', root && '!mb-0', ghost)}>
         <div className="flex flex-wrap items-center gap-1.5 px-2 py-[7px]">
 
           {root ? <span className="opacity-90">{'Show rows where'}</span> : grip(n.id)}
-          <motion.button key={n.j} initial={{ scale: 0.85 }} animate={{ scale: 1 }} transition={spring(0.5, 0.3)} aria-label={`Match ${(n.j === 'AND' ? 'all' : 'any') === 'all' ? 'all' : 'any'}. Click to switch`}
+          <motion.button key={n.j} initial={{ scale: 0.85 }} animate={{ scale: 1 }} transition={spring(0.5, 0.3)} aria-label={`Match ${n.j === 'AND' ? 'all' : 'any'}. Click to switch`}
             onClick={() => set(gridUpdate(ref.current, n.id, g => ({ ...g, j: (g as GridGroup).j === 'AND' ? 'OR' : 'AND' })))}
-            className="h-[22px] cursor-pointer rounded-[var(--r-lg)] border-0 bg-white/95 px-2.5 text-xs font-bold text-[#18181B] [@media(pointer:coarse)]:h-8 [@media(pointer:coarse)]:min-w-11 [@media(pointer:coarse)]:text-[13px]">{n.j === 'AND' ? 'all' : 'any'}</motion.button>
+            className={cn('h-[22px] cursor-pointer rounded-[var(--r-lg)] border-0 px-2.5 text-xs font-bold [@media(pointer:coarse)]:h-8 [@media(pointer:coarse)]:min-w-11 [@media(pointer:coarse)]:text-[13px]', GRID_BLOCK_PILL)}>{n.j === 'AND' ? 'all' : 'any'}</motion.button>
           <span className="opacity-90">{'of these are true'}</span>
-          {!root && <span className="ms-auto">{x(n.id, 'removeGroup')}</span>}
+          {!root && <span className="ms-auto">{x(n.id, 'Remove group')}</span>}
         </div>
         <div {...sort.listProps(n.id)} className="ms-3.5 min-h-[38px] rounded-s-md bg-[var(--card)] px-2 pt-2 pb-0.5">
           {n.c.length ? n.c.map(k => block(k)) : <div className="px-0.5 pt-1 pb-2.5 font-medium text-[var(--fg3)]">{'Drop blocks here'}</div>}
@@ -352,8 +391,7 @@ function GridFilterBuilder({ tree, onChange, schema, fields, defaultField, count
     )
   }
   const addBlock = (kind: 'cond' | 'AND' | 'OR') => {
-    const n: GridFilterNode = kind === 'cond' ? newCond() : { id: gridId(), j: kind, c: [{ id: gridId(), f: [fields.find(([k]) => schema.options(k))?.[0] ?? defaultField, 'is', ''] }] }
-    if (gridIsGroup(n)) { const c = n.c[0] as GridCondition; c.f[2] = schema.options(c.f[0])?.[0] ?? '' }
+    const n: GridFilterNode = kind === 'cond' ? newCond() : { id: gridId(), j: kind, c: [newCond(fields.find(([k]) => schema.options(k))?.[0] ?? defaultField)] }
     if (!gridIsGroup(n)) setFocusNew(n.id)
     set({ ...ref.current, c: [...ref.current.c, n] })
   }
@@ -362,8 +400,8 @@ function GridFilterBuilder({ tree, onChange, schema, fields, defaultField, count
       <div className="flex flex-wrap gap-1.5 md:flex-col">
         <span className="text-xs text-[var(--fg3)]">{'Add a block'}</span>
         {([['cond', 'where … is …'], ['AND', 'all of'], ['OR', 'any of']] as const).map(([k, l]) => (
-          <button key={k} onClick={() => addBlock(k)} style={{ '--bc': BC[k] } as CSSProperties}
-            className="cursor-pointer rounded-[var(--r-md)] border-0 bg-[color-mix(in_srgb,var(--bc)_90%,#000)] px-2.5 py-2 text-start text-xs font-semibold [@media(pointer:coarse)]:min-h-9 text-white shadow-[0_2px_0_color-mix(in_srgb,var(--bc)_60%,#000)] hover:brightness-110 active:translate-y-px">{l}</button>
+          <button key={k} onClick={() => addBlock(k)} style={blockStyle(k)}
+            className="cursor-pointer rounded-[var(--r-md)] border-0 px-2.5 py-2 text-start text-xs font-semibold [@media(pointer:coarse)]:min-h-9 shadow-[0_2px_0_color-mix(in_srgb,var(--bc)_35%,#000)] hover:brightness-110 active:translate-y-px">{l}</button>
         ))}
         <span className="mt-1.5 text-xs text-[var(--fg3)]">{'Drag ⠿ to reorder or drop a block inside a group to nest it. Text and Bricks stay in sync.'}</span>
       </div>
@@ -385,14 +423,19 @@ function GridFilterBuilder({ tree, onChange, schema, fields, defaultField, count
   )
 }
 
+/** One CSV field: quoted when it has to be; a text cell that a spreadsheet would run as a formula gets a leading '. */
+const gridCsvCell = (s: string, text: boolean) => {
+  const t = text && /^[=+\-@\t\r]/.test(s) ? `'${s}` : s
+  return /[",\r\n]/.test(t) || t !== t.trim() ? `"${t.replace(/"/g, '""')}"` : t
+}
+const gridFileName = (label?: string) => (label ?? '').toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '') || 'rows'
+
 /** The filter bar re-renders only when its props change (not on every scroll of a virtual grid). */
 const GridFilterBuilderMemo = memo(GridFilterBuilder)
 
 /** A visible accent ring on a text-field shell while its input has keyboard focus. */
 const GRID_FOCUS_RING = 'has-[input:focus-visible]:!border-[var(--accent)] has-[input:focus-visible]:!shadow-[0_0_0_2px_var(--accent-soft)]'
 
-const gridCmp = (x: unknown, y: unknown, coll: Intl.Collator) =>
-  (typeof x === 'number' && typeof y === 'number') || (x instanceof Date && y instanceof Date) ? Number(x) - Number(y) : coll.compare(String(x), String(y))
 
 /* ---- selection model ---- */
 /** A row's key (what `rowKey` returns). */
@@ -416,26 +459,51 @@ function gridSelWith(s: GridSelection, ids: readonly GridKey[], on: boolean): Gr
   return { mode: s.mode, keys }
 }
 /** Sort state: a column and a direction (1 ascending, -1 descending). */
-export type GridSort<T> = { key: keyof T & string; dir: 1 | -1 }
+export type GridSort<T> = TableSort<keyof T & string>
 /** Which edge a pinned column sticks to. */
 export type GridPinSide = 'left' | 'right'
 /** Pinned column keys per side, in display order. */
 export type GridPinned = { left?: string[]; right?: string[] }
 type GridDisp<T> = { g: string; rs: T[]; r?: undefined } | { r: T; g?: undefined }
+let gridWarned = false
+const gridWarnOnce = (msg: string) => {
+  if (gridWarned || (globalThis as { process?: { env?: { NODE_ENV?: string } } }).process?.env?.NODE_ENV === 'production') return
+  gridWarned = true; console.warn(`@lyndon/ui: ${msg}`)
+}
 /** Rows rendered when more than this many are shown (and always with `onLoadMore`) are virtualised. */
 const GRID_VIRTUAL_AT = 100
 const GRID_GROUP_H = 36
+/** The checkbox column's width (px): sticky offsets and the table width add it; `sticky0`'s w-10 is the same 40px. */
+const GRID_CHECK_W = 40
+/** A column's width (px) when it sets none. */
+const GRID_COL_W = 120
+/** Default row height (px): fine pointers, and touch screens. The td classes below match these. */
+const GRID_ROW_H = { fine: 38, coarse: 44 } as const
 
 /** Everything a grid row's output depends on: a memoised row re-renders only when one of these changes. */
 type GridRowProps<T> = {
-  r: T; di: number; ri: number; on: boolean; tabKey: string | null; editKey: string | null; activeKey: string | null
-  flash: { key: string; n: number } | null; marks?: Map<string, RegExpMatchArray[]>; cols: GridColumn<T>[]; stickKey: string; anim: boolean
+  r: T; di: number; ri: number; on: boolean; tabKey: string | null; editKey: string | null; editErr: string | null; activeKey: string | null
+  flash: { key: string; n: number } | null; marks?: Map<string, RegExpMatchArray[]>; cols: GridColumn<T>[]; stickKey: string; anim: boolean; h?: number
   measure: (el: Element | null) => void | (() => void); draw: { current: (r: T, di: number, p: GridRowProps<T>) => ReactElement }
 }
 const GridRowMemo = memo(function GridRow<T>(p: GridRowProps<T>) { return p.draw.current(p.r, p.di, p) }) as <T>(p: GridRowProps<T> & { key?: React.Key }) => ReactElement
 
-/** Props of DataGrid. Every 0.2 prop works as before; the rest add server data, column state and a selection API. */
-export type DataGridProps<T> = {
+/** Pages: `pageSize` shows a pager (client mode pages locally; server mode asks for each page). */
+export type GridPagedProps = {
+  /** 0-based page; with `pageSize` a pager shows (client mode pages locally) */ page?: number; defaultPage?: number; onPageChange?: (page: number) => void
+  pageSize?: number; defaultPageSize?: number; /** offered in "Rows per page" */ pageSizes?: number[]; onPageSizeChange?: (size: number) => void
+  onLoadMore?: never; hasMore?: never
+}
+/** Infinite loading: `onLoadMore` when the last rows scroll into view. The rows are always virtualised, and there are no pages. */
+export type GridInfiniteProps = {
+  /** called when the last rows scroll into view (once per row count) while `hasMore` and not `loading` */ onLoadMore: () => void; hasMore?: boolean
+  page?: never; defaultPage?: never; onPageChange?: never; pageSize?: never; defaultPageSize?: never; pageSizes?: never; onPageSizeChange?: never
+}
+
+/** Props of DataGrid. Paging is pages or infinite loading, never both (GridPagedProps | GridInfiniteProps). */
+export type DataGridProps<T> = DataGridBaseProps<T> & (GridPagedProps | GridInfiniteProps)
+/** Every DataGrid prop except the paging ones. */
+export type DataGridBaseProps<T> = {
   columns: GridColumn<T>[]; rows?: T[]; defaultRows?: T[]; onRowsChange?: (rows: T[]) => void; rowKey: (r: T) => GridKey
   defaultFilter?: GridGroup; defaultSort?: GridSort<T>; /** columns offered in Group by (client mode) */ groupable?: (keyof T & string)[]
   /** totals shown on each group row (default: sums of the number columns) */ groupSummary?: (rows: T[]) => ReactNode
@@ -447,9 +515,6 @@ export type DataGridProps<T> = {
   /** controlled filter tree; the Bricks/Text/Blocks builder emits it */ filter?: GridGroup; onFilterChange?: (filter: GridGroup) => void
   /** the rg search box, debounced (150 ms): apply it on your API in server mode */ onSearchChange?: (query: string) => void
   /** server mode: rows matching on the server (pages, the count, aria-rowcount, "select all N") */ rowCount?: number
-  /** 0-based page; with `pageSize` a pager shows (client mode pages locally) */ page?: number; defaultPage?: number; onPageChange?: (page: number) => void
-  pageSize?: number; defaultPageSize?: number; /** offered in "Rows per page" */ pageSizes?: number[]; onPageSizeChange?: (size: number) => void
-  /** infinite loading: called when the last rows scroll into view (once per row count) while `hasMore` and not `loading` */ onLoadMore?: () => void; hasMore?: boolean
   /** a request is in flight: skeleton rows when empty, dimmed rows otherwise, loading rows at the end with `onLoadMore` */ loading?: boolean
   /** a failed request: shown above the rows, with Retry when `onRetry` is given */ error?: ReactNode; onRetry?: () => void
   /** controlled selection (see GridSelection) */ selection?: GridSelection; defaultSelection?: GridSelection; onSelectionChange?: (s: GridSelection) => void
@@ -459,7 +524,7 @@ export type DataGridProps<T> = {
   /** pinned columns (default: columns with `pin`, else the first column on the left) */ pinnedColumns?: GridPinned; defaultPinnedColumns?: GridPinned; onPinnedColumnsChange?: (p: GridPinned) => void
   onColumnResize?: (key: string, width: number) => void
   /** px per row (default 38, 44 on touch screens); rows taller than this are measured */ rowHeight?: number
-  /** virtualise the rows: true, false, or above this many rows (default 100). Small grids keep their row animations. */ virtualize?: boolean | number
+  /** virtualise the rows: true, false, or above this many rows (default 100). Small grids keep their row animations. Always on with `onLoadMore`. */ virtualize?: boolean | number
 }
 
 /**
@@ -494,7 +559,10 @@ export function DataGrid<T extends object>(props: DataGridProps<T>) {
   const pageRef = useRef(page); pageRef.current = page
   const setPage = (p: number) => { if (p !== pageRef.current) { pageRef.current = p; setPageRaw(p) } }
   const [pageSize, setPageSize] = useControllable(pageSizeProp, defaultPageSize ?? 0, onPageSizeChange)
-  const paged = pageSize > 0
+  const infinite = !!onLoadMore
+  // a grid that is not virtualised has every row "in view", so infinite loading would fetch every page at once
+  if (infinite && (virtualize === false || pageSize > 0)) gridWarnOnce('DataGrid: onLoadMore always virtualises the rows and takes no pages; `virtualize={false}` and `pageSize` are ignored.')
+  const paged = pageSize > 0 && !infinite
   const [qInput, setQInput] = useState('') // what's typed; `q` follows it after a short pause
   const [q, setQ] = useState('')
   useEffect(() => { if (qInput === q) return; const t = setTimeout(() => setQ(qInput), 150); return () => clearTimeout(t) }, [qInput]) // eslint-disable-line react-hooks/exhaustive-deps
@@ -502,11 +570,12 @@ export function DataGrid<T extends object>(props: DataGridProps<T>) {
   const [groupBy, setGroupBy] = useState('')
   const [closed, setClosed] = useState<Set<string>>(new Set())
   const last = useRef<GridKey | null>(null)
-  const [widths, setWidths] = useState<Record<string, number>>(() => Object.fromEntries(columns.map(c => [c.key, c.width ?? 120])))
+  const [widths, setWidths] = useState<Record<string, number>>(() => Object.fromEntries(columns.map(c => [c.key, c.width ?? GRID_COL_W])))
   const [resizing, setResizing] = useState<string | null>(null)
-  const [edit, setEditState] = useState<{ id: GridKey; key: string } | null>(null)
-  const editRef = useRef(edit)
-  const setEdit = (e: typeof edit) => { editRef.current = e; setEditState(e) }
+  const [edit, setEditRaw, getEdit] = useLatestState<{ id: GridKey; key: string } | null>(null)
+  /** why the open editor's text was rejected (it stays open, showing this) */
+  const [editErr, setEditErr] = useState<string | null>(null)
+  const setEdit = (e: typeof edit) => { setEditErr(null); setEditRaw(e) }
   const [flash, setFlash] = useState<{ id: GridKey; key: string; n: number } | null>(null)
   /* touch: tap a cell to select it, tap again (or its pencil) to edit; mouse keeps double-click */
   const [active, setActive] = useState<{ id: GridKey; key: string } | null>(null)
@@ -514,6 +583,7 @@ export function DataGrid<T extends object>(props: DataGridProps<T>) {
   const [cursor, setCursor] = useState<{ id: GridKey; key: string } | null>(null)
   const pendingFocus = useRef<{ id: GridKey; key: string } | null>(null)
   const [setSaid, live] = useLive()
+  const editErrId = useId()
   const tableRef = useRef<HTMLTableElement>(null)
   const ptr = useRef('mouse')
   const [scrollerCb, edges] = useScrollEdges<HTMLDivElement>()
@@ -522,11 +592,9 @@ export function DataGrid<T extends object>(props: DataGridProps<T>) {
   const [gridBox, gridW] = useWidth<HTMLDivElement>()
   const narrow = gridW > 0 && gridW < 520
   const coarse = useCoarsePointer()
-  const rowH = rowHeight ?? (coarse ? 44 : 38)
-  const locale = LOCALE, timeZone = undefined
-  // one formatter and collator per locale: building Intl objects per cell is the slowest part of a scroll frame
-  const dateFmt = useMemo(() => dateFormat(locale, { day: 'numeric', month: 'short', year: 'numeric', ...(timeZone ? { timeZone } : null) }), [locale, timeZone])
-  const collator = useMemo(() => new Intl.Collator(locale), [locale])
+  const rowH = rowHeight ?? (coarse ? GRID_ROW_H.coarse : GRID_ROW_H.fine)
+  // one date formatter per grid: building Intl objects per cell is the slowest part of a scroll frame
+  const dateFmt = useMemo(() => dateFormat(LOCALE, { day: 'numeric', month: 'short', year: 'numeric' }), [])
 
   /* ---- columns: order, visibility, pins ---- */
   const col = (k: string) => columns.find(c => c.key === k)
@@ -547,13 +615,13 @@ export function DataGrid<T extends object>(props: DataGridProps<T>) {
     return [0, 1, 2].flatMap(n => order.filter(k => z(k) === n)).map(k => col(k)!).filter(Boolean)
   }, [order, pins, columns]) // eslint-disable-line react-hooks/exhaustive-deps
   const cols = useMemo(() => { const h = new Set(hidden); return arranged.filter(c => !h.has(c.key)) }, [arranged, hidden])
-  const colW = (c: GridColumn<T>, i: number) => { const w = widths[c.key] ?? c.width ?? 120; return i === 0 && narrow && pinOf(c.key) === 'start' ? Math.min(w, 120) : w }
+  const colW = (c: GridColumn<T>, i: number) => { const w = widths[c.key] ?? c.width ?? GRID_COL_W; return i === 0 && narrow && pinOf(c.key) === 'start' ? Math.min(w, GRID_COL_W) : w }
   const stick = new Map<string, { side: 'start' | 'end'; at: number; edge: boolean }>()
   {
     // on a phone only the first start pin stays sticky: more would leave no room for the rest of the row
     const first = cols.filter(c => pinOf(c.key) === 'start').slice(0, narrow ? 1 : undefined), last = narrow ? [] : cols.filter(c => pinOf(c.key) === 'end')
     // offsets are the cumulative colgroup widths, so the table must lay out at exactly those widths (see the table's style)
-    let x = 40; first.forEach((c, i) => { stick.set(c.key, { side: 'start', at: x, edge: i === first.length - 1 }); x += colW(c, cols.indexOf(c)) })
+    let x = GRID_CHECK_W; first.forEach((c, i) => { stick.set(c.key, { side: 'start', at: x, edge: i === first.length - 1 }); x += colW(c, cols.indexOf(c)) })
     let r = 0; [...last].reverse().forEach((c, i) => { stick.set(c.key, { side: 'end', at: r, edge: i === last.length - 1 }); r += colW(c, cols.indexOf(c)) })
   }
   const pinStyle = (k: string): CSSProperties | undefined => { const s = stick.get(k); return s ? (s.side === 'start' ? { left: s.at } : { right: s.at }) : undefined }
@@ -585,7 +653,6 @@ export function DataGrid<T extends object>(props: DataGridProps<T>) {
   const toggleHidden = (k: string) => setHidden(hidden.includes(k) ? hidden.filter(x => x !== k) : [...hidden, k])
 
   /* ---- filter, search, sort ---- */
-  const kind = (k: string): 'text' | 'number' => col(k)?.type === 'number' ? 'number' : 'text'
   const schema: GridSchema = useMemo(() => ({
     label: new Map(columns.map(c => [c.key, c.label])),
     field: new Map(columns.flatMap(c => [[c.label.toLowerCase(), c.key], [c.key.toLowerCase(), c.key]] as [string, string][])),
@@ -595,7 +662,12 @@ export function DataGrid<T extends object>(props: DataGridProps<T>) {
   const cellText = (r: T, c: GridColumn<T>) => { if (c.text) return c.text(r); const v = r[c.key]; return v instanceof Date ? dateFmt.format(v) : String(v ?? '') }
   const test = (r: T, [k, op, v]: GridCondition['f']) => {
     const c = col(k); if (!c || v === '' || v == null) return true
-    if (kind(k) === 'number') { const x = Number(r[c.key]), n = Number(v); if (Number.isNaN(n)) return true; return ({ '>': x > n, '<': x < n, '=': x === n, '≥': x >= n, '≤': x <= n } as Record<string, boolean>)[op] ?? true }
+    if (schema.kind(k) === 'number') {
+      const n = gridNum(v), fn = GRID_NUM_OPS[op as GridNumOp]
+      if (!Number.isFinite(n) || !fn) return true // an unfinished value: the input shows it as invalid, the filter waits
+      const x = gridNum(r[c.key])
+      return Number.isFinite(x) && fn(x, n) // an empty cell matches no comparison
+    }
     const a = cellText(r, c).toLowerCase(), b = v.toLowerCase()
     return op === 'is' ? a === b : op === 'is not' ? a !== b : a.includes(b)
   }
@@ -619,9 +691,9 @@ export function DataGrid<T extends object>(props: DataGridProps<T>) {
         if (m) { marks.set(r, m); if (!server) rows.push(r) }
       }
     }
-    if (sort && !server) { const k = sort.key, d = sort.dir; rows.sort((a, b) => gridCmp(a[k], b[k], collator) * d) }
+    if (sort && !server) { const k = sort.key, d = sort.dir; rows.sort((a, b) => compareCells(a[k], b[k], d)) }
     return { rows, marks, hits, cut: server ? 0 : cut, of: base.length }
-  }, [data, filter, rg, sort, columns, server, collator, dateFmt]) // eslint-disable-line react-hooks/exhaustive-deps
+  }, [data, filter, rg, sort, columns, server, dateFmt]) // eslint-disable-line react-hooks/exhaustive-deps
   const visible = search.rows, hits = search.hits
   const total = server ? (rowCount ?? data.length) : visible.length
   const pageCount = paged ? Math.max(1, Math.ceil(total / pageSize)) : 1
@@ -685,7 +757,18 @@ export function DataGrid<T extends object>(props: DataGridProps<T>) {
     }
     toast({ title: `Deleted ${plural(n, 'row')}`, action: { label: 'Undo', onClick: undo } })
   }
-  const exp = () => { const rs = selectedLoaded(); if (onExport) onExport(rs, selRef.current); else toast({ title: `Exported ${plural(selCount, 'row')}`, description: 'CSV ready' }) }
+  /** Without `onExport`: the selected loaded rows, visible columns as shown, saved as a CSV file. */
+  const exp = () => {
+    const rs = selectedLoaded()
+    if (onExport) { onExport(rs, selRef.current); return }
+    const notLoaded = selCount - rs.length
+    if (!rs.length) { toast({ title: 'Nothing to export', description: 'None of the selected rows are loaded yet', tone: 'warn' }); return }
+    const file = `${gridFileName(ariaLabelProp)}.csv`
+    const lines = [cols.map(c => gridCsvCell(c.label, false)), ...rs.map(r => cols.map(c => gridCsvCell(cellText(r, c), c.type !== 'number')))]
+    try { downloadBlob(new Blob(['\ufeff' + lines.map(l => l.join(',')).join('\r\n')], { type: 'text/csv;charset=utf-8' }), file) }
+    catch { toast({ title: 'Couldn’t export', description: 'This browser refused to save the file', tone: 'bad' }); return }
+    toast({ title: `Exported ${plural(rs.length, 'row')}`, description: notLoaded > 0 ? `${file} · only loaded rows: ${plural(notLoaded, 'selected row')} not included` : file })
+  }
   const canSelectAll = sel.mode === 'include' && allSel && total > pageIds.length
   const selectAll = () => setSel(server ? { mode: 'exclude', keys: new Set() } : { mode: 'include', keys: new Set(visible.map(rowKey)) })
 
@@ -700,7 +783,7 @@ export function DataGrid<T extends object>(props: DataGridProps<T>) {
   const startResize = (e: React.PointerEvent<HTMLSpanElement>, k: string) => {
     if (e.button !== 0) return
     e.preventDefault(); e.stopPropagation()
-    const w0 = widths[k] ?? col(k)?.width ?? 120
+    const w0 = widths[k] ?? col(k)?.width ?? GRID_COL_W
     rz.current = { k, w0, w: w0 }; setResizing(k); resize.start(e)
   }
 
@@ -750,18 +833,32 @@ export function DataGrid<T extends object>(props: DataGridProps<T>) {
 
   /* ---- edit ---- */
   const canEdit = (c: GridColumn<T>) => c.editable ?? (c.type !== 'date' && !c.options)
+  const parseEdit = (c: GridColumn<T>, raw: string): { ok: true; v: unknown } | { ok: false; err: string } => {
+    if (c.parse) {
+      let v: unknown
+      try { v = c.parse(raw) } catch (e) { v = e instanceof Error ? e : new Error(String(e)) }
+      return v instanceof Error ? { ok: false, err: v.message || `Not a valid ${c.label}` } : { ok: true, v }
+    }
+    if (c.type !== 'number') return { ok: true, v: raw }
+    const n = gridNum(raw)
+    return Number.isFinite(n) ? { ok: true, v: n } : { ok: false, err: raw.trim() ? `${c.label} needs a number` : `Enter a number for ${c.label}` }
+  }
+  /** Store the edited text; false (the editor stays open with the reason) when the column rejects it. */
   const save = (r: T, c: GridColumn<T>, raw: string) => {
-    if (!editRef.current) return
+    if (!getEdit()) return true
+    if (raw === String(r[c.key] ?? '')) { setEdit(null); return true } // untouched: keep the value (and its type) as it was
+    const p = parseEdit(c, raw)
+    if (!p.ok) { setEditErr(p.err); return false }
     setEdit(null)
-    const v = c.type === 'number' ? Math.max(0, Math.round(Number(raw)) || 0) : raw.trim() || r[c.key]
-    if (v === r[c.key]) return
+    if (Object.is(p.v, r[c.key])) return true
     const id = rowKey(r)
-    commit(dataRef.current.map(x => rowKey(x) === id ? { ...x, [c.key]: v } as T : x))
+    commit(dataRef.current.map(x => rowKey(x) === id ? { ...x, [c.key]: p.v } as T : x))
     setFlash(f => ({ id, key: c.key, n: (f?.n ?? 0) + 1 }))
+    return true
   }
 
   /* ---- virtual rows ---- */
-  const virtualOn = virtualize === true || (virtualize !== false && (!!onLoadMore || dispCount > (typeof virtualize === 'number' ? virtualize : GRID_VIRTUAL_AT)))
+  const virtualOn = infinite || virtualize === true || (virtualize !== false && dispCount > (typeof virtualize === 'number' ? virtualize : GRID_VIRTUAL_AT))
   const tab = cursor && nav.index.has(cursor.id) && cols.some(c => c.key === cursor.key) ? cursor : nav.ids.length && cols[0] ? { id: nav.ids[0], key: cols[0].key as string } : null
   const tabAt = tab ? nav.at[nav.index.get(tab.id)!] : -1
   const estimate = useMemo(() => disp ? (i: number) => disp[i]?.g !== undefined ? GRID_GROUP_H : rowH : rowH, [disp, rowH])
@@ -823,7 +920,7 @@ export function DataGrid<T extends object>(props: DataGridProps<T>) {
   /** close the editor and put keyboard focus back on its cell */
   const closeEdit = (r: T, c: GridColumn<T>, value: string | null) => {
     const id = rowKey(r)
-    if (value === null) setEdit(null); else save(r, c, value)
+    if (value === null) setEdit(null); else if (!save(r, c, value)) return
     cellEl(id, c.key)?.focus({ preventScroll: true })
   }
 
@@ -843,22 +940,26 @@ export function DataGrid<T extends object>(props: DataGridProps<T>) {
         <label className={cbWrap}><input type="checkbox" className={cb} checked={on} aria-label={`Select ${rowLabel?.(r) ?? id}`} onChange={() => {}} onClick={e => H.current.toggleRow(id, e.currentTarget.checked, e.shiftKey)} /></label>
       </td>
       {p.cols.map(c => {
-        const editing = p.editKey === c.key, text = h.cellText(r, c), content = gridMark(text, p.marks?.get(c.key))
+        const editing = p.editKey === c.key, text = h.cellText(r, c), content = gridMark(text, p.marks?.get(c.key)), err = editing ? p.editErr : null
         const picked = !editing && p.activeKey === c.key
         return (
           <td key={c.key} data-gr={String(id)} data-gk={c.key} tabIndex={p.tabKey === c.key && !editing ? 0 : -1} style={pinStyle(c.key)}
             onDoubleClick={() => canEdit(c) && H.current.setEdit({ id, key: c.key })} title={canEdit(c) ? 'Double-click or press Enter to edit' : undefined}
             onPointerDown={e => { ptr.current = e.pointerType }} onClick={() => H.current.onCell(r, c)} onFocus={e => { if (e.target === e.currentTarget) H.current.setCursor({ id, key: c.key }) }}
             onKeyDown={e => H.current.onCellKey(e, r, c)} aria-readonly={!canEdit(c) || undefined}
-            className={cn(td, 'relative outline-none focus-visible:shadow-[inset_0_0_0_2px_var(--accent)]', hoverBg, pinCls(c.key), c.type === 'number' && 'text-end tabular-nums', editing && '!p-0 shadow-[inset_0_0_0_2px_var(--accent)]',
+            className={cn(td, 'relative outline-none focus-visible:shadow-[inset_0_0_0_2px_var(--accent)]', hoverBg, pinCls(c.key), c.type === 'number' && 'text-end tabular-nums', editing && '!p-0 shadow-[inset_0_0_0_2px_var(--accent)]', err && 'z-[5] !overflow-visible',
               picked && 'shadow-[inset_0_0_0_2px_color-mix(in_srgb,var(--accent)_55%,transparent)]', picked && (c.type === 'number' ? '!ps-10' : '!pe-10'))}>
             {editing
-              ? <input autoFocus defaultValue={String(r[c.key] ?? '')} aria-label={`Edit ${c.label}`} onFocus={e => e.currentTarget.select()}
-                onKeyDown={e => {
-                  if (e.nativeEvent.isComposing) return
-                  if (e.key === 'Enter' || e.key === 'Escape') { e.preventDefault(); e.stopPropagation(); H.current.closeEdit(r, c, e.key === 'Enter' ? e.currentTarget.value : null) }
-                }} onBlur={e => H.current.save(r, c, e.currentTarget.value)}
-                className={cn('h-full w-full border-0 bg-[var(--card)] px-2.5 text-[13px] text-[var(--fg)] shadow-[inset_0_0_0_2px_var(--accent)] outline-none [@media(pointer:coarse)]:!text-base', c.type === 'number' && 'text-end tabular-nums')} />
+              ? <>
+                <input autoFocus defaultValue={String(r[c.key] ?? '')} aria-label={`Edit ${c.label}`} onFocus={e => e.currentTarget.select()}
+                  inputMode={c.type === 'number' && !c.parse ? 'decimal' : undefined} aria-invalid={!!err || undefined} aria-errormessage={err ? editErrId : undefined}
+                  onKeyDown={e => {
+                    if (e.nativeEvent.isComposing) return
+                    if (e.key === 'Enter' || e.key === 'Escape') { e.preventDefault(); e.stopPropagation(); H.current.closeEdit(r, c, e.key === 'Enter' ? e.currentTarget.value : null) }
+                  }} onBlur={e => H.current.save(r, c, e.currentTarget.value)}
+                  className={cn('h-full w-full border-0 bg-[var(--card)] px-2.5 text-[13px] text-[var(--fg)] shadow-[inset_0_0_0_2px_var(--accent)] outline-none [@media(pointer:coarse)]:!text-base', c.type === 'number' && 'text-end tabular-nums', err && 'shadow-[inset_0_0_0_2px_var(--bad)]')} />
+                {err && <span id={editErrId} role="alert" style={onColorLabel('var(--bad)')} className="absolute top-full start-0 mt-1 rounded-[var(--r-sm)] px-2 py-1 text-xs font-medium whitespace-nowrap shadow-[var(--shadow)]">{err}</span>}
+              </>
               : <>
                 {p.flash && p.flash.key === c.key && (
                   <motion.span key={p.flash.n} aria-hidden className="pointer-events-none absolute inset-0 bg-[var(--accent-soft)]" initial={{ opacity: 1 }} animate={{ opacity: 0 }} transition={{ duration: 0.8 }} />
@@ -876,7 +977,7 @@ export function DataGrid<T extends object>(props: DataGridProps<T>) {
       })}
     </>
     const rowCls = cn('group/row', on && '[&>td]:!bg-[var(--accent-soft)]')
-    const aria = { 'aria-rowindex': p.ri, 'aria-selected': on }
+    const aria = { 'aria-rowindex': p.ri, 'aria-selected': on, style: p.h ? { height: p.h } : undefined }
     return p.anim
       ? <motion.tr data-index={di} {...aria} layout="position" transition={spring(0.12, 0.45)} className={rowCls}>{cells}</motion.tr>
       : <tr data-index={di} ref={p.measure} {...aria} className={rowCls}>{cells}</tr>
@@ -884,9 +985,9 @@ export function DataGrid<T extends object>(props: DataGridProps<T>) {
   const draw = useRef(drawRow); draw.current = drawRow
   const rowView = (r: T, di: number) => {
     const id = rowKey(r)
-    return <GridRowMemo<T> key={id} r={r} di={di} ri={rowBase + di + 2} on={isSel(id)} tabKey={tab?.id === id ? tab.key : null} editKey={edit?.id === id ? edit.key : null}
+    return <GridRowMemo<T> key={id} r={r} di={di} ri={rowBase + di + 2} on={isSel(id)} tabKey={tab?.id === id ? tab.key : null} editKey={edit?.id === id ? edit.key : null} editErr={edit?.id === id ? editErr : null}
       activeKey={active?.id === id ? active.key : null} flash={flash?.id === id ? flash : null} marks={search.marks.get(r)} cols={cols} stickKey={stickKey}
-      anim={animateRows} measure={v.measureElement} draw={draw} />
+      anim={animateRows} measure={v.measureElement} draw={draw} h={rowHeight} />
   }
   const defaultSummary = (rs: T[]) => numCols.map((c, i) => <span key={c.key}>{i > 0 && ' · '}{c.label} <b className="font-[family-name:var(--mono)] font-semibold text-[var(--fg2)]">{fmt.number(rs.reduce((s, r) => s + Number(r[c.key]), 0))}</b></span>)
   const groupCol = groupBy ? col(groupBy) : undefined
@@ -898,7 +999,7 @@ export function DataGrid<T extends object>(props: DataGridProps<T>) {
         <td className={cn(td, sticky0, '!h-9 !bg-[color-mix(in_srgb,var(--muted)_60%,var(--card))]')}>
           <label className={cbWrap}><input type="checkbox" className={cb} checked={all} aria-label={`Select group ${k}`} onChange={e => setMany(ids, e.currentTarget.checked)} /></label>
         </td>
-        <td colSpan={cols.length} style={firstPinned?.side === 'start' ? { insetInlineStart: 40 } : undefined}
+        <td colSpan={cols.length} style={firstPinned?.side === 'start' ? { insetInlineStart: GRID_CHECK_W } : undefined}
           className={cn(td, firstPinned?.side === 'start' && 'sticky z-[1]', '!h-9 overflow-visible !bg-[color-mix(in_srgb,var(--muted)_60%,var(--card))]')}>
           <button aria-expanded={open} onClick={() => setClosed(s => { const n = new Set(s); if (n.has(k)) n.delete(k); else n.add(k); return n })}
             className="inline-flex cursor-pointer items-center gap-2 border-0 bg-transparent p-0 text-[13px] font-medium text-[var(--fg)] [@media(pointer:coarse)]:min-h-9">
@@ -931,8 +1032,13 @@ export function DataGrid<T extends object>(props: DataGridProps<T>) {
       {cols.map((c, j) => <td key={c.key} style={pinStyle(c.key)} className={cn(td, pinCls(c.key))}><Skeleton className={cn('h-3', j % 3 === 0 ? 'w-3/4' : j % 3 === 1 ? 'w-1/2' : 'w-2/3', c.type === 'number' && 'ms-auto')} /></td>)}
     </tr>
   ))
-  const infinite = !!onLoadMore
-  const rowCountAria = disp ? dispCount + 1 : infinite ? (rowCount != null ? rowCount + 1 : hasMore ? -1 : dispCount + 1) : total + 1
+  /** rows plus the header row; -1 means unknown (ARIA) while infinite loading has more and no `rowCount` */
+  const rowCountAria = (() => {
+    if (disp) return dispCount + 1
+    if (!infinite) return total + 1
+    if (rowCount != null) return rowCount + 1
+    return hasMore ? -1 : dispCount + 1
+  })()
 
   const fields: [string, string][] = useMemo(() => columns.map(c => [c.key, c.label]), [columns])
   const defaultField = (columns.find((c, i) => i > 0 && c.type !== 'number' && !c.options) ?? columns[0]).key
@@ -944,10 +1050,10 @@ export function DataGrid<T extends object>(props: DataGridProps<T>) {
   )
   const fmtN = (n: number) => fmt.number(n)
   const count = server ? plural(total, 'row') : `${fmtN(visible.length)} of ${plural(data.length, 'row')}`
-  const startW = cols.reduce((s, c, i) => s + (stick.get(c.key)?.side === 'start' ? colW(c, i) : 0), 40)
+  const startW = cols.reduce((s, c, i) => s + (stick.get(c.key)?.side === 'start' ? colW(c, i) : 0), GRID_CHECK_W)
   const endW = cols.reduce((s, c, i) => s + (stick.get(c.key)?.side === 'end' ? colW(c, i) : 0), 0)
   /** the checkbox column plus every visible column, exactly as the colgroup declares them */
-  const tableW = cols.reduce((s, c, i) => s + colW(c, i), 40)
+  const tableW = cols.reduce((s, c, i) => s + colW(c, i), GRID_CHECK_W)
   const visibleCols = cols.length
 
   /** "Jump to rows": focus the grid's current cell (the one Tab would reach) */
@@ -1025,23 +1131,23 @@ export function DataGrid<T extends object>(props: DataGridProps<T>) {
           style={{ width: tableW, minWidth: '100%' }}
           className={cn('table-fixed border-separate border-spacing-0 text-[13px] transition-opacity', loading && dispCount > 0 && !infinite && 'opacity-60')}>
           {/* on a phone the first pinned column is capped so the rest of the row has room to scroll past it */}
-          <colgroup><col style={{ width: 40 }} />{cols.map((c, i) => <col key={c.key} style={{ width: colW(c, i) }} />)}</colgroup>
+          <colgroup><col style={{ width: GRID_CHECK_W }} />{cols.map((c, i) => <col key={c.key} style={{ width: colW(c, i) }} />)}</colgroup>
           <thead>
-            <tr aria-rowindex={1}>
+            <tr aria-rowindex={1} style={rowHeight ? { height: rowHeight } : undefined}>
               <th className={cn(td, sticky0, 'top-0 z-[3] bg-[color-mix(in_srgb,var(--muted)_50%,var(--card))]')}>
                 <label className={cbWrap}><input ref={headCb} type="checkbox" className={cb} checked={allSel} aria-label={'Select all'} onChange={e => setMany(pageIds, e.currentTarget.checked)} /></label>
               </th>
               {cols.map(c => {
                 const dragOver = colDrag && colDrag.over === c.key && colDrag.k !== c.key
                 return (
-                  <th key={c.key} data-ck={c.key} aria-sort={sort?.key === c.key ? (sort.dir === 1 ? 'ascending' : 'descending') : undefined} style={pinStyle(c.key)}
+                  <th key={c.key} data-ck={c.key} aria-sort={ariaSort(sort, c.key)} style={pinStyle(c.key)}
                     onPointerDown={e => onHeadPointerDown(e, c.key)}
                     className={cn(td, 'sticky top-0 z-[2] cursor-pointer bg-[color-mix(in_srgb,var(--muted)_50%,var(--card))] text-xs font-medium text-[var(--fg2)] select-none hover:text-[var(--fg)]', pinCls(c.key, true), c.type === 'number' ? 'text-end' : 'text-start',
                       // the drop line on the right (after) or left (before) edge
                       colDrag?.k === c.key && 'opacity-50', dragOver && (colDrag.after ? '!shadow-[inset_-2px_0_0_var(--accent)]' : '!shadow-[inset_2px_0_0_var(--accent)]'))}>
-                    <button onClick={() => { if (dragged.current) { dragged.current = false; return } setSort({ key: c.key, dir: sort?.key === c.key ? (-sort.dir as 1 | -1) : 1 }) }}
+                    <button onClick={() => { if (dragged.current) { dragged.current = false; return } setSort(nextSort(sort, c.key, { clearable: true })) }}
                       onKeyDown={e => headerKey(e, c.key)} aria-keyshortcuts="Control+Shift+ArrowLeft Control+Shift+ArrowRight" aria-description={'Ctrl+Shift+arrows move the column'}
-                      className={cn('cursor-pointer border-0 bg-transparent p-0 font-[inherit] text-inherit [@media(pointer:coarse)]:text-start', TOUCH.tap36)}>{c.label}{sort?.key === c.key && <span className="ms-1 text-[11px] text-[var(--accent)]">{sort.dir > 0 ? '▲' : '▼'}</span>}</button>
+                      className={cn('cursor-pointer border-0 bg-transparent p-0 font-[inherit] text-inherit [@media(pointer:coarse)]:text-start', TOUCH.tap36)}>{c.label}{sort?.key === c.key && <motion.span aria-hidden className="ms-1 inline-grid align-[-1px] text-[var(--accent)]" initial={false} animate={{ rotate: sort.dir > 0 ? 0 : 180 }} transition={{ duration: 0.2 }}><Icon name="arrowUp" size={11} /></motion.span>}</button>
                     <span role="separator" aria-orientation="vertical" aria-label={`Resize ${c.label}`} onPointerDown={e => startResize(e, c.key)}
                       className="group/rz absolute top-0 end-0 bottom-0 w-[7px] cursor-col-resize touch-none [@media(pointer:coarse)]:w-4">
                       <span className={cn('absolute top-[9px] end-[3px] bottom-[9px] w-px bg-[var(--line2)] group-hover/rz:w-0.5 group-hover/rz:bg-[var(--accent)]', resizing === c.key && '!w-0.5 !bg-[var(--accent)]')} />

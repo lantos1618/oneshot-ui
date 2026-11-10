@@ -1,5 +1,5 @@
 import { memo, useCallback, useEffect, useId, useImperativeHandle, useLayoutEffect, useMemo, useRef, useState, type CSSProperties, type KeyboardEvent as ReactKeyboardEvent, type MouseEvent as ReactMouseEvent, type PointerEvent as ReactPointerEvent, type ReactNode, type Ref } from 'react'
-import { Badge, Button, IconButton, cn, clamp, inputClass, rowHoverClass, useCoarsePointer, useControllable, useWidth, plural, fmt, useResizeObserver, writeClipboard, useLive, Legend } from './core'
+import { Badge, Button, IconButton, cn, clamp, inputClass, rowHoverClass, useCoarsePointer, useControllable, useWidth, plural, fmt, useResizeObserver, writeClipboard, useLive, Legend, useFlash, FLASH_MS, formatHotkey } from './core'
 import { SegmentedControl, Switch } from './fields'
 import { ContextMenu } from './overlay'
 import { Tabs } from './navigation'
@@ -303,21 +303,27 @@ export function formatBytesAs(data: BinaryData, format: ByteCopyFormat, name = '
   return parts.join('\n')
 }
 
+/** `v` as a file offset: itself when inside the file, else the offset a section's `vaddr` range maps it to; null when neither. */
+function binResolveAddress(v: number, size: number, sections?: readonly BinarySection[]): number | null {
+  if (v >= size && sections) { const sec = sections.find(x => x.vaddr !== undefined && v >= x.vaddr && v < x.vaddr + x.size); if (sec) v = sec.offset + v - sec.vaddr! }
+  return v >= 0 && v < Math.max(1, size) ? v : null
+}
+
 /**
- * Parse what someone typed into "go to": `0x1F40`, `1F40h` or digits with a-f → hex; plain digits → decimal;
- * a leading `+`/`-` is relative to `cursor`. A value past the end of the file that falls inside a section's `vaddr`
- * range is read as an address and mapped to its file offset. Null when it lands outside the file.
+ * Parse what someone typed into "go to". Numbers are hex, the way the editor shows offsets: `360`, `00000360`, `0x360`
+ * and `360h` are all 0x360. `#864` is decimal. A leading `+`/`-` is relative to `cursor`. A value past the end of the
+ * file that falls inside a section's `vaddr` range is read as an address and mapped to its file offset. Null when it
+ * lands outside the file.
  */
 export function parseByteOffset(input: string, { size, cursor = 0, sections }: { size: number; cursor?: number; sections?: readonly BinarySection[] }): number | null {
   const s = input.trim().replace(/_/g, '')
-  const m = /^([+-]?)\s*(0x[0-9a-f]+|[0-9a-f]+h|[0-9]*[a-f][0-9a-f]*|[0-9]+)$/i.exec(s)
+  const m = /^([+-]?)\s*(#[0-9]+|0x[0-9a-f]+|[0-9a-f]+h|[0-9a-f]+)$/i.exec(s)
   if (!m) return null
-  const body = m[2], hex = /^0x/i.test(body) || /h$/i.test(body) || /[a-f]/i.test(body)
-  const n = parseInt(body.replace(/^0x/i, '').replace(/h$/i, ''), hex ? 16 : 10)
+  const body = m[2]
+  const n = body.startsWith('#') ? parseInt(body.slice(1), 10) : parseInt(body.replace(/^0x/i, '').replace(/h$/i, ''), 16)
   if (!Number.isFinite(n)) return null
-  let v = m[1] === '+' ? cursor + n : m[1] === '-' ? cursor - n : n
-  if (!m[1] && v >= size && sections) { const sec = sections.find(x => x.vaddr !== undefined && v >= x.vaddr && v < x.vaddr + x.size); if (sec) v = sec.offset + v - sec.vaddr! }
-  return v >= 0 && v < Math.max(1, size) ? v : null
+  const v = m[1] === '+' ? cursor + n : m[1] === '-' ? cursor - n : n
+  return m[1] ? (v >= 0 && v < Math.max(1, size) ? v : null) : binResolveAddress(v, size, sections)
 }
 
 /** Default section colours (theme tokens), by section index. */
@@ -404,6 +410,7 @@ export type HexEditorProps = {
   sections?: readonly BinarySection[]
   /** byte colouring: by class (zero / printable / control / high, default), by section (row tint), or none */ colorBy?: 'class' | 'section' | 'none'
   /** offset column: file offsets (default) or addresses (section `vaddr` + offset within it); the column header toggles it when sections have addresses */ offsets?: 'offset' | 'vaddr'
+  defaultOffsets?: 'offset' | 'vaddr'; onOffsetsChange?: (offsets: 'offset' | 'vaddr') => void
   cursor?: number; defaultCursor?: number; onCursorChange?: (offset: number) => void
   selection?: ByteRange | null; defaultSelection?: ByteRange | null; onSelectionChange?: (range: ByteRange | null) => void
   /** no editing (default false: typing overwrites) */ readOnly?: boolean
@@ -417,8 +424,19 @@ export type HexEditorProps = {
   ref?: Ref<HexEditorHandle>
 }
 
+/** HexEditor commands and their shortcuts (the first is shown in menus): one table for the key handler and the labels. */
+const HEX_KEYS = { goTo: ['mod+g', 'mod+shift+g'], find: ['mod+f', 'mod+shift+f'], undo: ['mod+z'], redo: ['mod+shift+z', 'mod+y', 'mod+shift+y'], selectAll: ['mod+a', 'mod+shift+a'], copy: ['mod+c', 'mod+shift+c'] } as const
+type HexCommand = keyof typeof HEX_KEYS
+const HEX_KEY_ACTION = new Map<string, HexCommand>(Object.entries(HEX_KEYS).flatMap(([a, ks]) => ks.map(k => [k, a as HexCommand] as const)))
+
 /** Above this many px of rows the scroll range is scaled (browsers cap element heights near 17–33 M px). */
 const BIN_MAX_SCROLL_PX = 8_000_000
+/** Most matches a search collects (the count shows "10,000+" at this cap). */
+const BIN_SEARCH_MAX = 10_000
+/** Undo steps kept. */
+const BIN_UNDO_MAX = 10_000
+/** How long typing in the search box settles before it searches (ms). Enter searches at once. */
+const BIN_SEARCH_DEBOUNCE = 160
 /** Most bytes put on the clipboard at once. */
 const BIN_COPY_MAX = 4 * 1024 * 1024
 /** Rows are positioned relative to a base row that changes every this many rows, so a row keeps its props (and memo) while scrolling. */
@@ -558,7 +576,7 @@ const BinInspector = memo(function BinInspector({ view, offset, layout, littleEn
  * Hex editor for any size of data: offset · hex · text rows, virtualised (only the rows on screen render, the buffer is
  * never stringified; past ~8 M px of rows the scroll range is scaled so 100 MB still scrolls, with the wheel moving by
  * pixels). Select by dragging, Shift+click or Shift+arrows; the hex and text columns share the cursor and selection.
- * Keys: arrows, Page Up/Down, Home/End (Ctrl: file start/end), Tab between columns, Ctrl+G go to (hex, decimal,
+ * Keys: arrows, Page Up/Down, Home/End (Ctrl: file start/end), Tab between columns, Ctrl+G go to (hex as shown, #decimal,
  * +relative or a section address), Ctrl+F search (hex with `??` or text; every match on screen is tinted), Ctrl+A,
  * Ctrl+C (hex; the context menu also copies a C array, Base64 or text). Typing hex digits or text overwrites bytes
  * unless `readOnly`; edits live in a patch map over the data, reported through `onChange`, undone with Ctrl+Z and
@@ -566,7 +584,7 @@ const BinInspector = memo(function BinInspector({ view, offset, layout, littleEn
  * decodes the cursor as every integer, float, time and varint type in either byte order. Touch: tap selects a byte,
  * long-press opens the menu, the grid scrolls sideways on phones and the text column hides below 480 px (switch).
  */
-export function HexEditor({ data, bytesPerRow = 16, sections = BIN_NO_SECTIONS, colorBy = 'class', offsets: offsetsProp, cursor: cursorProp, defaultCursor = 0, onCursorChange,
+export function HexEditor({ data, bytesPerRow = 16, sections = BIN_NO_SECTIONS, colorBy = 'class', offsets: offsetsProp, defaultOffsets = 'offset', onOffsetsChange, cursor: cursorProp, defaultCursor = 0, onCursorChange,
   selection: selectionProp, defaultSelection = null, onSelectionChange, readOnly = false, onChange, highlights = BIN_NO_HIGHLIGHTS, height = 360,
   inspector = 'auto', toolbar = true, label, className, ref }: HexEditorProps) {
   const bytes = useMemo(() => toByteArray(data), [data]), n = bytes.length
@@ -578,31 +596,31 @@ export function HexEditor({ data, bytesPerRow = 16, sections = BIN_NO_SECTIONS, 
   const [nibble, setNibble] = useState(0)
   const [focused, setFocused] = useState(false)
   const [le, setLe] = useState(true)
-  const [offMode, setOffMode] = useState<'offset' | 'vaddr'>(offsetsProp ?? 'offset')
-  useEffect(() => { if (offsetsProp) setOffMode(offsetsProp) }, [offsetsProp])
+  const [offMode, setOffMode] = useControllable(offsetsProp, defaultOffsets, onOffsetsChange)
   const hasVaddr = sections.some(s => s.vaddr !== undefined)
   const anchor = useRef(cursor)
-  const live = useRef(''), [setSaid, liveRegion] = useLive()
-  const say = useCallback((s: string) => { live.current = s; setSaid(s) }, [])
+  const [say, liveRegion] = useLive()
+  // copy results also show briefly in the status bar (the live region only reaches screen readers)
+  const [copyNote, flashCopy] = useFlash<{ ok: boolean; text: string } | null>(FLASH_MS, null)
 
   // ── edits: a patch map over the data, per-row versions (so only edited rows re-render), undo and redo stacks
   const patch = useRef(new Map<number, number>()), rowVer = useRef(new Map<number, number>())
-  const undoStack = useRef<{ o: number; before: number; after: number }[][]>([]), redoStack = useRef<{ o: number; before: number; after: number }[][]>([])
+  type Op = { o: number; before: number; after: number }
+  const undoStack = useRef<Op[][]>([]), redoStack = useRef<Op[][]>([]), rowSeq = useRef(0)
   const [ver, setVer] = useState(0)
   useEffect(() => { patch.current = new Map(); rowVer.current = new Map(); undoStack.current = []; redoStack.current = []; setVer(v => v + 1) }, [bytes])
   const byteAt = useCallback((o: number) => patch.current.get(o) ?? bytes[o], [bytes])
   const editList = useCallback((): HexEdit[] => [...patch.current].sort((a, b) => a[0] - b[0]).map(([offset, after]) => ({ offset, before: bytes[offset], after })), [bytes])
   const onChangeRef = useRef(onChange); onChangeRef.current = onChange
   const write = useCallback((ops: { o: number; v: number }[]) => {
-    let k = 0
-    for (const { o, v } of ops) { if (v === bytes[o]) patch.current.delete(o); else patch.current.set(o, v); rowVer.current.set(Math.floor(o / bpr), ++k + Date.now()) }
+    for (const { o, v } of ops) { if (v === bytes[o]) patch.current.delete(o); else patch.current.set(o, v); rowVer.current.set(Math.floor(o / bpr), ++rowSeq.current) }
     setVer(x => x + 1)
     onChangeRef.current?.(editList())
   }, [bytes, bpr, editList])
   const edit = useCallback((ops: { o: number; after: number }[]) => {
     const rec = ops.map(({ o, after }) => ({ o, before: byteAt(o), after })).filter(r => r.before !== r.after)
     if (!rec.length) return
-    undoStack.current.push(rec); if (undoStack.current.length > 10000) undoStack.current.shift()
+    undoStack.current.push(rec); if (undoStack.current.length > BIN_UNDO_MAX) undoStack.current.shift()
     redoStack.current = []
     write(rec.map(r => ({ o: r.o, v: r.after })))
   }, [byteAt, write])
@@ -700,11 +718,18 @@ export function HexEditor({ data, bytesPerRow = 16, sections = BIN_NO_SECTIONS, 
   const [matchIdx, setMatchIdx] = useState(-1)
   const [badQuery, setBadQuery] = useState(false)
   const searchRef = useRef<HTMLInputElement>(null), gotoRef = useRef<HTMLInputElement>(null)
+  // matches in the original bytes, by pattern: an edit only re-checks the bytes around the patch
+  const baseHits = useRef<{ bytes: Uint8Array; key: string; found: number[] } | null>(null)
+  /** what the matches on screen were computed for: Enter while typing is newer runs the search at once */
+  const searched = useRef('')
   const runSearch = useCallback((q: string, mode: 'hex' | 'text') => {
+    searched.current = `${mode}\u0000${q}\u0000${ver}`
     const p = q.trim() ? binPattern(mode === 'text' ? q : q.trim(), mode) : null
     setBadQuery(!!q.trim() && !p)
-    if (!p) { setMatches(BIN_NO_MATCHES); setMatchLen(0); setMatchIdx(-1); return }
-    let found = searchBytes(bytes, p)
+    if (!p) { setMatches(BIN_NO_MATCHES); setMatchLen(0); setMatchIdx(-1); return { found: BIN_NO_MATCHES, len: 0 } }
+    const key = p.join(',')
+    if (baseHits.current?.bytes !== bytes || baseHits.current.key !== key) baseHits.current = { bytes, key, found: searchBytes(bytes, p, { max: BIN_SEARCH_MAX }) }
+    let found: readonly number[] = baseHits.current.found
     if (patch.current.size) { // matches in the edited bytes: drop stale ones, look again around each edit
       const ok = (o: number) => o >= 0 && o + p.length <= n && p.every((v, j) => v < 0 || byteAt(o + j) === v)
       const set = new Set(found.filter(ok))
@@ -712,21 +737,29 @@ export function HexEditor({ data, bytesPerRow = 16, sections = BIN_NO_SECTIONS, 
       found = [...set].sort((a, b) => a - b)
     }
     setMatches(found); setMatchLen(p.length); setMatchIdx(-1)
-  }, [bytes, n, byteAt])
-  useEffect(() => { const t = setTimeout(() => runSearch(query, qMode), 160); return () => clearTimeout(t) }, [query, qMode, runSearch, ver])
+    return { found, len: p.length }
+  }, [bytes, n, byteAt, ver])
+  useEffect(() => {
+    if (searched.current === `${qMode}\u0000${query}\u0000${ver}`) return
+    const t = setTimeout(() => runSearch(query, qMode), BIN_SEARCH_DEBOUNCE); return () => clearTimeout(t)
+  }, [query, qMode, runSearch, ver])
   const jumpMatch = useCallback((dirn: 1 | -1) => {
-    if (!matches.length) return
-    let i = dirn > 0 ? binLowerBound(matches, cursor + (matchIdx >= 0 && matches[matchIdx] === cursor ? 1 : 0)) : binLowerBound(matches, cursor) - 1
-    if (i >= matches.length) i = 0
-    if (i < 0) i = matches.length - 1
-    const o = matches[i]
-    setMatchIdx(i); anchor.current = o; setSel({ start: o, end: Math.min(n, o + matchLen) }); setCursorRaw(o); setNibble(0); reveal(o)
-    say(`${i + 1} of ${matches.length}` + ', 0x' + hexOffset(o))
-  }, [matches, matchIdx, cursor, matchLen, n, setSel, setCursorRaw, reveal, say])
+    let list = matches, len = matchLen, idx = matchIdx
+    if (searched.current !== `${qMode}\u0000${query}\u0000${ver}`) { const r = runSearch(query, qMode); list = r.found; len = r.len; idx = -1 } // typed faster than the debounce
+    if (!list.length) return
+    let i = dirn > 0 ? binLowerBound(list, cursor + (idx >= 0 && list[idx] === cursor ? 1 : 0)) : binLowerBound(list, cursor) - 1
+    if (i >= list.length) i = 0
+    if (i < 0) i = list.length - 1
+    const o = list[i]
+    setMatchIdx(i); anchor.current = o; setSel({ start: o, end: Math.min(n, o + len) }); setCursorRaw(o); setNibble(0); reveal(o)
+    say(`${i + 1} of ${list.length}` + ', 0x' + hexOffset(o))
+  }, [matches, matchIdx, cursor, matchLen, n, setSel, setCursorRaw, reveal, say, query, qMode, ver, runSearch])
 
   // ── go to
   const [gotoText, setGotoText] = useState('')
   const [gotoBad, setGotoBad] = useState(false)
+  /** where the go-to text points, shown before Enter so a hex/decimal mix-up is visible */
+  const gotoTarget = gotoText.trim() ? parseByteOffset(gotoText, { size: n, cursor, sections }) : null
   const goToText = (s: string) => {
     const o = parseByteOffset(s, { size: n, cursor, sections })
     setGotoBad(o === null)
@@ -754,8 +787,11 @@ export function HexEditor({ data, bytesPerRow = 16, sections = BIN_NO_SECTIONS, 
   const copy = useCallback((format: ByteCopyFormat) => {
     const r = selection ?? { start: cursor, end: Math.min(n, cursor + 1) }, z = Math.min(r.end, r.start + BIN_COPY_MAX)
     const text = formatBytesAs(viewOf(r.start, z), format)
-    void writeClipboard(text).then(ok => say(!ok ? 'Couldn’t copy' : z < r.end ? `Copied the first ${fmt.bytes(z - r.start)}` : `Copied ${fmt.bytes(z - r.start)}`))
-  }, [selection, cursor, n, viewOf, say, fmt])
+    void writeClipboard(text).then(ok => {
+      const msg = !ok ? 'Couldn’t copy' : z < r.end ? `Copied the first ${fmt.bytes(z - r.start)} (truncated)` : `Copied ${fmt.bytes(z - r.start)}`
+      say(msg); flashCopy({ ok, text: msg })
+    })
+  }, [selection, cursor, n, viewOf, say, flashCopy])
   const getBytes = useCallback(() => viewOf(0, n), [viewOf, n])
 
   useImperativeHandle(ref, () => ({
@@ -766,18 +802,21 @@ export function HexEditor({ data, bytesPerRow = 16, sections = BIN_NO_SECTIONS, 
   }), [moveTo, setSel, n, setCursorRaw, reveal, undo, redo, revert, editList, getBytes])
 
   // ── keyboard
+  const commands: Record<HexCommand, () => void> = {
+    goTo: () => { gotoRef.current?.focus(); gotoRef.current?.select() },
+    find: () => { searchRef.current?.focus(); searchRef.current?.select() },
+    undo: () => { if (!readOnly) undo() },
+    redo: () => { if (!readOnly) redo() },
+    selectAll: () => { anchor.current = 0; setSel(n ? { start: 0, end: n } : null) },
+    copy: () => copy('hex'),
+  }
   const pageRows = Math.max(1, Math.floor(view / rowH) - 1)
   const onKeyDown = (e: ReactKeyboardEvent<HTMLDivElement>) => {
     if (e.target !== e.currentTarget) return
     const mod = e.ctrlKey || e.metaKey, k = e.key, ext = e.shiftKey
     if (mod && !e.altKey) {
-      const lk = k.toLowerCase()
-      if (lk === 'g') { e.preventDefault(); gotoRef.current?.focus(); gotoRef.current?.select(); return }
-      if (lk === 'f') { e.preventDefault(); searchRef.current?.focus(); searchRef.current?.select(); return }
-      if (lk === 'z') { e.preventDefault(); if (readOnly) return; if (ext) redo(); else undo(); return }
-      if (lk === 'y') { e.preventDefault(); if (!readOnly) redo(); return }
-      if (lk === 'a') { e.preventDefault(); anchor.current = 0; setSel(n ? { start: 0, end: n } : null); return }
-      if (lk === 'c') { e.preventDefault(); copy('hex'); return }
+      const act = HEX_KEY_ACTION.get(`mod+${ext ? 'shift+' : ''}${k.toLowerCase()}`)
+      if (act) { e.preventDefault(); commands[act](); return }
     }
     let to: number | null = null
     switch (k) {
@@ -897,11 +936,11 @@ export function HexEditor({ data, bytesPerRow = 16, sections = BIN_NO_SECTIONS, 
   const hl = highlights.find(h => cursor >= h.start && cursor < h.end)
   const editCount = patch.current.size
   const inspView = useMemo(() => viewOf(cursor, Math.min(n, cursor + 16)), [viewOf, cursor, n, ver]) // eslint-disable-line react-hooks/exhaustive-deps
-  const helpId = useId()
+  const helpId = useId(), gotoHintId = useId()
   const u32 = n >= cursor + 4 ? decodeBytes(inspView, 0, le).u32 : null
-  const u32Off = u32 !== null ? parseByteOffset('0x' + u32.toString(16), { size: n, sections }) : null
+  const u32Off = u32 !== null ? binResolveAddress(u32, n, sections) : null
   const menuSec = menuAt !== null ? sectionAt(sections, menuAt) : sec
-  const matchLabel = badQuery ? 'Use hex pairs such as 7F 45, ?? for any byte' : !query.trim() ? '' : !matches.length ? 'No matches' : matches.length >= 10_000 ? `${fmt.number(10_000)}+ matches`
+  const matchLabel = badQuery ? 'Use hex pairs such as 7F 45, ?? for any byte' : !query.trim() ? '' : !matches.length ? 'No matches' : matches.length >= BIN_SEARCH_MAX ? `${fmt.number(BIN_SEARCH_MAX)}+ matches`
     : matchIdx >= 0 ? `${matchIdx + 1} of ${matches.length}` : fmt.number(matches.length)
 
   const grid = (
@@ -927,19 +966,19 @@ export function HexEditor({ data, bytesPerRow = 16, sections = BIN_NO_SECTIONS, 
         </div>
       </ContextMenu.Trigger>
       <ContextMenu.Content aria-label={'Hex editor'}>
-        <ContextMenu.Item icon="copy" shortcut="Ctrl C" onSelect={() => copy('hex')}>{'Copy as hex'}</ContextMenu.Item>
+        <ContextMenu.Item icon="copy" shortcut={formatHotkey(HEX_KEYS.copy[0])} onSelect={commands.copy}>{'Copy as hex'}</ContextMenu.Item>
         <ContextMenu.Item onSelect={() => copy('c')}>{'Copy as C array'}</ContextMenu.Item>
         <ContextMenu.Item onSelect={() => copy('base64')}>{'Copy as Base64'}</ContextMenu.Item>
         <ContextMenu.Item onSelect={() => copy('text')}>{'Copy as text'}</ContextMenu.Item>
         <ContextMenu.Separator />
-        <ContextMenu.Item shortcut="Ctrl A" onSelect={() => { anchor.current = 0; setSel(n ? { start: 0, end: n } : null) }}>{'Select all'}</ContextMenu.Item>
+        <ContextMenu.Item shortcut={formatHotkey(HEX_KEYS.selectAll[0])} onSelect={commands.selectAll}>{'Select all'}</ContextMenu.Item>
         {menuAt !== null && menuAt !== cursor && <ContextMenu.Item onSelect={() => { setSel(binRange(cursor, menuAt)); anchor.current = cursor; setCursorRaw(menuAt) }}>{'Select from cursor to here'}</ContextMenu.Item>}
         {menuSec && <ContextMenu.Item onSelect={() => { anchor.current = menuSec.offset; setSel({ start: menuSec.offset, end: Math.min(n, menuSec.offset + menuSec.size) }); setCursorRaw(menuSec.offset); reveal(menuSec.offset) }}>{`Select ${menuSec.name}`}</ContextMenu.Item>}
         {u32Off !== null && <ContextMenu.Item onSelect={() => { moveTo(u32Off); announce(u32Off) }}>{`Go to u32 at cursor (0x${hexOffset(u32!)})`}</ContextMenu.Item>}
         {!readOnly && <>
           <ContextMenu.Separator />
-          <ContextMenu.Item shortcut="Ctrl Z" onSelect={undo}>{'Undo'}</ContextMenu.Item>
-          <ContextMenu.Item shortcut="Ctrl ⇧ Z" onSelect={redo}>{'Redo'}</ContextMenu.Item>
+          <ContextMenu.Item shortcut={formatHotkey(HEX_KEYS.undo[0])} onSelect={commands.undo}>{'Undo'}</ContextMenu.Item>
+          <ContextMenu.Item shortcut={formatHotkey(HEX_KEYS.redo[0])} onSelect={commands.redo}>{'Redo'}</ContextMenu.Item>
           {editCount > 0 && <ContextMenu.Item danger onSelect={revert}>{'Revert all edits'}</ContextMenu.Item>}
         </>}
       </ContextMenu.Content>
@@ -962,8 +1001,10 @@ export function HexEditor({ data, bytesPerRow = 16, sections = BIN_NO_SECTIONS, 
           </div>
           <span role="status" className={cn('min-w-0 truncate text-[11px] tabular-nums', badQuery ? 'text-[var(--bad)]' : 'text-[var(--fg2)]')}>{matchLabel}</span>
           <div className="ms-auto flex items-center gap-1">
-            <input ref={gotoRef} value={gotoText} onChange={e => { setGotoText(e.target.value); setGotoBad(false) }} aria-label={'Go to offset'} placeholder={'Go to 0x…'} aria-invalid={gotoBad || undefined}
-              spellCheck={false} autoComplete="off" title={gotoBad ? 'Not an offset or address in this file' : undefined}
+            {gotoTarget !== null && <span id={gotoHintId} className="font-[family-name:var(--mono)] text-[11px] tabular-nums whitespace-nowrap text-[var(--fg3)]">{`→ 0x${hexOffset(gotoTarget)} (${fmt.number(gotoTarget)})`}</span>}
+            <input ref={gotoRef} value={gotoText} onChange={e => { setGotoText(e.target.value); setGotoBad(false) }} aria-label={'Go to offset'} placeholder={'Go to (hex)'} aria-invalid={gotoBad || undefined}
+              aria-describedby={gotoTarget !== null ? gotoHintId : undefined}
+              spellCheck={false} autoComplete="off" title={gotoBad ? 'Not an offset or address in this file' : 'Hex offset or address: 1F40, 0x1F40 or 1F40h; #8000 is decimal; +/- moves from the cursor'}
               onKeyDown={e => { if (e.key === 'Enter') { e.preventDefault(); handlers.current.goToText(gotoText) } else if (e.key === 'Escape') { e.preventDefault(); scroller.current?.focus({ preventScroll: true }) } }}
               className={cn(inputClass, '!h-[30px] w-[124px] font-[family-name:var(--mono)] !text-xs [@media(pointer:coarse)]:!h-9 [@media(pointer:coarse)]:!text-base')} />
             {!readOnly && <>
@@ -972,7 +1013,7 @@ export function HexEditor({ data, bytesPerRow = 16, sections = BIN_NO_SECTIONS, 
             </>}
           </div>
         </div>
-      ), [toolbar, query, qMode, matches.length, matchLabel, badQuery, gotoText, gotoBad, readOnly, ver]) // eslint-disable-line react-hooks/exhaustive-deps
+      ), [toolbar, query, qMode, matches.length, matchLabel, badQuery, gotoText, gotoBad, gotoTarget, readOnly, ver]) // eslint-disable-line react-hooks/exhaustive-deps
   const statusEl = useMemo(() => (
       <div className="flex min-h-6 flex-wrap items-center gap-x-3 gap-y-1 text-[11px] text-[var(--fg2)]">
         <span className="font-[family-name:var(--mono)] tabular-nums text-[var(--fg)]">0x{hexOffset(cursor, offWidth)}</span>
@@ -980,13 +1021,14 @@ export function HexEditor({ data, bytesPerRow = 16, sections = BIN_NO_SECTIONS, 
         {hl?.label && <span>{hl.label}</span>}
         {selection && selection.end - selection.start > 1 && <span className="font-[family-name:var(--mono)] tabular-nums">{`0x${hexOffset(selection.start)}–0x${hexOffset(selection.end - 1)}, ${fmt.bytes(selection.end - selection.start)}`}</span>}
         <span className="ms-auto inline-flex items-center gap-2">
+          {copyNote && <span className={copyNote.ok ? 'text-[var(--fg)]' : 'text-[var(--bad)]'}>{copyNote.text}</span>}
           {editCount > 0 && <Badge size="sm" tone="accent">{plural(editCount, 'edit')}</Badge>}
           <span title={readOnly ? undefined : 'Overwrite mode: typing replaces bytes'}><Badge size="sm">{readOnly ? 'Read only' : 'OVR'}</Badge></span>
           {narrow && <Switch label={<span className="text-[11px] text-[var(--fg2)]">{'Text column'}</span>} checked={showText} onChange={v => setTextOn(v)} />}
           {inspector === 'auto' && !inspSide && <Switch label={<span className="text-[11px] text-[var(--fg2)]">{'Data inspector'}</span>} checked={inspOpen} onChange={setInspOpen} />}
         </span>
       </div>
-  ), [cursor, offWidth, sec, hl, selection, editCount, readOnly, narrow, showText, inspector, inspSide, inspOpen, fmt, sections])
+  ), [cursor, offWidth, sec, hl, selection, editCount, readOnly, narrow, showText, inspector, inspSide, inspOpen, sections, copyNote])
 
   return (
     <div ref={rootRef} className={cn('flex min-w-0 flex-col gap-2', className)}>
@@ -1092,8 +1134,7 @@ export function EntropyMap({ data, entropy: entropyProp, length: lengthProp, win
     }
     return out
   }, [ent, W, cols, step, length])
-  const [selInner, setSelInner] = useState<ByteRange | null>(null)
-  const sel = selectionProp !== undefined ? selectionProp : selInner
+  const [sel, setSel] = useControllable<ByteRange | null>(selectionProp, null, r => { if (r) onSelect?.(r) })
   const [hover, setHover] = useState<number | null>(null)
   const [active, setActive] = useState<number | null>(null) // keyboard bucket
   const kAnchor = useRef<number | null>(null)
@@ -1107,7 +1148,7 @@ export function EntropyMap({ data, entropy: entropyProp, length: lengthProp, win
     return clamp(Math.floor(f * length), 0, Math.max(0, length - 1))
   }
   const windowRange = (o: number): ByteRange => { const i = Math.floor(o / step); return { start: i * step, end: Math.min(length, i * step + windowSize) } }
-  const select = (r: ByteRange) => { setSelInner(r); onSelect?.(r) }
+  const select = (r: ByteRange) => setSel(r)
   const pick = (o: number) => { const reg = regions.find(x => o >= x.start && o < x.end); select(reg ? { start: reg.start, end: reg.end } : windowRange(o)) }
   const bitsAt = (o: number) => (W ? ent[Math.min(W - 1, Math.floor(o / step))] : 0)
   const setHov = (o: number | null) => { setHover(o); onHover?.(o) }
@@ -1288,6 +1329,11 @@ export type ByteMapProps = {
   className?: string
 }
 
+/** Smallest entropy window per cell (bytes): fewer bytes can't show more than log2(n) bits. */
+const BYTEMAP_MIN_WINDOW = 256
+/** Zoom per button press or key (and the most one wheel event zooms). */
+const BYTEMAP_ZOOM_STEP = 4
+
 /**
  * The file folded onto a Hilbert curve (binvis-style): bytes that are close in the file stay close on the map, so
  * sections show as blocks. Drawn on a canvas (crisp on HiDPI: one pixel per cell, scaled without smoothing, snapped to
@@ -1313,10 +1359,12 @@ export function ByteMap({ data, sections = BIN_NO_SECTIONS, order: orderProp = 7
   const [px, setPx] = useState({ w: 0, dpr: 1 })
   useResizeObserver(box, el => setPx(p => { const w = el.clientWidth, dpr = window.devicePixelRatio || 1; return p.w === w && p.dpr === dpr ? p : { w, dpr } }))
 
+  /** the bytes around a cell that its entropy is measured over (the colour and the readout use the same window) */
+  const entropyWin = entropyWindow ?? Math.max(BYTEMAP_MIN_WINDOW, bpc)
   // per-cell metrics for the current mode (computed once per data, zoom and mode)
   const metric = useMemo(() => {
     const view = bytes.subarray(vs, ve)
-    if (mode === 'entropy') return { kind: 'entropy' as const, v: entropyWindows(view, entropyWindow ?? Math.max(256, bpc), bpc, { align: 'center' }) }
+    if (mode === 'entropy') return { kind: 'entropy' as const, v: entropyWindows(view, entropyWin, bpc, { align: 'center' }) }
     if (mode === 'class') {
       const v = new Float32Array(used * 4), stride = Math.max(1, Math.floor(bpc / 64))
       for (let d = 0; d < used; d++) {
@@ -1342,7 +1390,7 @@ export function ByteMap({ data, sections = BIN_NO_SECTIONS, order: orderProp = 7
     const v = new Int16Array(used)
     for (let d = 0; d < used; d++) { const s = sectionAt(sections, vs + d * bpc); v[d] = s ? sections.indexOf(s) : -1 }
     return { kind: 'sections' as const, v }
-  }, [bytes, vs, ve, len, mode, bpc, used, entropyWindow, sections])
+  }, [bytes, vs, ve, len, mode, bpc, used, entropyWin, sections])
 
   // the base image: one pixel per cell, in theme colours
   const baseImg = useRef<HTMLCanvasElement | null>(null)
@@ -1424,9 +1472,21 @@ export function ByteMap({ data, sections = BIN_NO_SECTIONS, order: orderProp = 7
     const start = clamp(Math.round(o - nextLen / 2), 0, n - nextLen)
     setZoom({ start, end: start + nextLen })
   }
-  useWheelZoom(box, (zoomIn, e) => { const d = cellAt(e), o = d === null ? vs + len / 2 : offOf(d); zoomAround(o, zoomIn ? 4 : 0.25) }, { modifier: true, enabled: zoomable })
+  /** what zooming without a pointer centres on: the focused cell, else the middle of the view */
+  const focusOffset = (cur: number) => cur >= 0 ? offOf(cur) : vs + len / 2
+  // the zoom follows the wheel distance (2× per 100 px), so a trackpad pinch's many small events zoom smoothly
+  useWheelZoom(box, (_, e) => {
+    const d = cellAt(e), dy = e.deltaY * (e.deltaMode === 1 ? 33 : e.deltaMode === 2 ? 400 : 1)
+    zoomAround(d === null ? focusOffset(-1) : offOf(d), clamp(2 ** (-dy / 100), 1 / BYTEMAP_ZOOM_STEP, BYTEMAP_ZOOM_STEP))
+  }, { modifier: true, enabled: zoomable })
   const [setSaid, live] = useLive()
-  const describe = (d: number) => { const o = offOf(d), s = sectionAt(sections, o); return `0x${hexOffset(o)}${s ? `, ${s.name}` : ''}, ${binBits(shannonEntropy(bytes, o - 256, o + 256))} bits` }
+  /** a cell's entropy in bits: the value its colour shows in entropy mode, else the same window measured here */
+  const bitsOf = (d: number) => {
+    if (metric.kind === 'entropy' && d < metric.v.length) return metric.v[d]
+    const mid = offOf(d) + bpc / 2
+    return shannonEntropy(bytes, Math.floor(mid - entropyWin / 2), Math.floor(mid + entropyWin / 2))
+  }
+  const describe = (d: number) => { const o = offOf(d), s = sectionAt(sections, o); return `0x${hexOffset(o)}${s ? `, ${s.name}` : ''}, ${binBits(bitsOf(d))} bits` }
   const onKeyDown = (e: ReactKeyboardEvent<HTMLDivElement>) => {
     const cur = active ?? (cursor !== undefined && cellOfOffset(cursor) >= 0 ? cellOfOffset(cursor) : -1)
     let d: number | null = null
@@ -1440,11 +1500,12 @@ export function ByteMap({ data, sections = BIN_NO_SECTIONS, order: orderProp = 7
       case 'End': d = used - 1; break
       case 'Enter': if (cur >= 0) { e.preventDefault(); onSelect?.(offOf(cur)) } return
       case 'Escape': if (active !== null) { e.preventDefault(); setActive(null) } return
-      case '+': case '=': if (zoomable) { e.preventDefault(); zoomAround(cur >= 0 ? offOf(cur) : vs + len / 2, 4) } return
-      case '-': if (zoomable) { e.preventDefault(); zoomAround(cur >= 0 ? offOf(cur) : vs + len / 2, 0.25) } return
+      case '+': case '=': if (zoomable) { e.preventDefault(); zoomAround(focusOffset(cur), BYTEMAP_ZOOM_STEP) } return
+      case '-': if (zoomable) { e.preventDefault(); zoomAround(focusOffset(cur), 1 / BYTEMAP_ZOOM_STEP) } return
       default: return
     }
     e.preventDefault()
+    if (d >= used && cur >= 0 && e.key !== 'End') d = cur // past the end of the data: stay put rather than jump to its last cell
     const k = clamp(d, 0, Math.max(0, used - 1))
     if (k >= used) return
     setActive(k); setSaid(describe(k)); onHover?.(offOf(k))
@@ -1453,7 +1514,7 @@ export function ByteMap({ data, sections = BIN_NO_SECTIONS, order: orderProp = 7
   const shownCell = hover ?? active ?? (cursor !== undefined && cellOfOffset(cursor) >= 0 ? cellOfOffset(cursor) : null)
   const shownOff = shownCell !== null ? offOf(shownCell) : null
   const shownSec = shownOff !== null ? sectionAt(sections, shownOff) : undefined
-  const shownBits = shownOff !== null ? shannonEntropy(bytes, shownOff - 256, shownOff + 256) : 0
+  const shownBits = shownCell !== null ? bitsOf(shownCell) : 0
   const modeOpts: { value: ByteMapMode; label: string }[] = [{ value: 'entropy', label: 'Entropy' }, { value: 'sections', label: 'Sections' }, { value: 'class', label: 'Bytes' }, { value: 'strings', label: 'Strings' }]
 
   return (
@@ -1495,8 +1556,8 @@ export function ByteMap({ data, sections = BIN_NO_SECTIONS, order: orderProp = 7
             {zoom && <button type="button" onClick={() => setZoom(null)} className="me-1 cursor-pointer border-0 bg-transparent p-0 text-[11px] text-[var(--accent)] underline-offset-2 hover:underline">{'Whole file'}</button>}
             <span className="me-1">{plural(bpc, 'byte')}</span>
             {zoomable && <>
-              <IconButton icon="zoomIn" size="icon-xs" label={'Zoom in'} disabled={len <= cells} onClick={() => zoomAround(cursor !== undefined && cursor >= vs && cursor < ve ? cursor : vs + len / 2, 4)} />
-              <IconButton icon="minus" size="icon-xs" label={'Zoom out'} disabled={!zoom} onClick={() => zoomAround(vs + len / 2, 0.25)} />
+              <IconButton icon="zoomIn" size="icon-xs" label={'Zoom in'} disabled={len <= cells} onClick={() => zoomAround(cursor !== undefined && cursor >= vs && cursor < ve ? cursor : focusOffset(-1), BYTEMAP_ZOOM_STEP)} />
+              <IconButton icon="minus" size="icon-xs" label={'Zoom out'} disabled={!zoom} onClick={() => zoomAround(focusOffset(-1), 1 / BYTEMAP_ZOOM_STEP)} />
             </>}
           </span>
         </div>
