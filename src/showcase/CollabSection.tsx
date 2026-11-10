@@ -1,5 +1,6 @@
 import { useState } from 'react'
-import { type InboxConversation, type Notification, NotificationBell } from '../lib'
+import { type Notification, NotificationBell } from '../lib'
+import { type InboxConversation } from '../lib/collab'
 import { Section, Spec, specLazy } from './kit'
 
 /* The collaboration module loads when one of its cards first mounts. */

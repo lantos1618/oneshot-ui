@@ -1,16 +1,14 @@
 import { Fragment, createContext, isValidElement, useCallback, useContext, useEffect, useId, useLayoutEffect, useMemo, useRef, useState, type CSSProperties, type HTMLAttributes, type ReactNode, type Ref, type RefObject, type KeyboardEvent as RKeyboardEvent, type MouseEvent as ReactMouseEvent, type PointerEvent as ReactPointerEvent } from 'react'
 import { createPortal } from 'react-dom'
 import { AnimatePresence, motion, useDragControls, type Variants } from 'motion/react'
-import { type AsChildProps, Button, type ButtonProps, FOCUSABLE, Icon, IconButton, type IconName, Kbd, Slot, cn, isTouch, menuItemClass, prefersReducedMotion, spring, useControllable, useFocusTrap, useLongPress, useMediaQuery, useOutside, useRoving, AnimatedNumber, Spinner, TOUCH, uiShared, surface, menuKeyMove } from './core'
+import { type AsChildProps, Button, type ButtonProps, FOCUSABLE, Icon, IconButton, type IconName, Kbd, Slot, cn, isTouch, menuItemClass, prefersReducedMotion, spring, useControllable, useFocusTrap, useLongPress, useMediaQuery, useOutside, useRoving, AnimatedNumber, Spinner, TOUCH, uiShared, surface, focusStep, useRequiredContext, PartButton } from './core'
 import { EmptyState } from './feedback'
 import { shake } from './motion'
 import { useVirtual, virtualSetAria } from './virtual'
 
 type PopCtx = { open: boolean; setOpen: (v: boolean) => void; triggerRef: RefObject<HTMLButtonElement | null>; id: string }
 const PopoverCtx = createContext<PopCtx | null>(null)
-export const usePopover = () => {
-  const c = useContext(PopoverCtx); if (!c) throw new Error('usePopover must be inside <Popover>'); return c
-}
+export const usePopover = () => useRequiredContext(PopoverCtx, 'usePopover', '<Popover>')
 
 /** Popover.Root (also plain `<Popover>`): anchored panel state. Closes on outside click and Escape; springs in from its trigger. Controlled (`open`) or uncontrolled (`defaultOpen`). */
 export function PopoverRoot({ open: o, defaultOpen = false, onOpenChange, children, className }:
@@ -256,13 +254,12 @@ function useMenuKeys() {
     if ((e.target as Element).closest?.('[data-menu-list]') !== list) return
     const items = menuItemsOf(list)
     if (!items.length) return
-    const i = items.indexOf(document.activeElement as HTMLElement)
-    const next = menuKeyMove(e.key, i, items.length)
-    if (next !== null) { e.preventDefault(); items[next]?.focus() }
+    const next = focusStep(items, e.key)
+    if (next) { e.preventDefault(); next.focus() }
     else if (e.key.length === 1 && e.key !== ' ' && !e.ctrlKey && !e.metaKey && !e.altKey) {
       const b = buf.current, now = Date.now(), k = e.key.toLowerCase()
       b.s = now - b.t > 700 ? k : b.s + k; b.t = now
-      const same = [...b.s].every(c => c === b.s[0]), q = same ? b.s[0] : b.s
+      const same = [...b.s].every(c => c === b.s[0]), q = same ? b.s[0] : b.s, i = items.indexOf(document.activeElement as HTMLElement)
       const from = same ? i + 1 : Math.max(i, 0)
       const order = [...items.slice(from), ...items.slice(0, from)]
       const label = (el: HTMLElement) => (el.dataset.textValue ?? el.textContent ?? '').trim().toLowerCase()
@@ -359,8 +356,7 @@ export function MenuRadioGroup({ value, defaultValue, onValueChange, children, '
 /** One choice in a MenuRadioGroup (role=menuitemradio, aria-checked). Stays open when picked unless `closeOnSelect`. */
 export function MenuRadioItem({ value, onSelect, closeOnSelect = false, shortcut, children, disabled, textValue, className }: MenuItemBase &
   { value: string; onSelect?: (e: MenuSelectEvent) => void; closeOnSelect?: boolean; shortcut?: string }) {
-  const g = useContext(MenuRadioCtx)
-  if (!g) throw new Error('<RadioItem> must be inside a menu <RadioGroup>')
+  const g = useRequiredContext(MenuRadioCtx, '<RadioItem>', 'a menu <RadioGroup>')
   const close = useMenuClose(), on = g.value === value
   return (
     <motion.button type="button" variants={menuItemVariants} role="menuitemradio" aria-checked={on} tabIndex={-1} disabled={disabled} data-text-value={textValue}
@@ -376,7 +372,7 @@ export function MenuRadioItem({ value, onSelect, closeOnSelect = false, shortcut
 
 type MenuSubCtxV = { open: boolean; setOpen: (v: boolean) => void; hover: () => void; triggerRef: RefObject<HTMLButtonElement | null>; id: string }
 const MenuSubCtx = createContext<MenuSubCtxV | null>(null)
-const useMenuSub = (part: string) => { const c = useContext(MenuSubCtx); if (!c) throw new Error(`<${part}> must be inside a menu <Sub>`); return c }
+const useMenuSub = (part: string) => useRequiredContext(MenuSubCtx, `<${part}>`, 'a menu <Sub>')
 const menuFirstItem = (id: string) => requestAnimationFrame(() => menuItemsOf(document.getElementById(id))[0]?.focus({ preventScroll: true }))
 
 /**
@@ -530,7 +526,7 @@ type CtxAt = { x: number; y: number }
 
 type CtxMenuV = { open: boolean; at: CtxAt | null; openAt: (x: number, y: number) => void; close: (refocus?: boolean) => void; area: RefObject<HTMLElement | null> }
 const ContextMenuCtx = createContext<CtxMenuV | null>(null)
-const useCtxMenu = (part: string) => { const c = useContext(ContextMenuCtx); if (!c) throw new Error(`<ContextMenu.${part}> must be inside <ContextMenu.Root>`); return c }
+const useCtxMenu = (part: string) => useRequiredContext(ContextMenuCtx, `<ContextMenu.${part}>`, '<ContextMenu.Root>')
 
 /** ContextMenu.Root: state for a menu opened at a point. `onOpenChange` reports it; `open={false}` closes it, `open` opens it mid-area. */
 export function ContextMenuRoot({ open: openProp, onOpenChange, children }: { open?: boolean; onOpenChange?: (open: boolean) => void; children: ReactNode }) {
@@ -727,7 +723,7 @@ function tipFixed(r: DOMRect, p: Placement, offset?: number) {
 
 type TipCtxV = { shown: boolean; id: string; wrap: RefObject<HTMLSpanElement | null> }
 const TipCtx = createContext<TipCtxV | null>(null)
-const useTip = (part: string) => { const c = useContext(TipCtx); if (!c) throw new Error(`<Tooltip.${part}> must be inside <Tooltip.Root>`); return c }
+const useTip = (part: string) => useRequiredContext(TipCtx, `<Tooltip.${part}>`, '<Tooltip.Root>')
 
 /**
  * Tooltip.Root: wraps a Trigger and a Content in an inline box that listens for hover (after `delay` ms), keyboard focus
@@ -752,8 +748,7 @@ export function TooltipRoot({ open, defaultOpen, onOpenChange, delay = 400, disa
 /** Tooltip.Trigger: gets aria-describedby while the tip shows. A plain button, or `asChild` for your own element. */
 export function TooltipTrigger({ asChild, children, className, ...p }: HTMLAttributes<HTMLButtonElement> & AsChildProps & { ref?: Ref<HTMLButtonElement> }) {
   const { shown, id } = useTip('Trigger')
-  if (asChild) return <Slot aria-describedby={shown ? id : undefined} {...p}>{children}</Slot>
-  return <button type="button" aria-describedby={shown ? id : undefined} className={cn('inline-flex cursor-default items-center border-0 bg-transparent p-0 text-inherit', className)} {...p}>{children}</button>
+  return <PartButton asChild={asChild} aria-describedby={shown ? id : undefined} className={asChild ? className : cn('inline-flex cursor-default items-center border-0 bg-transparent p-0 text-inherit', className)} {...p}>{children}</PartButton>
 }
 /**
  * Tooltip.Content: the tip (role=tooltip). `side`/`align`/`sideOffset` (or `placement`), `arrow`, and `portal` to render it
@@ -806,7 +801,7 @@ export const Tooltip = Object.assign(TooltipConfig, { Root: TooltipRoot, Trigger
 type HoverCardCtxV = { shown: boolean; setOpen: (v: boolean) => void; pinned: boolean; setPinned: (v: boolean) => void; pinOnClick?: boolean
   tap: { onPointerUp: (e: ReactPointerEvent) => void }; lastPointer: RefObject<string> }
 const HoverCardCtx = createContext<HoverCardCtxV | null>(null)
-const useHoverCard = (part: string) => { const c = useContext(HoverCardCtx); if (!c) throw new Error(`<HoverCard.${part}> must be inside <HoverCard.Root>`); return c }
+const useHoverCard = (part: string) => useRequiredContext(HoverCardCtx, `<HoverCard.${part}>`, '<HoverCard.Root>')
 
 /**
  * HoverCard.Root: hover/focus/tap state in an inline box (`openDelay`, `closeDelay`; `open` + `onOpenChange` or
@@ -1032,7 +1027,7 @@ type DialogCtxV = { open: boolean; setOpen: (v: boolean) => void; ids: Record<Di
 const DialogCtx = createContext<DialogCtxV | null>(null)
 /** Which panel the Title/Description/Footer parts are in: they keep that panel's spacing. */
 const DialogKindCtx = createContext<'dialog' | 'sheet' | 'alert'>('dialog')
-const useDialogCtx = (part: string) => { const c = useContext(DialogCtx); if (!c) throw new Error(`<${part}> must be inside <Dialog.Root>, <Sheet.Root> or <AlertDialog.Root>`); return c }
+const useDialogCtx = (part: string) => useRequiredContext(DialogCtx, `<${part}>`, '<Dialog.Root>, <Sheet.Root> or <AlertDialog.Root>')
 
 /** Dialog.Root (also Sheet.Root and AlertDialog.Root): the open state, `open` + `onOpenChange` or `defaultOpen`. Renders no element. */
 export function DialogRoot({ open, defaultOpen = false, onOpenChange, children }: { open?: boolean; defaultOpen?: boolean; onOpenChange?: (open: boolean) => void; children: ReactNode }) {
@@ -1216,7 +1211,7 @@ export const Sheet = Object.assign(SheetConfig, {
 
 type AlertCtxV = { pending: boolean; err: string | null; confirm: (fn: () => void | Promise<unknown>) => void; cancel: () => void }
 const AlertCtx = createContext<AlertCtxV | null>(null)
-const useAlert = (part: string) => { const c = useContext(AlertCtx); if (!c) throw new Error(`<AlertDialog.${part}> must be inside <AlertDialog.Content>`); return c }
+const useAlert = (part: string) => useRequiredContext(AlertCtx, `<AlertDialog.${part}>`, '<AlertDialog.Content>')
 
 /**
  * AlertDialog.Content: the confirmation panel (role=alertdialog). An outside click doesn't close it (it shakes); Escape
@@ -1460,9 +1455,7 @@ export function CommandPalette({ open, onOpenChange, commands, placeholder, sugg
     )
   }
   const empty = list.length === 0 && (
-    <div className="p-6 text-center text-[13px] text-[var(--fg3)]">
-      {loading ? 'Searching…' : found.error && found.page === pageKey ? null : <>{`Nothing matches “${q}”.`}{!stack.length && suggest && <> {'Try'} <button className="cursor-pointer border-0 bg-transparent p-0 font-medium text-[var(--accent)] underline-offset-2 hover:underline" onClick={() => setQ(suggest)}>{`“${suggest}”`}</button></>}</>}
-    </div>
+    <EmptyState size="sm" className="p-6" title={loading ? 'Searching…' : found.error && found.page === pageKey ? null : <>{`Nothing matches “${q}”.`}{!stack.length && suggest && <> {'Try'} <button className="cursor-pointer border-0 bg-transparent p-0 font-medium text-[var(--accent)] underline-offset-2 hover:underline" onClick={() => setQ(suggest)}>{`“${suggest}”`}</button></>}</>} />
   )
   return (
     <ModalLayer open={open} onClose={() => onOpenChange(false)}>

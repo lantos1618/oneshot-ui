@@ -1,7 +1,6 @@
 import { useEffect, useId, useLayoutEffect, useRef, useState } from 'react'
 import { AnimatePresence, motion } from 'motion/react'
-import { Button, Icon, type IconName, ScrollEdges, TOUCH, cn, spring, surface, useControllable, useRoving, useScrollEdges, useWidth } from './core'
-import { ActiveIndicator, Input, Select, Switch, type Option } from './forms'
+import { ActiveIndicator, Button, Icon, type IconName, Input, type Option, ScrollEdges, Select, Switch, TOUCH, cn, spring, surface, useControllable, useRoving, useScrollEdges, useWidth } from '../lib'
 
 export type SettingsValue = boolean | string
 export type SettingsRow = { id: string; label: string; description?: string } & (

@@ -3,7 +3,7 @@
 import { act, fireEvent, render, screen, within } from '@testing-library/react'
 import { useRef, type ReactNode, type RefObject } from 'react'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
-import { BarList, Chart, DonutChart, ScatterChart, ToastProvider, UIProvider, exportChart, toast, useToast, type ToastApi } from '../../src/lib'
+import { BarList, Chart, DonutChart, ScatterChart, ToastProvider, UIProvider, exportChart, toast, useToast, type ToastApi } from '../../src/lib/all'
 
 /* ── Toasts ─────────────────────────────────────────────────────────────── */
 

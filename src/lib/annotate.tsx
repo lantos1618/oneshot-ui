@@ -5,6 +5,7 @@
  */
 import { useId, useRef, type CSSProperties, type FocusEvent as ReactFocusEvent, type HTMLAttributes, type KeyboardEvent as ReactKeyboardEvent, type ReactNode } from 'react'
 import { cn, safeColor, fmt } from './core'
+import { niceStep } from './vizkit'
 
 /** One tag on a timeline: a point event (`at`) or a span (`at` → `end`). Times are epoch ms or Date. */
 export type TimeTag = {
@@ -135,7 +136,7 @@ export function timeTicks(startMs: number, endMs: number, widthPx: number, fmt: 
   const span = endMs - startMs
   if (!(span > 0) || !(widthPx > 0)) return []
   const maxTicks = Math.max(1, Math.floor(widthPx / minPx))
-  const step = TIME_STEPS.find(m => span / (m * 60_000) <= maxTicks) ?? Math.ceil(span / 60_000 / maxTicks / 1440) * 1440
+  const step = niceStep(span / 60_000, maxTicks, TIME_STEPS)
   const stepMs = step * 60_000, out: { ms: number; label: string }[] = []
   let t = timeStepFloor(startMs, Math.min(step, 1440))
   if (t < startMs) t += stepMs

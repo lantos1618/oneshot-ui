@@ -1,9 +1,9 @@
 import { useEffect, useId, useLayoutEffect, useRef, useState, type InputHTMLAttributes, type ReactNode, type Ref, type RefObject, type TextareaHTMLAttributes } from 'react'
 import { AnimatePresence, animate, motion, useReducedMotion, useTransform } from 'motion/react'
-import { AnimatedNumber, FormFieldContext, type FormControlProps, formDisabledClass, formReadOnlyClass, useFormControl, useFormFieldProps, Button, Icon, clamp, cn, numberFormat, hex2hue, hsl2hex, inputClass, isTouch, prefersReducedMotion, spring, useCoarsePointer, useDisclosure, usePointerDrag, useRoving, plural, fmt, LOCALE, composeRefs } from './core'
+import { AnimatedNumber, FormFieldContext, type FormControlProps, formDisabledClass, formReadOnlyClass, useFormControl, useFormFieldProps, Button, Icon, clamp, cn, numberFormat, hex2hue, hsl2hex, inputClass, isTouch, prefersReducedMotion, spring, useCoarsePointer, useDisclosure, usePointerDrag, useListbox, plural, fmt, LOCALE, composeRefs } from './core'
 import { play, shake } from './motion'
 import { FloatingPanel } from './overlay'
-import { useFormsAfterReset, formsAssignRef } from './formkit'
+import { useFormsAfterReset } from './formkit'
 import { inputShellClass, rangeInputClass, type Option } from './fields'
 import { OptionList } from './select'
 import { type Magnet, type MagnetHit, MagnetBubble, MagnetMarks, magnetKeyDirection, useMagnet, useMagnetSettle } from './magnet'
@@ -318,7 +318,7 @@ export function Rating({ value, defaultValue = 0, onChange, labels: labelsProp, 
       <div className="flex gap-1 [@media(pointer:coarse)]:-mx-1.5 [@media(pointer:coarse)]:gap-0" role="radiogroup" aria-label={labelled} aria-labelledby={labelled ? undefined : fc.labelledBy} {...fc.control}
         aria-required={fc.required || undefined} aria-readonly={fc.readOnly || undefined} aria-disabled={fc.disabled || undefined} onPointerLeave={() => setHover(0)}>
         {[1, 2, 3, 4, 5].map(n => (
-          <button type="button" key={n} ref={el => { refs.current[n - 1] = el; if (n === (v || 1)) formsAssignRef(ref, el) }} role="radio" aria-checked={v === n} tabIndex={n === (v || 1) ? 0 : -1}
+          <button type="button" key={n} ref={el => { refs.current[n - 1] = el; if (n === (v || 1)) composeRefs(ref)(el) }} role="radio" aria-checked={v === n} tabIndex={n === (v || 1) ? 0 : -1}
             disabled={fc.disabled} aria-label={plural(n, 'star')} onClick={() => pick(n)} onPointerEnter={e => !isTouch(e) && setHover(n)}
             onKeyDown={e => {
               const d = ({ ArrowRight: 1, ArrowUp: 1, ArrowLeft: -1, ArrowDown: -1 } as Record<string, number>)[e.key]
@@ -418,7 +418,7 @@ export function OTPInput({ length = 6, value, defaultValue = '', onComplete, onC
     // a code is read left to right in every locale (like the digits it is made of), so the boxes keep that order
     <div ref={box} className={cn('relative flex gap-2', className)} role="group" aria-label={labelled} aria-labelledby={labelled ? undefined : fc.labelledBy} aria-describedby={fc.control['aria-describedby']} id={fc.control.id} onBlur={fc.onBlur}>
       {vals.map((c, i) => (
-        <input key={i} ref={el => { refs.current[i] = el; if (i === 0) formsAssignRef(ref, el) }} value={c} inputMode="numeric" autoComplete={i === 0 ? 'one-time-code' : 'off'} maxLength={1} aria-label={`Digit ${i + 1}`}
+        <input key={i} ref={el => { refs.current[i] = el; if (i === 0) composeRefs(ref)(el) }} value={c} inputMode="numeric" autoComplete={i === 0 ? 'one-time-code' : 'off'} maxLength={1} aria-label={`Digit ${i + 1}`}
           disabled={fc.disabled} readOnly={fc.readOnly} aria-invalid={bad || undefined} onFocus={e => e.target.select()}
           onChange={e => typed(i, e.target.value.replace(/\D/g, '').slice(-1))}
           onKeyDown={e => {
@@ -583,7 +583,7 @@ export function RangeSlider({ value, defaultValue = [20, 80], onChange, min = 0,
         <motion.div className="absolute top-2 h-1 rounded-full bg-[var(--primary)] [@media(pointer:coarse)]:top-3.5" style={{ insetInlineStart: pos[0], insetInlineEnd: fillEnd }} />
         {own && <MagnetMarks magnets={magnets} min={min} max={max} value={v} />}
         {([0, 1] as const).map(k => (
-          <motion.button type="button" key={k} ref={el => { thumbs.current[k] = el; if (k === 0) formsAssignRef(ref, el) }} role="slider" aria-label={thumbLabel(k)} aria-valuemin={min} aria-valuemax={max} aria-valuenow={v[k]}
+          <motion.button type="button" key={k} ref={el => { thumbs.current[k] = el; if (k === 0) composeRefs(ref)(el) }} role="slider" aria-label={thumbLabel(k)} aria-valuemin={min} aria-valuemax={max} aria-valuenow={v[k]}
             aria-valuetext={own ? mg.valueText(v[k], valueText(v[k])) : valueText(v[k])} aria-keyshortcuts={own ? 'PageUp PageDown' : undefined}
             disabled={fc.disabled} aria-readonly={fc.readOnly || undefined} aria-invalid={fc.control['aria-invalid']}
             animate={{ scale: dragging === k ? 1.15 : 1 }} transition={spring(0.4, 0.3)}
@@ -660,7 +660,7 @@ export function PhoneInput({ countries = PHONE_COUNTRIES, value, defaultCountry 
   const [plus, setPlus] = useState<string | null>(null) // "+4" while a dial code is still being typed
   const [swaps, setSwaps] = useState(0)
   const input = useRef<HTMLInputElement>(null), caret = useRef<number | null>(null)
-  const { open, setOpen, ref: wrap } = useDisclosure(), lid = useId()
+  const { open, setOpen, ref: wrap } = useDisclosure()
   const mask = phoneMask(country), maxDigits = (mask.match(/X/g) || []).length
   const { out, rest } = phoneFormat(mask, digits)
   const shown = plus ?? out
@@ -671,7 +671,7 @@ export function PhoneInput({ countries = PHONE_COUNTRIES, value, defaultCountry 
     setCountry(c); setDigits(d => d.slice(0, (phoneMask(c).match(/X/g) || []).length))
   }
   const pickIndex = (i: number) => { if (locked) return; fc.set(''); choose(countries[i]); setPlus(null); setOpen(false); input.current?.focus() }
-  const { active, setActive, onKeyDown } = useRoving(countries.length, pickIndex)
+  const lb = useListbox(options, pickIndex, { open, setOpen, selected: countries.indexOf(country) })
   const first = useRef(true)
   useEffect(() => {
     if (first.current) { first.current = false; return }
@@ -710,15 +710,12 @@ export function PhoneInput({ countries = PHONE_COUNTRIES, value, defaultCountry 
   return (
     <div ref={wrap} className={cn('relative', className)} onBlur={fc.onBlur}>
       <div className={cn(inputShellClass(invalid), 'flex h-9 items-stretch overflow-hidden', fc.disabled ? 'cursor-not-allowed !bg-[var(--muted)] text-[var(--fg3)] hover:!border-[var(--line)]' : fc.readOnly && '!bg-[var(--muted)]')}>
-        <button type="button" disabled={locked} aria-label={`Country: ${country.name} ${country.dial}`} aria-haspopup="listbox" aria-expanded={open} aria-controls={lid} aria-activedescendant={open ? `${lid}-${active}` : undefined}
-          onClick={() => { setActive(countries.indexOf(country)); setOpen(!open) }}
+        <button type="button" disabled={locked} {...lb.comboProps} role={undefined /* a menu button: the number field is the control */} aria-label={`Country: ${country.name} ${country.dial}`}
+          onClick={() => lb.show(!open)}
           onKeyDown={e => {
-            if (!open) { if (['ArrowDown', 'ArrowUp', 'Enter', ' '].includes(e.key)) { e.preventDefault(); setActive(countries.indexOf(country)); setOpen(true) } return }
-            if (e.key === 'Escape') { e.stopPropagation(); return setOpen(false) }
-            if (e.key === 'Tab') return setOpen(false)
-            if (e.key === ' ') { e.preventDefault(); return pickIndex(active) }
-            if (e.key.length === 1) { const k = names.findIndex(n => n.toLocaleLowerCase(locale).startsWith(e.key.toLocaleLowerCase(locale))); if (k >= 0) setActive(k); return }
-            onKeyDown(e)
+            if (!open || e.key.length !== 1 || e.key === ' ') return lb.onKeyDown(e)
+            const k = names.findIndex(n => n.toLocaleLowerCase(locale).startsWith(e.key.toLocaleLowerCase(locale)))
+            if (k >= 0) lb.setActive(k)
           }}
           className="flex flex-none cursor-pointer items-center gap-1 border-0 border-e border-[var(--line)] bg-[var(--muted)] px-2.5 text-sm outline-none hover:bg-[var(--line)] focus-visible:bg-[var(--line)] disabled:cursor-not-allowed disabled:hover:bg-[var(--muted)]">
           <motion.span key={`f${swaps}`} initial={swaps ? { scale: 0.5, rotate: -20 } : false} animate={{ scale: 1, rotate: 0 }} transition={spring(0.5, 0.4)} className="leading-none">{country.flag}</motion.span>
@@ -733,7 +730,7 @@ export function PhoneInput({ countries = PHONE_COUNTRIES, value, defaultCountry 
         </span>
       </div>
       <FloatingPanel open={open} className="max-h-60 w-full overflow-auto overscroll-contain sm:w-[260px]" role="presentation">
-        <OptionList id={lid} label={'Country'} options={options} active={active} isSelected={o => o.value === country.dial} onPick={pickIndex} onHover={setActive} />
+        <OptionList id={lb.id} label={'Country'} options={options} active={lb.active} isSelected={o => o.value === country.dial} onPick={pickIndex} onHover={lb.setActive} />
       </FloatingPanel>
       {fc.inputs}
     </div>

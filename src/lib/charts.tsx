@@ -1,6 +1,6 @@
 import { memo, useEffect, useId, useLayoutEffect, useMemo, useRef, useState, type FocusEvent as ReactFocusEvent, type KeyboardEvent as ReactKeyboardEvent, type PointerEvent as ReactPointerEvent, type ReactNode, type Ref, type RefObject, type CSSProperties } from 'react'
 import { motion } from 'motion/react'
-import { AnimatedNumber, Button, DeltaBadge, Icon, IconButton, SparkChart, TOUCH, chartPath, composeRefs, menuItemClass, type Curve, addDays, clamp, cn, dayKey, extent, fmt, isTouch, maxOf, minOf, onMouseLeave, prefersReducedMotion, releaseTouchCapture, safeColor, spring, startOfWeek, surface, useCoarsePointer, useControllable, useOutside, useWidth, plural, rangeStr, downloadBlob, writeClipboard, gridKeyMove, menuKeyMove, useActiveIndex, useStatusFlash, useLive } from './core'
+import { AnimatedNumber, Button, DeltaBadge, Icon, IconButton, SparkChart, TOUCH, chartPath, composeRefs, menuItemClass, type Curve, addDays, clamp, cn, dayKey, extent, fmt, isTouch, maxOf, minOf, onMouseLeave, prefersReducedMotion, releaseTouchCapture, safeColor, spring, startOfWeek, surface, useCoarsePointer, useControllable, useOutside, useWidth, plural, rangeStr, downloadBlob, writeClipboard, gridKeyMove, focusStep, useActiveIndex, useStatusFlash, useLive, Legend, useResizeObserver, svgN } from './core'
 import { useTween, useViewport } from './motion'
 import { CHART_NEUTRAL, PALETTE, linScale, niceTicks, polarPt, seriesColor, svgWedge, ticksIn } from './vizkit'
 import { TAG_SR_ONLY, TagGlyph, TagTooltip, layoutTimeTags, timeTagLook, timeTagTint, timeTicks, useTagFocus, type TimeTag, type TimeTagKind, type TimeTagStyle } from './annotate'
@@ -156,7 +156,7 @@ export function useChartShell(o: ChartShellOptions) {
   const { box, count, columns = 0, start = 0, tip: tipBody } = o
   const id = useId(), tblId = `${id}-tbl`, sumId = `${id}-sum`
   const [hover, setHover, leave] = useActiveIndex(count, box)
-  const [said, say] = useState('')
+  const [say, live] = useLive()
   const [tip, setTip] = useState<ChartTip | null>(null)
   useOutside([box], () => setTip(null), !!tip, { escape: true })
   const [open, setOpen] = useState(o.table === 'shown')
@@ -190,7 +190,7 @@ export function useChartShell(o: ChartShellOptions) {
     onFocus: (e: ReactFocusEvent<HTMLElement>) => { if (e.target === e.currentTarget && hover === null && count && e.currentTarget.matches(':focus-visible')) go(clamp(start, 0, count - 1)) },
     onBlur: (e: ReactFocusEvent<HTMLElement>) => { if (!e.currentTarget.contains(e.relatedTarget as Node | null)) go(null) },
   }
-  return { hover, setHover, bind, tip, focusProps, said, open, setOpen, tblId, sumId, o }
+  return { hover, setHover, bind, tip, focusProps, live, open, setOpen, tblId, sumId, o }
 }
 export type ChartShellState = ReturnType<typeof useChartShell>
 
@@ -205,7 +205,7 @@ const CHART_FOCUS = 'rounded-[var(--r-md)] outline-none focus-visible:outline-so
  */
 function ChartShell({ shell, className, boxClassName, style, after, children }:
   { shell: ChartShellState; className?: string; boxClassName?: string; style?: CSSProperties; after?: ReactNode; children: ReactNode }) {
-  const { o, open, setOpen, tblId, sumId, tip, said, focusProps } = shell
+  const { o, open, setOpen, tblId, sumId, tip, live, focusProps } = shell
   const { table = 'hidden', exportable = false, ref: userRef, box, label, summary, data } = o
   const root = useRef<HTMLDivElement | null>(null)
   const bar = table === 'toggle' || exportable, visible = table === 'shown' || (table === 'toggle' && open)
@@ -216,7 +216,7 @@ function ChartShell({ shell, className, boxClassName, style, after, children }:
   const tableEl = data ? <ChartDataTable id={tblId} sumId={sumId} label={label} summary={summary} data={data} visible={visible} /> : <span id={sumId} className="sr-only">{summary}</span>
   const plot = (
     <div ref={boxRef} {...(outer ? null : rootProps)} {...focusProps} className={cn('relative', CHART_FOCUS, boxClassName, !outer && className)} style={style}>
-      <span className="sr-only" aria-live="polite">{said}</span>
+      {live}
       {children}
       {tip && <ChartTooltip x={tip.x} y={tip.y} width={box.current?.clientWidth ?? 300}>{tip.body}</ChartTooltip>}
       {!outer && tableEl}
@@ -521,11 +521,10 @@ function ChartExportMenu({ root }: { root: RefObject<HTMLElement | null> }) {
     try { await exportChart(root, { format: kind }); say('') } catch { flash(false); say('Couldn’t export the chart') }
   }
   const onKey = (e: ReactKeyboardEvent<HTMLDivElement>) => {
-    const items = [...(menu.current?.querySelectorAll<HTMLElement>('[role="menuitem"]') ?? [])], k = items.indexOf(document.activeElement as HTMLElement)
     if (e.key === 'Escape') { e.preventDefault(); e.stopPropagation(); close(true); return }
     if (e.key === 'Tab') { close(false); return }
-    const next = menuKeyMove(e.key, k, items.length)
-    if (next !== null) { e.preventDefault(); items[next]?.focus() }
+    const next = focusStep([...(menu.current?.querySelectorAll<HTMLElement>('[role="menuitem"]') ?? [])], e.key)
+    if (next) { e.preventDefault(); next.focus() }
   }
   return (
     <div ref={box} className="relative">
@@ -575,7 +574,6 @@ export function chartDownsample<T>(data: T[], max?: number): T[] {
   for (let i = 0; i < Math.floor(max); i++) out.push(data[Math.round(i * step)])
   return out
 }
-const p1 = (n: number) => n.toFixed(1)
 const linePath = (pts: [number, number][]) => chartPath(pts)
 const num = (v: unknown) => (v === null || v === undefined || v === '' ? null : Number(v))
 
@@ -602,19 +600,6 @@ function TooltipRow({ color, label, value, dashed }: { color: string; label: Rea
     <div className="flex items-center gap-2">
       <span className={cn('h-2 w-2 rounded-[var(--r-sm)]', dashed && 'border border-dashed bg-transparent')} style={dashed ? { borderColor: safeColor(color) } : { background: safeColor(color) }} />
       <span className="flex-1 text-[var(--fg2)]">{label}</span><b className="ui-num font-medium">{value}</b>
-    </div>
-  )
-}
-/** Legend row: swatch per series; `dashed` draws a dashed line, `band` a shaded range. */
-export function Legend({ items, className }: { items: { label: string; color: string; dashed?: boolean; band?: boolean }[]; className?: string }) {
-  return (
-    <div className={cn('mt-2 flex flex-wrap gap-x-4 gap-y-1 text-xs text-[var(--fg2)]', className)}>
-      {items.map(it => (
-        <span key={it.label} className="flex items-center gap-1.5">
-          <span className={cn('inline-block', it.band ? 'h-2.5 w-3.5 rounded-[var(--r-sm)] bg-[var(--band)]' : it.dashed ? 'w-3.5 border-t-2 border-dashed' : 'h-2.5 w-2.5 rounded-[var(--r-sm)]')}
-            style={it.band ? undefined : it.dashed ? { borderColor: safeColor(it.color) } : { background: safeColor(it.color) }} />{it.label}
-        </span>
-      ))}
     </div>
   )
 }
@@ -844,7 +829,7 @@ export function Chart<T extends object = ChartDatum>({ data: allRows, x, series,
   const whiskers = (caps: boolean) => S.map(s => s.whisker && !!s.whisker.caps === caps && data.map((d, i) => {
     const lo = num(d[s.whisker!.low]), hi = num(d[s.whisker!.high]), mid = num(d[s.key]); if (lo === null || hi === null || mid === null) return null
     const { Y } = sc(s), cx = bx(i, s) + bw / 2, cw = Math.min(7, bw / 2)
-    const path = (a: number, b: number) => `M${p1(cx)},${p1(a)}L${p1(cx)},${p1(b)}` + (caps ? `M${p1(cx - cw)},${p1(a)}L${p1(cx + cw)},${p1(a)}M${p1(cx - cw)},${p1(b)}L${p1(cx + cw)},${p1(b)}` : '')
+    const path = (a: number, b: number) => `M${svgN(cx)},${svgN(a)}L${svgN(cx)},${svgN(b)}` + (caps ? `M${svgN(cx - cw)},${svgN(a)}L${svgN(cx + cw)},${svgN(a)}M${svgN(cx - cw)},${svgN(b)}L${svgN(cx + cw)},${svgN(b)}` : '')
     return <motion.path key={`w${s.key}${i}`} fill="none" stroke={s.whisker!.color ?? (caps ? 'var(--fg2)' : s.colorOf?.(d, i) ?? s.color)} strokeWidth={1.5} strokeLinecap="round"
       initial={{ d: path(Y(mid), Y(mid)) }} animate={{ d: seen ? path(Y(lo), Y(hi)) : path(Y(mid), Y(mid)), opacity: hover === null || hover === i ? 1 : 0.55 }} transition={{ ...spring(0.15, 0.6), delay: seen ? 0.15 : 0 }} />
   }))
@@ -1209,13 +1194,8 @@ export function Heatmap({ rows, cols, value, format: formatProp, cell = 18, touc
   const gap = Math.ceil(30 / (size + 3)) // columns each label needs; skip labels that would collide
   let last = -gap
   const shown = cols.map((c, i) => (c && i - last >= gap ? ((last = i), c) : ''))
-  useLayoutEffect(() => {
-    const el = ref.current; if (!el) return
-    const check = () => setScrolls(el.scrollWidth > el.clientWidth + 1)
-    check(); if (scrollTo === 'end') el.scrollLeft = el.scrollWidth
-    const ro = new ResizeObserver(check); ro.observe(el)
-    return () => ro.disconnect()
-  }, [size, cols.length, scrollTo])
+  useResizeObserver(ref, el => setScrolls(el.scrollWidth > el.clientWidth + 1), [size, cols.length])
+  useLayoutEffect(() => { if (scrollTo === 'end' && ref.current) ref.current.scrollLeft = ref.current.scrollWidth }, [size, cols.length, scrollTo])
   // the staggered fade-in only applies to the first reveal; later hover changes answer straight away
   const [introDone, setIntroDone] = useState(false)
   useEffect(() => { if (!seen || introDone) return; const t = setTimeout(() => setIntroDone(true), 900); return () => clearTimeout(t) }, [seen, introDone])
@@ -1576,7 +1556,7 @@ export function RegressionChart({ points, prediction = true, height = 240, xDoma
     describe: i => { const r = fit.band[i]; return `x ${chartFixed(r[0], 0)}: fitted ${chartFixed(r[1])}, 95% CI plus or minus ${chartFixed(r[2])}` + (prediction ? `, prediction plus or minus ${chartFixed(r[3])}` : '') },
   })
   const { hover, setHover } = shell
-  const poly = (k: number) => S.band.map(r => `${p1(X(r[0]))},${p1(Y(r[1] + r[k]))}`).join(' ') + ' ' + S.band.slice().reverse().map(r => `${p1(X(r[0]))},${p1(Y(r[1] - r[k]))}`).join(' ')
+  const poly = (k: number) => S.band.map(r => `${svgN(X(r[0]))},${svgN(Y(r[1] + r[k]))}`).join(' ') + ' ' + S.band.slice().reverse().map(r => `${svgN(X(r[0]))},${svgN(Y(r[1] - r[k]))}`).join(' ')
   const row = hover === null ? null : S.band[hover]
   const regressionPick = (e: ReactPointerEvent<SVGRectElement>) => {
     const xv = xd[0] + ((e.clientX - e.currentTarget.getBoundingClientRect().left) / (iw || 1)) * (xd[1] - xd[0]), b0 = fit.band[0][0], b1 = fit.band[40][0]
@@ -1663,10 +1643,10 @@ export function BoxViolinChart({ groups, mode = 'both', domain, height = 200, fo
           <ChartGridY ticks={ticksIn(dom[0], dom[1])} Y={Y} x1={pad.l} x2={w - pad.r} format={v => chartFixed(v, 0)} dash="2 3" gap={6} />
           {S.map((k, i) => {
             const g = groups[i], color = colorOf(i), cx = pad.l + slot * (i + 0.5), mx = maxOf(k.dens) || 1, wv = slot * 0.36, bxw = mode === 'both' ? 9 : 16
-            const right = k.ys.map((v, j) => `L${p1(cx + (k.dens[j] / mx) * wv)},${p1(Y(v))}`).join(''), left = k.ys.map((v, j) => `L${p1(cx - (k.dens[j] / mx) * wv)},${p1(Y(v))}`).reverse().join('')
+            const right = k.ys.map((v, j) => `L${svgN(cx + (k.dens[j] / mx) * wv)},${svgN(Y(v))}`).join(''), left = k.ys.map((v, j) => `L${svgN(cx - (k.dens[j] / mx) * wv)},${svgN(Y(v))}`).reverse().join('')
             return (
               <g key={g.label} data-ci={i} opacity={hover === null || hover === i ? 1 : 0.5} onPointerEnter={() => setHover(i)}>
-                {mode !== 'box' && <path d={`M${p1(cx)},${p1(Y(k.lo))}${right}L${p1(cx)},${p1(Y(k.hi))}${left}Z`} fill={color} fillOpacity={mode === 'both' ? 0.16 : 0.3} stroke={color} strokeOpacity={0.7} strokeWidth={1.2} strokeLinejoin="round" />}
+                {mode !== 'box' && <path d={`M${svgN(cx)},${svgN(Y(k.lo))}${right}L${svgN(cx)},${svgN(Y(k.hi))}${left}Z`} fill={color} fillOpacity={mode === 'both' ? 0.16 : 0.3} stroke={color} strokeOpacity={0.7} strokeWidth={1.2} strokeLinejoin="round" />}
                 {mode !== 'violin' && <>
                   <line x1={cx} x2={cx} y1={Y(k.lo)} y2={Y(k.hi)} stroke="var(--fg2)" />
                   {[k.lo, k.hi].map((v, j) => <line key={j} x1={cx - 5} x2={cx + 5} y1={Y(v)} y2={Y(v)} stroke="var(--fg2)" />)}
@@ -1815,7 +1795,7 @@ export function ForestPlot({ rows, domain = [-0.1, 0.2], ticks = [-0.1, 0, 0.1, 
           <line x1={8} x2={w - 2} y1={py - rowH * 0.6} y2={py - rowH * 0.6} stroke="var(--line)" />
           {hover === rows.length && <rect x={2} y={py - rowH / 2 + 1} width={w - 4} height={rowH - 2} rx={4} fill="var(--muted)" />}
           <text x={L - 8} y={py} dy="0.32em" textAnchor="end" fontWeight={600} fill="var(--fg)">{'Pooled'}</text>
-          <path d={`M${p1(X(plo))},${p1(py)}L${p1(X(S.pooled))},${p1(py - 6)}L${p1(X(phi))},${p1(py)}L${p1(X(S.pooled))},${p1(py + 6)}Z`} fill="var(--fg)" />
+          <path d={`M${svgN(X(plo))},${svgN(py)}L${svgN(X(S.pooled))},${svgN(py - 6)}L${svgN(X(phi))},${svgN(py)}L${svgN(X(S.pooled))},${svgN(py + 6)}Z`} fill="var(--fg)" />
           <rect data-ci={rows.length} x={0} y={py - rowH / 2} width={w} height={rowH} fill="transparent" {...shell.bind(rows.length)} />
           <text x={w - 2} y={py} dy="0.32em" textAnchor="end" fontFamily="var(--mono)" fontWeight={600} pointerEvents="none" fill="var(--fg)">{forestPct(S.pooled)}{narrow ? '' : ` [${forestCi(plo)}, ${forestCi(phi)}]`}</text>
         </svg>

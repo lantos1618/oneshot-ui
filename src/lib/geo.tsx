@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useRef, useState, useSyncExternalStore, type PointerEvent as ReactPointerEvent, type ReactNode } from 'react'
 import { motion, useInView, useReducedMotion } from 'motion/react'
-import { Button, Skeleton, TOUCH, clamp, cn, isTouch, maxOf, minOf, onMouseLeave, safeColor, useOutside, useTheme, fmt } from './core'
-import { SegmentedControl } from './forms'
+import { Button, Skeleton, TOUCH, clamp, cn, isTouch, maxOf, minOf, onMouseLeave, safeColor, useOutside, useTheme, fmt, useResizeObserver } from './core'
+import { SegmentedControl } from './fields'
 import { PointerTooltip, usePointerTooltip } from './overlay'
 import { useFrameLoop } from './motion'
 
@@ -210,16 +210,11 @@ export function Globe({ hubs, routes, land: landProp, height = 440, className }:
     const grd = g.createRadialGradient(cx - R * 0.35, cy - R * 0.35, R * 0.1, cx, cy, R); grd.addColorStop(0, geoRgba(C('var(--card)'), 1)); grd.addColorStop(1, geoRgba(C('var(--line)'), 1))
     g.fillStyle = grd; g.beginPath(); g.arc(cx, cy, R, 0, Math.PI * 2); g.fill(); g.strokeStyle = geoRgba(C('var(--fg3)'), 0.35); g.lineWidth = 1; g.stroke()
   }
-  useEffect(() => {
-    const cv = cvRef.current!, bg = bgRef.current!, st = S.current
-    const size = () => {
-      st.dpr = Math.min(2, devicePixelRatio || 1); st.W = cv.clientWidth; st.H = cv.clientHeight; cv.width = bg.width = st.W * st.dpr; cv.height = bg.height = st.H * st.dpr
-      drawBg(); if (!looping.current) draw(0, performance.now())
-    }
-    size()
-    const ro = new ResizeObserver(size); ro.observe(cv)
-    return () => ro.disconnect()
-  }, [])
+  useResizeObserver(cvRef, cv => {
+    const bg = bgRef.current!, st = S.current
+    st.dpr = Math.min(2, devicePixelRatio || 1); st.W = cv.clientWidth; st.H = cv.clientHeight; cv.width = bg.width = st.W * st.dpr; cv.height = bg.height = st.H * st.dpr
+    drawBg(); if (!looping.current) draw(0, performance.now())
+  })
   // canvas colours are resolved from the theme tokens: re-read them whenever the theme changes (works with
   // UIProvider target="self" too, where nothing on <html> changes)
   useEffect(() => {

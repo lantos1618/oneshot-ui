@@ -142,9 +142,9 @@ export function analyze(root, { tsconfig = 'tsconfig.app.json', extraDirs = [] }
   } catch (e) { api.close(); throw e }
 }
 
-/** Names reachable from src/lib/index.ts (`export * from './x'`, following re-exports inside the modules). */
+/** Names reachable from src/lib/all.ts (`export * from './x'`, following re-exports inside the modules). */
 function publicNames(root, modules, decls) {
-  const index = readFileSync(join(root, 'src/lib/index.ts'), 'utf8')
+  const index = readFileSync(join(root, 'src/lib/all.ts'), 'utf8')
   const out = new Set()
   const seen = new Set()
   const add = name => {
@@ -155,7 +155,8 @@ function publicNames(root, modules, decls) {
     for (const d of decls.values()) if (d.module === name && d.exported) out.add(d.name)
     for (const r of mod.reexports) { if (r.names) r.names.forEach(n => out.add(n)); else add(r.from) }
   }
-  for (const m of index.matchAll(/^export \* from '\.\/([\w-]+)'/gm)) add(m[1])
+  const stars = text => [...text.matchAll(/^export \* from '\.\/([\w-]+)'/gm)].map(m => m[1])
+  for (const m of stars(index)) for (const n of m === 'index' ? stars(readFileSync(join(root, 'src/lib/index.ts'), 'utf8')) : [m]) add(n)
   for (const m of index.matchAll(/^export \{([^}]*)\} from '\.\/([\w-]+)'/gm)) m[1].split(',').map(x => x.trim().replace(/^type\s+/, '').split(/\s+as\s+/)[0]).filter(Boolean).forEach(n => out.add(n))
   return out
 }

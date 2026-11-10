@@ -1,5 +1,5 @@
 /** Slot / asChild: merge props onto a single child element, compose refs. Part of @lyndon/ui/core. */
-import { type HTMLAttributes, type ReactNode, cloneElement as slotClone, type ReactElement as SlotElement, Fragment as SlotFragment, isValidElement as slotIsElement, type Ref as SlotRef, type RefCallback as SlotRefCallback, useMemo } from 'react'
+import { type ButtonHTMLAttributes, type HTMLAttributes, type ReactNode, cloneElement as slotClone, type ReactElement as SlotElement, Fragment as SlotFragment, isValidElement as slotIsElement, type Ref as SlotRef, type RefCallback as SlotRefCallback, useMemo } from 'react'
 import { cn } from './helpers'
 
 /** `asChild` for parts that support it: render your element (merged with the part's props) instead of the part's own. */
@@ -71,4 +71,13 @@ export function Slot<E extends HTMLElement = HTMLElement>({ children, ref, ...pr
   const childRef = child.props.ref as SlotRef<E> | undefined
   const merged = useComposedRefs<E>(ref, childRef)
   return slotClone(child, { ...mergeSlotProps(props as Record<string, unknown>, child.props), ref: ref || childRef ? merged : undefined })
+}
+
+/**
+ * A part's trigger: a `<button type="button">` with `after` rendered behind the children, or with `asChild` your element
+ * (where `disabled` becomes aria-disabled, since a link or div has no disabled state).
+ */
+export function PartButton({ asChild, disabled, after, children, ref, ...p }: ButtonHTMLAttributes<HTMLButtonElement> & AsChildProps & { after?: ReactNode; ref?: SlotRef<HTMLButtonElement> }) {
+  if (asChild) return <Slot<HTMLButtonElement> {...p} ref={ref} aria-disabled={disabled || undefined}>{children}</Slot>
+  return <button type="button" ref={ref} disabled={disabled} {...p}>{children}{after}</button>
 }

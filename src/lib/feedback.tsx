@@ -1,7 +1,7 @@
 import { createContext, isValidElement, useCallback, useContext, useEffect, useLayoutEffect, useMemo, useRef, useState, useSyncExternalStore, type MouseEvent as ReactMouseEvent, type ReactNode } from 'react'
 import { AnimatePresence, type AnimationPlaybackControls, animate, motion, useAnimate, useInView, useIsPresent, useMotionValue, useTransform, type Transition } from 'motion/react'
 import { AnimatedNumber, Badge, Button, type ButtonProps, Icon, IconButton, type IconName, Spinner, TONE_SOFT, type Tone, cn, prefersReducedMotion, sleep, spring, uiAddHost, uiShared, useControllable, fmt, surface, useResizeObserver, useStatusFlash, writeClipboard } from './core'
-import { CheckMark } from './forms'
+import { CheckMark } from './fields'
 
 /** A toast's id: the one `toast()` returns, or your own (`toast({ id: 'save', … })` replaces the toast with that id). */
 export type ToastId = string | number
@@ -330,9 +330,20 @@ export function ProgressRing({ value, size = 56, stroke = 5, label, tone = 'prim
   )
 }
 
-/** Centred icon, title, hint and action. The icon bobs gently (off for reduced motion or `bob={false}`). */
-export function EmptyState({ icon = 'inbox', title, description, action, bob = true, className }:
-  { icon?: IconName; title: ReactNode; description?: ReactNode; action?: ReactNode; bob?: boolean; className?: string }) {
+/**
+ * Centred icon, title, hint and action. The icon bobs gently (off for reduced motion or `bob={false}`). `size="sm"` is
+ * the one-line form for an empty list or panel: quiet centred text (role=status), with the icon only when one is given.
+ */
+export function EmptyState({ icon, title, description, action, bob = true, size = 'md', className }:
+  { icon?: IconName; title: ReactNode; description?: ReactNode; action?: ReactNode; bob?: boolean; size?: 'sm' | 'md'; className?: string }) {
+  if (size === 'sm') return (
+    <div role="status" className={cn('p-4 text-center text-[13px] text-[var(--fg3)]', className)}>
+      {icon && <Icon name={icon} size={18} className="mx-auto mb-2 block" />}{title}{description && <div className="text-xs">{description}</div>}{action}
+    </div>
+  )
+  return <EmptyStateMd icon={icon ?? 'inbox'} title={title} description={description} action={action} bob={bob} className={className} />
+}
+function EmptyStateMd({ icon, title, description, action, bob, className }: { icon: IconName; title: ReactNode; description?: ReactNode; action?: ReactNode; bob: boolean; className?: string }) {
   // the loop runs only while the icon is on screen (an endless animation off screen still costs a frame each tick)
   const ref = useRef<HTMLSpanElement>(null), onScreen = useInView(ref)
   return (

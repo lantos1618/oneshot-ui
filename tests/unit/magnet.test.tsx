@@ -5,7 +5,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import {
   Gantt, MAGNET_IDLE, MagnetMarks, RangeSlider, Slider, SplitPane, magnetKeyDirection, magnetStops, magnetize, nextMagnet,
   type Magnet, type MagnetState,
-} from '../../src/lib'
+} from '../../src/lib/all'
 
 // px 200 on 0..100: 2 px per unit; capture 8 px = 4 units, release 18 px = 9 units
 const R = { min: 0, max: 100, px: 200, radius: 8, release: 18 }

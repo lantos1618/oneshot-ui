@@ -1,7 +1,6 @@
 import { createContext, useContext, useEffect, useId, useRef, useState, type AriaAttributes, type FormEvent, type FormHTMLAttributes, type ReactNode, type Ref } from 'react'
 import { motion } from 'motion/react'
 import { FormFieldContext, type FormControlProps, type FormFieldState, useFormControl, Badge, ICONS, Icon, type IconName, cn, spring, useCoarsePointer, useRoving, composeRefs } from './core'
-import { formsAssignRef } from './formkit'
 
 /**
  * Frame for composite fields (an input plus addons, chips or buttons inside one border): focus ring while anything inside
@@ -238,7 +237,7 @@ export function RadioGroup({ options, value, defaultValue, onChange, label, clas
       {options.map((o, i) => {
         const on = o.value === v
         return (
-          <button type="button" key={o.value} ref={el => { refs.current[i] = el; if (i === tabStop) formsAssignRef(ref, el) }} role="radio" aria-checked={on} disabled={off(i)} tabIndex={i === tabStop ? 0 : -1} onClick={() => set(o.value)}
+          <button type="button" key={o.value} ref={el => { refs.current[i] = el; if (i === tabStop) composeRefs(ref)(el) }} role="radio" aria-checked={on} disabled={off(i)} tabIndex={i === tabStop ? 0 : -1} onClick={() => set(o.value)}
             className="group/rd flex cursor-pointer items-center gap-2.5 border-0 bg-transparent p-0 text-start text-[13px] disabled:cursor-not-allowed disabled:text-[var(--fg3)] [@media(pointer:coarse)]:min-h-9">
             <span className={cn('grid h-[18px] w-[18px] flex-none place-items-center rounded-full border-[1.5px] group-disabled/rd:opacity-50', on ? 'border-[var(--primary)]' : fc.invalid ? 'border-[var(--bad)]' : 'border-[var(--line2)]')}>
               <motion.i className="block h-2 w-2 rounded-full bg-[var(--primary)]" initial={false} animate={{ scale: on ? 1 : 0 }} transition={on ? spring(0.5, 0.35) : { duration: 0.1 }} />
@@ -283,7 +282,7 @@ export function SegmentedControl({ options, value, defaultValue, onChange, class
       aria-invalid={fc.control['aria-invalid']} aria-describedby={fc.control['aria-describedby']} id={fc.control.id} onKeyDown={onKeyDown} onBlur={fc.onBlur}
       className={cn('relative inline-flex rounded-[calc(var(--r-md)+1px)] bg-[var(--muted)] p-1', fc.invalid && 'shadow-[0_0_0_1px_var(--bad)]', className)}>
       {opts.map((o, i) => (
-        <button type="button" key={o.value} ref={el => { refs.current[i] = el; if (i === tabStop) formsAssignRef(ref, el) }} role="radio" aria-checked={o.value === v} tabIndex={i === tabStop ? 0 : -1} disabled={off(i)}
+        <button type="button" key={o.value} ref={el => { refs.current[i] = el; if (i === tabStop) composeRefs(ref)(el) }} role="radio" aria-checked={o.value === v} tabIndex={i === tabStop ? 0 : -1} disabled={off(i)}
           aria-label={o.label ? undefined : o.value} onClick={() => set(o.value)}
           className={cn('relative flex-1 cursor-pointer rounded-[calc(var(--r-md)-2px)] border-0 bg-transparent px-3 font-medium whitespace-nowrap transition-colors disabled:cursor-not-allowed',
             size === 'sm' ? 'h-[22px] text-xs [@media(pointer:coarse)]:h-8' : 'h-7 text-[13px] [@media(pointer:coarse)]:h-9',

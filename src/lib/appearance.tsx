@@ -1,53 +1,15 @@
 import { useEffect, useId, useMemo, useRef, useState } from 'react'
 import { AnimatePresence, motion } from 'motion/react'
-import { Button, FONTS, Icon, IconButton, type Palette, THEMES, type Theme, type ThemeSettings, cn, derive, editPalette, inputClass, loadFont, spring, themeCSS, themePalette, themeShareUrl, useControllable, useTheme, plural, downloadBlob } from './core'
+import { Button, FONTS, Icon, IconButton, type Palette, THEMES, type ThemeSettings, cn, derive, editPalette, inputClass, loadFont, spring, themeCSS, themePalette, themeShareUrl, useControllable, useTheme, plural, downloadBlob } from './core'
 import { Collapse, CopyButton, useCopy, useToast } from './feedback'
-import { SegmentedControl, Slider } from './forms'
+import { SegmentedControl } from './fields'
+import { Slider } from './inputs'
 import { TabsContent, TabsList, TabsRoot, TabsTrigger } from './navigation'
 import { Popover, PopoverContent, PopoverTrigger } from './overlay'
 import { THEME_EXPORT_FORMATS, type ThemeExportFormat, type ThemeExportMode, type ThemeImportNote, themeExport, themeImport, themeImportSettings } from './themeexport'
+import { ThemePreview } from './provider'
 
-/** One half (or all) of a theme thumbnail: page, card, two text lines, primary button, accent dot. */
-function ThemeMini({ p, clip }: { p: Palette; clip?: string }) {
-  return (
-    <span className="absolute inset-0 block" style={{ background: p.bg, clipPath: clip }}>
-      <span className="absolute inset-2 rounded-[var(--r-sm)]" style={{ background: p.card, boxShadow: `inset 0 0 0 1px ${p.line}` }} />
-      <span className="absolute top-[15px] start-[15px] h-1 w-[34%] rounded-[var(--r-sm)]" style={{ background: p.fg }} />
-      <span className="absolute top-[23px] start-[15px] h-[3px] w-[48%] rounded-[var(--r-sm)] opacity-90" style={{ background: p.fg3 }} />
-      <span className="absolute bottom-[14px] start-[15px] h-2 w-[22px] rounded-[var(--r-sm)]" style={{ background: p.primary }} />
-      <span className="absolute end-[15px] bottom-[14px] h-2 w-2 rounded-full" style={{ background: p.accent }} />
-    </span>
-  )
-}
-const previewFrame = 'relative mb-1.5 block h-[58px] overflow-hidden rounded-[calc(var(--r-lg)-5px)] shadow-[inset_0_0_0_1px_rgba(127,127,127,.2)]'
-
-/** Theme thumbnail split diagonally: the light palette on the left, the chosen dark palette on the right. */
-export function ThemePreview({ theme, variant = 0, className }: { theme: Theme; variant?: number; className?: string }) {
-  const dark = theme.dark[Math.min(variant, theme.dark.length - 1)][1]
-  return (
-    <span className={cn(previewFrame, className)} aria-hidden>
-      <ThemeMini p={theme.light[0][1]} clip="polygon(0 0,62% 0,38% 100%,0 100%)" />
-      <ThemeMini p={dark} clip="polygon(62% 0,100% 0,100% 100%,38% 100%)" />
-    </span>
-  )
-}
-
-/** One-click light/dark switch for the header. The new theme sweeps out from the button. */
-export function ThemeToggle({ className }: { className?: string }) {
-  const { dark, toggle } = useTheme()
-  return (
-    <Button size="icon" aria-label={(dark ? 'Switch to light theme' : 'Switch to dark theme')} onClick={e => toggle(e.currentTarget)} className={className}>
-      <AnimatePresence mode="popLayout" initial={false}>
-        <motion.span key={String(dark)} initial={{ rotate: -90, scale: 0.5, opacity: 0 }} animate={{ rotate: 0, scale: 1, opacity: 1 }} exit={{ rotate: 90, scale: 0.5, opacity: 0 }} transition={spring(0.4, 0.4)}>
-          <Icon name={dark ? 'moon' : 'sun'} />
-        </motion.span>
-      </AnimatePresence>
-    </Button>
-  )
-}
-
-/** Strings of the export, import and share controls (ThemeExportPanel). Override one as 'themeExport.<key>' in UIProvider messages. */
-
+export { ThemePreview, ThemeToggle } from './provider'
 
 const THEME_IMPORT_ERRORS = {
   empty: 'Paste a theme to preview it', 'too-large': 'That is too long to be a theme', 'invalid-json': 'That JSON could not be read',
@@ -133,7 +95,7 @@ export function ThemeExportPanel({ className }: { className?: string }) {
             {result?.ok && preview && (
               <>
                 <div className="flex items-center gap-2.5">
-                  <span className="relative block h-[58px] w-[96px] flex-none overflow-hidden rounded-[var(--r-md)] shadow-[inset_0_0_0_1px_rgba(127,127,127,.2)]" aria-hidden><ThemeMini p={preview} /></span>
+                  <ThemePreview palette={preview} className="w-[96px] flex-none !mb-0 !rounded-[var(--r-md)]" />
                   <span className="min-w-0 text-[var(--fg2)]">{`${result.format} theme · ${(modes.length > 1 ? 'both' : modes[0]) === 'both' ? 'light and dark' : (modes.length > 1 ? 'both' : modes[0]) === 'dark' ? 'dark' : 'light'}`}</span>
                 </div>
                 {modes.length > 1 && (
@@ -222,7 +184,7 @@ export function AppearancePanel({ onClose, open = true, className }: { onClose?:
               onClick={e => { if (!settings.useCustom) set({ useCustom: true }, e.currentTarget) }}
               className={cn('flex cursor-pointer flex-col gap-0.5 rounded-[var(--r-lg)] border bg-[var(--card)] p-1.5 pb-2 text-start transition-[border-color,box-shadow]',
                 settings.useCustom ? 'border-[var(--accent)] shadow-[0_0_0_1px_var(--accent)]' : 'border-[var(--line)] hover:border-[var(--line2)]')}>
-              <span className={previewFrame} aria-hidden><ThemeMini p={settings.custom.v} /></span>
+              <ThemePreview palette={settings.custom.v} />
               <span className="px-1 text-[13px] font-medium">{'Custom'}</span>
               <span className="px-1 text-[11px] text-[var(--fg3)]">{'Your colours'}</span>
             </motion.button>

@@ -12,6 +12,7 @@ import { join } from 'node:path'
 import type { Plugin } from 'vite'
 import { analyze } from './registry/analyze.mjs'
 import { apiOfDecl } from './registry/api.mjs'
+import { bundleOf } from './tiers.mjs'
 
 /** A card's usage example: the code, the section file it came from, and the library components it renders (in order). */
 export type CodeExample = { code: string; file: string; components: string[] }
@@ -220,15 +221,23 @@ export function codeExampleFor(title: string, sources: Record<string, string>): 
     const paramNames = comp?.params ? codeIdents(comp.params.split(/\)\s*:|}\s*:/)[0]) : new Set<string>()
     const usesParams = [...paramNames].some(p => need.has(p) && !bound.has(p))
     // keep only the imported names that are used; library imports point at the single-file build
-    const importLines = imports.flatMap(imp => {
+    // library imports point at the single-file bundles: core at ./ui, each extras module at its bundle (ui-charts …)
+    const byFrom = new Map<string, string[]>()
+    for (const imp of imports) {
       const m = imp.match(/^import\s+(type\s+)?\{([\s\S]*)\}\s*from\s*'([^']+)'/)
-      if (!m) return []
-      const from = m[3] === '../lib' ? './ui' : m[3]
-      if (from === './kit') return []
+      if (!m) continue
+      const lib = /^\.\.\/lib(?:\/(\w+))?$/.exec(m[3])
+      const bundle = lib?.[1] ? bundleOf(lib[1]) : 'ui'
+      if (!bundle) throw new Error(`showcase-code: ${m[3]} is in no single-file bundle (scripts/tiers.mjs)`)
+      const from = lib ? `./${bundle}` : m[3]
+      if (from === './kit') continue
       const names = m[2].split(',').map(n => n.trim()).filter(Boolean).filter(n => need.has(n.replace(/^type\s+/, '').split(/\s+as\s+/).pop()!))
-      if (from === './ui' && needRow && !names.includes('cn')) names.push('cn')
-      return names.length ? [`import ${m[1] ?? ''}{ ${names.join(', ')} } from '${from}'`] : []
-    })
+        .map(n => (m[1] && !n.startsWith('type ') ? `type ${n}` : n))
+      byFrom.set(from, [...(byFrom.get(from) ?? []), ...names])
+    }
+    if (needRow && !byFrom.get('./ui')?.includes('cn')) byFrom.set('./ui', [...(byFrom.get('./ui') ?? []), 'cn'])
+    const importLines = [...byFrom].filter(([, names]) => names.length).map(([from, names]) =>
+      names.every(n => n.startsWith('type ')) ? `import type { ${names.map(n => n.slice(5)).join(', ')} } from '${from}'` : `import { ${names.join(', ')} } from '${from}'`)
     if (needRow) {
       const r = importLines.findIndex(l => / from 'react'$/.test(l) && l.startsWith('import {'))
       if (r >= 0) { if (!/\bReactNode\b/.test(importLines[r])) importLines[r] = importLines[r].replace(' }', ', type ReactNode }') }
@@ -243,7 +252,7 @@ export function codeExampleFor(title: string, sources: Record<string, string>): 
     const fn = [`export function ${codePascal(title)}Example(${usesParams ? comp!.params : ''}) {`, ...body.map(b => codeIndent(b, 2)), `  ${ret}`, '}'].join('\n')
     const code = [importLines.join('\n'), ...helpers, fn].filter(Boolean).join('\n\n')
     // the library components it renders, in order of first use (for the Props tab)
-    const libNames = new Set(imports.filter(i => /from '\.\.\/lib'/.test(i)).flatMap(i => (i.match(/\{([\s\S]*)\}/)?.[1] ?? '').split(',').map(n => n.trim()).filter(n => /^[A-Z]/.test(n))))
+    const libNames = new Set(imports.filter(i => /from '\.\.\/lib(\/\w+)?'/.test(i)).flatMap(i => (i.match(/\{([\s\S]*)\}/)?.[1] ?? '').split(',').map(n => n.trim()).filter(n => /^[A-Z]/.test(n))))
     const components = [...new Set([...code.matchAll(/<([A-Z][\w]*)[\s/>]/g)].map(m => m[1]).filter(n => libNames.has(n)))]
     return { code, file: path.replace(/^\.\//, 'src/showcase/'), components }
   }
@@ -256,18 +265,17 @@ const QUERY = '?showcase-code'
 
 /** A component the showcase loads lazily (kit.tsx, specLazy): `const LazyX = specLazy(() => import('../lib/m').then(m => m.X))`,
  * with the one-line comment above it (a comment would otherwise stick to the import that replaces it). */
-const LAZY = /^(?:\/\*[^\n]*\*\/\n)?const (Lazy(\w+)) = specLazy\(\(\) => import\('\.\.\/lib\/\w+'\)\.then\(m => m\.(\w+)\)\)\n/gm
+const LAZY = /^(?:\/\*[^\n]*\*\/\n)?const (Lazy(\w+)) = specLazy\(\(\) => import\('\.\.\/lib\/(\w+)'\)\.then\(m => m\.(\w+)\)\)\n/gm
 
 /** Every card's example in one section file. */
 function showcaseExamples(file: string, raw: string): Record<string, CodeExample> {
   const out: Record<string, CodeExample> = {}
   // a lazily loaded library component reads as the plain import it stands for (LazyX is X in the example)
-  const lazy = new Map<string, string>()
-  let src = raw.replace(LAZY, (m, local: string, short: string, name: string) => { if (short !== name) return m; lazy.set(local, name); return '' })
+  const lazy = new Map<string, { name: string; mod: string }>()
+  let src = raw.replace(LAZY, (m, local: string, short: string, mod: string, name: string) => { if (short !== name) return m; lazy.set(local, { name, mod }); return '' })
   if (lazy.size) {
-    const names = [...lazy.values()].join(', '), lib = /^import \{([^}]*)\} from '\.\.\/lib'$/m
-    src = lib.test(src) ? src.replace(lib, (_, list: string) => `import {${list.replace(/\s*$/, '')}, ${names} } from '../lib'`) : `import { ${names} } from '../lib'\n${src}`
-    src = src.replace(new RegExp(`\\b(${[...lazy.keys()].join('|')})\\b`, 'g'), l => lazy.get(l)!)
+    src = `${[...lazy.values()].map(({ name, mod }) => `import { ${name} } from '../lib/${mod}'`).join('\n')}\n${src}`
+    src = src.replace(new RegExp(`\\b(${[...lazy.keys()].join('|')})\\b`, 'g'), l => lazy.get(l)!.name)
   }
   const open = /<Spec\b/g
   for (let m = open.exec(src); m; m = open.exec(src)) {

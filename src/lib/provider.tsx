@@ -1,6 +1,6 @@
 import { type ReactNode } from 'react'
-import { MotionConfig } from 'motion/react'
-import { DEFAULT_THEME, FONT_CSS, THEME_LEGACY_KEY, THEME_STORAGE_KEY, THEME_TOKEN_NAMES, THEME_VALUE_SOURCE, TOKENS, ThemeProvider, type ThemeSettings, UIHosts, cn, themeStyle, themeTokens, useTheme } from './core'
+import { AnimatePresence, MotionConfig, motion } from 'motion/react'
+import { DEFAULT_THEME, FONT_CSS, THEME_LEGACY_KEY, THEME_STORAGE_KEY, THEME_TOKEN_NAMES, THEME_VALUE_SOURCE, TOKENS, ThemeProvider, type ThemeSettings, UIHosts, Button, Icon, type Palette, THEMES, type Theme, cn, spring, themeStyle, themeTokens, useTheme } from './core'
 
 export type UIProviderProps = {
   children: ReactNode
@@ -101,4 +101,44 @@ if(t)for(var n in t)e.style.setProperty("--"+n,t[n]);e.setAttribute("data-theme"
  */
 export function ThemeScript({ nonce, ...opts }: { storageKey?: string; defaultTheme?: Partial<ThemeSettings>; persist?: boolean; nonce?: string }) {
   return <script nonce={nonce} suppressHydrationWarning dangerouslySetInnerHTML={{ __html: themeScriptSource(opts) }} />
+}
+
+/** One half (or all) of a theme thumbnail: page, card, two text lines, primary button, accent dot. */
+function ThemeMini({ p, clip }: { p: Palette; clip?: string }) {
+  return (
+    <span className="absolute inset-0 block" style={{ background: p.bg, clipPath: clip }}>
+      <span className="absolute inset-2 rounded-[var(--r-sm)]" style={{ background: p.card, boxShadow: `inset 0 0 0 1px ${p.line}` }} />
+      <span className="absolute top-[15px] start-[15px] h-1 w-[34%] rounded-[var(--r-sm)]" style={{ background: p.fg }} />
+      <span className="absolute top-[23px] start-[15px] h-[3px] w-[48%] rounded-[var(--r-sm)] opacity-90" style={{ background: p.fg3 }} />
+      <span className="absolute bottom-[14px] start-[15px] h-2 w-[22px] rounded-[var(--r-sm)]" style={{ background: p.primary }} />
+      <span className="absolute end-[15px] bottom-[14px] h-2 w-2 rounded-full" style={{ background: p.accent }} />
+    </span>
+  )
+}
+const previewFrame = 'relative mb-1.5 block h-[58px] overflow-hidden rounded-[calc(var(--r-lg)-5px)] shadow-[inset_0_0_0_1px_rgba(127,127,127,.2)]'
+
+/** Theme thumbnail split diagonally: the light palette on the left, the chosen dark palette on the right. With `palette`, that one palette whole. */
+export function ThemePreview({ theme, palette, variant = 0, className }: { theme?: Theme; palette?: Palette; variant?: number; className?: string }) {
+  return (
+    <span className={cn(previewFrame, className)} aria-hidden>
+      {palette || !theme ? <ThemeMini p={palette ?? THEMES[0].light[0][1]} /> : <>
+        <ThemeMini p={theme.light[0][1]} clip="polygon(0 0,62% 0,38% 100%,0 100%)" />
+        <ThemeMini p={theme.dark[Math.min(variant, theme.dark.length - 1)][1]} clip="polygon(62% 0,100% 0,100% 100%,38% 100%)" />
+      </>}
+    </span>
+  )
+}
+
+/** One-click light/dark switch for the header. The new theme sweeps out from the button. */
+export function ThemeToggle({ className }: { className?: string }) {
+  const { dark, toggle } = useTheme()
+  return (
+    <Button size="icon" aria-label={(dark ? 'Switch to light theme' : 'Switch to dark theme')} onClick={e => toggle(e.currentTarget)} className={className}>
+      <AnimatePresence mode="popLayout" initial={false}>
+        <motion.span key={String(dark)} initial={{ rotate: -90, scale: 0.5, opacity: 0 }} animate={{ rotate: 0, scale: 1, opacity: 1 }} exit={{ rotate: 90, scale: 0.5, opacity: 0 }} transition={spring(0.4, 0.4)}>
+          <Icon name={dark ? 'moon' : 'sun'} />
+        </motion.span>
+      </AnimatePresence>
+    </Button>
+  )
 }

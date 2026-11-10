@@ -5,9 +5,9 @@
 // by tags (OR within a facet, AND across), kept in the URL as ?tags=…&q=… so a filtered list can be shared.
 import { Suspense, createContext, createElement, lazy, useCallback, useContext, useEffect, useMemo, useRef, useState, type ComponentType, type ReactNode } from 'react'
 import {
-  Badge, Button, Card, CodeBlock, CodeTabs, Collapse, CommandPalette, Icon, IconButton, Input, Kbd, Sheet, ThemeToggle, UIProvider,
-  cn, useHotkey, type Command,
+  Badge, Button, Card, Collapse, CommandPalette, Icon, IconButton, Input, Kbd, Sheet, ThemeToggle, UIProvider, cn, useHotkey, type Command,
 } from '../../src/lib'
+import { CodeBlock, CodeTabs } from '../../src/lib/code'
 import { ShellContext } from '../../src/showcase/kit'
 import {
   TAG_BY_ID, type TagFacet, type TagId, tagFacetCounts, tagMatches, tagParseUrl, tagSearchString, tagToggle, tagsOfFacet,
@@ -18,13 +18,21 @@ import demos from '../generated/demos.json'
 type Prop = { name: string; type: string; required: boolean; default: string | null; doc: string }
 type Api = { name: string; kind: 'component' | 'hook' | 'function' | 'value'; doc: string; props?: Prop[]; inherited?: number; inheritedFrom?: string[]; signature?: string }
 type Item = {
-  name: string; title: string; type: string; description: string; kind: TagId; area: TagId; tags: TagId[]; module?: string; exports: string[]; embeds: string[]
+  name: string; title: string; type: string; description: string; tier: 'core' | 'extras' | 'block'; family: string | null; import: string | null
+  kind: TagId; area: TagId; tags: TagId[]; module?: string; exports: string[]; embeds: string[]
   dependencies: string[]; requires: string[]; bytes: number; tokens: number; file: string; packageFile: string | null; api: Api[]
 }
 type Demo = { section: string; file: string; exportName: string; titles: string[] }
 
 const ITEMS = data.items as unknown as Item[]
 const AREAS = (data.areas as [string, string][]).filter(([id]) => ITEMS.some(i => i.area === id))
+const FAMILY_LABEL: Record<string, string> = { ai: 'AI', vizkit: 'Chart math' }
+/** Sidebar groups by tier: core by area, then each extras family, then the copy-in blocks. */
+const TIERS: { label: string; groups: { key: string; label: string; match: (i: Item) => boolean }[] }[] = [
+  { label: 'Core', groups: AREAS.map(([id, label]) => ({ key: `core-${id}`, label, match: i => i.tier === 'core' && i.area === id })) },
+  { label: 'Extras', groups: (data.families as string[]).map(f => ({ key: `extras-${f}`, label: FAMILY_LABEL[f] ?? f[0].toUpperCase() + f.slice(1), match: i => i.family === f })) },
+  { label: 'Blocks', groups: [{ key: 'blocks', label: 'Copy-in blocks', match: i => i.tier === 'block' }] },
+]
 const DEMOS = demos as Record<string, Demo>
 const BY_NAME = new Map(ITEMS.map(i => [i.name, i]))
 const REPO = 'https://github.com/lantos1618/oneshot-ui'
@@ -205,27 +213,32 @@ function Sidebar({ current }: { current?: string }) {
         <Collapse open={open}><div className="pt-1"><TagFacets counts={counts} /></div></Collapse>
       </div>
       <a href="#/" className={cn('rounded-[var(--r-md)] px-2 py-1.5 text-[13px] no-underline', !current ? 'bg-[var(--muted)] font-medium text-[var(--fg)]' : 'text-[var(--fg2)] hover:text-[var(--fg)]')}>Introduction</a>
-      {AREAS.map(([id, label]) => {
-        const list = shown.filter(i => i.area === id)
-        if (!list.length) return null
-        return (
-          <div key={id}>
-            <h2 className="m-0 mb-1 flex items-baseline justify-between px-2 text-[11px] font-semibold tracking-wide text-[var(--fg3)] uppercase">{label}<span className="font-normal tabular-nums">{list.length}</span></h2>
-            <ul className="m-0 flex list-none flex-col p-0">
-              {list.map(i => (
-                <li key={i.name}>
-                  <a href={`#/c/${i.name}`} aria-current={i.name === current ? 'page' : undefined}
-                    className={cn('flex h-8 items-center justify-between gap-2 rounded-[var(--r-md)] px-2 text-[13px] no-underline [@media(pointer:coarse)]:h-10',
-                      i.name === current ? 'bg-[var(--muted)] font-medium text-[var(--fg)]' : 'text-[var(--fg2)] hover:bg-[var(--muted)] hover:text-[var(--fg)]')}>
-                    <span className="truncate">{i.title}</span>
-                    <span className="flex-none text-[11px] text-[var(--fg3)] tabular-nums">{tok(i.tokens)}</span>
-                  </a>
-                </li>
-              ))}
-            </ul>
-          </div>
-        )
-      })}
+      {TIERS.map(tier => tier.groups.some(g => shown.some(g.match)) && (
+        <div key={tier.label} className="flex flex-col gap-4">
+          <h2 className="m-0 px-2 text-xs font-semibold text-[var(--fg)]">{tier.label}</h2>
+          {tier.groups.map(({ key, label, match }) => {
+            const list = shown.filter(match)
+            if (!list.length) return null
+            return (
+              <div key={key}>
+                <h3 className="m-0 mb-1 flex items-baseline justify-between px-2 text-[11px] font-semibold tracking-wide text-[var(--fg3)] uppercase">{label}<span className="font-normal tabular-nums">{list.length}</span></h3>
+                <ul className="m-0 flex list-none flex-col p-0">
+                  {list.map(i => (
+                    <li key={i.name}>
+                      <a href={`#/c/${i.name}`} aria-current={i.name === current ? 'page' : undefined}
+                        className={cn('flex h-8 items-center justify-between gap-2 rounded-[var(--r-md)] px-2 text-[13px] no-underline [@media(pointer:coarse)]:h-10',
+                          i.name === current ? 'bg-[var(--muted)] font-medium text-[var(--fg)]' : 'text-[var(--fg2)] hover:bg-[var(--muted)] hover:text-[var(--fg)]')}>
+                        <span className="truncate">{i.title}</span>
+                        <span className="flex-none text-[11px] text-[var(--fg3)] tabular-nums">{tok(i.tokens)}</span>
+                      </a>
+                    </li>
+                  ))}
+                </ul>
+              </div>
+            )
+          })}
+        </div>
+      ))}
       {filtering && !shown.length && <p className="m-0 px-2 text-[13px] text-[var(--fg3)]">Nothing matches. <button type="button" onClick={clear} className="cursor-pointer border-0 bg-transparent p-0 text-[var(--accent)] underline">Clear filters</button></p>}
     </nav>
   )
@@ -342,7 +355,8 @@ function ItemPage({ item }: { item: Item }) {
   const area = AREAS.find(([a]) => a === item.area)?.[1]
   const components = item.api.filter(a => a.kind === 'component').map(a => a.name)
   const block = item.type === 'registry:block'
-  const importLine = `import { ${(components.length ? components : item.exports).slice(0, 6).join(', ')} } from '@lyndon/ui'`
+  const source = `src/${block ? 'blocks' : 'lib'}/${item.module ?? 'core'}.tsx`
+  const importLine = `import { ${(components.length ? components : item.exports).slice(0, 6).join(', ')} } from '${item.import ?? '@lyndon/ui'}'`
   return (
     <article className="flex max-w-[960px] flex-col gap-8">
       <header className="flex flex-col gap-2">
@@ -381,12 +395,13 @@ function ItemPage({ item }: { item: Item }) {
         <dl className="m-0 grid grid-cols-[max-content_1fr] gap-x-4 gap-y-1.5 text-[13px]">
           <dt className="text-[var(--fg3)]">File</dt><dd className="m-0"><a href={`./${item.file}`}>{item.name}.tsx</a> · {kb(item.bytes)} · ~{tok(item.tokens)} tokens · <a href={`./r/${item.name}.json`}>registry item</a></dd>
           {item.packageFile && <><dt className="text-[var(--fg3)]">Package variant</dt><dd className="m-0"><a href={`./${item.packageFile}`}>{item.name}.package.tsx</a> (imports @lyndon/ui)</dd></>}
+          {item.import && <><dt className="text-[var(--fg3)]">Tier</dt><dd className="m-0">{item.tier === 'core' ? 'Core' : `Extras · ${item.family}`} · <code>{item.import}</code></dd></>}
           <dt className="text-[var(--fg3)]">Exports</dt><dd className="m-0 font-[family-name:var(--mono)] text-xs">{item.exports.join(', ')}</dd>
           {item.embeds.length > 0 && <><dt className="text-[var(--fg3)]">Embeds</dt><dd className="m-0 text-xs">{item.embeds.map((e, i) => {
             const target = ITEMS.find(x => x.exports.includes(e))
             return <span key={e}>{i > 0 && ', '}{target ? <a href={`#/c/${target.name}`}>{e}</a> : e}</span>
           })}</dd></>}
-          <dt className="text-[var(--fg3)]">Source</dt><dd className="m-0"><a href={`${REPO}/blob/main/src/lib/${item.module ?? 'core'}.tsx`}>src/lib/{item.module ?? 'core'}.tsx</a></dd>
+          <dt className="text-[var(--fg3)]">Source</dt><dd className="m-0"><a href={`${REPO}/blob/main/${source}`}>{source}</a></dd>
         </dl>
       </Section>
     </article>

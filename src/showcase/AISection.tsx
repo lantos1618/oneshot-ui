@@ -1,7 +1,15 @@
 import { useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
-import { AI_RICH_RENDERERS, AICanvas, type AiChunk, type AiMessage, type AiToolPart, AgentComposer, Conversation, Message, MessageActions, PromptInput, Suggestions, aiMessageText, useAiChat, AgentPlan, AgentTransitMap, AssistantChat, Badge, Chart, ChatApproval, ChatCard, ChatChecklist, type ChatScript, SourceList, Citation, CodeBlock, sourceDomain, type ComposerModel, type ComposerAction, type ComposerReply, type ComposerSample, type ComposerSendMeta, ConfidenceField, type Connector, GhostTextInput, ModelComparison, PermissionRequest, type SlashCommand, type Source, SourcesPanel, SuggestedEdit, ThinkingSteps, VoiceInput, type StepStatus, type WorkspaceItem, sleep, useToast, useViewport, fmt } from '../lib'
+import { Badge, sleep, useToast, useViewport, fmt } from '../lib'
+import { PromptInput, AgentPlan, SourceList, Citation, sourceDomain, ConfidenceField, GhostTextInput, ModelComparison, PermissionRequest, type Source, SourcesPanel, SuggestedEdit, ThinkingSteps, VoiceInput, type StepStatus } from '../lib/ai'
+import { AICanvas, AgentTransitMap } from '../lib/aiagent'
+import { AI_RICH_RENDERERS, AgentComposer, Conversation, Message, MessageActions, Suggestions, AssistantChat, ChatApproval, ChatCard, ChatChecklist, type ChatScript, type ComposerModel, type ComposerAction, type ComposerReply, type ComposerSample, type ComposerSendMeta, type Connector, type SlashCommand, type WorkspaceItem } from '../lib/aichat'
+import { type AiChunk, type AiMessage, type AiToolPart, aiMessageText, useAiChat } from '../lib/aistream'
+import { Chart } from '../lib/charts'
+import { CodeBlock } from '../lib/code'
 import { AGENT_WORKFLOWS, AGENT_WORKFLOW_ORDER, AI_CANVAS_SAMPLE, AGENT_RUN_FIXTURES, AgentRunLanes, type AgentRunFixture } from '../examples'
-import { Button, Icon, SegmentedControl, TabsContent, TabsList, TabsRoot, TabsTrigger, TraceWaterfall, replayRun, useAgentRun, type AgentRunSource } from '../lib'
+import { Button, Icon, SegmentedControl, TabsContent, TabsList, TabsRoot, TabsTrigger } from '../lib'
+import { replayRun, useAgentRun, type AgentRunSource } from '../lib/agentrun'
+import { TraceWaterfall } from '../lib/trace'
 import { Section, Spec, SpecAction } from './kit'
 
 export type Invoice = { id: string; customer: string; status: string; amount: number }

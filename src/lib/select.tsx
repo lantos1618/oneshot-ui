@@ -1,10 +1,10 @@
-import { useEffect, useId, useLayoutEffect, useRef, useState, type CSSProperties, type ReactNode, type Ref, type KeyboardEvent as RKeyboardEvent } from 'react'
+import { useEffect, useLayoutEffect, useRef, useState, type CSSProperties, type ReactNode, type Ref, type KeyboardEvent as RKeyboardEvent } from 'react'
 import { AnimatePresence, motion } from 'motion/react'
-import { type FormControlProps, Spinner, formDisabledClass, formReadOnlyClass, useFormControl, Button, Icon, type IconName, cn, inputClass, menuItemClass, spring, useCoarsePointer, useDisclosure, useRoving, composeRefs } from './core'
+import { type FormControlProps, Spinner, formDisabledClass, formReadOnlyClass, useFormControl, Button, Icon, type IconName, cn, inputClass, menuItemClass, spring, useCoarsePointer, useDisclosure, useListbox, composeRefs } from './core'
 import { play } from './motion'
-import { FloatingPanel, type Placement } from './overlay'
+import { FloatingPanel } from './overlay'
 import { useVirtual } from './virtual'
-import { formsPlacement, formsScrollIntoList, formsTriggerClass } from './formkit'
+import { formsScrollIntoList, formsTriggerClass } from './formkit'
 import { inputShellClass, CheckboxBox, type Option } from './fields'
 
 /** Bold the first case-insensitive match of `query` inside `text` (for option lists and autocomplete). */
@@ -111,35 +111,25 @@ export function Select({ options, value, defaultValue, onChange, placeholder: pl
   const placeholder = placeholderProp ?? 'Select…'
   const fc = useFormControl<string>({ ...fp, value, defaultValue: defaultValue ?? '', onChange, serialize: x => x, focus: () => btn.current?.focus() })
   const v = fc.value, set = fc.set, locked = fc.disabled || fc.readOnly
-  const { open, setOpen, ref: wrap } = useDisclosure(), lid = useId()
-  const [place, setPlace] = useState<Placement>('bottom-start')
   const sel = options.findIndex(o => o.value === v)
-  const off = (i: number) => !!options[i]?.disabled
-  const pick = (i: number) => { if (!options[i] || off(i)) return; set(options[i].value); setOpen(false) }
-  const { active, setActive, onKeyDown } = useRoving(options.length, pick, { isDisabled: off })
-  const show = (o: boolean) => { if (o && locked) return; if (o) { setPlace(formsPlacement(wrap.current)); setActive(sel >= 0 ? sel : Math.max(0, options.findIndex(x => !x.disabled))) } setOpen(o) }
+  const { open, setOpen, ref: wrap } = useDisclosure()
+  const pick = (i: number) => { if (!options[i] || options[i].disabled) return; set(options[i].value); setOpen(false) }
+  const lb = useListbox(options, pick, { open, setOpen, selected: sel, locked }), active = lb.active
   const nextMatch = (ch: string, from: number) => {
     for (let s = 1; s <= options.length; s++) { const k = (from + s + options.length) % options.length; if (!options[k].disabled && options[k].label.toLowerCase().startsWith(ch)) return k }
     return -1
   }
   const onKey = (e: RKeyboardEvent) => {
     const typed = e.key.length === 1 && e.key !== ' ' && !e.metaKey && !e.ctrlKey ? e.key.toLowerCase() : ''
-    if (!open) {
-      if (typed) { const k = nextMatch(typed, sel); if (k >= 0) set(options[k].value); return }
-      if (['ArrowDown', 'ArrowUp', 'Enter', ' '].includes(e.key)) { e.preventDefault(); show(true) }
-      return
-    }
-    if (e.key === 'Escape') { e.stopPropagation(); return setOpen(false) } // closes the list, not the dialog around it
-    if (e.key === 'Tab') return setOpen(false)
-    if (e.key === ' ') { e.preventDefault(); return pick(active) }
-    if (typed) { const k = nextMatch(typed, active); if (k >= 0) setActive(k); return }
-    onKeyDown(e)
+    if (!typed) return lb.onKeyDown(e)
+    const k = nextMatch(typed, open ? active : sel)
+    if (k >= 0) { if (open) lb.setActive(k); else set(options[k].value) }
   }
   return (
     <div ref={wrap} className={cn('relative', className)} onBlur={fc.onBlur}>
-      <button type="button" ref={composeRefs(btn, ref)} {...fc.control} role="combobox" aria-label={ariaLabel} aria-expanded={open} aria-haspopup="listbox" aria-controls={lid} aria-activedescendant={open ? `${lid}-${active}` : undefined}
+      <button type="button" ref={composeRefs(btn, ref)} {...fc.control} {...lb.comboProps} aria-label={ariaLabel}
         aria-required={fc.required || undefined} aria-readonly={fc.readOnly || undefined} disabled={fc.disabled}
-        onClick={() => show(!open)} onKeyDown={onKey}
+        onClick={() => lb.show(!open)} onKeyDown={onKey}
         className={cn(formsTriggerClass, 'cursor-pointer justify-between')}>
         <span className={cn('flex min-w-0 items-center gap-2', mono && 'ui-num')}>
           {icon && <Icon name={icon} size={15} className="text-[var(--fg3)]" />}
@@ -149,8 +139,8 @@ export function Select({ options, value, defaultValue, onChange, placeholder: pl
         </span>
         {!fc.readOnly && <motion.span animate={{ rotate: open ? 180 : 0 }} className="text-[var(--fg3)]"><Icon name="chevronDown" size={14} /></motion.span>}
       </button>
-      <FloatingPanel open={open} matchWidth placement={place} className={cn('max-h-64 overflow-auto', mono && 'ui-num')} role="presentation">
-        <OptionList id={lid} options={options} active={active} isSelected={o => o.value === v} onPick={pick} onHover={setActive} />
+      <FloatingPanel open={open} matchWidth className={cn('max-h-64 overflow-auto', mono && 'ui-num')} role="presentation">
+        <OptionList id={lb.id} options={options} active={active} isSelected={o => o.value === v} onPick={pick} onHover={lb.setActive} />
       </FloatingPanel>
       {fc.inputs}
     </div>
@@ -208,7 +198,7 @@ export function Combobox({ options = [], loadOptions, debounce = 200, minChars =
   const [q, setQ] = useState(() => labelOf(v))
   const shownFor = useRef(v) // when the value changes from outside, show its label
   useEffect(() => { if (shownFor.current === v) return; shownFor.current = v; setQ(labelOf(v)) }, [v, options]) // eslint-disable-line react-hooks/exhaustive-deps
-  const { open: isOpen, setOpen, ref: wrap } = useDisclosure(), lid = useId()
+  const { open: isOpen, setOpen, ref: wrap } = useDisclosure()
   const open = isOpen && !locked
   const chosenLabel = v ? labelOf(v) : ''
   const chosen = !!v && chosenLabel === q
@@ -232,31 +222,25 @@ export function Combobox({ options = [], loadOptions, debounce = 200, minChars =
     if (o === createOpt) { o = onCreate?.(query) || { value: query, label: query }; known.current.set(o.value, o); const made = o; setCreated(c => [...c.filter(x => x.value !== made.value), made]) }
     shownFor.current = o.value; set(o.value); setQ(o.label); setOpen(false); play(input.current, { scale: [0.98, 1] }, spring(0.4, 0.3))
   }
-  const { active, setActive, onKeyDown } = useRoving(list.length, pick, { loop: false, homeEnd: false, isDisabled: i => !!list[i]?.disabled })
+  const lb = useListbox(list, pick, { open, setOpen, input: true }), { active, setActive } = lb
   const leading = chosen ? known.current.get(v)?.leading : undefined
   return (
     <div ref={wrap} className={cn('relative', className)} onBlur={fc.onBlur}>
       <span className="pointer-events-none absolute top-1/2 start-3 grid -translate-y-1/2 place-items-center text-[var(--fg3)]">
         {leading ? <motion.span key={v} initial={{ scale: 0.5 }} animate={{ scale: 1 }} transition={spring(0.5, 0.35)} className="text-sm leading-none">{leading}</motion.span> : <Icon name="search" size={14} />}
       </span>
-      <input ref={composeRefs(input, ref)} {...fc.control} role="combobox" aria-label={ariaLabel} aria-expanded={open} aria-controls={lid} aria-autocomplete="list" aria-activedescendant={open && list.length ? `${lid}-${active}` : undefined}
+      <input ref={composeRefs(input, ref)} {...fc.control} {...lb.comboProps} aria-label={ariaLabel}
         aria-required={fc.required || undefined} disabled={fc.disabled} readOnly={fc.readOnly}
         value={q} placeholder={placeholder ?? 'Search…'} autoComplete="off" className={cn(inputClass, formDisabledClass, formReadOnlyClass, '!ps-8', loading && '!pe-8')}
         onChange={e => { setQ(e.target.value); onInputChange?.(e.target.value); setOpen(true); setActive(0) }} onFocus={() => setOpen(true)}
         onBlur={e => { if (!wrap.current?.contains(e.relatedTarget as Node)) setOpen(false) }}
-        onKeyDown={e => {
-          if (e.key === 'Escape') { if (open) { e.stopPropagation(); setOpen(false) } return }
-          if (e.key === 'Tab') return setOpen(false)
-          if (e.key === 'Enter' && failed) { e.preventDefault(); return retry() }
-          if (!open) setOpen(true)
-          onKeyDown(e)
-        }} />
+        onKeyDown={e => { if (e.key === 'Enter' && failed) { e.preventDefault(); retry() } else lb.onKeyDown(e) }} />
       {loading && <span aria-hidden className="pointer-events-none absolute top-1/2 end-3 grid -translate-y-1/2 text-[var(--fg3)]"><Spinner size={13} /></span>}
       <span className="sr-only" aria-live="polite">{open ? live : ''}</span>
       {/* never flips above the field: the list shrinks as you type, and above it would jump and cover the label */}
       <FloatingPanel open={open} matchWidth flip="scroll" className="max-h-[220px] overflow-auto" role="presentation">
         {list.length > 0 && (failed || (loading && !matches.length)) && <div className="p-3 pb-1 text-center text-[13px] text-[var(--fg3)]">{message}</div>}
-        <OptionList id={lid} options={list} query={filter} active={active} isSelected={o => o !== createOpt && o.value === v} onPick={pick} onHover={setActive} empty={message} busy={loading} />
+        <OptionList id={lb.id} options={list} query={filter} active={active} isSelected={o => o !== createOpt && o.value === v} onPick={pick} onHover={setActive} empty={message} busy={loading} />
       </FloatingPanel>
       {fc.inputs}
     </div>
@@ -313,32 +297,25 @@ function FormsMultiStatic({ options = [], value, defaultValue = [], onChange, pl
   const box = useRef<HTMLDivElement>(null)
   const fc = useFormControl<string[]>({ ...fp, value, defaultValue, onChange, serialize: x => x, filled: x => x.length > 0, focus: () => box.current?.focus() })
   const v = fc.value, set = fc.set, locked = fc.disabled || fc.readOnly
-  const { open, setOpen, ref: wrap } = useDisclosure(), lid = useId()
-  const [place, setPlace] = useState<Placement>('bottom-start')
-  const off = (i: number) => !!options[i]?.disabled
-  const toggle = (i: number) => { if (!options[i] || off(i)) return; const o = options[i].value; set(v.includes(o) ? v.filter(x => x !== o) : [...v, o]) }
-  const { active, setActive, onKeyDown } = useRoving(options.length, toggle, { isDisabled: off })
-  const show = (o: boolean) => { if (o && locked) return; if (o) { setPlace(formsPlacement(wrap.current)); if (off(active)) setActive(Math.max(0, options.findIndex(x => !x.disabled))) } setOpen(o) }
+  const { open, setOpen, ref: wrap } = useDisclosure()
+  const toggle = (i: number) => { if (!options[i] || options[i].disabled) return; const o = options[i].value; set(v.includes(o) ? v.filter(x => x !== o) : [...v, o]) }
+  const lb = useListbox(options, toggle, { open, setOpen, locked })
   return (
     <div ref={wrap} className={cn('relative', className)} onBlur={fc.onBlur}>
-      <div ref={composeRefs<HTMLDivElement>(box, ref as Ref<HTMLDivElement>)} {...fc.control} role="combobox" tabIndex={fc.disabled ? -1 : 0} aria-label={ariaLabel} aria-labelledby={ariaLabel ? undefined : fc.labelledBy} aria-expanded={open} aria-controls={lid} aria-haspopup="listbox"
-        aria-activedescendant={open ? `${lid}-${active}` : undefined} aria-required={fc.required || undefined} aria-readonly={fc.readOnly || undefined} aria-disabled={fc.disabled || undefined}
-        onClick={() => show(!open)} onKeyDown={e => {
+      <div ref={composeRefs<HTMLDivElement>(box, ref as Ref<HTMLDivElement>)} {...fc.control} {...lb.comboProps} tabIndex={fc.disabled ? -1 : 0} aria-label={ariaLabel} aria-labelledby={ariaLabel ? undefined : fc.labelledBy}
+        aria-required={fc.required || undefined} aria-readonly={fc.readOnly || undefined} aria-disabled={fc.disabled || undefined}
+        onClick={() => lb.show(!open)} onKeyDown={e => {
           if (locked) return
-          if (e.key === 'Escape') { if (open) { e.stopPropagation(); setOpen(false) } }
-          else if (e.key === 'Tab') setOpen(false)
-          else if (e.key === 'Backspace' && v.length) set(v.slice(0, -1))
-          else if (!open && ['Enter', ' ', 'ArrowDown'].includes(e.key)) { e.preventDefault(); show(true) }
-          else if (e.key === ' ') { e.preventDefault(); toggle(active) }
-          else onKeyDown(e)
+          if (e.key === 'Backspace' && v.length) set(v.slice(0, -1))
+          else lb.onKeyDown(e)
         }}
         className={cn(inputClass, formDisabledClass, 'relative flex !h-auto min-h-9 flex-wrap items-center gap-1 py-1 !pe-8 focus-visible:border-[var(--fg3)] aria-readonly:bg-[var(--muted)]', locked ? fc.disabled ? 'cursor-not-allowed' : 'cursor-default' : 'cursor-pointer')}>
         {v.length === 0 && <span className="text-[var(--fg3)]">{placeholder ?? 'Select…'}</span>}
         <FormsChips values={v} optionOf={x => options.find(p => p.value === x)} locked={locked} onRemove={x => set(v.filter(y => y !== x))} />
         {!fc.readOnly && <motion.span animate={{ rotate: open ? 180 : 0 }} className="absolute end-3 top-[11px] text-[var(--fg3)]"><Icon name="chevronDown" size={14} /></motion.span>}
       </div>
-      <FloatingPanel open={open} matchWidth placement={place} className="max-h-64 overflow-auto" role="presentation">
-        <OptionList id={lid} multi options={options} active={active} isSelected={o => v.includes(o.value)} onPick={toggle} onHover={setActive} />
+      <FloatingPanel open={open} matchWidth className="max-h-64 overflow-auto" role="presentation">
+        <OptionList id={lb.id} multi options={options} active={lb.active} isSelected={o => v.includes(o.value)} onPick={toggle} onHover={lb.setActive} />
       </FloatingPanel>
       {fc.inputs}
     </div>
@@ -358,7 +335,7 @@ function FormsMultiAsync({ options = [], loadOptions, debounce = 200, minChars =
   const [q, setQ] = useState('')
   const fc = useFormControl<string[]>({ ...fp, value, defaultValue, onChange, serialize: x => x, filled: x => x.length > 0, focus: () => input.current?.focus(), onReset: () => setQ('') })
   const v = fc.value, set = fc.set, locked = fc.disabled || fc.readOnly
-  const { open: isOpen, setOpen, ref: wrap } = useDisclosure(), lid = useId()
+  const { open: isOpen, setOpen, ref: wrap } = useDisclosure()
   const open = isOpen && !locked
   const query = q.trim()
   const { load, short, loading, failed, retry: reload } = useFormsLoader(loadOptions, { query, open, minChars, debounce, defaultOptions, onItems: items => items.forEach(o => known.current.set(o.value, o)) })
@@ -383,34 +360,30 @@ function FormsMultiAsync({ options = [], loadOptions, debounce = 200, minChars =
     }
     set(v.includes(o.value) ? v.filter(x => x !== o.value) : [...v, o.value])
   }
-  const { active, setActive, onKeyDown } = useRoving(list.length, toggle, { loop: false, homeEnd: false, isDisabled: i => !!list[i]?.disabled })
+  const lb = useListbox(list, toggle, { open, setOpen, input: true }), { active, setActive } = lb
   return (
     <div ref={wrap} className={cn('relative', className)} onBlur={fc.onBlur}>
       <div onPointerDown={e => { if (e.target !== input.current && !(e.target as HTMLElement).closest('button')) { e.preventDefault(); input.current?.focus() } }}
         className={cn(inputShellClass(fc.invalid), 'relative flex min-h-9 w-full flex-wrap items-center gap-1 py-1 ps-1.5 pe-8 text-[13px]',
           fc.disabled ? 'cursor-not-allowed bg-[var(--muted)] text-[var(--fg3)]' : fc.readOnly ? 'bg-[var(--muted)]' : 'cursor-text')}>
         <FormsChips values={v} optionOf={x => known.current.get(x)} locked={locked} onRemove={x => set(v.filter(y => y !== x))} />
-        <input ref={composeRefs<HTMLInputElement>(input, ref as Ref<HTMLInputElement>)} {...fc.control} role="combobox" aria-label={ariaLabel} aria-expanded={open} aria-controls={lid} aria-autocomplete="list"
-          aria-activedescendant={open && list.length ? `${lid}-${active}` : undefined} aria-required={fc.required || undefined} disabled={fc.disabled} readOnly={fc.readOnly}
+        <input ref={composeRefs<HTMLInputElement>(input, ref as Ref<HTMLInputElement>)} {...fc.control} {...lb.comboProps} aria-label={ariaLabel} aria-required={fc.required || undefined} disabled={fc.disabled} readOnly={fc.readOnly}
           value={q} placeholder={v.length ? '' : placeholder ?? 'Search…'} autoComplete="off"
           className="h-7 min-w-[8ch] flex-1 border-0 bg-transparent px-1 text-[13px] [color:inherit] outline-none placeholder:text-[var(--fg3)] disabled:cursor-not-allowed [@media(pointer:coarse)]:text-base"
           onChange={e => { setQ(e.target.value); onInputChange?.(e.target.value); setOpen(true); setActive(0) }} onFocus={() => setOpen(true)}
           onBlur={e => { if (!wrap.current?.contains(e.relatedTarget as Node)) setOpen(false) }}
           onKeyDown={e => {
             if (locked) return
-            if (e.key === 'Escape') { if (open) { e.stopPropagation(); setOpen(false) } return }
-            if (e.key === 'Tab') return setOpen(false)
-            if (e.key === 'Backspace' && !q && v.length) { e.preventDefault(); set(v.slice(0, -1)); return }
-            if (e.key === 'Enter' && failed) { e.preventDefault(); return retry() }
-            if (!open) setOpen(true)
-            onKeyDown(e)
+            if (e.key === 'Backspace' && !q && v.length) { e.preventDefault(); set(v.slice(0, -1)) }
+            else if (e.key === 'Enter' && failed) { e.preventDefault(); retry() }
+            else lb.onKeyDown(e)
           }} />
         <span aria-hidden className="pointer-events-none absolute end-3 top-1/2 grid -translate-y-1/2 text-[var(--fg3)]">{loading ? <Spinner size={13} /> : <Icon name="search" size={14} />}</span>
       </div>
       <span className="sr-only" aria-live="polite">{open ? live : ''}</span>
       <FloatingPanel open={open} matchWidth flip="scroll" className="max-h-64 overflow-auto" role="presentation">
         {list.length > 0 && (failed || (loading && !matches.length)) && <div className="p-3 pb-1 text-center text-[13px] text-[var(--fg3)]">{message}</div>}
-        <OptionList id={lid} multi options={list} query={query} active={active} isSelected={o => o !== createOpt && v.includes(o.value)} onPick={toggle} onHover={setActive} empty={message} busy={loading} />
+        <OptionList id={lb.id} multi options={list} query={query} active={active} isSelected={o => o !== createOpt && v.includes(o.value)} onPick={toggle} onHover={setActive} empty={message} busy={loading} />
       </FloatingPanel>
       {fc.inputs}
     </div>

@@ -5,7 +5,7 @@
 //                                           closure of top-level declarations, in source order); imports only
 //                                           react, react-dom and motion
 //   dist-registry/files/<name>.package.tsx  blocks only: the block as written, importing from '@lyndon/ui'
-//   dist-registry/index.json                name, title, description, kind, area, tags, exports, embedded
+//   dist-registry/index.json                name, title, description, tier, family, import, kind, area, tags, exports, embedded
 //                                           components, npm dependencies, bytes, approximate tokens (bytes / 3.6),
 //                                           sha256; plus the tag vocabulary (src/showcase/tags.ts)
 //   dist-registry/r/<name>.json             shadcn registry items (`npx shadcn add <base>/r/<name>.json`)
@@ -21,12 +21,13 @@
 // To keep the files small: ICONS keeps only the icons a file draws (the rest resolve through the page-wide icon
 // registry; icon.tsx has them all), and embedded helpers keep only a one-sentence summary of their docs
 // (scripts/registry/diet.mjs; the item's own exports keep theirs).
-import { readFileSync, writeFileSync, mkdirSync, rmSync } from 'node:fs'
+import { readFileSync, readdirSync, writeFileSync, mkdirSync, rmSync } from 'node:fs'
 import { join } from 'node:path'
 import { commit, dirty, header, pkg, sha256 } from './registry/stamp.mjs'
 import { analyze, closure } from './registry/analyze.mjs'
 import { dietPart } from './registry/diet.mjs'
 import { FAMILIES, BLOCKS, EXCLUDE, kebab, humanize, isComponentName } from './registry/items.mjs'
+import { EXTRAS, assertPlaced, familyOf, importOf, tierOf } from './tiers.mjs'
 // the tag vocabulary shared with the showcase and the docs (a .ts file: Node strips its types)
 import { TAGS, TAG_FACETS, TAG_BY_ID, tagRegistryMeta } from '../src/showcase/tags.ts'
 
@@ -122,6 +123,7 @@ function build() {
     const bytes = Buffer.byteLength(text)
     const entry = {
       name: it.name, type: it.type, title: it.title, description, module: first.module,
+      ...(first.dir === 'lib' ? { tier: tierOf(first.module), family: familyOf(first.module), import: importOf(first.module) } : { tier: 'block', family: null, import: null }),
       ...tagRegistryMeta({ name: it.name, type: it.type, module: first.module }),
       file: `files/${it.name}.tsx`, exports: it.roots, embeds,
       embedsItems: [...new Set(embeds.map(e => itemOfRoot.get(e)).filter(Boolean))].sort(),
@@ -350,12 +352,17 @@ function cssToObject(css) {
 
 function writeLlms(index) {
   const fmtTok = t => (t >= 1000 ? `${(t / 1000).toFixed(1)}k` : `${t}`)
-  // one group per area of the tag vocabulary, in its order
-  const order = TAGS.filter(t => t.facet === 'area').map(t => t.id).filter(a => index.some(e => e.area === a))
-  const groups = new Map(order.map(a => [a, index.filter(e => e.area === a)]))
   const first = s => s.split(/(?<=\.)\s/)[0].replace(/\s+/g, ' ')
   const tagList = e => e.tags.filter(t => t !== e.area).join(', ')
-  const allLines = order.flatMap(a => [`\n## ${TAG_BY_ID[a].label}\n`, ...groups.get(a).map(e =>
+  // core by area (in the vocabulary's order), then each extras family, then the copy-in blocks
+  const areas = TAGS.filter(t => t.facet === 'area').map(t => t.id)
+  const groups = [
+    ...areas.map(a => [`Core: ${TAG_BY_ID[a].label}`, index.filter(e => e.tier === 'core' && e.area === a), '@lyndon/ui']),
+    ...Object.keys(EXTRAS).map(f => [`Extras: ${f}`, index.filter(e => e.family === f), EXTRAS[f].modules.filter(m => index.some(e => e.module === m)).map(m => `@lyndon/ui/${m}`).join(', ')]),
+    ['Blocks', index.filter(e => e.tier === 'block'), 'copy-in, not in the package'],
+  ].filter(([, list]) => list.length)
+  const heading = (label, from) => `\n## ${label}\n\nImport from: ${from}.\n`
+  const allLines = groups.flatMap(([label, list, from]) => [heading(label, from), ...list.map(e =>
     `- [${e.name}](${RAW}/${e.file}): ${first(e.description)} (${e.kind}, ~${fmtTok(e.tokens)} tokens${tagList(e) ? `; tags: ${tagList(e)}` : ''})`)])
   const vocab = TAG_FACETS.filter(f => f.id !== 'area').map(f => `- ${f.label}: ${TAGS.filter(t => t.facet === f.id).map(t => t.id).join(', ')}`).join('\n')
   const intro = `# @lyndon/ui
@@ -368,7 +375,7 @@ Version ${pkg.version}. Source: ${repo}. Docs: ${BASE}/. Licence: MIT with a rev
 
 ## Use it
 
-- Install: \`npm i @lyndon/ui motion\` (peer deps react@19, react-dom@19). Import from \`@lyndon/ui\` or a subpath (\`@lyndon/ui/charts\`).
+- Install: \`npm i @lyndon/ui motion\` (peer deps react@19, react-dom@19). Core components come from \`@lyndon/ui\`; extras from their own subpath (\`@lyndon/ui/charts\`, \`@lyndon/ui/kanban\`, …), named in each group below.
 - Styles: Tailwind v4 \`@source "../node_modules/@lyndon/ui/dist";\`, or without Tailwind \`import '@lyndon/ui/styles.css'\`.
 - Wrap the app once in \`<UIProvider>\`: it injects the theme tokens, applies the theme (light/dark/system), hosts toasts.
 - Colours only through tokens: \`bg-[var(--card)]\`, \`text-[var(--fg2)]\`, \`border-[var(--line)]\`, \`var(--accent)\`, \`var(--ok|warn|bad)\`. Override a component's class with Tailwind's \`!\` prefix.
@@ -387,21 +394,22 @@ and motion. Attach the ones you need plus ui-provider.tsx; they share one UIProv
 
 ## Tags
 
-Items are grouped by area below; each line gives the item's kind and tags (ids from one vocabulary: labels,
+Items are grouped below: core by area, then extras by family, then blocks; each line gives the item's kind and tags (ids from one vocabulary: labels,
 descriptions and synonyms are in index.json under \`vocabulary\`; the showcase filters by them with \`?tags=id,id\`).
 
 ${vocab}
 `
   writeFileSync(join(root, 'llms.txt'), intro + allLines.join('\n') + '\n')
   // llms-full.txt: the same, plus each item's exports and embedded components
-  const full = intro + order.flatMap(a => [`\n## ${TAG_BY_ID[a].label}\n`, ...groups.get(a).map(e =>
-    `### ${e.title} (\`${e.name}\`, ~${fmtTok(e.tokens)} tokens)\n\n${e.description}\n\n- File: ${RAW}/${e.file}\n- Kind: ${e.kind}; area: ${a}${tagList(e) ? `; tags: ${tagList(e)}` : ''}\n- Exports: ${e.exports.join(', ')}` +
+  const full = intro + groups.flatMap(([label, list, from]) => [heading(label, from), ...list.map(e =>
+    `### ${e.title} (\`${e.name}\`, ~${fmtTok(e.tokens)} tokens)\n\n${e.description}\n\n- File: ${RAW}/${e.file}\n- Kind: ${e.kind}; area: ${e.area}${tagList(e) ? `; tags: ${tagList(e)}` : ''}${e.import ? `\n- Import: \`${e.import}\`` : ''}\n- Exports: ${e.exports.join(', ')}` +
     (e.embeds.length ? `\n- Embeds: ${e.embeds.join(', ')}` : '') + (e.dependencies.length ? `\n- npm: ${e.dependencies.join(', ')}` : '') + '\n')]).join('\n')
   writeFileSync(join(root, 'llms-full.txt'), full + '\n')
 }
 
 function sizeOf(rel) { try { return readFileSync(join(root, rel)).length } catch { return 0 } }
 
+assertPlaced(readdirSync(join(root, 'src/lib')).filter(f => /\.tsx?$/.test(f)), 'build-registry')
 const graph = analyze(root, { extraDirs: ['src/blocks'] })
 try {
   build()

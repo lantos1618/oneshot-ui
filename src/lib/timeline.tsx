@@ -4,9 +4,10 @@
  */
 import { useEffect, useId, useLayoutEffect, useMemo, useRef, useState, type CSSProperties, type FocusEvent as ReactFocusEvent, type KeyboardEvent as ReactKeyboardEvent, type PointerEvent as ReactPointerEvent, type ReactNode, type RefObject } from 'react'
 import { motion } from 'motion/react'
-import { IconButton, cn, isTouch, safeColor, spring, surface, useControllable, useOutside, useWidth, type LocaleFmt, plural, fmt } from './core'
+import { IconButton, cn, isTouch, safeColor, spring, surface, useControllable, useOutside, useWidth, type LocaleFmt, plural, fmt, Legend } from './core'
+import { EmptyState } from './feedback'
 import { VirtualList, type VirtualListHandle } from './virtual'
-import { seriesColor } from './vizkit'
+import { TrackGrid, seriesColor } from './vizkit'
 import { TagGlyph, TagTooltip, layoutTimeTags, timeTagMs, timeTicks, type TimeTag, type TimeTagKind } from './annotate'
 
 export type { TimeTag, TimeTagKind } from './annotate'
@@ -278,10 +279,6 @@ function TimelineAxis({ ticks, start, end, className }: { ticks: { ms: number; l
     </div>
   )
 }
-/** Faint vertical grid lines at the ticks. */
-function TimelineGrid({ ticks, start, end }: { ticks: { ms: number }[]; start: number; end: number }) {
-  return <>{ticks.map(k => <span key={k.ms} aria-hidden className="pointer-events-none absolute inset-y-0 w-px bg-[var(--line)]" style={{ left: `${((k.ms - start) / Math.max(1, end - start)) * 100}%` }} />)}</>
-}
 
 /** Props of Swimlanes. */
 export type SwimlanesProps = TimelineLinkProps & {
@@ -383,7 +380,7 @@ export function Swimlanes({ tags, kinds: kindsProp, start: startProp, end: endPr
           <span id={`${ids}-sum`} className="sr-only">{`${tags.length === 0 ? 'No tags' : tags.length === 1 ? `${tags.length} tag` : `${tags.length} tags`} from ${fmt.time(start)} to ${fmt.time(end)}.`} {'Arrow keys move between tags, up and down between rows. Enter selects, Escape clears.'}</span>
           <div ref={scroller} className={cn('relative', scrolls && 'overflow-y-auto overscroll-contain')} style={scrolls ? { maxHeight: maxLanes * laneH + 4 } : undefined}>
             <div className="relative py-0.5">
-              <div className="pointer-events-none absolute inset-y-0 start-[var(--tl-lw)] end-[var(--tl-rp)]"><TimelineGrid ticks={ticks} start={start} end={end} /></div>
+              <div className="pointer-events-none absolute inset-y-0 start-[var(--tl-lw)] end-[var(--tl-rp)]"><TrackGrid at={ticks.map(k => (k.ms - start) / Math.max(1, end - start))} /></div>
               {lanes.map((l, li) => (
                 <div key={l.kind.kind} role="group" aria-label={`${l.kind.label}: ${l.tags.length === 0 ? 'no tags' : l.tags.length === 1 ? `${l.tags.length} tag` : `${l.tags.length} tags`}`}
                   className="grid grid-cols-[var(--tl-lw)_minmax(0,1fr)_var(--tl-rp)] items-center [contain-intrinsic-size:auto_26px] [content-visibility:auto]" style={{ height: laneH }}>
@@ -551,14 +548,7 @@ export function StateRibbon({ states, pins = [], bars = [], kinds: kindsProp, st
         )}
       </div>
       {legend && totals.length > 0 && (
-        <ul aria-label={'Legend'} className="m-0 mt-2 flex list-none flex-wrap gap-x-4 gap-y-1 p-0 text-xs text-[var(--fg2)]">
-          {totals.map(({ k, ms }) => (
-            <li key={k.kind} className="flex items-center gap-1.5">
-              <span aria-hidden className="h-2.5 w-2.5 rounded-[var(--r-sm)]" style={{ background: safeColor(k.color) }} />{k.label}
-              <span className="text-[var(--fg3)]">{timelineDuration(ms, fmt)}</span>
-            </li>
-          ))}
-        </ul>
+        <Legend items={totals.map(({ k, ms }) => ({ key: k.kind, label: k.label, color: k.color, value: timelineDuration(ms, fmt) }))} />
       )}
     </div>
   )
@@ -643,7 +633,7 @@ export function TagJournal({ tags, kinds: kindsProp, groupBy, height, maxHeight 
     else if (e.key === 'End') go(rowIds.length - 1)
     else if (e.key === 'Escape' && active !== null) { e.preventDefault(); set(null, null) }
   }
-  if (!tags.length) return <div className={cn('grid min-h-20 place-items-center text-[13px] text-[var(--fg3)]', className)}>{empty ?? 'Nothing logged yet'}</div>
+  if (!tags.length) return <EmptyState size="sm" className={cn('grid min-h-20 place-items-center', className)} title={empty ?? 'Nothing logged yet'} />
   return (
     <div ref={box} className={className} onKeyDown={onKeyDown}
       onBlur={e => { if (!e.currentTarget.contains(e.relatedTarget as Node | null) && source.current === 'focus') set(null, null) }}

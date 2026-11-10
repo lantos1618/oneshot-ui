@@ -1,6 +1,6 @@
 {
   "name": "@lyndon/ui",
-  "version": "0.10.0",
+  "version": "0.11.0",
   "description": "Animated React 19 components with themes, in the shadcn style: forms, overlays, data grids, charts, diagrams, maps, AI chat. Also ships as drop-in single files for AI tools.",
   "keywords": [
     "react",
@@ -44,6 +44,14 @@
     "./utils": {
       "types": "./dist/utils.d.ts",
       "default": "./dist/utils.js"
+    },
+    "./utils/extras": {
+      "types": "./dist/utils-extras.d.ts",
+      "default": "./dist/utils-extras.js"
+    },
+    "./all": {
+      "types": "./dist/all.d.ts",
+      "default": "./dist/all.js"
     },
     "./core": {
       "types": "./dist/core.d.ts",
@@ -157,6 +165,10 @@
       "types": "./dist/scheduler.d.ts",
       "default": "./dist/scheduler.js"
     },
+    "./kanban": {
+      "types": "./dist/kanban.d.ts",
+      "default": "./dist/kanban.js"
+    },
     "./code": {
       "types": "./dist/code.d.ts",
       "default": "./dist/code.js"
@@ -193,9 +205,9 @@
       "types": "./dist/media.d.ts",
       "default": "./dist/media.js"
     },
-    "./pages": {
-      "types": "./dist/pages.d.ts",
-      "default": "./dist/pages.js"
+    "./vizkit": {
+      "types": "./dist/vizkit.d.ts",
+      "default": "./dist/vizkit.js"
     },
     "./charts": {
       "types": "./dist/charts.d.ts",
@@ -265,10 +277,6 @@
       "types": "./dist/themeexport.d.ts",
       "default": "./dist/themeexport.js"
     },
-    "./examples": {
-      "types": "./dist/examples.d.ts",
-      "default": "./dist/examples.js"
-    },
     "./styles.css": "./dist/styles.css",
     "./preflight.css": "./dist/preflight.css",
     "./tokens.css": "./dist/tokens.css",
@@ -299,7 +307,7 @@
   "scripts": {
     "dev": "vite",
     "build": "pnpm build:lib && pnpm build:css && pnpm build:single && pnpm build:registry",
-    "build:lib": "vite build --config vite.lib.config.ts && vite build --config vite.lib.config.ts --mode utils && tsc -p tsconfig.lib.json && node scripts/fix-dts.mjs",
+    "build:lib": "vite build --config vite.lib.config.ts && vite build --config vite.lib.config.ts --mode utils && vite build --config vite.lib.config.ts --mode utils-extras && tsc -p tsconfig.lib.json && node scripts/fix-dts.mjs",
     "build:css": "tailwindcss -i src/lib/styles.css -o dist/styles.css --minify && tailwindcss -i src/lib/preflight.css -o dist/preflight.css --minify && node scripts/build-tokens.mjs",
     "build:single": "node scripts/build-single.mjs && tsc -p tsconfig.single.json --noEmit",
     "build:registry": "node scripts/build-registry.mjs",

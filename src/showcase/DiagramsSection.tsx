@@ -1,5 +1,10 @@
 import { useMemo, useState } from 'react'
-import { type DiagramState, type DiagramTransition, Gantt, type GanttPhase, Globe, type GlobeHub, type GlobeRoute, SegmentedControl, StateDiagram, StateMachine, TraceWaterfall, type TimeTag, type TimeTagKind, type TraceSpan, type WorldMapData, WorldMap, useToast, useWorldMap, type LocaleFmt, fmt } from '../lib'
+import { SegmentedControl, useToast, type LocaleFmt, fmt } from '../lib'
+import { type TimeTag, type TimeTagKind } from '../lib/annotate'
+import { Gantt, type GanttPhase } from '../lib/gantt'
+import { Globe, type GlobeHub, type GlobeRoute, type WorldMapData, WorldMap, useWorldMap } from '../lib/geo'
+import { type DiagramState, type DiagramTransition, StateDiagram, StateMachine } from '../lib/statechart'
+import { TraceWaterfall, type TraceSpan } from '../lib/trace'
 import { AGENT_WORKFLOWS, AGENT_WORKFLOW_ORDER, type TagsDayVariant } from '../examples'
 import { Section, Spec, type SpecNotes, specLazy } from './kit'
 

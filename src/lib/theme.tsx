@@ -1,9 +1,9 @@
 /** Theme engine: tokens (TOKENS, FONT_CSS), palettes (THEMES), derive(), validated storage, the circular reveal, ThemeProvider and useTheme. Part of @lyndon/ui/core. */
-import { createContext, type CSSProperties, type ReactNode, useContext, useEffect, useLayoutEffect, useMemo, useState } from 'react'
+import { createContext, type CSSProperties, type ReactNode, useEffect, useLayoutEffect, useMemo, useState } from 'react'
 import { flushSync } from 'react-dom'
 import { clamp } from './helpers'
 import { uiShared } from './shared'
-import { useMediaQuery } from './hooks'
+import { useMediaQuery, useRequiredContext } from './hooks'
 import { safeCssValue } from './safe'
 
 const LIGHT = `--bg:#FAFAFA;--card:#FFFFFF;--muted:#F4F4F5;--line:#E4E4E7;--line2:#D4D4D8;--fg:#09090B;--fg2:#52525B;--fg3:#68686F;
@@ -474,7 +474,7 @@ type ThemeContext = {
 const ThemeCtx = createContext<ThemeContext | null>(null)
 
 /** const { settings, set, toggle, dark, tokens } = useTheme(); set({ theme: 'nord', mode: 'dark' }) */
-export const useTheme = () => { const c = useContext(ThemeCtx); if (!c) throw new Error('useTheme must be inside <UIProvider>'); return c }
+export const useTheme = () => useRequiredContext(ThemeCtx, 'useTheme', '<UIProvider>')
 
 /** Tokens as inline-style CSS variables, to theme one element and its subtree: <div style={themeStyle(tokens, dark)}>. Unsafe values are dropped. */
 export function themeStyle(tokens: Record<string, string>, dark: boolean): CSSProperties {

@@ -1,10 +1,10 @@
 import { useEffect, useLayoutEffect, useRef, useState, type PointerEvent as RPointerEvent, type ReactNode } from 'react'
 import { AnimatePresence, motion, useReducedMotion } from 'motion/react'
-import { Input } from './forms'
+import { Input } from './inputs'
 import { Avatar, Badge, Button, Icon, IconButton, TOUCH, cn, isCoarsePointer, safeColor, spring, surface, useControllable, useWidth, plural, fmt } from './core'
 import { play, useFrameLoop, useViewport } from './motion'
 import { AnimatedList } from './data'
-import { Collapse, TypingDots, useToast } from './feedback'
+import { Collapse, TypingDots, useToast, EmptyState } from './feedback'
 
 export type Comment = { id: string; author: string; time: string; text: string; replies?: Comment[] }
 
@@ -380,7 +380,7 @@ export function ChatInbox({ conversations, replies = INBOX_REPLIES, simulateInco
             </div>
           )
         })}
-        {!shown.length && <p className="m-0 p-4 text-center text-xs text-[var(--fg3)]">{`No conversations match “${q}”`}</p>}
+        {!shown.length && <EmptyState size="sm" title={`No conversations match “${q}”`} />}
       </div>
     </aside>
   )

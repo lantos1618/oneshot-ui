@@ -1,8 +1,9 @@
 import { useEffect, useRef, useState, type ReactNode } from 'react'
 import { useInView } from 'motion/react'
 import {
-  AudioPlayer, AvatarCropper, Button, Carousel, ImageCompare, MasonryGallery, MediaCard, MiniAudioPlayer, ProgressiveImage, Skeleton, VideoPlayer, VoiceNote, createAudioTrack, type GalleryItem, type MediaChapter,
+  Button, Skeleton,
 } from '../lib'
+import { AudioPlayer, AvatarCropper, Carousel, ImageCompare, MasonryGallery, MediaCard, MiniAudioPlayer, ProgressiveImage, VideoPlayer, VoiceNote, createAudioTrack, type GalleryItem, type MediaChapter } from '../lib/media'
 import { mediaArt, mediaImage, mediaImageAsync, mediaRecordVideo, mediaSynthTrackAsync, type MediaArtKind } from '../examples'
 import { Section, Spec } from './kit'
 

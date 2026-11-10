@@ -6,6 +6,7 @@ import { PointerTooltip, usePointerTooltip } from './overlay'
 import { useFrameLoop } from './motion'
 import { DG_COLLAPSE_STICKY, DgChevron } from './diagramkit'
 import { TAG_SR_ONLY, TagGlyph, layoutTimeTags, timeTagLook, timeTagMs, timeTagTint, useTagFocus, type TimeTag, type TimeTagKind } from './annotate'
+import { TrackGrid, niceStep } from './vizkit'
 
 /* DIAGRAMS · Trace waterfall: nested spans on one streaming timeline. */
 
@@ -56,8 +57,7 @@ function traceRunRows(run: TraceRun, total: number, end: number, name: string): 
   if (own) rows.unshift({ id: own, parent: null, name, kind: 'agent', start: 0, duration: Math.max(0.001, live ? total : end), ...(live ? { open: true } : {}) })
   return rows
 }
-/** A tick step that gives at most 6 ticks over `total` seconds. */
-const traceStep = (total: number) => [0.5, 1, 2, 5, 10, 15, 30, 60, 120, 300, 600, 1800, 3600].find(s => total / s <= 6) ?? 7200
+const TRACE_STEPS = [0.5, 1, 2, 5, 10, 15, 30, 60, 120, 300, 600, 1800, 3600]
 const TRACE_BAR = {
   llm: 'bg-[color-mix(in_srgb,var(--accent)_72%,var(--card))]',
   tool: 'bg-[color-mix(in_srgb,var(--c4)_58%,var(--card))]',
@@ -149,7 +149,7 @@ export function TraceWaterfall({ spans: spansProp, total: totalProp, run, title,
   if (run) {
     const t0 = run.startedAt
     if (liveRun) {
-      const el = Math.max(clockRef.current, (liveNow() - t0) / 1000), want = Math.max(4, el * 1.25, ((seen.current.latest - t0) / 1000) * 1.05), step = traceStep(want)
+      const el = Math.max(clockRef.current, (liveNow() - t0) / 1000), want = Math.max(4, el * 1.25, ((seen.current.latest - t0) / 1000) * 1.05), step = niceStep(want, 6, TRACE_STEPS)
       liveAxis.current.v = Math.max(liveAxis.current.v, Math.ceil(want / step) * step)
       total = liveAxis.current.v
     } else {
@@ -274,7 +274,7 @@ export function TraceWaterfall({ spans: spansProp, total: totalProp, run, title,
   const S = stats.current
   const pct = (t: number) => `${(t / total) * 100}%`
   // a run's axis picks its own step (at most 6 ticks); a trace keeps 10 s ticks
-  const tickStep = run ? traceStep(total) : 10
+  const tickStep = run ? niceStep(total, 6, TRACE_STEPS) : 10
   const ticks = Array.from({ length: Math.floor(total / tickStep + 1e-9) + 1 }, (_, i) => Math.round(i * tickStep * 10) / 10)
 
   // spawn connectors, drawn row by row so they follow Collapse, scrolling and streaming for free: the parent row
@@ -321,7 +321,7 @@ export function TraceWaterfall({ spans: spansProp, total: totalProp, run, title,
             <span className="ms-auto flex flex-none">{live && s.kind !== 'agent' && <Spinner size={12} tone="accent" label={`${s.name} running`} className="motion-reduce:animate-none" />}</span>
           </div>
           <div className="relative h-full border-s border-[var(--line)]">
-            {ticks.slice(1).map(t => <span key={t} className="pointer-events-none absolute inset-y-0 w-px bg-[var(--line)] opacity-70" style={{ left: pct(t) }} />)}
+            <TrackGrid at={ticks.slice(1).map(t => t / total)} className="opacity-70" />
             {wires.get(s.id)?.map(({ c, part }) => (
               <span key={`${c.id}-${part}`} aria-hidden style={{ left: `calc(${pct(c.start)} - 6px)` }}
                 className={cn('pointer-events-none absolute transition-[opacity,border-color] duration-200', chain.has(c.id) ? TRACE_WIRE_ON : TRACE_WIRE,

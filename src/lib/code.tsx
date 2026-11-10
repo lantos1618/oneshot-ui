@@ -1,7 +1,7 @@
 import { memo, useCallback, useEffect, useId, useMemo, useRef, useState, type CSSProperties, type ReactNode } from 'react'
 import { motion, useReducedMotion } from 'motion/react'
 import { Button, Icon, IconButton, ScrollEdges, cn, sleep, spring, useControllable, useMediaQuery, useRoving, useScrollEdges, useSize, useWidth, useResizeObserver } from './core'
-import { ActiveIndicator, SegmentedControl } from './forms'
+import { ActiveIndicator, SegmentedControl } from './fields'
 import { CopyButton } from './feedback'
 import { useViewport } from './motion'
 import type { MarkdownCodeRenderer } from './markdown'

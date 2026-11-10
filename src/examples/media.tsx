@@ -1,4 +1,5 @@
-import { mix, seeded } from '../lib/core'
+import { mix } from '../lib/core'
+import { seeded } from './random'
 
 /* Sample media generated in the page, so the showcase works offline: canvas art, a synthesised track, a canvas recording. */
 

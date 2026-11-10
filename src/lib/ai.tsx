@@ -1,8 +1,10 @@
 import { useEffect, useId, useLayoutEffect, useMemo, useRef, useState, type ReactNode, type RefObject } from 'react'
 import { AnimatePresence, motion, useAnimate, useInView, useReducedMotion } from 'motion/react'
-import { AnimatedNumber, Avatar, Badge, Button, Icon, IconButton, Kbd, Spinner, StatusIcon, TOUCH, cn, cssUrl, inputClass, safeColor, safeUrl, sleep, spring, surface, useControllable, useOutside, useRoving, useStreamedText, type IconName, plural, fmt } from './core'
+import { AnimatedNumber, Avatar, Badge, Button, Icon, IconButton, Kbd, Spinner, StatusIcon, TOUCH, cn, cssUrl, inputClass, safeColor, safeUrl, sleep, spring, surface, useControllable, useOutside, useMediaQuery, useRoving, type IconName, plural, fmt } from './core'
 import { AutoHeight, Collapse, Progress, TypingDots, useToast } from './feedback'
-import { CheckMark, Checkbox, OptionList, fileAccepts, type Option } from './forms'
+import { CheckMark, Checkbox, type Option } from './fields'
+import { OptionList } from './select'
+import { fileAccepts } from './upload'
 import { FloatingPanel, MenuLabel, Tooltip, useHoverIntent } from './overlay'
 import { lcsDiff } from './code'
 import { useViewport } from './motion'
@@ -26,6 +28,57 @@ export function ShimmerText({ children, active = true, className }: { children: 
   if (!active) return <span ref={ref} className={className}>{children}</span>
   const cls = cn('bg-[linear-gradient(90deg,var(--fg3)_0%,var(--fg)_40%,var(--fg3)_80%)] bg-[length:200%_100%] bg-clip-text text-transparent', className)
   return <span ref={ref} className={cls} style={{ backgroundPosition: '100% 0' }}>{children}</span>
+}
+
+/**
+ * Reveals text the way a model streams it: a few characters (`unit: 'char'`, about `cps` per second) or a word
+ * (`unit: 'word'`, every `wordDelay` ms) at a time. Give it a finished string to replay it, or a string that keeps
+ * growing (append-only, e.g. a live model stream) and it carries on from where it is instead of restarting; with
+ * `live` it is not `done` until `live` turns false, and it speeds up to stay close when a large chunk lands. Any
+ * other change to `text` replays from the start. `start: false` pauses it. Under reduced motion it shows everything.
+ * Returns `{ text: shown so far, done, shown: chars shown, total }`. StreamingText is this hook as a component.
+ */
+export function useStreamedText(text: string, { cps = 60, start = true, unit = 'char', wordDelay = 45, live = false, onProgress }:
+  { cps?: number; start?: boolean; unit?: 'char' | 'word'; wordDelay?: number; live?: boolean; onProgress?: () => void } = {}) {
+  const reduce = useMediaQuery('(prefers-reduced-motion: reduce)')
+  const [st, setSt] = useState(() => ({ src: text, pos: 0 }))
+  const progress = useRef(onProgress); progress.current = onProgress
+  const src = useRef(text); src.current = text
+  let { pos } = st
+  if (st.src !== text) {
+    // append-only? (compares the tail of what we had, so a long stream stays cheap to check)
+    const prev = st.src, k = Math.min(prev.length, 256)
+    const appended = text.length >= prev.length && text.startsWith(prev.slice(prev.length - k), prev.length - k)
+    pos = appended ? Math.min(st.pos, text.length) : 0
+    setSt({ src: text, pos }) // adjust state while rendering (React re-renders before committing)
+  }
+  const total = text.length
+  const shown = reduce ? total : Math.min(pos, total)
+  const behind = !reduce && start && pos < total
+  useEffect(() => {
+    if (!behind) return
+    const word = unit === 'word'
+    // one interval while it is behind (reading the latest text from a ref, so a stream of updates doesn't reset it);
+    // it stops once caught up and starts again when more text arrives
+    const id = setInterval(() => {
+      if (word && Math.random() < 0.2) return // skip a tick now and then so words don't arrive at a metronome pace
+      setSt(s => {
+        const text = src.current, total = text.length
+        if (s.src !== text || s.pos >= total) return s
+        const lag = total - s.pos
+        let to: number
+        if (word) {
+          const from = live && lag > 400 ? s.pos + Math.floor(lag / 10) : s.pos + 1 // live and far behind: catch up
+          const sp = text.indexOf(' ', from)
+          to = sp < 0 ? total : sp
+        } else to = s.pos + 2 + Math.floor(Math.random() * 3) + (live ? Math.floor(lag / 12) : 0)
+        return { src: s.src, pos: Math.min(total, to) }
+      })
+      progress.current?.()
+    }, word ? Math.max(8, wordDelay * 0.85) : 1000 / (Math.max(1, cps) / 3))
+    return () => clearInterval(id)
+  }, [behind, cps, unit, wordDelay, live])
+  return { text: text.slice(0, shown), done: !live && shown >= total, shown, total }
 }
 
 /**

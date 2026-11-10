@@ -2,9 +2,10 @@
 import { act, render, screen } from '@testing-library/react'
 import { describe, expect, it } from 'vitest'
 import {
-  DEFAULT_THEME, THEMES, THEME_LEGACY_KEY, THEME_STORAGE_KEY, ThemeProvider, contrast, derive, hex, seeded, themeLoad, themeSafeTokens, themeStored, themeTokens, useTheme,
+  DEFAULT_THEME, THEMES, THEME_LEGACY_KEY, THEME_STORAGE_KEY, ThemeProvider, contrast, derive, hex, themeLoad, themeSafeTokens, themeStored, themeTokens, useTheme,
   type ThemeSettings,
 } from '../../src/lib/core'
+import { seeded } from '../../src/examples/random'
 
 const JUNK: unknown[] = [
   null, undefined, 0, 1, NaN, '', 'x', '{"theme":"ayu"}', true, [], [1, 2], () => {}, Symbol('s'), new Date(), Object.create(null),

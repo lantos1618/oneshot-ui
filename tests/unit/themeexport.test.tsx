@@ -6,7 +6,7 @@ import {
   AppearancePanel, DEFAULT_THEME, THEMES, THEME_STORAGE_KEY, UIProvider, contrast, derive, editPalette, themeFromUrl, themeLoad, themeShareDecode, themeShareEncode, themeShareUrl, themeTokens, useTheme,
   hexToOklch, oklchString, oklchToHex, themeExport, themeExportSource, themeImport, themeImportSettings, themeToCSS, themeToDTCG, themeToDTCGTokens, themeToShadcn, themeToTailwind, themeToTokensStudio,
   THEME_EXPORT_FORMATS, type CustomTheme, type ThemeExportSource, type ThemeSettings,
-} from '../../src/lib'
+} from '../../src/lib/all'
 
 const LIGHT_CUSTOM: ThemeSettings = { ...DEFAULT_THEME, radius: 12, font: 'Inter', useCustom: true, custom: editPalette(editPalette(THEMES[5].light[0][1], false, 'accent', '#7C3AED').v, false, 'primary', '#0F766E') }
 const DARK_CUSTOM: ThemeSettings = { ...DEFAULT_THEME, radius: 4, font: 'Manrope', useCustom: true, custom: editPalette(editPalette(THEMES[6].dark[0][1], true, 'bg', '#101418').v, true, 'accent', '#F472B6') }

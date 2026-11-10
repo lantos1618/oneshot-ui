@@ -1,5 +1,8 @@
 import { Fragment, useMemo, useState, type ReactNode } from 'react'
-import { Kanban, type KanbanColumn, type OrgNode, highlightCode, type SchedulerEvent, SortableList, SplitPane, Switch, Timeline, type TimelineItem, type TreeNode, TreeView, useToast } from '../lib'
+import { SortableList, SplitPane, Switch, Timeline, type TimelineItem, type TreeNode, TreeView, useToast } from '../lib'
+import { highlightCode } from '../lib/code'
+import { Kanban, type KanbanColumn } from '../lib/kanban'
+import { type OrgNode, type SchedulerEvent } from '../lib/scheduler'
 import { Section, Spec, SpecAction, specLazy } from './kit'
 
 /* The scheduler module (calendar and org chart) loads when one of their cards first mounts. */

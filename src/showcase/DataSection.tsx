@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { motion } from 'motion/react'
-import { Accordion, Avatar, AvatarStack, Badge, DataGrid, DataTable, type GridColumn, type GridFilterNode, type GridGroup, type GridSelection, type GridSort, GRID_NO_SELECTION, gridSelectedCount, Icon, SegmentedControl, Switch, InlineDatePicker, JsonViewer, Kbd, type ShortcutGroup, ShortcutSheet, StatCard, TaskList, type Tone, gridFilter, StatGrid, useToast } from '../lib'
+import { Accordion, Avatar, AvatarStack, Badge, DataTable, Icon, SegmentedControl, Switch, InlineDatePicker, JsonViewer, Kbd, type ShortcutGroup, ShortcutSheet, StatCard, TaskList, type Tone, StatGrid, useToast } from '../lib'
+import { DataGrid, type GridColumn, type GridFilterNode, type GridGroup, type GridSelection, type GridSort, GRID_NO_SELECTION, gridSelectedCount, gridFilter } from '../lib/datagrid'
 import { Row, Section, Spec, SpecAction } from './kit'
 
 type DataInvoice = { id: string; customer: string; status: string; amount: number }

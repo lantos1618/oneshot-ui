@@ -1,6 +1,6 @@
-import { useEffect, useLayoutEffect, useRef, useState, type ReactNode, type RefObject } from 'react'
+import { useEffect, useLayoutEffect, useRef, useState, type PointerEvent as RPointerEvent, type ReactNode, type RefObject } from 'react'
 import { type DOMKeyframesDefinition, type HTMLMotionProps, animate, motion, useInView, useReducedMotion, type Transition } from 'motion/react'
-import { isCoarsePointer, prefersReducedMotion, spring } from './core'
+import { clamp, isCoarsePointer, prefersReducedMotion, spring } from './core'
 
 /** The library's entrance easing (quick out, long settle). */
 export const EASE_OUT: [number, number, number, number] = [0.22, 1, 0.36, 1]
@@ -127,4 +127,64 @@ export const MOTION_PRESETS: MotionPreset[] = [['Snappy', 0.1, 0.3], ['Default',
 /** The motion call for a set of playground values: a spring, or a duration with the library's ease-out. */
 export function motionTransition(type: 'spring' | 'ease', bounce: number, duration: number): Transition {
   return type === 'spring' ? spring(bounce, duration) : { duration, ease: EASE_OUT }
+}
+
+/**
+ * Wheel zoom on `ref`: `onZoom(zoomIn, event)` per wheel step, with the page scroll prevented (a non-passive listener).
+ * `modifier`: only while Ctrl or ⌘ is held (trackpad pinch), so a plain wheel still scrolls the page.
+ */
+export function useWheelZoom(ref: RefObject<HTMLElement | null> | undefined, onZoom: (zoomIn: boolean, e: WheelEvent) => void, { modifier = false, enabled = true }: { modifier?: boolean; enabled?: boolean } = {}) {
+  const fn = useRef(onZoom)
+  useLayoutEffect(() => { fn.current = onZoom })
+  useEffect(() => {
+    const el = ref?.current; if (!el || !enabled) return
+    const on = (e: WheelEvent) => { if (modifier && !e.ctrlKey && !e.metaKey) return; e.preventDefault(); fn.current(e.deltaY < 0, e) }
+    el.addEventListener('wheel', on, { passive: false })
+    return () => el.removeEventListener('wheel', on)
+  }, [ref, modifier, enabled])
+}
+
+/** What a pan reports: distance from where it started, whether it moved more than a few px, and the event. */
+export type PinchPanMove = { dx: number; dy: number; moved: boolean; event: RPointerEvent }
+/**
+ * Two-finger pinch zoom plus one-pointer pan for a zoomable surface (lightbox, cropper). Spread `bind` on the element
+ * (give it `touch-none`). A second finger starts a pinch from `getZoom()`; `onZoom(z)` gets the new zoom, clamped to
+ * [min, max]. One pointer pans: `onPanStart(e)` may return false to ignore that press, then `onPan` / `onPanEnd` report
+ * the distance. `wheel` (the element's ref) also zooms by `wheelStep` per notch. The pointer is captured.
+ */
+export function usePinchPan({ getZoom, onZoom, min = 1, max = 4, onPinchStart, onPinchEnd, onPanStart, onPan, onPanEnd, onCancel, wheel, wheelStep = 0.15 }: {
+  getZoom: () => number; onZoom: (z: number) => void; min?: number; max?: number
+  onPinchStart?: () => void; onPinchEnd?: () => void
+  onPanStart?: (e: RPointerEvent) => boolean | void; onPan?: (m: PinchPanMove) => void; onPanEnd?: (m: PinchPanMove) => void; onCancel?: () => void
+  wheel?: RefObject<HTMLElement | null>; wheelStep?: number }) {
+  const fns = useRef({ getZoom, onZoom, onPinchStart, onPinchEnd, onPanStart, onPan, onPanEnd, onCancel, min, max, wheelStep })
+  useLayoutEffect(() => { fns.current = { getZoom, onZoom, onPinchStart, onPinchEnd, onPanStart, onPan, onPanEnd, onCancel, min, max, wheelStep } })
+  const pts = useRef(new Map<number, { x: number; y: number }>())
+  const pinch = useRef<{ d: number; z: number } | null>(null), pan = useRef<{ x: number; y: number; moved: boolean } | null>(null)
+  useWheelZoom(wheel, zoomIn => { const f = fns.current, s = 1 + f.wheelStep; f.onZoom(clamp(f.getZoom() * (zoomIn ? s : 1 / s), f.min, f.max)) }, { enabled: !!wheel })
+  const dist = () => { const [a, b] = [...pts.current.values()]; return Math.hypot(a.x - b.x, a.y - b.y) }
+  const move = (e: RPointerEvent): PinchPanMove => { const p = pan.current!, dx = e.clientX - p.x, dy = e.clientY - p.y; if (Math.abs(dx) + Math.abs(dy) > 4) p.moved = true; return { dx, dy, moved: p.moved, event: e } }
+  const bind = {
+    onPointerDown: (e: RPointerEvent) => {
+      pts.current.set(e.pointerId, { x: e.clientX, y: e.clientY })
+      try { e.currentTarget.setPointerCapture(e.pointerId) } catch { /* pointer already gone */ }
+      if (pts.current.size === 2) { pinch.current = { d: dist() || 1, z: fns.current.getZoom() }; pan.current = null; fns.current.onPinchStart?.(); return }
+      if (pts.current.size > 2 || fns.current.onPanStart?.(e) === false) return
+      pan.current = { x: e.clientX, y: e.clientY, moved: false }
+    },
+    onPointerMove: (e: RPointerEvent) => {
+      if (!pts.current.has(e.pointerId)) return
+      pts.current.set(e.pointerId, { x: e.clientX, y: e.clientY })
+      const pz = pinch.current, f = fns.current
+      if (pz && pts.current.size >= 2) { f.onZoom(clamp(pz.z * dist() / pz.d, f.min, f.max)); return }
+      if (pan.current) f.onPan?.(move(e))
+    },
+    onPointerUp: (e: RPointerEvent) => {
+      pts.current.delete(e.pointerId)
+      if (pinch.current) { if (pts.current.size < 2) { pinch.current = null; fns.current.onPinchEnd?.() } return }
+      if (pan.current) { const m = move(e); pan.current = null; fns.current.onPanEnd?.(m) }
+    },
+    onPointerCancel: (e: RPointerEvent) => { pts.current.delete(e.pointerId); pinch.current = null; pan.current = null; fns.current.onCancel?.() },
+  }
+  return { bind, pinching: () => pinch.current !== null }
 }

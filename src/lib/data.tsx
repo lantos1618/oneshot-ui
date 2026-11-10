@@ -1,6 +1,6 @@
 import { createContext, useContext, useId, useMemo, useRef, useState, type ReactNode } from 'react'
 import { AnimatePresence, motion } from 'motion/react'
-import { AnimatedNumber, type AsChildProps, Button, Slot, DeltaBadge, Icon, IconButton, Kbd, TOUCH, cn, inputClass, spring, surface, useControllable, useHotkey, SparkChart, rowHoverClass, plural, writeClipboard } from './core'
+import { AnimatedNumber, type AsChildProps, Button, DeltaBadge, Icon, IconButton, Kbd, TOUCH, cn, inputClass, spring, surface, useControllable, useHotkey, SparkChart, rowHoverClass, plural, writeClipboard, useRequiredContext, PartButton } from './core'
 import { shake } from './motion'
 import { Collapse, useToast } from './feedback'
 import { CheckboxBox } from './fields'
@@ -109,7 +109,7 @@ type AccCtxV = { open: string[]; toggle: (v: string) => void; base: string; disa
 const AccCtx = createContext<AccCtxV | null>(null)
 type AccItemCtxV = { value: string; on: boolean; disabled?: boolean; triggerId: string; panelId: string }
 const AccItemCtx = createContext<AccItemCtxV | null>(null)
-const useAccItem = (part: string) => { const c = useContext(AccItemCtx); if (!c) throw new Error(`<Accordion.${part}> must be inside <Accordion.Item>`); return c }
+const useAccItem = (part: string) => useRequiredContext(AccItemCtx, `<Accordion.${part}>`, '<Accordion.Item>')
 const accIdPart = (v: string) => v.replace(/[^\w-]/g, '_')
 
 /** Props of Accordion.Root: `type="single"` (one open `value`, '' for none) or `"multiple"` (a list of open values). */
@@ -135,8 +135,7 @@ export function AccordionRoot(props: AccordionRootProps) {
 }
 /** Accordion.Item: one section (`value`), with a rule under it. `disabled` locks it. */
 export function AccordionItem({ value, disabled, className, children }: { value: string; disabled?: boolean; className?: string; children: ReactNode }) {
-  const acc = useContext(AccCtx)
-  if (!acc) throw new Error('<Accordion.Item> must be inside <Accordion.Root>')
+  const acc = useRequiredContext(AccCtx, '<Accordion.Item>', '<Accordion.Root>')
   const on = acc.open.includes(value), id = `${acc.base}-${accIdPart(value)}`
   return (
     <AccItemCtx.Provider value={{ value, on, disabled: disabled || acc.disabled, triggerId: `${id}-h`, panelId: `${id}-p` }}>
@@ -152,13 +151,8 @@ export function AccordionTrigger({ className, children, asChild }: { className?:
     onClick: () => { if (!it.disabled) acc?.toggle(it.value) },
     className: cn('flex w-full cursor-pointer items-center justify-between gap-3 rounded-[var(--r-md)] border-0 bg-transparent px-1.5 py-3 text-start text-[13px] font-medium transition-colors disabled:cursor-default disabled:opacity-50 [@media(pointer:coarse)]:min-h-11 [@media(pointer:coarse)]:text-sm', rowHoverClass, className),
   }
-  if (asChild) return <Slot {...props} aria-disabled={it.disabled || undefined}>{children}</Slot>
-  return (
-    <button type="button" disabled={it.disabled} {...props}>
-      {children}
-      <motion.span animate={{ rotate: it.on ? 180 : 0 }} transition={spring(0.2, 0.3)} className="text-[var(--fg3)]"><Icon name="chevronDown" size={14} /></motion.span>
-    </button>
-  )
+  const chevron = <motion.span animate={{ rotate: it.on ? 180 : 0 }} transition={spring(0.2, 0.3)} className="text-[var(--fg3)]"><Icon name="chevronDown" size={14} /></motion.span>
+  return <PartButton asChild={asChild} disabled={it.disabled} after={chevron} {...props}>{children}</PartButton>
 }
 /**
  * Accordion.Content (role=region, labelled by its trigger): grows to its content height. Unmounted while closed, or with

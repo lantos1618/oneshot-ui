@@ -45,7 +45,7 @@ export const FAMILIES = {
   confetti: { roots: ['confetti'], title: 'Confetti', type: 'registry:lib', description: 'confetti({ x, y, count }): a one-off burst of confetti from a point, drawn on a temporary canvas in the theme\'s chart colours. Does nothing under reduced motion. For real milestones, not every click.' },
   // data
   stat: { roots: ['StatCard', 'StatGrid'], title: 'Stat card' },
-  'shortcut-sheet': { roots: ['ShortcutSheet', 'ShortcutOverlay'] },
+  'shortcut-sheet': { roots: ['ShortcutSheet'] },
   'data-grid': { roots: ['DataGrid', 'gridFilter', 'gridIsSelected', 'gridSelectedCount', 'GRID_NO_SELECTION'] },
   'sortable-list': { roots: ['SortableList', 'useDragSort'] },
   // content
@@ -69,7 +69,7 @@ export const FAMILIES = {
 }
 
 /** Copy-in page sections: `registry:block` items. */
-export const BLOCKS = ['PricingTable', 'Checkout', 'OnboardingChecklist', 'ProfileCard', 'CookieConsent']
+export const BLOCKS = ['PricingTable', 'Checkout', 'OnboardingChecklist', 'ProfileCard', 'CookieConsent', 'SettingsPage']
 
 /** Demo-only exports (moving to @lyndon/ui/examples): no item. */
 export const EXCLUDE = ['PhoneFrame', 'MotionPlayground', 'ThemeProvider']

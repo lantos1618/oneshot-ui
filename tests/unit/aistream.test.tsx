@@ -9,7 +9,7 @@ import {
 } from '../../src/lib/aistream'
 import { AssistantChat, Conversation, Message, MessageParts, Suggestions, aiNearBottom } from '../../src/lib/aichat'
 import { PromptInput, StreamingText } from '../../src/lib/ai'
-import { useStreamedText } from '../../src/lib/core'
+import { useStreamedText } from '../../src/lib/ai'
 
 const run = (chunks: (AiChunk | string)[], start: AiMessage[] = []) => chunks.reduce(applyAiChunk, start)
 const last = (ms: AiMessage[]) => ms[ms.length - 1]

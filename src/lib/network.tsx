@@ -1,9 +1,9 @@
 import { useEffect, useId, useLayoutEffect, useMemo, useReducer, useRef, useState, type CSSProperties, type PointerEvent as ReactPointerEvent } from 'react'
 import { AnimatePresence, animate, cubicBezier, motion, useInView, useReducedMotion } from 'motion/react'
-import { AnimatedNumber, Button, ICONS, Icon, StatusIcon, TOUCH, clamp, cn, isTouch, onMouseLeave, safeColor, sleep, spring, surface, useOutside, useWidth, type IconName, plural, useActiveIndex, fmt } from './core'
-import { Slider } from './forms'
+import { AnimatedNumber, Button, ICONS, Icon, StatusIcon, TOUCH, clamp, cn, isTouch, onMouseLeave, safeColor, sleep, spring, surface, useOutside, useWidth, type IconName, plural, useActiveIndex, fmt, svgN, svgTranslate } from './core'
+import { Slider } from './inputs'
 import { PointerTooltip, usePointerTooltip } from './overlay'
-import { useFrameLoop, useViewport } from './motion'
+import { useFrameLoop, useViewport, useWheelZoom } from './motion'
 import { DG_DOTS, DgDot, dgBez, dgSafeId } from './diagramkit'
 import type { StatechartDot } from './statechart'
 
@@ -132,7 +132,7 @@ export function NetworkGraph({ nodes, links, groups, width = 900, height = 340, 
   /** Moves the drawn nodes and links to the simulation (attribute writes only, no reads, no React render). */
   const paint = () => {
     const ns = sim.current
-    nodeEls.current.forEach((g, i) => g?.setAttribute('transform', `translate(${ns[i].x.toFixed(1)},${ns[i].y.toFixed(1)})`))
+    nodeEls.current.forEach((g, i) => g?.setAttribute('transform', svgTranslate(ns[i].x, ns[i].y)))
     links.forEach(([a, b], k) => { const l = lineEls.current[k]; if (!l) return; l.setAttribute('x1', ns[a].x.toFixed(1)); l.setAttribute('y1', ns[a].y.toFixed(1)); l.setAttribute('x2', ns[b].x.toFixed(1)); l.setAttribute('y2', ns[b].y.toFixed(1)) })
   }
   /** Cool enough to stop: low temperature and (almost) nothing moving. */
@@ -181,13 +181,13 @@ export function NetworkGraph({ nodes, links, groups, width = 900, height = 340, 
         <g>
           {links.map(([a, b], k) => {
             const on = hl !== null && (a === hl || b === hl)
-            return <line key={k} ref={el => { lineEls.current[k] = el }} x1={ns[a].x.toFixed(1)} y1={ns[a].y.toFixed(1)} x2={ns[b].x.toFixed(1)} y2={ns[b].y.toFixed(1)}
+            return <line key={k} ref={el => { lineEls.current[k] = el }} x1={svgN(ns[a].x)} y1={svgN(ns[a].y)} x2={svgN(ns[b].x)} y2={svgN(ns[b].y)}
               className={cn('transition-[stroke,opacity] duration-150', on ? 'stroke-[var(--fg2)] [stroke-width:1.8]' : 'stroke-[var(--line2)] [stroke-width:1.2]', hl !== null && !on && 'opacity-12')} />
           })}
         </g>
         <g>
           {nodes.map((n, i) => (
-            <g key={i} ref={el => { nodeEls.current[i] = el }} transform={`translate(${ns[i].x.toFixed(1)},${ns[i].y.toFixed(1)})`} tabIndex={0} role="button" aria-label={`${n.label}, ${groups[n.group][0]}, ${plural(nb[i].size, 'connection')}`} data-net-node=""
+            <g key={i} ref={el => { nodeEls.current[i] = el }} transform={svgTranslate(ns[i].x, ns[i].y)} tabIndex={0} role="button" aria-label={`${n.label}, ${groups[n.group][0]}, ${plural(nb[i].size, 'connection')}`} data-net-node=""
               className={cn('touch-none outline-none transition-opacity duration-150', dragging === i ? 'cursor-grabbing' : 'cursor-grab', !isOn(i) && 'opacity-25')}
               onPointerEnter={e => { if (dragging === null && !isTouch(e)) setHl(i) }} onPointerLeave={onMouseLeave(() => { if (dragging === null) setHl(null) })}
               onFocus={() => setHl(i)} onBlur={() => setHl(null)}
@@ -283,12 +283,7 @@ export function ProcessFlow({ nodes: initial, edges, steps, height = 420, idle, 
     const v = viewRef.current, z = Math.max(0.2, Math.min(2, v.z * f)), wx = (cx - v.x) / v.z, wy = (cy - v.y) / v.z, to = { z, x: cx - wx * z, y: cy - wy * z }
     if (anim) tween(to, 0.25); else setView(to)
   }
-  useEffect(() => {
-    const el = pf.current; if (!el) return
-    const wheel = (e: WheelEvent) => { if (!(e.ctrlKey || e.metaKey)) return; e.preventDefault(); const r = el.getBoundingClientRect(); zoomAt(e.deltaY < 0 ? 1.08 : 0.93, e.clientX - r.left, e.clientY - r.top, false) }
-    el.addEventListener('wheel', wheel, { passive: false })
-    return () => el.removeEventListener('wheel', wheel)
-  }, []) // eslint-disable-line react-hooks/exhaustive-deps
+  useWheelZoom(pf, (zoomIn, e) => { const r = pf.current!.getBoundingClientRect(); zoomAt(zoomIn ? 1.08 : 0.93, e.clientX - r.left, e.clientY - r.top, false) }, { modifier: true })
 
   // pointers: drag a node, pan the canvas, pinch with two fingers
   const ptrs = useRef(new Map<number, { x: number; y: number }>())

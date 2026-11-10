@@ -1,6 +1,10 @@
 import { useEffect, useMemo, useState } from 'react'
 import { useReducedMotion } from 'motion/react'
-import { Citation, CodeBlock, CodeTabs, Diff, type GitCommit, InlineCode, InstallCommand, Kbd, Markdown, type Source, Switch, Tabs, Terminal, markdownCodeBlock, useToast, useViewport } from '../lib'
+import { Kbd, Switch, Tabs, useToast, useViewport } from '../lib'
+import { Citation, type Source } from '../lib/ai'
+import { CodeBlock, CodeTabs, Diff, InlineCode, InstallCommand, Terminal, markdownCodeBlock } from '../lib/code'
+import { type GitCommit } from '../lib/gitgraph'
+import { Markdown } from '../lib/markdown'
 import { AgentRunExample, AstGraphExample, BINARY_SAMPLE_SECTIONS, binarySample, binarySampleLarge, ChatBranchesExample, DependencyGraphExample, chatTreeHistory, GIT_SAMPLE_NOW, gitHistory, gitSampleCommit, gitSampleLoadCommit, gitSampleLoadDiff } from '../examples'
 import { Section, Spec, SpecAction, specLazy } from './kit'
 

@@ -406,9 +406,10 @@ export default function Page() {
 Notes:
 
 - Hooks (`useTheme`, `useToast`, …) and event handlers belong in your own `"use client"` components, as usual.
-- Pure helpers (`cn`, `variants`, `mix`, `contrast`, `themeCSS`, `themeTokens`, `highlightCode`,
-  `codeLineDiff`, `wordDiff`, `formatDate`, …) are also exported from `@lyndon/ui/utils`, which has no
-  `"use client"` directive, so Server Components and route handlers can call them.
+- Pure helpers (`cn`, `variants`, `mix`, `contrast`, `themeCSS`, `themeTokens`, `formatDate`, …) are also exported
+  from `@lyndon/ui/utils`, and those of the extras (`highlightCode`, `codeLineDiff`, `wordDiff`, the theme exporters
+  and oklch conversion) from `@lyndon/ui/utils/extras`. Neither has a `"use client"` directive, so Server Components
+  and route handlers can call them.
 - A few demo-style components use random layouts or the current time; render those only on the client (for
   example `dynamic(() => …, { ssr: false })`) if you see hydration warnings.
 
@@ -502,7 +503,8 @@ export async function POST(req: Request) {
 ```tsx
 // app/chat.tsx
 'use client'
-import { AI_RICH_RENDERERS, AssistantChat, aiMessageText, useAiChat } from '@lyndon/ui'
+import { AI_RICH_RENDERERS, AssistantChat } from '@lyndon/ui/aichat'
+import { aiMessageText, useAiChat } from '@lyndon/ui/aistream'
 
 export function Chat() {
   const chat = useAiChat({
@@ -621,27 +623,40 @@ const { run } = useAgentRun(source, { mapper: () => langGraphRunMapper({ agentNo
 
 `PRICES` is yours (`{ 'gpt-4.1': { input: 2, output: 8, cachedInput: 0.5 } }`, USD per million tokens; a key also
 matches dated model ids). The showcase's "Live agent run" card plays recorded runs from all three sources
-(`AGENT_RUN_FIXTURES` in `@lyndon/ui/examples`).
+(`AGENT_RUN_FIXTURES` in the repository's `src/examples`).
 
-## Subpath imports
+## Core and extras
 
-`@lyndon/ui` is the all-in-one entry. Each area is also its own entry point (one ES module per area, with
-types), which keeps dev servers and type-checking fast and makes the import show what you use:
+`@lyndon/ui` is the **core** tier: theme and provider, primitives, motion, overlays, forms, navigation, feedback, data
+display and layout. Everything else is an **extras** family on its own subpath:
+
+| Family | Import from |
+|---|---|
+| vizkit (chart math) | `@lyndon/ui/vizkit` |
+| charts | `@lyndon/ui/charts`, `/annotate`, `/timeline` |
+| diagrams | `@lyndon/ui/diagrams` (re-exports `/gantt`, `/statechart`, `/trace`, `/network`) |
+| geo | `@lyndon/ui/geo` (its map data, `/geoworld` and `/geoland`, loads lazily) |
+| content | `@lyndon/ui/code`, `/markdown`, `/editor` |
+| lanes | `@lyndon/ui/lanes`, `/gitgraph` |
+| media, collab, binary | `@lyndon/ui/media`, `/collab`, `/binary` |
+| data | `@lyndon/ui/datagrid`, `/scheduler`, `/kanban` |
+| ai | `@lyndon/ui/aistream`, `/ai`, `/aichat` |
+| agents | `@lyndon/ui/agentrun`, `/aiagent` |
+| theming | `@lyndon/ui/themeexport`, `/appearance` (`ThemeToggle` and `ThemePreview` are core) |
 
 ```ts
-import { Button, Card, Badge } from '@lyndon/ui/core'
+import { Button, Card, Badge } from '@lyndon/ui'
 import { Chart, DonutChart } from '@lyndon/ui/charts'
 import { WorldMap } from '@lyndon/ui/geo'
 import { cn, mix } from '@lyndon/ui/utils'
 ```
 
-Entries: `core` (re-exports `helpers`, `theme`, `locale`, `hooks`, `icons`, `primitives`, `slot`, `safe`,
-`formcontrol` and `shared`, each also an entry), `motion`, `virtual`, `overlay`, `forms` (re-exports `fields`, `inputs`, `select`, `pickers` and `upload`, each also an entry), `navigation`, `feedback`, `data`, `datagrid`, `layout`,
-`editor`, `scheduler`, `code`, `markdown`, `media`, `collab`, `pages`, `binary`, `charts`, `diagrams` (re-exports `gantt`,
-`statechart`, `trace` and `network`, each also an entry), `geo` (its map data, `geoworld` and `geoland`, loads lazily),
-`aistream`, `agentrun`, `ai`, `aichat`, `aiagent`, `appearance`, `themeexport` (theme exporters, import and share codes), `provider`, `utils`, plus `styles.css`, `preflight.css` and
-`tokens.css` (the token CSS UIProvider injects, for `injectStyles={false}`). Sample data and demo helpers (the
-showcase's documents, workflows, generated media, MotionPlayground) are in `@lyndon/ui/examples`, outside the stable API.
+Every core module is also an entry of its own: `core` (re-exports `helpers`, `theme`, `locale`, `hooks`, `icons`,
+`primitives`, `slot`, `safe`, `formcontrol` and `shared`), `motion`, `virtual`, `magnet`, `overlay`, `forms`
+(re-exports `fields`, `inputs`, `select`, `pickers` and `upload`), `navigation`, `feedback`, `data`, `layout`,
+`provider`; plus `utils`, `utils/extras`, `styles.css`, `preflight.css` and `tokens.css` (the token CSS UIProvider
+injects, for `injectStyles={false}`). `@lyndon/ui/all` re-exports core and every extras module; it is deprecated and
+goes in the next minor release. Sample data and demo helpers live in the repository's `src/examples`, not the package.
 Tree-shaking works with either style: a bundler only keeps the components you import.
 
 ## Drop-in files, registry and CLI
@@ -739,10 +754,10 @@ chats (`ui-all.tsx` is about 1.7 MB, ~490k tokens); prefer the drop-ins above.
 
 | File | Contents | Needs |
 | --- | --- | --- |
-| `ui.tsx` | Theme and provider, primitives, inputs and forms, overlays, navigation, feedback, data display, layout | |
-| `ui-content.tsx` | Editor, data grid, scheduler, code, media, collaboration, pages | `ui.tsx` |
-| `ui-charts.tsx` | Chart kit, diagrams, maps | `ui.tsx` |
-| `ui-ai.tsx` | AI message model and streams (`useAiChat`), chat parts, composer, agents | `ui.tsx`, `ui-content.tsx` |
+| `ui.tsx` | The core tier: theme and provider, primitives, inputs and forms, overlays, navigation, feedback, data display, layout | |
+| `ui-charts.tsx` | Extras: chart math, charts, diagrams, maps | `ui.tsx` |
+| `ui-content.tsx` | Extras: code, markdown, editor, lane graphs and git history, media, collaboration, data grid, scheduler, kanban, binary, theme export and appearance panels | `ui.tsx`, `ui-charts.tsx` |
+| `ui-ai.tsx` | Extras: AI message model and streams (`useAiChat`), chat parts, composer, agents | `ui.tsx`, `ui-charts.tsx`, `ui-content.tsx` |
 | `ui-all.tsx` | Everything in one file | |
 
 **Integrity.** Every drop-in starts with `'use client'` and one short line naming the package version, the item and
@@ -913,7 +928,7 @@ const nodes = messages.map(m => ({ id: m.id, parents: m.parentId ? [m.parentId] 
    another's geometry. Colours belong to groups (a branch, a thread), not lane numbers, so new rows don't reshuffle them.
    `direction: 'up'` runs the same pass and flips the result.
 
-**Examples** (`@lyndon/ui/examples`, the showcase's "Graphs as rows" card; each is a data builder plus a `renderRow`):
+**Examples** (the repository's `src/examples`, the showcase's "Graphs as rows" card; each is a data builder plus a `renderRow`):
 
 - *Git*: `GitGraph`, the built-in preset below.
 - *Chat branches*: `chatBranchGraph(messages, leaf)` over `AiMessage & { parentId? | parents? }` (what `useAiChat` keeps,
@@ -1015,7 +1030,7 @@ const sections = [{ name: '.text', offset: 0x1000, size: 0x3000, vaddr: 0x401000
 ```
 
 Sample data: `binarySample()` / `BINARY_SAMPLE_SECTIONS` (a synthetic 44 KiB
-ELF-like file) and `binarySampleLarge(mb)` in `@lyndon/ui/examples`.
+ELF-like file) and `binarySampleLarge(mb)` in the repository's `src/examples`.
 
 ## Magnets (snapping for sliders and drags)
 

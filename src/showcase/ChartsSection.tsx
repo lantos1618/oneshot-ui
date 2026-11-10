@@ -1,7 +1,11 @@
 import { useEffect, useLayoutEffect, useMemo, useRef, useState, type ReactNode } from 'react'
 import { motion, useReducedMotion } from 'motion/react'
 import {
-  BarList, BoxViolinChart, BulletChart, Button, CalendarHeatmap, Chart, ChartWithJournal, TagGlyph, DensityHistogram, DonutChart, ForestPlot, FunnelChart, Gauge, Heatmap, RadarChart, RegressionChart, ScatterChart, SegmentedControl, Slider, SparkChart, SparkTile, StateRibbon, Swimlanes, Switch, TOUCH, Tabs, TickerTable, Treemap, cn, dayKey, useToast, useViewport, type ChartDatum, type TickerRow, type TimeTag, type TimeTagStyle, type LocaleFmt, fmt } from '../lib'
+  Button, SegmentedControl, Slider, SparkChart, Switch, TOUCH, Tabs, cn, dayKey, useToast, useViewport, type LocaleFmt, fmt,
+} from '../lib'
+import { TagGlyph, type TimeTag, type TimeTagStyle } from '../lib/annotate'
+import { BarList, BoxViolinChart, BulletChart, CalendarHeatmap, Chart, DensityHistogram, DonutChart, ForestPlot, FunnelChart, Gauge, Heatmap, RadarChart, RegressionChart, ScatterChart, SparkTile, TickerTable, Treemap, type ChartDatum, type TickerRow } from '../lib/charts'
+import { ChartWithJournal, StateRibbon, Swimlanes } from '../lib/timeline'
 import { TAGS_EVENT_KINDS, TAGS_KINDS, describeSample, tagsDay, type TagsDayVariant } from '../examples'
 import { Row, Section, Spec, SpecAction } from './kit'
 

@@ -1,4 +1,4 @@
-/** Pure helpers: class names (cn, variants), spring(), numbers, seeded random, focusable elements, key-to-move maps, downloads and the clipboard. Part of @lyndon/ui/core. */
+/** Pure helpers: class names (cn, variants), spring(), numbers, focusable elements, key-to-move maps, downloads and the clipboard. Part of @lyndon/ui/core. */
 
 /** Join class names. (Add tailwind-merge here if you want later classes to override earlier ones.) */
 export function cn(...c: (string | false | null | undefined | 0)[]) {
@@ -35,17 +35,6 @@ export function minOf(values: Iterable<number>, init = Infinity) { let m = init;
 
 /** [min, max] in one pass, with a loop (see maxOf). Empty → [Infinity, -Infinity]. */
 export function extent(values: Iterable<number>): [number, number] { let lo = Infinity, hi = -Infinity; for (const v of values) { lo = Math.min(lo, v); hi = Math.max(hi, v) } return [lo, hi] }
-
-/** Repeatable pseudo-random numbers (mulberry32): const r = seeded(42); r() → 0…1, the same sequence every time (safe for SSR and demos). */
-export function seeded(seed: number) {
-  let a = seed >>> 0
-  return () => {
-    a = (a + 0x6d2b79f5) >>> 0
-    let t = Math.imul(a ^ (a >>> 15), 1 | a)
-    t = (t + Math.imul(t ^ (t >>> 7), 61 | t)) ^ t
-    return ((t ^ (t >>> 14)) >>> 0) / 4294967296
-  }
-}
 
 /** Selector for elements that can take keyboard focus. Use `focusables(root)` to also drop hidden, inert and aria-hidden ones. */
 export const FOCUSABLE = 'a[href],area[href],button:not([disabled]),input:not([disabled]):not([type=hidden]),select:not([disabled]),textarea:not([disabled]),iframe,audio[controls],video[controls],[contenteditable=""],[contenteditable="true"],[tabindex]:not([tabindex="-1"])'
@@ -90,10 +79,15 @@ export function gridKeyMove(key: string, cur: number, count: number, cols = 0, w
   return next === undefined ? null : next < 0 || next >= count ? cur : next
 }
 
-/** Where ↑/↓ (wrapping around) and Home/End move the focus in a vertical menu of `count` items; null for any other key. */
-export function menuKeyMove(key: string, cur: number, count: number): number | null {
-  if (!count) return null
-  const moves: Record<string, number> = { ArrowDown: cur + 1, ArrowUp: cur < 0 ? count - 1 : cur - 1, Home: 0, End: count - 1 }
-  const next = moves[key]
-  return next === undefined ? null : (next + count) % count
+/**
+ * The element `key` moves the focus to among `items`, from the focused one: ↑/↓ in a `vertical` list, ←/→ in a
+ * `horizontal` one, Home/End to the ends. `loop` wraps around, otherwise it stops at the ends. Null for any other key.
+ */
+export function focusStep(items: HTMLElement[], key: string, { orientation = 'vertical', loop = true }: { orientation?: 'horizontal' | 'vertical'; loop?: boolean } = {}): HTMLElement | null {
+  if (!items.length) return null
+  const [prev, next] = orientation === 'vertical' ? ['ArrowUp', 'ArrowDown'] : ['ArrowLeft', 'ArrowRight']
+  const i = items.indexOf(document.activeElement as HTMLElement)
+  const n = key === next ? i + 1 : key === prev ? (i < 0 ? items.length - 1 : i - 1) : key === 'Home' ? 0 : key === 'End' ? items.length - 1 : null
+  if (n === null) return null
+  return items[loop ? (n + items.length) % items.length : clamp(n, 0, items.length - 1)] ?? null
 }

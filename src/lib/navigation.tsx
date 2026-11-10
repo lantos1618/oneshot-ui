@@ -1,7 +1,7 @@
 import { createContext, useCallback, useContext, useEffect, useId, useLayoutEffect, useMemo, useRef, useState, type ButtonHTMLAttributes, type HTMLAttributes, type ReactNode, type Ref, type KeyboardEvent as RKeyboardEvent, type MouseEvent as ReactMouseEvent } from 'react'
 import { AnimatePresence, motion, type Variants } from 'motion/react'
-import { type AsChildProps, Avatar, Button, type ButtonProps, Icon, IconButton, type IconName, ScrollEdges, Slot, StatusIcon, cn, prefersReducedMotion, safeUrl, spring, useCoarsePointer, useComposedRefs, useControllable, useHotkey, useOutside, useScrollEdges, fmt, useResizeObserver } from './core'
-import { ActiveIndicator } from './forms'
+import { type AsChildProps, Avatar, Button, type ButtonProps, Icon, IconButton, type IconName, ScrollEdges, StatusIcon, cn, prefersReducedMotion, safeUrl, spring, useCoarsePointer, useComposedRefs, useControllable, useHotkey, useOutside, useScrollEdges, fmt, useResizeObserver, useRequiredContext, PartButton, focusStep } from './core'
+import { ActiveIndicator } from './fields'
 import { Tooltip } from './overlay'
 
 /**
@@ -19,15 +19,6 @@ function useNavRegistry() {
 /** The first enabled registered value. */
 const navFirst = (items: { value: string; disabled: boolean }[]) => items.find(x => !x.disabled)?.value
 /** DOM-order arrow-key step through `items` from the focused one: ±1 (wrapping when `loop`), or the first/last. */
-function navStep(items: HTMLElement[], key: string, prev: string, next: string, loop = true): HTMLElement | null {
-  if (!items.length) return null
-  const i = items.indexOf(document.activeElement as HTMLElement)
-  let n = key === next ? i + 1 : key === prev ? (i < 0 ? items.length - 1 : i - 1) : key === 'Home' ? 0 : key === 'End' ? items.length - 1 : -2
-  if (n === -2) return null
-  if (loop) n = (n + items.length) % items.length
-  else n = Math.max(0, Math.min(items.length - 1, n))
-  return items[n] ?? null
-}
 const navIdPart = (v: string) => v.replace(/[^\w-]/g, '_')
 
 export type TabItem = { value: string; label: ReactNode; content?: ReactNode; badge?: ReactNode }
@@ -39,7 +30,7 @@ type TabsCtxV = {
   panels: Set<string>; registerPanel: (v: string) => () => void
 }
 const TabsCtx = createContext<TabsCtxV | null>(null)
-const useTabs = (part: string) => { const c = useContext(TabsCtx); if (!c) throw new Error(`<Tabs.${part}> must be inside <Tabs.Root>`); return c }
+const useTabs = (part: string) => useRequiredContext(TabsCtx, `<Tabs.${part}>`, '<Tabs.Root>')
 
 /**
  * Tabs.Root: the selected tab (`value` + `onValueChange`, or `defaultValue`). `orientation="vertical"` puts the list
@@ -90,7 +81,7 @@ export function TabsList({ className, children, fade = 'card', 'aria-label': ari
   const onKeyDown = (e: RKeyboardEvent<HTMLDivElement>) => {
     if (e.key === 'Enter' || (e.target as Element).closest('[role=tablist]') !== e.currentTarget) return
     const tabs = [...e.currentTarget.querySelectorAll<HTMLElement>('[role=tab]')].filter(t => t.closest('[role=tablist]') === e.currentTarget && !(t as HTMLButtonElement).disabled)
-    const to = navStep(tabs, vertical ? e.key : e.key, vertical ? 'ArrowUp' : 'ArrowLeft', vertical ? 'ArrowDown' : 'ArrowRight')
+    const to = focusStep(tabs, e.key, { orientation: vertical ? 'vertical' : 'horizontal' })
     if (!to) return
     e.preventDefault(); to.focus()
     if (!c.manual && to.dataset.value !== undefined) c.select(to.dataset.value)
@@ -129,8 +120,7 @@ export function TabsTrigger({ value, disabled = false, asChild, className, child
       on ? 'text-[var(--fg)]' : 'text-[var(--fg2)] hover:text-[var(--fg)]', vertical && !on && 'hover:bg-[var(--muted)]', className),
   }
   const bar = on && <ActiveIndicator group={c.group} className={vertical ? 'start-auto -end-px w-0.5 rounded-full bg-[var(--fg)]' : 'top-auto -bottom-px h-0.5 rounded-full bg-[var(--fg)]'} />
-  if (asChild) return <Slot {...props} aria-disabled={disabled || undefined}>{children}</Slot>
-  return <button type="button" disabled={disabled} {...props}>{children}{bar}</button>
+  return <PartButton asChild={asChild} disabled={disabled} after={bar} {...props}>{children}</PartButton>
 }
 
 /**
@@ -435,18 +425,11 @@ export function MegaMenu({ items, brand, actions, children, closeDelay = 160, de
     return () => ro.disconnect()
   }, [measure, items])
   useEffect(() => () => clearTimeout(closeT.current), [])
-  useOutside([host], () => { wasOpen.current = false; setCur(-1) }, cur >= 0)
-  useEffect(() => {
-    if (cur < 0) return
-    const on = (e: KeyboardEvent) => {
-      if (e.key !== 'Escape') return
-      const t = triggers.current[cur], inside = host.current?.contains(document.activeElement)
-      clearTimeout(closeT.current); wasOpen.current = false; setCur(-1)
-      if (inside) t?.focus()
-    }
-    addEventListener('keydown', on)
-    return () => removeEventListener('keydown', on)
-  }, [cur])
+  useOutside([host], e => {
+    const t = triggers.current[cur], refocus = e.type === 'keydown' && host.current?.contains(document.activeElement)
+    clearTimeout(closeT.current); wasOpen.current = false; setCur(-1)
+    if (refocus) t?.focus()
+  }, cur >= 0, { escape: true })
 
   const open = (i: number) => {
     clearTimeout(closeT.current)
@@ -685,8 +668,7 @@ export function Toggle({ pressed, defaultPressed = false, onPressedChange, varia
     ...p, 'aria-pressed': on, 'data-state': on ? 'on' : 'off', 'data-toolbar-item': inToolbar ? '' : undefined, className: toggleClass(variant, size, className),
     onClick: (e: ReactMouseEvent<HTMLButtonElement>) => { onClick?.(e); if (!e.defaultPrevented) set(!on) },
   }
-  if (asChild) return <Slot<HTMLButtonElement> {...props} ref={ref}>{children}</Slot>
-  return <button type="button" ref={ref} {...props}>{children}</button>
+  return <PartButton asChild={asChild} ref={ref} {...props}>{children}</PartButton>
 }
 
 type TgCtxV = {
@@ -726,8 +708,7 @@ export function ToggleGroupRoot(props: ToggleGroupProps) {
   const onKeyDown = (e: RKeyboardEvent<HTMLDivElement>) => {
     if (inToolbar) return
     const own = [...e.currentTarget.querySelectorAll<HTMLElement>('[data-tg-item]')].filter(el => el.closest('[data-tg-root]') === e.currentTarget && !(el as HTMLButtonElement).disabled)
-    const v = orientation === 'vertical'
-    const to = navStep(own, v ? e.key : e.key, v ? 'ArrowUp' : 'ArrowLeft', v ? 'ArrowDown' : 'ArrowRight', loop)
+    const to = focusStep(own, e.key, { orientation, loop })
     if (!to) return
     e.preventDefault(); to.focus()
     if (single && to.dataset.value !== undefined) setValue([to.dataset.value]) // radio: arrows select
@@ -744,8 +725,7 @@ export function ToggleGroupRoot(props: ToggleGroupProps) {
 /** ToggleGroup.Item: one button of the group (`value`). Give icon-only items an `aria-label`. `asChild` renders your element. */
 export function ToggleGroupItem({ value, disabled: own, asChild, className, children, ...p }:
   Omit<ButtonHTMLAttributes<HTMLButtonElement>, 'value' | 'onChange'> & AsChildProps & { value: string; disabled?: boolean }) {
-  const g = useContext(TgCtx)
-  if (!g) throw new Error('<ToggleGroup.Item> must be inside <ToggleGroup>')
+  const g = useRequiredContext(TgCtx, '<ToggleGroup.Item>', '<ToggleGroup>')
   const disabled = own || g.disabled, on = g.value.includes(value), register = g.register
   useLayoutEffect(() => register(value, !!disabled), [register, value, disabled])
   const props = {
@@ -756,8 +736,7 @@ export function ToggleGroupItem({ value, disabled: own, asChild, className, chil
     onFocus: () => g.setFocused(value),
     onClick: (e: ReactMouseEvent<HTMLButtonElement>) => { p.onClick?.(e); if (!e.defaultPrevented && !disabled) g.toggle(value) },
   }
-  if (asChild) return <Slot {...props} aria-disabled={disabled || undefined}>{children}</Slot>
-  return <button type="button" disabled={disabled} {...props}>{children}</button>
+  return <PartButton asChild={asChild} disabled={disabled} {...props}>{children}</PartButton>
 }
 /** Toggle buttons sharing one value (single, a radio group) or a set (multiple). Parts: ToggleGroup.Root (= ToggleGroup) and ToggleGroup.Item. */
 export const ToggleGroup = Object.assign(ToggleGroupRoot, { Root: ToggleGroupRoot, Item: ToggleGroupItem })
@@ -782,8 +761,7 @@ export function ToolbarRoot({ orientation = 'horizontal', loop = true, className
         onFocus={e => { const i = items().indexOf(e.target as HTMLElement); if (i >= 0 && i !== active.current) { active.current = i; sync() } }}
         onKeyDown={e => {
           if ((e.target as Element).closest('[role=toolbar]') !== e.currentTarget || (e.target as Element).matches('input,textarea,select,[contenteditable="true"]')) return
-          const v = orientation === 'vertical'
-          const to = navStep(items(), v ? e.key : e.key, v ? 'ArrowUp' : 'ArrowLeft', v ? 'ArrowDown' : 'ArrowRight', loop)
+          const to = focusStep(items(), e.key, { orientation, loop })
 
           if (to) { e.preventDefault(); to.focus() }
         }}

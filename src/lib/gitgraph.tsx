@@ -1,9 +1,9 @@
 import { memo, useCallback, useDeferredValue, useEffect, useImperativeHandle, useMemo, useRef, useState, type CSSProperties, type KeyboardEvent as RKeyboardEvent, type ReactNode, type Ref } from 'react'
-import { Avatar, Badge, Button, Chip, Icon, IconButton, Kbd, Spinner, TOUCH, cn, inputClass, useCoarsePointer, useControllable, useWidth, type IconName, plural, fmt } from './core'
+import { Avatar, Badge, Button, Chip, Icon, IconButton, Kbd, Spinner, TOUCH, cn, inputClass, useCoarsePointer, useControllable, useWidth, type IconName, plural, fmt, useLive } from './core'
 import { LANE_COLORS, LaneGraph, laneAncestry, laneColor, laneGutterWidth, laneHash, layoutLanes, type LaneEdge, type LaneGraphHandle, type LaneNode, type LaneRow, type LaneRowState } from './lanes'
 // the parts, not the ContextMenu/DropdownMenu/Sheet objects: those reference every menu part, which drop-in files would carry
 import { ContextMenuContent, ContextMenuRoot, ContextMenuTrigger, DialogClose, DialogRoot, DialogTitle, DropdownMenuContent, DropdownMenuRoot, DropdownMenuTrigger, MenuCheckboxItem, MenuItem, MenuLabel, MenuSeparator, SheetContent, SheetHeader } from './overlay'
-import { CopyButton, useCopy } from './feedback'
+import { CopyButton, useCopy, EmptyState } from './feedback'
 import { Diff } from './code'
 import { Markdown } from './markdown'
 
@@ -646,7 +646,7 @@ export function GitGraph({ commits, order = 'date', pin, selected, defaultSelect
   /* new commits on top fade in (LaneGraph keeps the reader's place) and a polite live region counts them */
   const prevHashes = useRef<Set<string> | null>(null)
   const [fresh, setFresh] = useState<Set<string> | null>(null)
-  const [announce, setAnnounce] = useState('')
+  const [setAnnounce, live] = useLive()
   useEffect(() => {
     const prev = prevHashes.current
     prevHashes.current = new Set(commits.map(c => c.hash))
@@ -776,7 +776,7 @@ export function GitGraph({ commits, order = 'date', pin, selected, defaultSelect
   const list = (
     <ContextMenuRoot onOpenChange={o => { if (o) setMenuRow(pendingMenu.current >= 0 ? pendingMenu.current : act); else pendingMenu.current = -1 }}>
       <LaneGraph ref={graph} nodes={lanes} renderRow={renderRow} cells columns={cols} rowHeight={h} laneWidth={lw} maxLanes={cap} height={height} fit={false}
-        header={header} headerHeight={GIT_HEADER_H} contentMinWidth={minW} empty={<p className="m-0 p-6 text-center text-[13px] text-[var(--fg3)]">{'No commits'}</p>}
+        header={header} headerHeight={GIT_HEADER_H} contentMinWidth={minW} empty={<EmptyState size="sm" className="p-6" title={'No commits'} />}
         aria-label={ariaLabel ?? 'Commit history'} aria-colcount={narrow ? 2 : showAuthor ? 5 : 4}
         active={act} onActiveChange={setActive} selected={marked} onSelect={id => { if (id == null) setSel(null) }} onActivate={onActivate}
         onKeyDown={onKeyDown} onContextMenu={onRowMenu} rowLabel={rowLabel} rowAttrs={inRange} rowClassName={rangeClass} emphasis={isHead} fresh={fresh}
@@ -820,7 +820,7 @@ export function GitGraph({ commits, order = 'date', pin, selected, defaultSelect
           </SheetContent>
         </DialogRoot>
       )}
-      <span className="sr-only" aria-live="polite">{announce}</span>
+      {live}
     </div>
   )
 }

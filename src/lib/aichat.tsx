@@ -1,8 +1,9 @@
 import { Children, Fragment, createContext, isValidElement, useCallback, useContext, useEffect, useId, useLayoutEffect, useRef, useState, type KeyboardEvent as RKeyboardEvent, type ReactNode } from 'react'
 import { AnimatePresence, motion, useReducedMotion } from 'motion/react'
-import { Badge, Button, Chip, Icon, IconButton, Spinner, TOUCH, cn, inputClass, menuItemClass, safeColor, sleep, spring, surface, useCoarsePointer, useControllable, useMediaQuery, useOutside, useRoving, type IconName, type Tone, plural, fmt } from './core'
-import { Collapse, CopyButton, TypingDots, confetti } from './feedback'
-import { Checkbox, Slider, Switch } from './forms'
+import { Badge, Button, Chip, Icon, IconButton, Spinner, TOUCH, cn, inputClass, menuItemClass, safeColor, sleep, spring, surface, useCoarsePointer, useControllable, useMediaQuery, useOutside, useRoving, type IconName, type Tone, plural, fmt, useLive } from './core'
+import { Collapse, CopyButton, TypingDots, confetti, EmptyState } from './feedback'
+import { Checkbox, Switch } from './fields'
+import { Slider } from './inputs'
 import { FloatingPanel, MenuItem, MenuLabel } from './overlay'
 import { AttachmentChip, Citation, PromptInput, SendButton, SourceList, sourceDomain, ShimmerText, StreamingText, ToolCall, useAttachments, type Attachment } from './ai'
 import { JsonViewer } from './data'
@@ -500,7 +501,7 @@ function AiSlashInput({ commands, placeholder, busy, onSend, onStop }: { command
 /** AssistantChat over useAiChat: the same frame, with real streamed parts. */
 function AiLiveChat({ chat, starters, commands, placeholder, renderers, className }: { chat: AiChat; starters: string[]; commands: SlashCommand[]; placeholder: string; renderers?: AiRenderers; className?: string }) {
   const { messages, busy } = chat
-  const [said, setSaid] = useState('')
+  const [setSaid, live] = useLive()
   const prev = useRef(chat.status)
   useEffect(() => { // announce a short summary once, not every token
     if (prev.current !== chat.status) {
@@ -514,7 +515,7 @@ function AiLiveChat({ chat, starters, commands, placeholder, renderers, classNam
   const lastAssistant = messages.reduce((k, m, i) => m.role === 'assistant' ? i : k, -1)
   return (
     <div className={cn('flex flex-col gap-2.5', className)}>
-      <span className="sr-only" aria-live="polite">{said}</span>
+      {live}
       <AiChatLog busy={busy} className="h-[min(420px,62dvh)]" contentClassName="!gap-2.5">
         {!messages.length && <Suggestions items={starters} onPick={q => chat.submit(q)} />}
         {messages.map((m, i) => (
@@ -551,7 +552,7 @@ const AI_NONE: string[] = [], AI_NO_COMMANDS: SlashCommand[] = []
 function AiScriptedChat({ starters, commands, respond, defaultTurns, placeholder, className }:
   { starters: string[]; commands: SlashCommand[]; respond: (q: string) => ChatScript; defaultTurns: string[]; placeholder: string; className?: string }) {
   const [turns, setTurns] = useState<ChatTurn[]>(() => defaultTurns.map((q, i) => ({ id: -1 - i, q, s: respond(q), phase: 'done', v: 0, run: 0, stopped: false, shown: '', rating: 0 })))
-  const [said, setSaid] = useState('') // what the live region announces
+  const [setSaid, live] = useLive()
   const alive = useRef(true), cancelled = useRef(new Set<number>())
   useEffect(() => { alive.current = true; return () => { alive.current = false } }, [])
   const busy = turns.some(x => x.phase !== 'done')
@@ -581,7 +582,7 @@ function AiScriptedChat({ starters, commands, respond, defaultTurns, placeholder
 
   return (
     <div className={cn('flex flex-col gap-2.5', className)}>
-      <span className="sr-only" aria-live="polite">{said}</span>
+      {live}
       <AiChatLog busy={streaming} className="h-[min(420px,62dvh)]" contentClassName="!gap-2.5">
         <AnimatePresence>
           {!turns.length && starters.length > 0 && (
@@ -816,7 +817,7 @@ export function AgentComposer({ chat: live, onSend, onApprovalRequest, items = A
   const [msgs, setMsgs] = useState<AcMsg[]>([])
   const [queue, setQueue] = useState<AcDraft[]>([])
   const [submitting, setSubmitting] = useState(false)
-  const [said, setSaid] = useState('') // short summaries for screen readers
+  const [setSaid, liveRegion] = useLive()
   const [sel, setSel] = useState<{ x: number; y: number; bottom: number; text: string } | null>(null)
   const narrow = useMediaQuery('(max-width: 639px)'), coarse = useCoarsePointer()
   const [wsOpen, setWsOpen] = useState(false) // phones: the workspace folds into a toggle above the composer
@@ -927,7 +928,7 @@ export function AgentComposer({ chat: live, onSend, onApprovalRequest, items = A
 
   return (
     <div className={cn('grid gap-4 sm:min-h-[440px]', workspace && 'md:grid-cols-[240px_minmax(0,1fr)]', className)}>
-      <span className="sr-only" aria-live="polite">{said}</span>
+      {liveRegion}
       {workspace && <aside aria-label={'Workspace'} className={cn(surface.card, 'flex flex-col gap-3 !bg-[var(--bg)] p-3 max-sm:gap-0 max-sm:p-0')}>
         {narrow
           ? <button type="button" aria-expanded={wsOpen} onClick={() => setWsOpen(o => !o)}
@@ -1039,7 +1040,7 @@ export function AgentComposer({ chat: live, onSend, onApprovalRequest, items = A
                           <span className="grid h-7 w-7 flex-none place-items-center rounded-[var(--r-md)] text-[11px] font-bold text-white [@media(pointer:coarse)]:text-[11px]" style={{ background: safeColor(c.color, 'var(--fg3)') }}>{c.name.slice(0, 2)}</span>
                           <span className="flex min-w-0 flex-1 flex-col"><b className="text-[13px] font-medium">{c.name}</b><span className="truncate text-[11px] text-[var(--fg3)]">{c.desc}</span></span>
                           <Switch checked={c.on} onChange={v => setCons(cs => cs.map(x => x.name === c.name ? { ...x, on: v } : x))} label={<span className="sr-only">{c.name}</span>} />
-                        </div>)) : <span className="p-2 text-xs text-[var(--fg3)]">{'No connectors match'}</span>}
+                        </div>)) : <EmptyState size="sm" className="p-2" title={'No connectors match'} />}
                     </div>
                     <div className="flex items-center justify-between border-t border-[var(--line)] px-2 pt-1.5 pb-1"><span className="text-xs text-[var(--fg3)]">{`${onCount} of ${cons.length} on`}</span>
                       {onAddConnector && <Button size="sm" variant="ghost" onClick={() => { close(); onAddConnector() }}>{'+ Add connector'}</Button>}</div>

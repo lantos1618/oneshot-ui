@@ -3,7 +3,7 @@
 import { act, fireEvent, render, screen, waitFor } from '@testing-library/react'
 import { useState, type ReactNode } from 'react'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
-import { Chart, layoutTimeTags, timeTicks, type TimeTag } from '../../src/lib'
+import { Chart, layoutTimeTags, timeTicks, type TimeTag } from '../../src/lib/all'
 import { TAGS_BUSY_DAY, TAGS_LIGHT_DAY, POSTURE_STATES_DAY, tagsDay } from '../../src/examples'
 
 const at = (h: number, m = 0) => new Date(2026, 10, 9, h, m).getTime()

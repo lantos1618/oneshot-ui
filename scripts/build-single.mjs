@@ -1,11 +1,13 @@
 // Generates drop-in single files from the modules in src/lib (and src/showcase), for pasting into
 // an AI tool or copying into a project without installing the package:
 //
-//   dist-single/ui.tsx           foundation: theme, primitives, inputs, overlays, navigation, feedback, data, layout
-//   dist-single/ui-content.tsx   editor, data grid, scheduler, code, media, collaboration, pages   (imports ./ui)
-//   dist-single/ui-charts.tsx    chart kit, diagrams, maps                                          (imports ./ui)
-//   dist-single/ui-ai.tsx        AI patterns: chat, composer, agents                                 (imports the others)
+//   dist-single/ui.tsx           the core tier: theme, primitives, inputs, overlays, navigation, feedback, data, layout
+//   dist-single/ui-charts.tsx    extras: chart math, charts, diagrams, maps                          (imports ./ui)
+//   dist-single/ui-content.tsx   extras: code, editor, lanes, media, collab, data grid, scheduler,    (imports ./ui, ./ui-charts)
+//                                kanban, binary, theme export and appearance panels
+//   dist-single/ui-ai.tsx        extras: AI chat, composer, agents                                   (imports the others)
 //   dist-single/ui-all.tsx       everything in one file
+// The bundles follow the tiers in scripts/tiers.mjs.
 //   dist-single/ui-with-examples.tsx  everything plus the showcase (default export) as usage examples (not published)
 //
 // Each file starts with 'use client', then a stamp: package version, git commit (when built from a checkout) and the
@@ -17,16 +19,11 @@
 import { readFileSync, writeFileSync, mkdirSync, readdirSync } from 'node:fs'
 import { join } from 'node:path'
 import { commit, dirty, header, pkg, sha256 } from './registry/stamp.mjs'
+import { BUNDLES, assertPlaced, bundleOf } from './tiers.mjs'
 
 const root = new URL('..', import.meta.url).pathname
-const BUNDLES = {
-  ui: ['core', 'helpers', 'shared', 'locale', 'safe', 'theme', 'hooks', 'icons', 'slot', 'primitives', 'formcontrol', 'motion', 'virtual', 'magnet', 'overlay', 'formkit', 'fields', 'select', 'inputs', 'pickers', 'upload', 'forms', 'navigation', 'feedback', 'data', 'layout', 'themeexport', 'appearance', 'provider'],
-  'ui-charts': ['vizkit', 'annotate', 'charts', 'timeline', 'diagramkit', 'gantt', 'statechart', 'trace', 'network', 'diagrams', 'geoworld', 'geoland', 'geo'],
-  'ui-content': ['editor', 'datagrid', 'scheduler', 'code', 'markdown', 'media', 'collab', 'pages', 'lanes', 'gitgraph', 'binary'],
-  'ui-ai': ['aistream', 'agentrun', 'ai', 'aichat', 'aiagent'],
-}
 const LIB = Object.values(BUNDLES).flat()
-const bundleOf = Object.fromEntries(Object.entries(BUNDLES).flatMap(([b, ms]) => ms.map(m => [m, b])))
+assertPlaced(readdirSync(join(root, 'src/lib')).filter(f => /\.tsx?$/.test(f)), 'build-single')
 
 // every `import … from '…'` statement, including ones spread over several lines
 const IMPORT = /^import\s+(type\s+)?(?:\{([^}]*)\}|(\*\s+as\s+\w+)|(\w+))\s*from\s*'([^']+)';?[ \t]*\n?/gm
@@ -57,7 +54,7 @@ function render(files, { self, exampleDefault }) {
       if (imp.raw) { raw.add(imp.raw); continue }
       if (imp.from.startsWith('.')) {
         const mod = imp.from.replace(/^\.\.?\/(lib\/?)?/, '').replace(/^\.\//, '')
-        const target = bundleOf[mod]
+        const target = bundleOf(mod)
         if (!self || !target || self.includes(target)) continue // same bundle: already in this file
         if (!cross.has(target)) cross.set(target, new Set())
         imp.names.forEach(n => cross.get(target).add(n))
@@ -84,7 +81,7 @@ function render(files, { self, exampleDefault }) {
 const libFile = m => join(root, 'src/lib', `${m}.tsx`)
 const showcaseDir = join(root, 'src/showcase')
 // ui-with-examples: the sample data (src/examples) and copy-in blocks (src/blocks) the showcase imports, then the showcase
-const samples = ['examples', 'blocks'].flatMap(d => readdirSync(join(root, 'src', d)).filter(f => f.endsWith('.tsx')).sort().map(f => join(root, 'src', d, f)))
+const samples = ['examples', 'blocks'].flatMap(d => readdirSync(join(root, 'src', d)).filter(f => /\.tsx?$/.test(f) && f !== 'index.ts').sort().map(f => join(root, 'src', d, f)))
 const examples = [...samples, 'tags.ts', 'cardHeights.ts', 'kit.tsx', ...readdirSync(showcaseDir).filter(f => f.endsWith('.tsx') && f !== 'index.tsx' && f !== 'kit.tsx').sort(), 'index.tsx'].map(f => f.startsWith('/') ? f : join(showcaseDir, f))
 
 mkdirSync(join(root, 'dist-single'), { recursive: true })

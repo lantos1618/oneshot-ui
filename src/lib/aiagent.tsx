@@ -1,9 +1,10 @@
 import { Fragment, memo, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, useSyncExternalStore, type ReactNode } from 'react'
 import { AnimatePresence, cubicBezier, motion, useReducedMotion } from 'motion/react'
 import { flushSync } from 'react-dom'
-import { Badge, Button, Chip, FONT_CSS, Icon, IconButton, Spinner, TOUCH, cn, ScrollEdges, sleep, spring, surface, themeCSS, useMediaQuery, useRoving, useScrollEdges, useTheme, useWidth, plural, fmt } from './core'
-import { CopyButton, TypingDots } from './feedback'
-import { SegmentedControl, Slider, Switch } from './forms'
+import { Badge, Button, Chip, FONT_CSS, Icon, IconButton, Spinner, TOUCH, cn, ScrollEdges, sleep, spring, surface, themeCSS, useMediaQuery, useRoving, useScrollEdges, useTheme, useWidth, plural, fmt, svgN, svgTranslate } from './core'
+import { CopyButton, TypingDots, EmptyState } from './feedback'
+import { SegmentedControl, Switch } from './fields'
+import { Slider } from './inputs'
 import { SendButton } from './ai'
 import { lcsDiff } from './code'
 import { WorkflowEngine, type WorkflowJob, type WorkflowMachine, type WorkflowToken } from './statechart'
@@ -254,9 +255,7 @@ export function AICanvas({ file = 'untitled.html', initial = '', edits = AI_NO_E
         </div>
         <div className="relative min-h-0 flex-1">
           {empty ? (
-            <div className="absolute inset-0 grid place-items-center bg-[var(--card)] p-6 text-center text-[13px] text-[var(--fg3)]">
-              <span><Icon name="file" size={18} className="mx-auto mb-2 block" />{'Nothing here yet. Ask for something and it will appear here.'}</span>
-            </div>
+            <EmptyState size="sm" icon="file" className="absolute inset-0 grid place-content-center bg-[var(--card)] p-6" title={'Nothing here yet. Ask for something and it will appear here.'} />
           ) : view === 'code' ? (
             <div ref={el => { codeRef.current = el; edgeRef(el) }} onScroll={() => setSelLine(null)} className="absolute inset-0 overflow-auto overscroll-x-contain bg-[var(--card)] [contain:inline-size]">
               <motion.pre key={diff ? 'diff' : `v${cur}-${flash}`} initial={diff ? false : { opacity: 0.3 }} animate={{ opacity: 1 }} transition={{ duration: 0.2 }}
@@ -369,9 +368,9 @@ const atPos = (line: string, station: string): number | undefined => AT_SP[line]
 /** The polyline between two arc positions of a line, bends included (for congestion heat). */
 function atSubPath(k: string, a: number, b: number) {
   if (a > b) [a, b] = [b, a]
-  const pts = AT_PATH[k], c = atCum[k], p0 = atPoint(k, a), p1 = atPoint(k, b), out = [`M${p0.x.toFixed(1)},${p0.y.toFixed(1)}`]
+  const pts = AT_PATH[k], c = atCum[k], p0 = atPoint(k, a), p1 = atPoint(k, b), out = [`M${svgN(p0.x)},${svgN(p0.y)}`]
   for (let i = 1; i < pts.length - 1; i++) if (c[i] > a + 0.5 && c[i] < b - 0.5) out.push(`L${pts[i][0]},${pts[i][1]}`)
-  out.push(`L${p1.x.toFixed(1)},${p1.y.toFixed(1)}`)
+  out.push(`L${svgN(p1.x)},${svgN(p1.y)}`)
   return out.join(' ')
 }
 /** Track segments between neighbouring stations, per line: the unit the congestion heat is painted on. */
@@ -741,7 +740,7 @@ function AtRings({ eng, machines, clock }: { eng: WorkflowEngine; machines: Reco
   useSyncExternalStore(clock.sub, () => atRings(eng, machines).map(r => `${r.k}${r.n}${(r.frac * 107).toFixed(1)}`).join(','), () => '')
   const C = 2 * Math.PI * 17
   return <>{atRings(eng, machines).map(r => (
-    <g key={r.k} transform={`translate(${r.x.toFixed(1)},${r.y.toFixed(1)})`}>
+    <g key={r.k} transform={svgTranslate(r.x, r.y)}>
       <circle r={17} fill="var(--card)" stroke="color-mix(in srgb, var(--warn) 25%, transparent)" strokeWidth={4} />
       <circle r={17} fill="none" stroke="var(--warn)" strokeWidth={4} strokeLinecap="round" strokeDasharray={`${(r.frac * C).toFixed(1)} ${C.toFixed(1)}`} transform="rotate(-90)" />
       {r.n > 1 && <g transform="translate(16,-16)"><circle r={9} fill="var(--warn)" /><text y={4} textAnchor="middle" fill="var(--card)" style={{ font: '700 11px var(--font)' }}>{r.n}</text></g>}
@@ -1129,7 +1128,7 @@ function AtSimMap({ machines = AT_NO_MACHINES, order = AT_NO_ORDER, className }:
           {/* queue counters beside each agent's line-up */}
           <g>
             {queueTags.map(t => { const w = (26 + String(t.n).length * 8) * fs; return (
-              <g key={t.stn} transform={`translate(${t.x.toFixed(1)},${t.y.toFixed(1)})`}>
+              <g key={t.stn} transform={svgTranslate(t.x, t.y)}>
                 <rect x={-w / 2} y={-11 * fs} width={w} height={22 * fs} rx={11 * fs} fill="var(--card)" stroke="var(--warn)" strokeWidth={1.5} />
                 <text y={5 * fs} textAnchor="middle" fill="var(--fg)" style={{ font: `600 ${13 * fs}px var(--font)` }}>+{t.n}</text>
               </g>) })}
@@ -1280,7 +1279,7 @@ const AT_RUN_TONE = { running: 'accent', ok: 'ok', error: 'bad', cancelled: 'neu
 const AtRunMarks = memo(function AtRunMarks({ marks, lit }: { sig: string; marks: AtRunStopMark[]; lit: string | null }) {
   return <g>
     {marks.map(m => { const on = !lit || m.ids.includes(lit); return (
-      <g key={m.key} transform={`translate(${m.x.toFixed(1)},${m.y.toFixed(1)})`} className={atDim(on)}>
+      <g key={m.key} transform={svgTranslate(m.x, m.y)} className={atDim(on)}>
         <circle r={m.running ? 15 : 13} fill="var(--card)" stroke={m.errors ? 'var(--bad)' : AT_C(m.line)} strokeWidth={m.running ? 4.5 : 3} />
         <text y={4} textAnchor="middle" fill={m.errors ? 'var(--bad)' : 'var(--fg)'} style={{ font: '700 11px var(--font)' }}>{m.errors ? '!' : m.visits}</text>
       </g>) })}

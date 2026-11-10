@@ -1,6 +1,7 @@
 import { memo, useCallback, useEffect, useId, useLayoutEffect, useMemo, useRef, useState, type RefObject } from 'react'
 import { AnimatePresence, motion } from 'motion/react'
-import { ActiveIndicator, AppearanceMenu, Badge, Button, Collapse, type Command, CommandPalette, Dialog, Icon, type IconName, Kbd, Sheet, THEMES, ThemeToggle, UIProvider, cn, useHotkey, useRoving, useTheme, useToast, fmt } from '../lib'
+import { ActiveIndicator, Badge, Button, Collapse, type Command, CommandPalette, Dialog, Icon, type IconName, Kbd, Sheet, THEMES, ThemeToggle, UIProvider, cn, useHotkey, useRoving, useTheme, useToast, fmt } from '../lib'
+import { AppearanceMenu } from '../lib/appearance'
 import { AISection } from './AISection'
 import { ButtonsSection } from './ButtonsSection'
 import { ChartsSection } from './ChartsSection'

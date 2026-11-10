@@ -1,6 +1,6 @@
 import { useEffect, useId, useLayoutEffect, useRef, useState, type ReactNode, type KeyboardEvent as RKeyboardEvent } from 'react'
 import { AnimatePresence, motion } from 'motion/react'
-import { Avatar, Button, Icon, type IconName, Spinner, cn, inputClass, isCoarsePointer, safeUrl, spring, useOutside, useRoving, useTheme, plural, useResizeObserver } from './core'
+import { Avatar, Button, Icon, type IconName, Spinner, cn, inputClass, isCoarsePointer, safeUrl, spring, useOutside, useRoving, useTheme, plural, useResizeObserver, useListbox, gridKeyMove } from './core'
 import { play, shake } from './motion'
 import { FloatingPanel, MenuLabel } from './overlay'
 import { OptionList } from './select'
@@ -540,14 +540,14 @@ export function AddressAutocomplete({ addresses, onChange, placeholder: placehol
   const [open, setOpen] = useState(false)
   const [rest, setRest] = useState({ city: '', postcode: '', country: '' })
   const [flash, setFlash] = useState({ city: 0, postcode: 0, country: 0 })
-  const lid = useId(), base = useId()
+  const base = useId()
   const timers = useRef<ReturnType<typeof setTimeout>[]>([])
   useEffect(() => () => timers.current.forEach(clearTimeout), [])
   const term = q.trim().toLowerCase()
   const items = term.length < 2 ? [] : addresses.filter(a => `${a.street} ${a.city}`.toLowerCase().includes(term)).slice(0, 5)
   const shown = open && items.length > 0
   const options: Option[] = items.map(a => ({ value: `${a.street}|${a.postcode}`, label: a.street, hint: `${a.city}, ${a.country}`, icon: 'mapPin' }))
-  const { active: idx, setActive: setIdx, onKeyDown: rove } = useRoving(items.length, i => choose(items[i]), { homeEnd: false })
+  const lb = useListbox(options, i => choose(items[i]), { open: shown, setOpen, input: true })
   const choose = (a: AddressRecord) => {
     setQ(a.street); setOpen(false); timers.current.forEach(clearTimeout)
     timers.current = (['city', 'postcode', 'country'] as const).map((k, i) => setTimeout(() => {
@@ -559,17 +559,12 @@ export function AddressAutocomplete({ addresses, onChange, placeholder: placehol
     <div className={cn('flex flex-col gap-2.5', className)}>
       <div className="relative">
         <label htmlFor={`${base}-street`} className="mb-1.5 block text-[13px] font-medium">{label}</label>
-        <input id={`${base}-street`} value={q} placeholder={placeholder} autoComplete="off" role="combobox" aria-expanded={shown} aria-controls={lid} aria-autocomplete="list"
-          aria-activedescendant={shown ? `${lid}-${idx}` : undefined} className={inputClass}
-          onChange={e => { setQ(e.target.value); setIdx(0); setOpen(true) }} onFocus={() => setOpen(true)} onBlur={() => setTimeout(() => setOpen(false), 120)}
-          onKeyDown={e => {
-            if (!shown || e.nativeEvent.isComposing) return
-            if (e.key === 'Escape') { e.preventDefault(); e.stopPropagation(); setOpen(false) }
-            else rove(e)
-          }} />
+        <input id={`${base}-street`} value={q} placeholder={placeholder} autoComplete="off" {...lb.comboProps} className={inputClass}
+          onChange={e => { setQ(e.target.value); lb.setActive(0); setOpen(true) }} onFocus={() => setOpen(true)} onBlur={() => setTimeout(() => setOpen(false), 120)}
+          onKeyDown={e => { if (shown && !e.nativeEvent.isComposing) lb.onKeyDown(e) }} />
         <FloatingPanel open={shown} matchWidth flip="scroll" role="presentation" className="max-h-64 overflow-auto overscroll-contain">
-          <OptionList id={lid} label={'Suggestions'} options={options} active={Math.min(idx, Math.max(0, items.length - 1))} query={term} isSelected={() => false}
-            onPick={i => choose(items[i])} onHover={setIdx} />
+          <OptionList id={lb.id} label={'Suggestions'} options={options} active={Math.min(lb.active, Math.max(0, items.length - 1))} query={term} isSelected={() => false}
+            onPick={i => choose(items[i])} onHover={lb.setActive} />
         </FloatingPanel>
       </div>
       <div className="grid grid-cols-[minmax(0,2fr)_minmax(0,1fr)] gap-2.5">
@@ -616,9 +611,8 @@ export function EmojiPicker({ onPick, onClose, recent = [], className }: { onPic
   )
   const onGridKey = (e: RKeyboardEvent) => {
     const btns = [...(grid.current?.querySelectorAll<HTMLElement>('[data-emoji-grid] button') ?? [])], i = btns.indexOf(document.activeElement as HTMLElement)
-    const d = ({ ArrowRight: 1, ArrowLeft: -1, ArrowDown: 8, ArrowUp: -8 } as Record<string, number>)[e.key]
-    if (!d || i < 0) return
-    e.preventDefault(); btns[Math.max(0, Math.min(btns.length - 1, i + d))]?.focus()
+    const to = i < 0 || e.key === 'Home' || e.key === 'End' ? null : gridKeyMove(e.key, i, btns.length, 8, true)
+    if (to !== null) { e.preventDefault(); btns[to]?.focus() }
   }
   return (
     <div ref={grid} className={cn('w-[300px] max-w-[calc(100vw-32px)]', className)} onKeyDown={e => { if (e.key === 'Escape') { e.stopPropagation(); onClose?.() } else onGridKey(e) }}>

@@ -32,7 +32,7 @@ describe('forms split', () => {
     expect('ShortcutOverlay' in lib).toBe(false)
   })
 
-  it('sample editor content is only in @lyndon/ui/examples', () => {
+  it('sample editor content is only in the showcase examples', () => {
     for (const n of ['RTE_SAMPLE', 'MENTION_PEOPLE', 'MENTION_COMMANDS']) {
       expect(lib).not.toHaveProperty(n)
       expect(examples).toHaveProperty(n)

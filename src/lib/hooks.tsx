@@ -1,5 +1,5 @@
 /** State and DOM hooks: controllable state, outside clicks, an active index, status flashes, a live region, sizes, media queries, touch, pointer drag, long press, hotkeys, focus trap, roving focus, streamed text, scroll edges. Part of @lyndon/ui/core. */
-import { type ReactNode, type PointerEvent as ReactPointerEvent, type RefObject, type KeyboardEvent as RKeyboardEvent, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, useSyncExternalStore } from 'react'
+import { type Context, type ReactNode, type PointerEvent as ReactPointerEvent, type RefObject, type KeyboardEvent as RKeyboardEvent, useCallback, useEffect, useContext, useId, useLayoutEffect, useMemo, useRef, useState, useSyncExternalStore } from 'react'
 import { focusables } from './helpers'
 import { uiShared } from './shared'
 
@@ -337,54 +337,37 @@ export function useRoving(count: number, onEnter: (i: number) => void, options: 
 }
 
 /**
- * Reveals text the way a model streams it: a few characters (`unit: 'char'`, about `cps` per second) or a word
- * (`unit: 'word'`, every `wordDelay` ms) at a time. Give it a finished string to replay it, or a string that keeps
- * growing (append-only, e.g. a live model stream) and it carries on from where it is instead of restarting; with
- * `live` it is not `done` until `live` turns false, and it speeds up to stay close when a large chunk lands. Any
- * other change to `text` replays from the start. `start: false` pauses it. Under reduced motion it shows everything.
- * Returns `{ text: shown so far, done, shown: chars shown, total }`. StreamingText is this hook as a component.
+ * A field that opens a listbox (Select, Combobox, MultiSelect, the time and zone pickers), given its open state
+ * (useDisclosure): the active option (useRoving, skipping disabled ones), the combobox's ARIA and its keys. Escape closes
+ * the list without reaching a dialog around it and Tab closes it. `input`: a typing combobox, where any key opens the
+ * list and arrows stop at the ends (Home/End stay with the caret). Otherwise a button that opens on ↓ ↑ Enter Space and
+ * picks with Space. `show(true)` puts the active option on `selected` (else the first enabled one) before opening.
  */
-export function useStreamedText(text: string, { cps = 60, start = true, unit = 'char', wordDelay = 45, live = false, onProgress }:
-  { cps?: number; start?: boolean; unit?: 'char' | 'word'; wordDelay?: number; live?: boolean; onProgress?: () => void } = {}) {
-  const reduce = useMediaQuery('(prefers-reduced-motion: reduce)')
-  const [st, setSt] = useState(() => ({ src: text, pos: 0 }))
-  const progress = useRef(onProgress); progress.current = onProgress
-  const src = useRef(text); src.current = text
-  let { pos } = st
-  if (st.src !== text) {
-    // append-only? (compares the tail of what we had, so a long stream stays cheap to check)
-    const prev = st.src, k = Math.min(prev.length, 256)
-    const appended = text.length >= prev.length && text.startsWith(prev.slice(prev.length - k), prev.length - k)
-    pos = appended ? Math.min(st.pos, text.length) : 0
-    setSt({ src: text, pos }) // adjust state while rendering (React re-renders before committing)
+export function useListbox(items: readonly { disabled?: boolean }[], onPick: (i: number) => void,
+  { open, setOpen, input = false, selected, locked = false }: { open: boolean; setOpen: (open: boolean) => void; input?: boolean; selected?: number; locked?: boolean }) {
+  const id = useId()
+  const isDisabled = (i: number) => !!items[i]?.disabled
+  const { active, setActive, onKeyDown: rove } = useRoving(items.length, onPick, { loop: !input, homeEnd: !input, isDisabled })
+  const firstOn = () => Math.max(0, items.findIndex(x => !x.disabled))
+  const show = (o: boolean) => {
+    if (o && locked) return
+    if (o && selected !== undefined) setActive(selected >= 0 ? selected : firstOn())
+    else if (o && isDisabled(active)) setActive(firstOn())
+    setOpen(o)
   }
-  const total = text.length
-  const shown = reduce ? total : Math.min(pos, total)
-  const behind = !reduce && start && pos < total
-  useEffect(() => {
-    if (!behind) return
-    const word = unit === 'word'
-    // one interval while it is behind (reading the latest text from a ref, so a stream of updates doesn't reset it);
-    // it stops once caught up and starts again when more text arrives
-    const id = setInterval(() => {
-      if (word && Math.random() < 0.2) return // the uneven rhythm of the per-word random delay this replaced
-      setSt(s => {
-        const text = src.current, total = text.length
-        if (s.src !== text || s.pos >= total) return s
-        const lag = total - s.pos
-        let to: number
-        if (word) {
-          const from = live && lag > 400 ? s.pos + Math.floor(lag / 10) : s.pos + 1 // live and far behind: catch up
-          const sp = text.indexOf(' ', from)
-          to = sp < 0 ? total : sp
-        } else to = s.pos + 2 + Math.floor(Math.random() * 3) + (live ? Math.floor(lag / 12) : 0)
-        return { src: s.src, pos: Math.min(total, to) }
-      })
-      progress.current?.()
-    }, word ? Math.max(8, wordDelay * 0.85) : 1000 / (Math.max(1, cps) / 3))
-    return () => clearInterval(id)
-  }, [behind, cps, unit, wordDelay, live])
-  return { text: text.slice(0, shown), done: !live && shown >= total, shown, total }
+  const onKeyDown = (e: RKeyboardEvent) => {
+    if (e.key === 'Escape') { if (open) { e.stopPropagation(); setOpen(false) } return }
+    if (e.key === 'Tab') return setOpen(false)
+    if (input) { if (!open) setOpen(true); return rove(e) }
+    if (!open) { if (['ArrowDown', 'ArrowUp', 'Enter', ' '].includes(e.key)) { e.preventDefault(); show(true) } return }
+    if (e.key === ' ') { e.preventDefault(); return onPick(active) }
+    rove(e)
+  }
+  const comboProps = {
+    role: 'combobox', 'aria-expanded': open, 'aria-controls': id, 'aria-activedescendant': open && items.length ? `${id}-${active}` : undefined,
+    ...(input ? { 'aria-autocomplete': 'list' as const } : { 'aria-haspopup': 'listbox' as const }),
+  }
+  return { id, active, setActive, show, onKeyDown, comboProps }
 }
 
 /**
@@ -407,4 +390,18 @@ export function useScrollEdges<T extends HTMLElement>() {
     return () => { el.removeEventListener('scroll', upd); ro.disconnect() }
   }, [el])
   return [ref, edges] as const
+}
+
+/** Refocus an element by selector (inside `root`) after React re-renders (moved nodes lose focus). */
+export function useRefocus(root: RefObject<HTMLElement | null>) {
+  const pending = useRef<string | null>(null)
+  useEffect(() => { if (pending.current) { root.current?.querySelector<HTMLElement>(pending.current)?.focus(); pending.current = null } })
+  return (selector: string) => { pending.current = selector }
+}
+
+/** A context that needs its provider: the value, or an error saying `${part} must be inside ${where}`. */
+export function useRequiredContext<T>(ctx: Context<T | null>, part: string, where: string): T {
+  const c = useContext(ctx)
+  if (!c) throw new Error(`${part} must be inside ${where}`)
+  return c
 }

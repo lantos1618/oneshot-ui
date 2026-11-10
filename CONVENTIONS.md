@@ -2,15 +2,31 @@
 
 ## Layout
 
-- `src/lib/*.tsx`: the library, one module per area; `src/lib/index.ts` re-exports all of them (don't edit it; new modules are already registered).
+- `src/lib/*.tsx`: the library, one module per area. `src/lib/index.ts` re-exports the core tier, `src/lib/all.ts` everything (see Tiers).
 - `src/showcase/*.tsx`: the demo page, one file per section (`XSection`), plus `kit.tsx` (Spec, Section, Row, SECTIONS) and `index.tsx` (page shell).
 - `scripts/build-single.mjs` generates `dist-single/ui.tsx` (one drop-in file) from the modules. Because of that, **every top-level name must be unique across all of `src/lib` and `src/showcase`**. Prefix internal helpers with your area if in doubt (e.g. `gridSort`, not `sort`).
 - `GAPS.md`: what's missing, per component. Work through the rows in your scope.
 
+## Tiers
+
+Every module in `src/lib` belongs to the **core** tier or to one **extras** family; `scripts/tiers.mjs` is the list.
+
+- Core (`@lyndon/ui`): foundation (helpers, shared, locale, safe, theme, hooks, icons, slot, primitives, formcontrol),
+  motion, virtual, magnet, overlays and forms, navigation, feedback, data, layout, provider.
+- Extras, each reached through its own subpath (`@lyndon/ui/charts`): vizkit, charts, diagrams, geo, content, lanes,
+  media, collab, data (datagrid, scheduler, kanban), binary, ai, agents, theming.
+- Core never imports extras, not even types. An extras module imports core, its own family and the families listed in
+  its `deps`. Nothing imports a barrel except `./core`. No runtime import cycles. `tests/unit/tiers.test.ts` checks all
+  of this, plus that `index.ts`, `all.ts`, `package.json` exports, the single-file bundles and the tag areas match.
+- A new module: add it to `CORE` or a family in `scripts/tiers.mjs`, add its `./<name>` export to `package.json` and
+  its area to `TAG_MODULE_AREA` (`src/showcase/tags.ts`). The builds fail until it is placed.
+- Shared plumbing for extras goes in core (hooks, helpers, primitives, motion) or in `vizkit` for chart math; a helper
+  two families need never lives in one of them.
+
 ## Rules
 
 - Edit only the files your brief lists. Exception: you may append new icon paths to `ICONS` in `src/lib/icons.tsx` (re-read the file right before editing; keep the edit to the map). If you need any other change in a file you don't own, put a minimal local version in your own module and mention it in your report.
-- Import siblings explicitly: `import { Button, cn, spring } from './core'`. Showcase files import from `'../lib'` and `'./kit'`.
+- Import siblings explicitly: `import { Button, cn, spring } from './core'`, never from another barrel (`./forms`, `./diagrams`). Showcase files import core from `'../lib'`, extras from `'../lib/<module>'`, and `'./kit'`.
 - No new npm dependencies. Everything is React + `motion/react` + Tailwind.
 - Do not run `pnpm build`, do not commit, do not restart the dev server.
 
@@ -30,7 +46,7 @@
 - Tailwind class strings must be literal (no `bg-[var(--${x})]`); pick from maps of full class strings.
 - No tailwind-merge: to override a class a component already sets, use the `!` prefix (`className="!h-8"`).
 - Animation: `motion/react` with `spring(bounce, duration)` from core. Use `initial={false}` where mount animation isn't wanted. Keyframe arrays that must replay on every change need a changing `key` (or `useAnimate`), because the same array on re-render does nothing. `MotionConfig reducedMotion="user"` already wraps everything.
-- Reuse the shared pieces before writing new ones: `Button`, `IconButton`, `Badge`, `Card`, `Avatar`, `AnimatedNumber` (rolling digits), `ActiveIndicator` (sliding pill/underline via layoutId), `Popover`/`FloatingPanel`/`DropdownMenu`/`MenuItem`, `ModalLayer`/`Dialog`/`Sheet`, `Collapse`, `Select`/`Combobox`/`OptionList`, `Tooltip`, `HoverCard`, `useToast` (supports `action` for Undo), `useControllable`, `useDisclosure`, `useRoving`, `useHotkey`, `useWidth`, `useActiveIndex`, `useStatusFlash`, `useLive`, `useResizeObserver`, `gridKeyMove`/`menuKeyMove`, `downloadBlob`, `writeClipboard`, `Chart` kit (`useChartShell` + `ChartShell`, chart math in `vizkit.tsx`), `confetti()`.
+- Reuse the shared pieces before writing new ones: `Button`, `IconButton`, `Badge`, `Card`, `Avatar`, `AnimatedNumber` (rolling digits), `ActiveIndicator` (sliding pill/underline via layoutId), `Popover`/`FloatingPanel`/`DropdownMenu`/`MenuItem`, `ModalLayer`/`Dialog`/`Sheet`, `Collapse`, `Select`/`Combobox`/`OptionList`, `Tooltip`, `HoverCard`, `useToast` (supports `action` for Undo), `useControllable`, `useDisclosure`, `useRoving`, `useListbox`, `useHotkey`, `useWidth`, `useActiveIndex`, `useStatusFlash`, `useLive`, `useResizeObserver`, `useRequiredContext`, `PartButton`, `gridKeyMove`/`focusStep`, `downloadBlob`, `writeClipboard`, `Legend`, `EmptyState size="sm"`, `svgN`, `useWheelZoom`/`usePinchPan`, `Chart` kit (`useChartShell` + `ChartShell`, chart math, `niceStep` and `TrackGrid` in `vizkit.tsx`), `confetti()`.
 - Components: typed props, `className` passthrough, controlled (`value`/`onChange`) or uncontrolled (`defaultValue`) where it's an input, keyboard support and ARIA roles, touch support for anything draggable (pointer events + `touch-none`), a one-line JSDoc on each export saying what it is and how it behaves.
 - Demos in the showcase use `<Spec title desc span>` inside `<Section>`. Use realistic content from the original. Every interactive demo should work, not just render.
 

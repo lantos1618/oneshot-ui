@@ -1,7 +1,7 @@
 // Generates the data the docs site (docs/) renders, into docs/generated/:
 //
 //   items.json   one entry per registry item (dist-registry/index.json: run scripts/build-registry.mjs first), with
-//                its kind, area and tags (src/showcase/tags.ts), and for every exported component a props table extracted from the TypeScript types:
+//                its tier, family and import path (scripts/tiers.mjs), kind, area and tags (src/showcase/tags.ts), and for every exported component a props table extracted from the TypeScript types:
 //                name, type, required, default (from the parameter's destructuring) and JSDoc. Props inherited from
 //                React's DOM attribute types are counted, not listed. Hooks and helpers get their signature.
 //   demos.json   which showcase cards (src/showcase/*Section.tsx <Spec title>) demonstrate each item (TAG_CARDS in
@@ -14,6 +14,7 @@ import { join } from 'node:path'
 import { analyze } from './registry/analyze.mjs'
 import { apiOfDecl } from './registry/api.mjs'
 import { TAGS, TAG_CARDS } from '../src/showcase/tags.ts'
+import { EXTRAS } from './tiers.mjs'
 
 const root = new URL('..', import.meta.url).pathname
 const outDir = join(root, 'docs/generated')
@@ -29,7 +30,7 @@ try {
   items = index.items.map(e => {
     const home = graph.decls.get(e.exports[0])?.module
     return {
-      name: e.name, title: e.title, type: e.type, description: e.description, kind: e.kind, area: e.area, tags: e.tags, module: home,
+      name: e.name, title: e.title, type: e.type, description: e.description, tier: e.tier, family: e.family, import: e.import, kind: e.kind, area: e.area, tags: e.tags, module: home,
       exports: e.exports, embeds: e.embeds, dependencies: e.dependencies, requires: e.requires,
       bytes: e.bytes, tokens: e.tokens, file: e.file, packageFile: e.packageFile ?? null,
       api: e.exports.map(n => apiOfDecl(graph, n)).filter(Boolean),
@@ -95,7 +96,7 @@ for (const it of items) {
 }
 
 mkdirSync(outDir, { recursive: true })
-writeFileSync(join(outDir, 'items.json'), JSON.stringify({ version: index.version, areas: AREAS, items }) + '\n')
+writeFileSync(join(outDir, 'items.json'), JSON.stringify({ version: index.version, areas: AREAS, families: Object.keys(EXTRAS), items }) + '\n')
 writeFileSync(join(outDir, 'demos.json'), JSON.stringify(demos, null, 1) + '\n')
 const withProps = items.reduce((a, i) => a + i.api.filter(x => x.kind === 'component').length, 0)
 console.log(`docs/generated: ${items.length} pages, ${withProps} props tables, ${Object.keys(demos).length} pages with live demos · ${Date.now() - t0} ms`)

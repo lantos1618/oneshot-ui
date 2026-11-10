@@ -1,5 +1,5 @@
 import { useLayoutEffect, useRef, useState } from 'react'
-import { Icon, TOUCH, clamp, cn } from './core'
+import { Icon, TOUCH, clamp, cn, svgTranslate } from './core'
 import { useFrameLoop } from './motion'
 
 /* Shared pieces of the diagram modules (gantt, statechart, trace, network): not part of the public API. */
@@ -39,7 +39,7 @@ export function DgDot({ path, ms, ease, onDone }: { path: () => SVGPathElement |
     const r = run.current, c = ref.current; if (!r || !c) return
     const e = ease === 'inOut' ? (u < 0.5 ? 2 * u * u : 1 - (-2 * u + 2) ** 2 / 2) : u
     const f = clamp(e, 0, 1) * (r.n - 1), a = Math.min(r.n - 2, Math.floor(f)), k = f - a, L = r.lut
-    c.setAttribute('transform', `translate(${(L[a * 2] + (L[a * 2 + 2] - L[a * 2]) * k).toFixed(1)},${(L[a * 2 + 1] + (L[a * 2 + 3] - L[a * 2 + 1]) * k).toFixed(1)})`)
+    c.setAttribute('transform', svgTranslate(L[a * 2] + (L[a * 2 + 2] - L[a * 2]) * k, L[a * 2 + 1] + (L[a * 2 + 3] - L[a * 2 + 1]) * k))
   }
   useLayoutEffect(() => {
     const p = path()

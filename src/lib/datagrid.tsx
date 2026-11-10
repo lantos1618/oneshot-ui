@@ -1,8 +1,9 @@
 import { memo, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type CSSProperties, type KeyboardEvent as RKeyboardEvent, type ReactElement, type ReactNode } from 'react'
 import { AnimatePresence, motion } from 'motion/react'
-import { Button, Icon, IconButton, clamp, ScrollEdges, Skeleton, Spinner, TOUCH, cn, dateFormat, spring, surface, useCoarsePointer, useControllable, usePointerDrag, useScrollEdges, useWidth, plural, fmt, LOCALE } from './core'
+import { Button, Icon, IconButton, clamp, ScrollEdges, Skeleton, Spinner, TOUCH, cn, dateFormat, spring, surface, useCoarsePointer, useControllable, usePointerDrag, useScrollEdges, useWidth, plural, fmt, LOCALE, useLive } from './core'
 import { Popover, PopoverContent, PopoverTrigger } from './overlay'
-import { SegmentedControl, Select, inputShellClass } from './forms'
+import { SegmentedControl, inputShellClass } from './fields'
+import { Select } from './select'
 import { useToast } from './feedback'
 import { useDragSort } from './layout'
 import { useVirtual } from './virtual'
@@ -512,7 +513,7 @@ export function DataGrid<T extends object>(props: DataGridProps<T>) {
   /* keyboard: one roving Tab stop among the cells; arrows move it, Enter or F2 edits, Space selects the row */
   const [cursor, setCursor] = useState<{ id: GridKey; key: string } | null>(null)
   const pendingFocus = useRef<{ id: GridKey; key: string } | null>(null)
-  const [said, setSaid] = useState('') // polite announcements (column moves)
+  const [setSaid, live] = useLive()
   const tableRef = useRef<HTMLTableElement>(null)
   const ptr = useRef('mouse')
   const [scrollerCb, edges] = useScrollEdges<HTMLDivElement>()
@@ -1006,7 +1007,7 @@ export function DataGrid<T extends object>(props: DataGridProps<T>) {
             </PopoverContent>
           </Popover>
         </span>
-        <span className="sr-only" aria-live="polite">{said}</span>
+        {live}
       </div>
       {error != null && error !== false && (
         <div role="alert" className="flex flex-wrap items-center gap-2 border-x border-t border-[var(--line)] bg-[var(--bad-soft)] px-3 py-2 text-[13px] text-[var(--fg)]">

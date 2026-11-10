@@ -1,9 +1,10 @@
 import { memo, useCallback, useEffect, useId, useImperativeHandle, useLayoutEffect, useMemo, useRef, useState, type CSSProperties, type KeyboardEvent as ReactKeyboardEvent, type MouseEvent as ReactMouseEvent, type PointerEvent as ReactPointerEvent, type ReactNode, type Ref } from 'react'
-import { Badge, Button, IconButton, cn, clamp, inputClass, rowHoverClass, useCoarsePointer, useControllable, useWidth, plural, fmt, useResizeObserver, writeClipboard } from './core'
+import { Badge, Button, IconButton, cn, clamp, inputClass, rowHoverClass, useCoarsePointer, useControllable, useWidth, plural, fmt, useResizeObserver, writeClipboard, useLive, Legend } from './core'
 import { SegmentedControl, Switch } from './fields'
 import { ContextMenu } from './overlay'
 import { Tabs } from './navigation'
 import { VIRTUAL_OVERSCAN, useVirtual } from './virtual'
+import { useWheelZoom } from './motion'
 
 /** Bytes the binary views accept. Never copied: views read it in place. */
 export type BinaryData = Uint8Array | ArrayBuffer
@@ -342,6 +343,7 @@ const BIN_CLASS_TEXT: Record<ByteClass, string> = {
 }
 /** Byte-class colours for the map and legends. */
 const BIN_CLASS_FILL: Record<ByteClass, string> = { null: 'var(--line)', ascii: 'var(--c2)', control: 'var(--c4)', high: 'var(--c3)' }
+const BIN_CLASS_LABEL: Record<ByteClass, string> = { null: 'Zero', ascii: 'Printable', control: 'Control', high: 'High (≥ 80)' }
 
 type BinRgb = [number, number, number]
 /** Resolve any CSS colour (tokens, color-mix) to RGB against an element, for canvas drawing. */
@@ -580,7 +582,7 @@ export function HexEditor({ data, bytesPerRow = 16, sections = BIN_NO_SECTIONS, 
   useEffect(() => { if (offsetsProp) setOffMode(offsetsProp) }, [offsetsProp])
   const hasVaddr = sections.some(s => s.vaddr !== undefined)
   const anchor = useRef(cursor)
-  const live = useRef(''), [said, setSaid] = useState('')
+  const live = useRef(''), [setSaid, liveRegion] = useLive()
   const say = useCallback((s: string) => { live.current = s; setSaid(s) }, [])
 
   // ── edits: a patch map over the data, per-row versions (so only edited rows re-render), undo and redo stacks
@@ -995,7 +997,7 @@ export function HexEditor({ data, bytesPerRow = 16, sections = BIN_NO_SECTIONS, 
       </div>
       {statusEl}
       <span id={helpId} className="sr-only">{readOnly ? 'Arrow keys move the cursor, Shift extends the selection, Page Up and Page Down move by a screen, Tab switches between the hex and text columns. Ctrl+G goes to an offset, Ctrl+F searches.' : 'Arrow keys move the cursor, Shift extends the selection, Page Up and Page Down move by a screen, Tab switches between the hex and text columns. Type hex digits or text to overwrite. Ctrl+G goes to an offset, Ctrl+F searches, Ctrl+Z undoes.'}</span>
-      <span className="sr-only" aria-live="polite">{said}</span>
+      {liveRegion}
     </div>
   )
 }
@@ -1112,7 +1114,7 @@ export function EntropyMap({ data, entropy: entropyProp, length: lengthProp, win
   const shown = hover ?? (active !== null ? buckets[active]?.a ?? null : null)
   const readSec = shown !== null ? sectionAt(sections, shown) : undefined
   const describe = (o: number) => `0x${hexOffset(o)}, ${sectionAt(sections, o)?.name ?? 'no section'}, ${binBits(bitsAt(o))} bits`
-  const [said, setSaid] = useState('')
+  const [setSaid, live] = useLive()
   const goBucket = (j: number, extend: boolean) => {
     const k = clamp(j, 0, cols - 1)
     setActive(k)
@@ -1231,7 +1233,7 @@ export function EntropyMap({ data, entropy: entropyProp, length: lengthProp, win
         onBlur={e => { if (!e.currentTarget.contains(e.relatedTarget as Node | null)) { setActive(null); kAnchor.current = null } }}
         className="rounded-[var(--r-md)] outline-none focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[var(--accent)]">
         <span className="sr-only">{summary}</span>
-        <span className="sr-only" aria-live="polite">{said}</span>
+        {live}
         {vertical ? <>
           <div aria-hidden className="mb-1 flex text-[10px] text-[var(--fg3)]">
             <span className="flex-none font-[family-name:var(--mono)]" style={rulerW}><span className="font-[family-name:var(--font)]">{'Offset'}</span></span>
@@ -1422,18 +1424,8 @@ export function ByteMap({ data, sections = BIN_NO_SECTIONS, order: orderProp = 7
     const start = clamp(Math.round(o - nextLen / 2), 0, n - nextLen)
     setZoom({ start, end: start + nextLen })
   }
-  useEffect(() => {
-    const el = box.current; if (!el || !zoomable) return
-    const wheel = (e: WheelEvent) => {
-      if (!e.ctrlKey && !e.metaKey) return
-      e.preventDefault()
-      const d = cellAt(e), o = d === null ? vs + len / 2 : offOf(d)
-      zoomAround(o, e.deltaY < 0 ? 4 : 0.25)
-    }
-    el.addEventListener('wheel', wheel, { passive: false })
-    return () => el.removeEventListener('wheel', wheel)
-  }) // re-bound every render: it reads the current zoom and geometry
-  const [said, setSaid] = useState('')
+  useWheelZoom(box, (zoomIn, e) => { const d = cellAt(e), o = d === null ? vs + len / 2 : offOf(d); zoomAround(o, zoomIn ? 4 : 0.25) }, { modifier: true, enabled: zoomable })
+  const [setSaid, live] = useLive()
   const describe = (d: number) => { const o = offOf(d), s = sectionAt(sections, o); return `0x${hexOffset(o)}${s ? `, ${s.name}` : ''}, ${binBits(shannonEntropy(bytes, o - 256, o + 256))} bits` }
   const onKeyDown = (e: ReactKeyboardEvent<HTMLDivElement>) => {
     const cur = active ?? (cursor !== undefined && cellOfOffset(cursor) >= 0 ? cellOfOffset(cursor) : -1)
@@ -1463,7 +1455,6 @@ export function ByteMap({ data, sections = BIN_NO_SECTIONS, order: orderProp = 7
   const shownSec = shownOff !== null ? sectionAt(sections, shownOff) : undefined
   const shownBits = shownOff !== null ? shannonEntropy(bytes, shownOff - 256, shownOff + 256) : 0
   const modeOpts: { value: ByteMapMode; label: string }[] = [{ value: 'entropy', label: 'Entropy' }, { value: 'sections', label: 'Sections' }, { value: 'class', label: 'Bytes' }, { value: 'strings', label: 'Strings' }]
-  const chip = (color: string, text: string, key?: string) => <span key={key ?? text} className="inline-flex min-w-0 items-center gap-1.5"><span aria-hidden className="h-2.5 w-2.5 flex-none rounded-[var(--r-sm)]" style={{ background: color }} /><span className="truncate">{text}</span></span>
 
   return (
     <div className={cn('flex min-w-0 flex-col gap-2', className)} style={{ maxWidth: size }}>
@@ -1476,7 +1467,7 @@ export function ByteMap({ data, sections = BIN_NO_SECTIONS, order: orderProp = 7
           onPointerDown={e => { if (e.pointerType !== 'mouse') setHov(cellAt(e)) }}
           onClick={e => { const d = cellAt(e); if (d !== null) { setActive(null); onSelect?.(offOf(d)) } }} />
         <span className="sr-only">{`${fmt.bytes(len)} on a Hilbert curve of ${side} × ${side} cells, ${plural(bpc, 'byte')} each.`}</span>
-        <span className="sr-only" aria-live="polite">{said}</span>
+        {live}
       </div>
       <div className="flex h-9 min-w-0 flex-col justify-center text-xs text-[var(--fg2)]" aria-hidden>
         {shownOff !== null ? <>
@@ -1497,9 +1488,9 @@ export function ByteMap({ data, sections = BIN_NO_SECTIONS, order: orderProp = 7
             <span aria-hidden className="h-2 min-w-0 flex-1 rounded-full" style={{ background: binEntropyGradient('to right') }} />
             <span className="flex-none">{`${8} bits`}</span>
           </div>}
-          {legend && mode === 'sections' && sections.map((s, i) => chip(binarySectionColor(sections, i), s.name, s.name + s.offset))}
-          {legend && mode === 'class' && BIN_CLASSES.map(k => chip(BIN_CLASS_FILL[k], (k === 'null' ? 'Zero' : k === 'ascii' ? 'Printable' : k === 'control' ? 'Control' : 'High (≥ 80)'), k))}
-          {legend && mode === 'strings' && <>{chip('var(--c2)', 'In a string')}{chip('var(--muted)', 'Other')}</>}
+          {legend && mode !== 'entropy' && <Legend className="contents" items={mode === 'sections' ? sections.map((s, i) => ({ key: s.name + s.offset, label: s.name, color: binarySectionColor(sections, i) }))
+            : mode === 'class' ? BIN_CLASSES.map(k => ({ key: k, label: BIN_CLASS_LABEL[k], color: BIN_CLASS_FILL[k] }))
+            : [{ label: 'In a string', color: 'var(--c2)' }, { label: 'Other', color: 'var(--muted)' }]} />}
           <span className="ms-auto inline-flex items-center gap-1 text-[var(--fg3)]">
             {zoom && <button type="button" onClick={() => setZoom(null)} className="me-1 cursor-pointer border-0 bg-transparent p-0 text-[11px] text-[var(--accent)] underline-offset-2 hover:underline">{'Whole file'}</button>}
             <span className="me-1">{plural(bpc, 'byte')}</span>

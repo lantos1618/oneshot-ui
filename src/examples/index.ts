@@ -1,7 +1,4 @@
-/**
- * `@lyndon/ui/examples`: sample data and demo-only helpers used by the showcase. Not part of the stable API: these
- * may change in any release. Copy what you need, or import it while you prototype.
- */
+/** Sample data and demo-only helpers for the showcase, docs and tests. Not published. */
 export * from './canvas'
 export * from './charts'
 export * from './editor'

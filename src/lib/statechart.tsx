@@ -1,7 +1,7 @@
 import { useEffect, useId, useLayoutEffect, useMemo, useReducer, useRef, useState, type CSSProperties, type ReactNode } from 'react'
 import { AnimatePresence, motion, useInView, useReducedMotion } from 'motion/react'
 import { Badge, Button, Icon, ScrollEdges, TOUCH, clamp, cn, maxOf, spring, surface, useScrollEdges, fmt } from './core'
-import { SegmentedControl } from './forms'
+import { SegmentedControl } from './fields'
 import { play, useFrameLoop } from './motion'
 import { DG_DOTS, DgDot, dgBez, dgSafeId } from './diagramkit'
 

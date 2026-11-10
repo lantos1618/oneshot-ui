@@ -1,11 +1,11 @@
 import { useEffect, useId, useLayoutEffect, useMemo, useRef, useState, useSyncExternalStore, type ReactNode, type Ref, type KeyboardEvent as RKeyboardEvent } from 'react'
 import { AnimatePresence, motion } from 'motion/react'
-import { FormFieldContext, LOCALE, type FormControlProps, formDate, formDisabledClass, formReadOnlyClass, useFormControl, Badge, Button, type HourCycle, type WeekDay, dateFormat, inputClass, numberFormat, addDays, addMonths, cn, fmtDate, isTouch, menuItemClass, sameDay, spring, startOfDay, useControllable, useDisclosure, usePointerDrag, useRoving, plural, composeRefs, memoOnce } from './core'
+import { FormFieldContext, LOCALE, type FormControlProps, formDate, formDisabledClass, formReadOnlyClass, useFormControl, Badge, Button, type HourCycle, type WeekDay, dateFormat, inputClass, numberFormat, addDays, addMonths, cn, fmtDate, isTouch, menuItemClass, sameDay, spring, startOfDay, useControllable, useDisclosure, usePointerDrag, useListbox, plural, composeRefs, memoOnce } from './core'
 import { play } from './motion'
-import { FloatingPanel, Popover, PopoverContent, type Placement, usePopover } from './overlay'
-import { formsAssignRef, formsPlacement, formsScrollIntoList, formsTriggerClass } from './formkit'
+import { FloatingPanel, Popover, PopoverContent, usePopover } from './overlay'
+import { formsScrollIntoList, formsTriggerClass } from './formkit'
 import { SegmentedControl, inputShellClass } from './fields'
-import { Combobox } from './select'
+import { Combobox, OptionList } from './select'
 
 //
 // Values (README "Forms" has the FormData table):
@@ -389,7 +389,7 @@ function DatesSegments(p: DatesSegmentsProps) {
             // each segment is a target of at least 24×24px (WCAG 2.5.8), digits centred in it
             <span key={k} className="relative inline-block min-w-6 text-center">
               <span aria-hidden className="invisible px-0.5 leading-6 whitespace-pre tabular-nums">{text ? widest : ph}</span>
-              <input ref={el => { refs.current[i] = el; if (i === 0) formsAssignRef(p.inputRef, el) }} id={sid} role="spinbutton"
+              <input ref={el => { refs.current[i] = el; if (i === 0) composeRefs(p.inputRef)(el) }} id={sid} role="spinbutton"
                 inputMode={t === 'dayPeriod' ? 'text' : 'numeric'} enterKeyHint="next" autoComplete="off" autoCorrect="off" spellCheck={false}
                 aria-label={datesFieldName(locale, t)} aria-labelledby={labelRef ? `${labelRef} ${sid}` : undefined}
                 aria-valuenow={vals[t] ?? undefined} aria-valuemin={lo} aria-valuemax={hi} aria-valuetext={text || p.emptyText}
@@ -1003,8 +1003,7 @@ export function TimeField({ value, defaultValue = '', onChange, granularity = 'm
   const range = v === null ? null : lo !== null && v < lo ? `Choose ${fmtT(lo)} or later` : hi !== null && v > hi ? `Choose ${fmtT(hi)} or earlier` : null
   const problem = range ?? (seg.partial ? 'Enter a complete time' : null)
   // suggestions
-  const { open, setOpen, ref: wrap } = useDisclosure(), lid = useId()
-  const [place, setPlace] = useState<Placement>('bottom-start')
+  const { open, setOpen, ref: wrap } = useDisclosure()
   const opts = useMemo<TimeOption[]>(() => !step ? [] : timeOptions(step, from, to).map(o => {
     const s = datesSecs(o.value)!
     return { value: o.value, label: fmtT(s), disabled: (lo !== null && s < lo) || (hi !== null && s > hi) }
@@ -1014,13 +1013,8 @@ export function TimeField({ value, defaultValue = '', onChange, granularity = 'm
     const o = opts[i]; if (!o || o.disabled) return
     fc.set(granularity === 'second' ? `${o.value}:00` : granularity === 'hour' ? `${o.value.slice(0, 3)}00` : o.value); setOpen(false)
   }
-  const { active, setActive, onKeyDown } = useRoving(opts.length, pick, { isDisabled: i => !!opts[i]?.disabled })
   const locked = fc.disabled || fc.readOnly
-  const show = (o: boolean) => {
-    if (o && locked) return
-    if (o) { const i = near >= 0 ? near : opts.findIndex(x => !x.disabled); setActive(Math.max(0, i)); setPlace(formsPlacement(wrap.current)) }
-    setOpen(o)
-  }
+  const lb = useListbox(opts, pick, { open, setOpen, selected: near, locked }), show = lb.show
   const zone = timeZone ? datesZoneName(L.locale, L.timeZone, Date.now()) : null
   return (
     <div ref={wrap} className={cn('relative', className)} onBlur={fc.onBlur}>
@@ -1030,23 +1024,15 @@ export function TimeField({ value, defaultValue = '', onChange, granularity = 'm
         onFocusChange={setEditing} onKeyDown={e => { if (step && e.altKey && e.key === 'ArrowDown') { e.preventDefault(); show(true); setTimeout(() => wrap.current?.querySelector<HTMLElement>('[data-times]')?.focus()) } }}
         suffix={zone && <span className="flex-none text-xs text-[var(--fg3)]">{zone}</span>}>
         {step ? (
-          <button type="button" data-times role="combobox" aria-label={'Show times'} aria-haspopup="listbox" aria-expanded={open} aria-controls={lid} aria-activedescendant={open ? `${lid}-${active}` : undefined}
-            disabled={fc.disabled} onClick={() => show(!open)}
-            onKeyDown={e => {
-              if (!open) { if (['ArrowDown', 'ArrowUp', 'Enter', ' '].includes(e.key)) { e.preventDefault(); show(true) } return }
-              if (e.key === 'Escape') { e.stopPropagation(); setOpen(false); return }
-              if (e.key === 'Tab') return setOpen(false)
-              if (e.key === ' ') { e.preventDefault(); pick(active); return }
-              onKeyDown(e)
-            }}
+          <button type="button" data-times {...lb.comboProps} aria-label={'Show times'} disabled={fc.disabled} onClick={() => show(!open)} onKeyDown={lb.onKeyDown}
             className={cn('-me-1 grid h-7 w-7 flex-none place-items-center rounded-[var(--r-md)] border-0 bg-transparent text-[var(--fg3)] [@media(pointer:coarse)]:h-8 [@media(pointer:coarse)]:w-8', locked ? 'cursor-default' : 'cursor-pointer hover:bg-[var(--muted)] hover:text-[var(--fg)]')}>
             <DatesGlyph name="clock" />
           </button>
         ) : null}
       </DatesSegments>
       {step ? (
-        <FloatingPanel open={open} matchWidth placement={place} className="max-h-64 overflow-auto tabular-nums" role="presentation">
-          <DatesTimeList id={lid} options={opts} active={active} selected={fc.value.slice(0, 5)} onPick={pick} onHover={setActive} label={'Suggested times'} />
+        <FloatingPanel open={open} matchWidth className="max-h-64 overflow-auto tabular-nums" role="presentation">
+          <DatesTimeList id={lb.id} options={opts} active={lb.active} selected={fc.value.slice(0, 5)} onPick={pick} onHover={lb.setActive} label={'Suggested times'} />
         </FloatingPanel>
       ) : null}
       {!fc.disabled && <DatesValidity message={problem} name={fc.name} form={fp.form} focus={() => first.current?.focus()} onInvalid={() => setFlagged(true)} />}
@@ -1284,55 +1270,38 @@ export function DateTimePicker({ timeZonePicker, numberOfMonths, ...props }: Dat
 
 /**
  * DateTimePicker's time-zone field: a small combobox over every IANA zone. The list is built when it first opens (about
- * 420 zones, each needing its offset) and rendered in full; typing narrows it. Lighter than TimeZonePicker (no shared
- * Combobox, option list or virtualiser), which suits a field that sits beside another.
+ * 420 zones, each needing its offset) and rendered in full; typing narrows it. Lighter than TimeZonePicker (no form
+ * control, loader or virtualiser), which suits a field that sits beside another.
  */
 function DatesZoneField({ value, onChange, at, label, placeholder, empty, disabled, readOnly, className }: { value: string; onChange: (z: string) => void; at: number | null
   label: string; placeholder: string; empty: string; disabled: boolean; readOnly: boolean; className?: string }) {
-  const { open: isOpen, setOpen, ref: wrap } = useDisclosure(), lid = useId(), input = useRef<HTMLInputElement>(null)
+  const { open: isOpen, setOpen, ref: wrap } = useDisclosure(), input = useRef<HTMLInputElement>(null)
   const open = isOpen && !disabled && !readOnly
   const hour = Math.floor((at ?? Date.now()) / 36e5) // offsets only change on the hour
   const label0 = (z: string) => `(GMT${datesOffsetText(zoneOffset(z, hour * 36e5))}) ${z.replace(/_/g, ' ')}`
   const [q, setQ] = useState<string | null>(null) // null: not typing, the field shows the zone
-  // the label is Latin text:)" from mirroring its parentheses
-  const shown = ('') + label0(value)
+  const shown = label0(value)
   const all = useMemo(() => (open ? timeZoneOptions(hour * 36e5) : []), [open, hour])
   const query = (q ?? '').trim().toLowerCase()
   const list = query ? all.filter(o => o.label.toLowerCase().includes(query)) : all
   const pick = (i: number) => { const o = list[i]; if (!o) return; onChange(o.value); setQ(null); setOpen(false) }
-  const { active, setActive, onKeyDown } = useRoving(list.length, pick, { loop: false, homeEnd: false })
-  useEffect(() => {
-    if (!open) return
-    const el = document.getElementById(`${lid}-${active}`)
-    if (el) formsScrollIntoList(el)
-  }, [open, active, lid])
+  const lb = useListbox(list, pick, { open, setOpen, input: true }), setActive = lb.setActive
   const show = () => { setOpen(true); if (q === null) setActive(Math.max(0, all.findIndex(o => o.value === value))) }
   return (
     <div ref={wrap} className={cn('relative', className)}>
       <span className="pointer-events-none absolute top-1/2 start-3 grid -translate-y-1/2 text-[var(--fg3)]"><DatesGlyph name="globe" size={14} /></span>
-      <input ref={input} role="combobox" aria-label={label} aria-expanded={open} aria-controls={lid} aria-autocomplete="list" aria-activedescendant={open && list.length ? `${lid}-${active}` : undefined}
-        disabled={disabled} readOnly={readOnly} autoComplete="off" placeholder={placeholder} value={q ?? shown}
+      <input ref={input} {...lb.comboProps} aria-label={label} disabled={disabled} readOnly={readOnly} autoComplete="off" placeholder={placeholder} value={q ?? shown}
         className={cn(inputClass, formDisabledClass, formReadOnlyClass, '!ps-8')}
         onFocus={e => { e.currentTarget.select(); show() }} onClick={show}
         onChange={e => { setQ(e.target.value); setOpen(true); setActive(0) }}
         onBlur={e => { if (!wrap.current?.contains(e.relatedTarget as Node)) { setOpen(false); setQ(null) } }}
         onKeyDown={e => {
-          if (e.key === 'Escape') { if (open) { e.stopPropagation(); setOpen(false); setQ(null) } return }
-          if (e.key === 'Tab') { setOpen(false); setQ(null); return }
-          if (!open) show()
-          onKeyDown(e)
+          if (e.key === 'Escape' || e.key === 'Tab') setQ(null)
+          else if (!open) show()
+          lb.onKeyDown(e)
         }} />
       <FloatingPanel open={open} matchWidth flip="scroll" className="max-h-[220px] overflow-auto" role="presentation">
-        {list.length ? (
-          <div role="listbox" id={lid} aria-label={label}>
-            {list.map((o, i) => (
-              <div key={o.value} id={`${lid}-${i}`} role="option" aria-selected={o.value === value} data-active={i === active}
-                onPointerMove={() => setActive(i)} onPointerDown={e => e.preventDefault()} onClick={() => pick(i)} className={menuItemClass}>
-                <bdi className="truncate">{o.label}</bdi>{o.value === value && <DatesGlyph name="check" size={14} />}
-              </div>
-            ))}
-          </div>
-        ) : <div role="status" className="p-3 text-center text-[13px] text-[var(--fg3)]">{empty}</div>}
+        <OptionList id={lb.id} label={label} options={list} active={lb.active} isSelected={o => o.value === value} onPick={pick} onHover={setActive} empty={empty} virtualize={false} />
       </FloatingPanel>
     </div>
   )

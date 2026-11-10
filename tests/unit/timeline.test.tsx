@@ -3,7 +3,7 @@
 // a chart and its journal, the keyboard model, and flags that never move the trace's rows. Queried by role and name.
 import { act, fireEvent, render, screen, within } from '@testing-library/react'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
-import { ChartWithJournal, StateRibbon, Swimlanes, TagJournal, TraceWaterfall, clusterTimeMarks, ribbonSegments, type TimeTag, type TimeTagKind, type TraceSpan } from '../../src/lib'
+import { ChartWithJournal, StateRibbon, Swimlanes, TagJournal, TraceWaterfall, clusterTimeMarks, ribbonSegments, type TimeTag, type TimeTagKind, type TraceSpan } from '../../src/lib/all'
 
 const at = (h: number, m = 0) => new Date(2026, 10, 9, h, m).getTime()
 const START = at(9), END = at(17, 30)

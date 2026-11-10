@@ -3,6 +3,41 @@
 All notable changes to `@lyndon/ui`, newest first. While on 0.x, a minor release may break APIs; each breaking
 change is listed with how to migrate.
 
+## 0.11.0
+
+The library splits into a core tier and extras families. `@lyndon/ui` is now core only (foundation, motion, overlays,
+forms, navigation, feedback, data, layout, provider); charts, diagrams, maps, content, media, AI and the rest come from
+their own subpaths. `scripts/tiers.mjs` lists every module's tier, and `tests/unit/tiers.test.ts` enforces it: core never
+imports extras, extras import only core, their own family and the families they declare, no module imports a barrel
+except `./core`, there are no runtime import cycles, and the entry points and `package.json` exports match the list.
+
+### Import migration
+
+| Before | After |
+|---|---|
+| Extras names from root `@lyndon/ui` | `@lyndon/ui/<module>`, or `@lyndon/ui/all` for one release |
+| `Kanban*` | `@lyndon/ui/kanban` |
+| `AppearancePanel`, `AppearanceMenu`, `ThemeExportPanel` from root | `@lyndon/ui/appearance` (`ThemeToggle` and `ThemePreview` stay in root) |
+| `useStreamedText` | `@lyndon/ui/ai` |
+| `seeded` | removed |
+| `highlightCode`, `codeLineDiff`, `codeLanguageOf`, `CODE_LANGUAGE_NAMES`, `wordDiff`, `theme*`/`oklch*` export helpers from `/utils` | `@lyndon/ui/utils/extras` |
+| `SettingsPage` | registry block `settings-page` |
+| `@lyndon/ui/examples` | removed |
+
+### Added
+- Subpaths `@lyndon/ui/kanban`, `@lyndon/ui/vizkit`, `@lyndon/ui/utils/extras`, and `@lyndon/ui/all` (deprecated: core plus every extras module, for one minor release).
+- `useListbox` (open list, active option, combobox ARIA and keys for Select, Combobox, MultiSelect, TimePicker, the zone field, PhoneInput's country menu and AddressAutocomplete), `useRequiredContext`, `useRefocus`, `PartButton` (a part's trigger: a button, or your element with `asChild`), `focusStep` (DOM focus roving for menus, tabs, toggle groups and toolbars), `Legend` in core (charts, StateRibbon and ByteMap share it; entries take an optional `value`), `EmptyState size="sm"`, `svgN` / `svgTranslate`, `useWheelZoom`; `usePinchPan` moves to `@lyndon/ui/motion`.
+- `vizkit`: `niceStep(span, max, steps?)` (one tick-step rule for value axes, trace and time ticks) and `TrackGrid` (grid lines across a time track).
+- Docs: the sidebar groups items as Core (by area), Extras (by family) and Blocks; item pages show the import path. `dist-registry/index.json` items carry `tier`, `family` and `import`; llms.txt is grouped the same way. The single-file bundles follow the tiers (`ui` is core; `ui-charts`, `ui-content`, `ui-ai` the extras), and the showcase's code drawer imports each extras module from its bundle.
+
+### Removed
+- `menuKeyMove` (use `focusStep`), `seeded`, the `@lyndon/ui/pages` and `@lyndon/ui/examples` entries.
+
+### Changed
+- Select, TimePicker and the multi-select no longer pre-compute whether to open upward: the floating panel flips by its measured height.
+- PhoneInput's country button and the date-time zone field use the shared listbox (the zone list now renders through `OptionList`).
+- Every build script fails when a module in `src/lib` has no tier, and `dist-single/ui-all.tsx` is type-checked.
+
 ## 0.10.0
 
 English only, no right-to-left, and a smaller chart kit. Breaking: see Removed for what to delete from your code.

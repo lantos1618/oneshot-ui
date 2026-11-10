@@ -40,7 +40,7 @@ async function check(name, make) {
 }
 
 try {
-  const lib = await vite.ssrLoadModule('/src/lib/index.ts')
+  const lib = await vite.ssrLoadModule('/src/lib/all.ts')
   await check('UIProvider + Button', () => h(lib.UIProvider, null, h(lib.Button, null, 'Save')))
   await check('UIProvider target=self, fonts=false', () => h(lib.UIProvider, { target: 'self', fonts: false, persist: false }, h(lib.ThemeToggle)))
   await check('ThemeScript', () => h(lib.ThemeScript, { storageKey: 'app-theme', defaultTheme: { theme: 'nord' } }))

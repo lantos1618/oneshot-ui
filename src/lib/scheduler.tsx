@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useLayoutEffect, useRef, useState, type CSSProperties, type ReactNode, type KeyboardEvent as RKeyboardEvent, type PointerEvent as RPointerEvent } from 'react'
 import { AnimatePresence, motion } from 'motion/react'
-import { Avatar, AvatarStack, Button, useCoarsePointer, IconButton, ScrollEdges, TOUCH, addDays, addMonths, cn, dateFormat, dayKey, maxOf, safeColor, sameDay, spring, startOfDay, startOfWeek, surface, useControllable, usePointerDrag, useScrollEdges, useWidth, plural, fmt, LOCALE } from './core'
-import { SegmentedControl } from './forms'
+import { Avatar, AvatarStack, Button, useCoarsePointer, IconButton, ScrollEdges, TOUCH, addDays, addMonths, cn, dateFormat, dayKey, maxOf, safeColor, sameDay, spring, startOfDay, startOfWeek, surface, useControllable, usePointerDrag, useScrollEdges, useWidth, plural, fmt, LOCALE, useLive } from './core'
+import { SegmentedControl } from './fields'
 import { useToast } from './feedback'
 
 export type SchedulerEvent = {
@@ -219,7 +219,7 @@ export function Scheduler({ events, defaultEvents = [], onChange, defaultView = 
   }
 
   /* ---- keyboard on a focused event: ← / → move it a day, ↑ / ↓ by 15 minutes (Shift: resize); focus stays on it ---- */
-  const [said, setSaid] = useState('')
+  const [setSaid, live] = useLive()
   const refocus = useRef<string | null>(null)
   useEffect(() => { // after a keyboard move the event may re-render in another column (or period): put focus back on it
     const id = refocus.current; if (!id) return
@@ -481,7 +481,7 @@ export function Scheduler({ events, defaultEvents = [], onChange, defaultView = 
           </motion.div>
         )}
       </AnimatePresence>
-      <span className="sr-only" aria-live="polite">{said}</span>
+      {live}
       <div ref={card} onKeyDown={onKey} tabIndex={-1} aria-label={`Calendar, ${title}. Left and right arrows change the ${view === 'month' ? 'month' : view === 'year' ? 'year' : 'dates'}`} role="region" className={cn(surface.card, 'overflow-hidden outline-none')}>
         <AnimatePresence mode="wait" initial={false}>
           <motion.div key={`${view}:${period}`} initial={{ opacity: 0, scale: z ? (z > 0 ? 1.02 : 0.98) : 1, x: (dx * 16) }} animate={{ opacity: 1, scale: 1, x: 0 }}

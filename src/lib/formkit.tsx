@@ -1,8 +1,7 @@
 /* Shared pieces of the form modules (fields, inputs, select, pickers, upload): not part of the public API. */
 
-import { useEffect, useLayoutEffect, useRef, type Ref } from 'react'
+import { useEffect, useLayoutEffect, useRef } from 'react'
 import { formDisabledClass, cn, inputClass } from './core'
-import { type Placement } from './overlay'
 
 /** Run `cb` after the form around `ref` has been reset (native fields hold their reset values by then). */
 export function useFormsAfterReset(ref: { current: HTMLInputElement | HTMLTextAreaElement | null }, cb: (el: HTMLInputElement | HTMLTextAreaElement) => void) {
@@ -15,17 +14,6 @@ export function useFormsAfterReset(ref: { current: HTMLInputElement | HTMLTextAr
     form.addEventListener('reset', on)
     return () => form.removeEventListener('reset', on)
   }, [ref])
-}
-
-/** Hand `el` to a callback or object ref. */
-export function formsAssignRef<T>(r: Ref<T> | undefined, el: T | null) { if (typeof r === 'function') r(el); else if (r) (r as { current: T | null }).current = el }
-
-
-/** Open a list upward when there isn't room below the trigger. */
-export const formsPlacement = (el: HTMLElement | null, room = 270): Placement => {
-  if (!el) return 'bottom-start'
-  const r = el.getBoundingClientRect(), below = innerHeight - r.bottom
-  return below < room && r.top > below ? 'top-start' : 'bottom-start'
 }
 
 /** Field triggers (Select, pickers): the shared field look plus the disabled, read-only and pointer states. */

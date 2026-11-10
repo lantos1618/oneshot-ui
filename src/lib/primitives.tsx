@@ -5,7 +5,7 @@ import { cn, maxOf, minOf, spring, variants } from './helpers'
 import { useWidth } from './hooks'
 import { Icon, type IconName, isIconName } from './icons'
 import { LOCALE, fmt, numberFormat, plural } from './locale'
-import { safeMediaUrl } from './safe'
+import { safeColor, safeMediaUrl } from './safe'
 import { Slot, slotOnlyChild } from './slot'
 
 const SCROLL_FADE = {
@@ -394,11 +394,28 @@ export function AnimatedNumber({ value, format, className }: { value: number; fo
 /** Curve shape for line paths: straight segments or a monotone cubic. */
 export type Curve = 'linear' | 'monotone'
 
+/** A legend entry: a swatch (`dashed` a dashed line, `band` a shaded range) and its label, with an optional quieter value. */
+export type LegendItem = { label: ReactNode; color: string; dashed?: boolean; band?: boolean; value?: ReactNode; key?: string }
+/** A wrapping row of legend entries for charts, maps and timelines (a list named "Legend"). */
+export function Legend({ items, className }: { items: readonly LegendItem[]; className?: string }) {
+  return (
+    <ul aria-label="Legend" className={cn('m-0 mt-2 flex list-none flex-wrap gap-x-4 gap-y-1 p-0 text-xs text-[var(--fg2)]', className)}>
+      {items.map((it, i) => (
+        <li key={it.key ?? (typeof it.label === 'string' ? it.label : i)} className="flex min-w-0 items-center gap-1.5">
+          <span aria-hidden className={cn('inline-block flex-none', it.band ? 'h-2.5 w-3.5 rounded-[var(--r-sm)] bg-[var(--band)]' : it.dashed ? 'w-3.5 border-t-2 border-dashed' : 'h-2.5 w-2.5 rounded-[var(--r-sm)]')}
+            style={it.band ? undefined : it.dashed ? { borderColor: safeColor(it.color) } : { background: safeColor(it.color) }} />
+          <span className="truncate">{it.label}</span>{it.value !== undefined && <span className="text-[var(--fg3)]">{it.value}</span>}
+        </li>
+      ))}
+    </ul>
+  )
+}
+
 /** SVG path through points (the chart kit and SparkChart share it). 'monotone' is a monotone cubic (Fritsch–Carlson): smooth, never overshoots the data. */
 export function chartPath(pts: [number, number][], curve: Curve = 'linear', join = false) {
   if (!pts.length) return ''
-  const head = `${join ? 'L' : 'M'}${sparkP1(pts[0][0])},${sparkP1(pts[0][1])}`
-  if (curve === 'linear' || pts.length < 2) return head + pts.slice(1).map(p => `L${sparkP1(p[0])},${sparkP1(p[1])}`).join('')
+  const head = `${join ? 'L' : 'M'}${svgN(pts[0][0])},${svgN(pts[0][1])}`
+  if (curve === 'linear' || pts.length < 2) return head + pts.slice(1).map(p => `L${svgN(p[0])},${svgN(p[1])}`).join('')
   const n = pts.length, dx: number[] = [], m: number[] = [], t: number[] = []
   for (let i = 0; i < n - 1; i++) { dx[i] = pts[i + 1][0] - pts[i][0]; m[i] = dx[i] ? (pts[i + 1][1] - pts[i][1]) / dx[i] : 0 }
   t[0] = m[0]; t[n - 1] = m[n - 2]
@@ -406,12 +423,15 @@ export function chartPath(pts: [number, number][], curve: Curve = 'linear', join
   let d = head
   for (let i = 0; i < n - 1; i++) {
     const [x0, y0] = pts[i], [x1, y1] = pts[i + 1], h = dx[i] / 3
-    d += `C${sparkP1(x0 + h)},${sparkP1(y0 + t[i] * h)},${sparkP1(x1 - h)},${sparkP1(y1 - t[i + 1] * h)},${sparkP1(x1)},${sparkP1(y1)}`
+    d += `C${svgN(x0 + h)},${svgN(y0 + t[i] * h)},${svgN(x1 - h)},${svgN(y1 - t[i + 1] * h)},${svgN(x1)},${svgN(y1)}`
   }
   return d
 }
 
-const sparkP1 = (n: number) => n.toFixed(1)
+/** An SVG coordinate rounded to 0.1 (shorter paths, no float noise in snapshots). */
+export const svgN = (n: number) => n.toFixed(1)
+/** An SVG `translate(x,y)` with the coordinates rounded to 0.1. */
+export const svgTranslate = (x: number, y: number) => `translate(${svgN(x)},${svgN(y)})`
 
 /** Width plus a flag that turns true once the element has scrolled into view. */
 function useSparkFrame(amount: number) {
@@ -442,14 +462,14 @@ export function SparkChart({ data, variant = 'line', width, height = 36, color =
   // update is one style write per mark and the browser interpolates: no per-frame attribute writes. Reduced motion jumps.
   const ease = `.45s ${ROLL_EASE}`
   const path = (d: string): CSSProperties => ({ d: `path("${d}")`, transition: `d ${ease}` } as CSSProperties)
-  const dot = (x: number, y: number): CSSProperties => ({ transform: `translate(${sparkP1(x)}px,${sparkP1(y)}px)`, transition: `transform ${ease}, fill ${ease}` })
+  const dot = (x: number, y: number): CSSProperties => ({ transform: `translate(${svgN(x)}px,${svgN(y)}px)`, transition: `transform ${ease}, fill ${ease}` })
   const bar = (k: number, originY: number): CSSProperties => ({ transform: `scaleY(${k})`, transformOrigin: `0 ${originY}px`, transition: `transform ${ease}` })
   const still = 'motion-reduce:!transition-none'
   return (
     <div ref={ref} className={cn('min-w-0', className)} style={{ width: width ?? '100%', height: H }}>
       {W > 0 && (
         <svg width={W} height={H} className="block overflow-visible" aria-hidden>
-          {variant === 'area' && <path className={still} d={`${line}L${sparkP1(W)},${H}L0,${H}Z`} style={path(`${line}L${sparkP1(W)},${H}L0,${H}Z`)} fill={color} fillOpacity={0.15} />}
+          {variant === 'area' && <path className={still} d={`${line}L${svgN(W)},${H}L0,${H}Z`} style={path(`${line}L${svgN(W)},${H}L0,${H}Z`)} fill={color} fillOpacity={0.15} />}
           {variant === 'area' && target !== undefined && <line x1={0} x2={W} y1={Y(target)} y2={Y(target)} stroke="var(--fg3)" strokeDasharray="3 3" />}
           {(variant === 'line' || variant === 'area') && <path className={still} d={line} style={path(line)} fill="none" stroke={color} strokeWidth={1.6} strokeLinejoin="round" strokeLinecap="round" />}
           {variant === 'line' && minMax && seen && <>

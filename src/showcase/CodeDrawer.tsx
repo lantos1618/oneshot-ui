@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useState, useSyncExternalStore } from 'react'
 import { motion, useDragControls } from 'motion/react'
-import { CodeBlock, IconButton, ModalLayer, SegmentedControl, cn, spring, useMediaQuery } from '../lib'
+import { IconButton, ModalLayer, SegmentedControl, cn, spring, useMediaQuery } from '../lib'
+import { CodeBlock } from '../lib/code'
 
 /* View code: the `</>` button on every card opens this drawer with a copy-pasteable usage example built from the
  * card's own JSX in the showcase source (its <Spec> children, plus the state, helpers and imports they use). */
@@ -113,7 +114,7 @@ export function CodeDrawer() {
           {data === null ? <p className="m-0 text-[13px] text-[var(--fg3)]">Loading the example…</p> : ex && tab === 'props' ? <CodePropsPanel docs={docs} /> : ex ? (
             <>
               <CodeBlock code={ex.code} filename={`${codePascal(title)}.tsx`} language="ts" collapseAt={false} defaultWrap={matchMedia('(max-width: 640px)').matches} />
-              <p className="m-0 text-xs text-[var(--fg3)]">From <code className="font-[family-name:var(--mono)]">{ex.file}</code>. Imports point at <code className="font-[family-name:var(--mono)]">./ui</code>, the single-file build.</p>
+              <p className="m-0 text-xs text-[var(--fg3)]">From <code className="font-[family-name:var(--mono)]">{ex.file}</code>. Imports point at the single-file builds: <code className="font-[family-name:var(--mono)]">./ui</code> for core, <code className="font-[family-name:var(--mono)]">./ui-charts</code>, <code className="font-[family-name:var(--mono)]">./ui-content</code> or <code className="font-[family-name:var(--mono)]">./ui-ai</code> for extras.</p>
             </>
           ) : (
             <p className="m-0 rounded-[var(--r-md)] border border-dashed border-[var(--line2)] p-4 text-[13px] text-[var(--fg2)]">
