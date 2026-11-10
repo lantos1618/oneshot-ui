@@ -1,7 +1,6 @@
 import { Fragment, createContext, memo, useContext, useMemo, useState, type CSSProperties, type ReactNode } from 'react'
-import { Icon, ScrollEdges, cn, safeMediaUrl, safeUrl, useMediaQuery, useScrollEdges } from './core'
-import { CopyButton } from './feedback'
-import { InlineCode } from './code'
+import { Icon, ScrollEdges, TEXT_LINK_SCHEMES, cn, safeMediaUrl, safeUrl, useScrollEdges } from './core'
+import { CodeCopy, CodeFrame, InlineCode } from './code'
 import { useViewport } from './motion'
 
 /** Longer input is cut to this many characters before parsing (the renderer says so under the text). */
@@ -14,7 +13,6 @@ const MD_MAX_INLINE_DEPTH = 12
 const MD_MAX_COLS = 50
 /** A link destination plus title longer than this is not a link (keeps failed matches cheap). */
 const MD_LINK_MAX = 2048
-const MD_SAFE_SCHEMES = ['https:', 'http:', 'mailto:']
 
 export type MdInline =
   | { type: 'text'; text: string }
@@ -140,7 +138,9 @@ type MdRange = [number, number]
  * Parse `lines` into blocks. `atEof`: the last line is the end of the whole (possibly still streaming) source, so
  * the leaf ending there is parsed as a partial tail when `streaming`. `ranges` collects each block's line span.
  */
-function mdBlocks(lines: string[], atEof: boolean, streaming: boolean, depth: number, ranges?: MdRange[]): MdBlock[] {
+function mdBlocks(lines: string[], atEof: boolean, o: MdParseOptions, depth: number, ranges?: MdRange[]): MdBlock[] {
+  const { streaming } = o
+  const inline = (text: string, partial = false) => mdInline(text, { partial, citations: o.citations })
   const n = lines.length
   const out: MdBlock[] = []
   /** The block ending at line `e` is the streaming tail (nothing but at most one empty line after it). */
@@ -148,7 +148,7 @@ function mdBlocks(lines: string[], atEof: boolean, streaming: boolean, depth: nu
   const push = (b: MdBlock, from: number, to: number) => { out.push(b); ranges?.push([from, to]) }
   if (depth > MD_MAX_DEPTH) {
     const text = mdParaText(lines)
-    if (text) push({ type: 'paragraph', children: mdInline(text, { partial: tailAt(n - 1) }) }, 0, n - 1)
+    if (text) push({ type: 'paragraph', children: inline(text, tailAt(n - 1)) }, 0, n - 1)
     return out
   }
   let i = 0
@@ -178,7 +178,7 @@ function mdBlocks(lines: string[], atEof: boolean, streaming: boolean, depth: nu
     const atx = mdAtx(line)
     if (atx) {
       i++
-      const partial = tailAt(from), children = mdInline(atx.text, { partial })
+      const partial = tailAt(from), children = inline(atx.text, partial)
       if (children.length || !partial) push({ type: 'heading', level: atx.level, children }, from, from)
       continue
     }
@@ -193,7 +193,7 @@ function mdBlocks(lines: string[], atEof: boolean, streaming: boolean, depth: nu
         if (!mdBlank(l) && q.length && !mdBlank(q[q.length - 1]) && !mdInterrupts(l) && !mdFence(q[0])) { q.push(l); i++; continue } // lazy continuation
         break
       }
-      push({ type: 'quote', children: mdBlocks(q, tailAt(i - 1), streaming, depth + 1) }, from, i - 1)
+      push({ type: 'quote', children: mdBlocks(q, tailAt(i - 1), o, depth + 1) }, from, i - 1)
       continue
     }
 
@@ -219,7 +219,7 @@ function mdBlocks(lines: string[], atEof: boolean, streaming: boolean, depth: nu
         let content = body, checked: boolean | undefined
         const task = /^\[([ xX])\](?:[ \t]|$)/.exec(content[0])
         if (task) { checked = task[1] !== ' '; content = [content[0].slice(task[0].length), ...content.slice(1)] }
-        const kids = mdBlocks(content, tailAt(end), streaming, depth + 1)
+        const kids = mdBlocks(content, tailAt(end), o, depth + 1)
         if (kids.length > 1 && content.includes('')) tight = false
         items.push({ checked, children: kids })
         lastEnd = end
@@ -237,9 +237,9 @@ function mdBlocks(lines: string[], atEof: boolean, streaming: boolean, depth: nu
       const rows: MdInline[][][] = []
       for (i += 2; i < n && !mdBlank(lines[i]) && !mdInterrupts(lines[i]); i++) {
         const cells = mdCells(lines[i]), partial = tailAt(i)
-        rows.push(table.head.map((_, k) => mdInline(cells[k] ?? '', { partial: partial && k === cells.length - 1 })))
+        rows.push(table.head.map((_, k) => inline(cells[k] ?? '', partial && k === cells.length - 1)))
       }
-      push({ type: 'table', align: table.align, head: table.head.map(h => mdInline(h)), rows }, from, i - 1)
+      push({ type: 'table', align: table.align, head: table.head.map(h => inline(h)), rows }, from, i - 1)
       continue
     }
 
@@ -258,24 +258,26 @@ function mdBlocks(lines: string[], atEof: boolean, streaming: boolean, depth: nu
       while (k > 0 && para[k - 1].trimStart().startsWith('|')) k--
       const rest = para.slice(k)
       if (rest.length && rest.length <= 2 && (rest.length === 1 || /^[\s|:-]*$/.test(rest[1]))) {
-        if (k > 0) push({ type: 'paragraph', children: mdInline(mdParaText(para.slice(0, k))) }, from, from + k - 1)
+        if (k > 0) push({ type: 'paragraph', children: inline(mdParaText(para.slice(0, k))) }, from, from + k - 1)
         continue
       }
     }
-    const children = mdInline(mdParaText(para), { partial })
+    const children = inline(mdParaText(para), partial)
     if (children.length) push({ type: 'paragraph', children }, from, i - 1)
   }
   return out
 }
 function mdParaText(lines: string[]) { return lines.map(l => l.replace(/^[ \t]+/, '')).join('\n').trim() }
 
+/** What the block parser passes down: `citations` turns `[n]` into citation nodes. */
+type MdParseOptions = { streaming: boolean; citations: boolean }
 /** Parse the top level of `src` from offset `base` (a line start), recording source offsets. */
-function mdParseTop(src: string, streaming: boolean, base: number): MdBlock[] {
+function mdParseTop(src: string, o: MdParseOptions, base: number): MdBlock[] {
   const lines = (base ? src.slice(base) : src).split('\n')
   const starts: number[] = new Array(lines.length)
-  for (let i = 0, o = base; i < lines.length; i++) { starts[i] = o; o += lines[i].length + 1 }
+  for (let i = 0, at = base; i < lines.length; i++) { starts[i] = at; at += lines[i].length + 1 }
   const ranges: MdRange[] = []
-  const blocks = mdBlocks(lines, true, streaming, 0, ranges)
+  const blocks = mdBlocks(lines, true, o, 0, ranges)
   blocks.forEach((b, k) => { const [a, z] = ranges[k]; b.range = [starts[a], starts[z] + lines[z].length] })
   return blocks
 }
@@ -286,9 +288,10 @@ function mdNormalize(src: string) {
 /**
  * Parse Markdown (GFM subset) into blocks; pure and linear in the input. With `streaming`, syntax cut off at the end
  * of the text is parsed as what it is most likely becoming (see `Markdown`). Input over MARKDOWN_MAX_CHARS is cut.
+ * `citations` (default true): `[n]` becomes a citation node (Markdown parses them only when given `renderCitation`).
  */
-export function parseMarkdown(src: string, { streaming = false }: { streaming?: boolean } = {}): MdBlock[] {
-  return mdParseTop(mdNormalize(src), streaming, 0)
+export function parseMarkdown(src: string, { streaming = false, citations = true }: { streaming?: boolean; citations?: boolean } = {}): MdBlock[] {
+  return mdParseTop(mdNormalize(src), { streaming, citations }, 0)
 }
 
 type MdEmph = 'em' | 'strong' | 'del'
@@ -362,8 +365,9 @@ function mdDest(t: string, s: number, e: number): { href: string; title?: string
  * Parse inline Markdown. Linear: code spans are paired with one pointer per backtick-run length, brackets and parens
  * with one stack pass each, emphasis with the CommonMark delimiter algorithm (an openers bottom per kind).
  * `partial`: the text is cut off at the end (streaming), so unclosed code, links and emphasis close optimistically.
+ * `citations`: `[n]` (1 to 999) is a citation unless a letter or digit comes right before it (`arr[0]`) or `:` or `(` after it.
  */
-function mdInline(src: string, { partial = false, links = true }: { partial?: boolean; links?: boolean } = {}): MdInline[] {
+function mdInline(src: string, { partial = false, links = true, citations = false }: { partial?: boolean; links?: boolean; citations?: boolean } = {}): MdInline[] {
   let end = src.length
   if (partial) { // a half-received marker at the very end: hide it until it means something
     while (end > 0 && '*_~`'.includes(src[end - 1])) end--
@@ -461,7 +465,9 @@ function mdInline(src: string, { partial = false, links = true }: { partial?: bo
         buf += t.slice(i, o + 1); i = o + 1; continue
       }
       const inner = t.slice(o + 1, close)
-      if (!img && /^\d{1,3}$/.test(inner) && t[close + 1] !== '(') { node({ type: 'citation', n: Number(inner) }); i = close + 1; continue }
+      if (citations && !img && /^\d{1,3}$/.test(inner) && Number(inner) >= 1 && t[close + 1] !== '(' && t[close + 1] !== ':' && !/[\p{L}\p{N}]/u.test(t[o - 1] ?? '')) {
+        node({ type: 'citation', n: Number(inner) }); i = close + 1; continue
+      }
       const label = () => mdInline(inner, { links: false })
       if (t[close + 1] === '(') {
         const pc = parens[close + 1]
@@ -594,7 +600,7 @@ const mdAbsolute = (href: string) => /^https?:/i.test(href) || href.startsWith('
 function MdLinkView({ href, title, pending, children }: { href: string; title?: string; pending?: boolean; children: ReactNode }) {
   const { onLinkClick } = useContext(MdContext)
   if (pending) return <span className={MD_LINK}>{children}</span>
-  const safe = safeUrl(href, { allow: MD_SAFE_SCHEMES, fallback: '' })
+  const safe = safeUrl(href, { allow: TEXT_LINK_SCHEMES, fallback: '' })
   if (!safe) return <span title={'Link removed: unsupported address'} className="underline decoration-dotted underline-offset-2">{children}</span>
   return (
     <a href={safe} title={title} target={mdAbsolute(safe) ? '_blank' : undefined} rel="noopener noreferrer nofollow" className={MD_LINK}
@@ -613,7 +619,7 @@ function MdImageView({ src, alt, title }: { src: string; alt: string; title?: st
   const body = <><Icon name="image" size={13} className="flex-none text-[var(--fg3)]" /><span className="truncate">{alt || 'Image'}</span></>
   if (!href) return <span className={MD_IMAGE_CHIP} title={'Image not shown'}>{body}</span>
   return (
-    <a href={href} target={mdAbsolute(href) ? '_blank' : undefined} rel="noopener noreferrer nofollow" title={`${(title || 'none') === 'none' ? 'Open image' : `Open image: ${title || 'none'}`} (not loaded automatically)`}
+    <a href={href} target={mdAbsolute(href) ? '_blank' : undefined} rel="noopener noreferrer nofollow" title={`${title ? `Open image: ${title}` : 'Open image'} (not loaded automatically)`}
       className={cn(MD_IMAGE_CHIP, 'transition-colors hover:border-[var(--line2)] hover:text-[var(--fg)]')} onClick={onLinkClick ? e => onLinkClick(href, e) : undefined}>
       {body}<span className="sr-only"> {'(image, opens in a new tab)'}</span>
     </a>
@@ -716,21 +722,13 @@ function MdTableView({ block, caret }: { block: Extract<MdBlock, { type: 'table'
 /** A fence without a code renderer (or one it doesn't highlight): CodeBlock's frame, plain text, always left to right. */
 function MdPlainCode({ text, lang }: { text: string; lang: string }) {
   const [edgesRef, edges] = useScrollEdges<HTMLPreElement>()
-  const phone = useMediaQuery('(max-width: 639px)')
   const scrolls = edges.left || edges.right
   const label = lang || 'text'
   return (
-    <div className="overflow-hidden rounded-[var(--r-lg)] border border-[var(--line)] bg-[color-mix(in_srgb,var(--muted)_45%,var(--card))]">
-      <div className="flex min-h-10 items-center gap-2 border-b border-[var(--line)] bg-[var(--card)] py-1 pe-1.5 ps-3 text-xs [@media(pointer:coarse)]:min-h-11">
-        <span className="flex min-w-0 items-center gap-1.5 font-medium text-[var(--fg)]"><Icon name="file" size={13} className="text-[var(--fg3)]" /><span className="truncate">{'snippet'}</span></span>
-        <span className="flex-none rounded-[var(--r-sm)] bg-[var(--muted)] px-1.5 py-0.5 font-[family-name:var(--mono)] text-[11px] font-medium text-[var(--fg3)] max-[420px]:hidden">{label}</span>
-        <span className="flex-1" />
-        <CopyButton text={() => text} size={phone ? 'icon-sm' : 'sm'} iconOnly={phone} variant="ghost"
-          className={phone ? 'text-[var(--fg2)] hover:text-[var(--fg)]' : '!h-7 !gap-1 !px-2 font-medium text-[var(--fg2)] hover:text-[var(--fg)] [@media(pointer:coarse)]:!h-9'} />
-      </div>
+    <CodeFrame name={'snippet'} badge={label} tools={<CodeCopy text={() => text} />}>
       <pre ref={edgesRef} tabIndex={scrolls ? 0 : undefined} role={scrolls ? 'region' : undefined} aria-label={scrolls ? `${label} code, scrolls` : undefined}
         className="m-0 overflow-x-auto px-3 py-2.5 font-[family-name:var(--mono)] text-xs leading-[1.65] whitespace-pre text-[var(--fg)] [overflow-wrap:normal] focus-visible:outline-2 focus-visible:-outline-offset-2 focus-visible:outline-[var(--accent)]">{text || ' '}</pre>
-    </div>
+    </CodeFrame>
   )
 }
 
@@ -786,19 +784,19 @@ function MdBlockNode({ block: b, caret }: { block: MdBlock; caret?: MdCaretKey }
 const MdTopBlock = memo(MdBlockNode, (a, b) => a.block === b.block && a.caret === b.caret)
 
 /** Parse with reuse: while the text only grows, every block but the last two is kept as the same object. */
-function useMdBlocks(src: string, streaming: boolean) {
+function useMdBlocks(src: string, streaming: boolean, citations: boolean) {
   // a mutable box held in state: the parse is a pure function of (previous parse, src), so re-running it is harmless
-  const [cache] = useState<{ last: { src: string; streaming: boolean; blocks: MdBlock[] } | null }>(() => ({ last: null }))
+  const [cache] = useState<{ last: { src: string; streaming: boolean; citations: boolean; blocks: MdBlock[] } | null }>(() => ({ last: null }))
   return useMemo(() => {
     const prev = cache.last
     let blocks: MdBlock[]
-    if (prev && streaming && prev.streaming && prev.blocks.length > 2 && src.length >= prev.src.length && src.startsWith(prev.src)) {
+    if (prev && streaming && prev.streaming && prev.citations === citations && prev.blocks.length > 2 && src.length >= prev.src.length && src.startsWith(prev.src)) {
       const keep = prev.blocks.length - 2
-      blocks = prev.blocks.slice(0, keep).concat(mdParseTop(src, true, prev.blocks[keep].range?.[0] ?? 0))
-    } else blocks = mdParseTop(src, streaming, 0)
-    cache.last = { src, streaming, blocks }
+      blocks = prev.blocks.slice(0, keep).concat(mdParseTop(src, { streaming: true, citations }, prev.blocks[keep].range?.[0] ?? 0))
+    } else blocks = mdParseTop(src, { streaming, citations }, 0)
+    cache.last = { src, streaming, citations, blocks }
     return blocks
-  }, [cache, src, streaming])
+  }, [cache, src, streaming, citations])
 }
 
 export type MarkdownProps = {
@@ -808,7 +806,7 @@ export type MarkdownProps = {
   className?: string
   /** Called on link (and image link) clicks with the checked href; call `e.preventDefault()` to handle navigation yourself. */
   onLinkClick?: (href: string, e: React.MouseEvent) => void
-  /** Renders citation markers like `[1]` (default: a small superscript `[1]`). */
+  /** Renders citation markers like `[1]`; without it, `[1]` stays text. */
   renderCitation?: (n: number) => ReactNode
   /** Renders fenced code (default: a plain frame with Copy). `markdownCodeBlock` from code highlights it with CodeBlock. */
   renderCode?: MarkdownCodeRenderer
@@ -820,7 +818,7 @@ export type MarkdownProps = {
 
 /**
  * Markdown for model output (GFM subset: headings, emphasis, strikethrough, code, fences (plain, or `renderCode`), quotes, nested
- * and task lists, tables, rules, links, autolinks, hard breaks, `[n]` citations). Builds React nodes only; raw HTML
+ * and task lists, tables, rules, links, autolinks, hard breaks, `[n]` citations with `renderCitation`). Builds React nodes only; raw HTML
  * shows as text; links are limited to https, http, mailto and relative URLs, and absolute ones open in a new tab with
  * `rel="noopener noreferrer nofollow"`; images are links unless `images="allow"`. With `streaming`, completed blocks
  * don't re-render as text arrives, and unfinished syntax at the end never flashes as raw characters.
@@ -828,7 +826,7 @@ export type MarkdownProps = {
 export function Markdown({ children, streaming = false, className, onLinkClick, renderCitation, renderCode, images = 'link', caret = true }: MarkdownProps) {
   const raw = typeof children === 'string' ? children : String(children ?? '')
   const src = useMemo(() => mdNormalize(raw), [raw])
-  const blocks = useMdBlocks(src, streaming)
+  const blocks = useMdBlocks(src, streaming, !!renderCitation)
   const opts = useMemo(() => ({ onLinkClick, renderCitation, renderCode, images, streaming }), [onLinkClick, renderCitation, renderCode, images, streaming])
   const { ref, visible } = useViewport<HTMLDivElement>(null, { amount: 0 })
   const showCaret = streaming && caret

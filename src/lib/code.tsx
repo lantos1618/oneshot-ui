@@ -1,6 +1,6 @@
-import { memo, useCallback, useEffect, useId, useMemo, useRef, useState, type CSSProperties, type ReactNode } from 'react'
+import { memo, useCallback, useEffect, useId, useMemo, useRef, useState, type CSSProperties, type ReactNode, type Ref } from 'react'
 import { motion, useReducedMotion } from 'motion/react'
-import { Button, Icon, IconButton, ScrollEdges, cn, sleep, spring, useControllable, useMediaQuery, useRoving, useScrollEdges, useSize, useWidth, useResizeObserver } from './core'
+import { Button, Icon, IconButton, ScrollEdges, cn, sleep, spring, useControllable, useMediaQuery, useRoving, useScrollEdges, useSize, useWidth, useResizeObserver, useStableArray } from './core'
 import { ActiveIndicator, SegmentedControl } from './fields'
 import { CopyButton } from './feedback'
 import { useViewport } from './motion'
@@ -30,24 +30,59 @@ const CODE_LANGS: Record<CodeLanguage, [RegExp, CodeTokenKind[]]> = {
 }
 export const CODE_LANGUAGE_NAMES: Record<CodeLanguage, string> = { ts: 'TypeScript', js: 'JavaScript', py: 'Python', sh: 'Shell', json: 'JSON' }
 
-/** Guess the language from a file name (`run-import.ts` → ts). */
-export function codeLanguageOf(filename?: string): CodeLanguage {
-  const ext = filename?.split('.').pop()?.toLowerCase() ?? ''
-  if (ext === 'ts' || ext === 'tsx') return 'ts'
-  if (ext === 'py') return 'py'
-  if (ext === 'sh' || ext === 'bash' || ext === 'zsh') return 'sh'
-  if (ext === 'json') return 'json'
-  return ext === 'js' || ext === 'jsx' || ext === 'mjs' ? 'js' : 'ts'
-}
-
 /** Markdown fence info words CodeBlock highlights, and the language each one means. */
 export const CODE_FENCE_LANGS: Readonly<Record<string, CodeLanguage>> = {
   ts: 'ts', tsx: 'ts', typescript: 'ts', js: 'js', jsx: 'js', javascript: 'js', mjs: 'js', cjs: 'js', py: 'py', python: 'py',
   sh: 'sh', bash: 'sh', shell: 'sh', zsh: 'sh', console: 'sh', 'shell-session': 'sh', json: 'json', jsonc: 'json', json5: 'json',
 }
+// own keys only: a fence or file named "constructor" must not reach Object.prototype
+const codeFenceLang = (word: string): CodeLanguage | undefined => (Object.hasOwn(CODE_FENCE_LANGS, word) ? CODE_FENCE_LANGS[word] : undefined)
+
+/** The language of a file name by its extension (`run-import.ts` → ts, `x.cjs` → js), from CODE_FENCE_LANGS; undefined for anything else (plain text). */
+export function codeLanguageOf(filename?: string): CodeLanguage | undefined {
+  const dot = filename?.lastIndexOf('.') ?? -1
+  return dot < 0 ? undefined : codeFenceLang(filename!.slice(dot + 1).toLowerCase())
+}
+
+/** The lines of `text` without their newlines: '' has none, and a trailing newline ends the last line instead of starting an empty one. */
+export function codeLines(text: string): string[] {
+  return text ? text.replace(/\n$/, '').split('\n') : []
+}
 
 /** Lines longer than this render as plain text (minified bundles, data blobs): highlighting them helps nobody and costs time. */
 export const CODE_HIGHLIGHT_MAX = 2000
+
+/** A FIFO cache of at most `max` entries: `get(key, make)` returns the cached value or makes and stores it. */
+function boundedCache<V>(max: number) {
+  const m = new Map<string, V>()
+  return (key: string, make: () => V): V => {
+    let v = m.get(key)
+    if (v === undefined) { v = make(); if (m.size >= max) m.delete(m.keys().next().value!); m.set(key, v) }
+    return v
+  }
+}
+/** Highlighted lines and segments are cached by language and text: re-renders, tab switches and remounts reuse them. */
+const CODE_CACHE_MAX = 3000
+
+/**
+ * The one tokenizer walk: `gap(from, to)` for text between tokens, `tok(start, end, class)` for each token. The shell
+ * prefix group (`pre`) is text before its command, which is the token.
+ */
+function codeWalk(line: string, lang: CodeLanguage, gap: (from: number, to: number) => void, tok: (s: number, e: number, cls: string | undefined) => void) {
+  const [src, names] = CODE_LANGS[lang] ?? CODE_JS
+  const re = new RegExp(src.source, src.flags)
+  let last = 0, m: RegExpExecArray | null
+  while ((m = re.exec(line))) {
+    if (m[0] === '') { re.lastIndex++; continue }
+    gap(last, m.index)
+    let gi = 1; while (gi < m.length && m[gi] === undefined) gi++
+    const kind = names[gi - 1], end = m.index + m[0].length
+    if (kind === 'pre') { gap(m.index, m.index + m[gi].length); tok(m.index + m[gi].length, end, CODE_TOKEN_CLASS.kw) }
+    else tok(m.index, end, kind ? CODE_TOKEN_CLASS[kind] : undefined)
+    last = end
+  }
+  gap(last, line.length)
+}
 
 /**
  * Highlight one line of code: returns spans coloured with theme tokens. The patterns have no overlapping alternatives
@@ -55,21 +90,11 @@ export const CODE_HIGHLIGHT_MAX = 2000
  */
 export function highlightCode(line: string, lang: CodeLanguage = 'ts'): ReactNode[] {
   if (line.length > CODE_HIGHLIGHT_MAX) return [line]
-  const [src, names] = CODE_LANGS[lang] ?? CODE_JS
-  const re = new RegExp(src.source, src.flags)
-  const out: ReactNode[] = []; let last = 0, k = 0, m: RegExpExecArray | null
-  while ((m = re.exec(line))) {
-    if (m[0] === '') { re.lastIndex++; continue }
-    if (m.index > last) out.push(line.slice(last, m.index))
-    let gi = 1; while (gi < m.length && m[gi] === undefined) gi++
-    const kind = names[gi - 1]
-    if (kind === 'pre') out.push(m[gi], <span key={k++} className={CODE_TOKEN_CLASS.kw}>{m[gi + 1]}</span>)
-    else out.push(<span key={k++} className={kind ? CODE_TOKEN_CLASS[kind] : undefined}>{m[0]}</span>)
-    last = m.index + m[0].length
-  }
-  if (last < line.length) out.push(line.slice(last))
+  const out: ReactNode[] = []
+  codeWalk(line, lang, (a, b) => { if (b > a) out.push(line.slice(a, b)) }, (a, b, cls) => out.push(<span key={out.length} className={cls}>{line.slice(a, b)}</span>))
   return out
 }
+const codeHighlightCached = (() => { const get = boundedCache<ReactNode[]>(CODE_CACHE_MAX); return (text: string, lang: CodeLanguage) => get(lang + '\u0000' + text, () => highlightCode(text, lang)) })()
 
 /** One step of an lcsDiff: kept (`=`, both indexes), removed (`-`, index in before) or added (`+`, index in after). Indexes are 0-based. */
 export type LcsStep = { type: '=' | '-' | '+'; a: number | null; b: number | null }
@@ -112,6 +137,28 @@ export function codeLineDiff(before: string[], after: string[]): CodeDiffRow[] {
   return lcsDiff(before, after).map(s => ({ type: s.type, text: s.b != null ? after[s.b] : before[s.a!], a: s.a == null ? null : s.a + 1, b: s.b == null ? null : s.b + 1 }))
 }
 
+/** How many steps of a diff add and remove. */
+export function diffStat(steps: readonly { type: '=' | '+' | '-' }[]): { adds: number; dels: number } {
+  let adds = 0, dels = 0
+  for (const s of steps) { if (s.type === '+') adds++; else if (s.type === '-') dels++ }
+  return { adds, dels }
+}
+
+/** A diff walked in runs: a kept step, or a run of removals with the run of additions right after it (either may be empty). */
+export type DiffHunk<T> = { eq: T } | { del: T[]; add: T[] }
+/** Pair each run of removals with the run of additions that follows it (side-by-side views, word diffs). */
+export function diffHunks<T extends { type: '=' | '+' | '-' }>(steps: readonly T[]): DiffHunk<T>[] {
+  const out: DiffHunk<T>[] = []
+  for (let i = 0; i < steps.length;) {
+    if (steps[i].type === '=') { out.push({ eq: steps[i++] }); continue }
+    const del: T[] = [], add: T[] = []
+    while (i < steps.length && steps[i].type === '-') del.push(steps[i++])
+    while (i < steps.length && steps[i].type === '+') add.push(steps[i++])
+    out.push({ del, add })
+  }
+  return out
+}
+
 /**
  * A character range of CodeBlock's `code` ([start, end) offsets) drawn as an underline with a soft tint, line by line
  * (decorative: no ARIA; say what it means elsewhere). `color`: any CSS colour (default var(--accent)); `variant`:
@@ -151,29 +198,12 @@ const CODE_PIECE = /[\w$]+|\s+|[^\w$\s]/g
 function codeSegments(line: string, lang: CodeLanguage): CodeSegment[] {
   if (line.length > CODE_HIGHLIGHT_MAX) return [{ s: 0, e: line.length }]
   const out: CodeSegment[] = []
-  const gap = (from: number, to: number) => { for (const m of line.slice(from, to).matchAll(CODE_PIECE)) out.push({ s: from + m.index, e: from + m.index + m[0].length }) }
-  const [src, names] = CODE_LANGS[lang] ?? CODE_JS
-  const re = new RegExp(src.source, src.flags)
-  let last = 0, m: RegExpExecArray | null
-  while ((m = re.exec(line))) {
-    if (m[0] === '') { re.lastIndex++; continue }
-    gap(last, m.index)
-    let gi = 1; while (gi < m.length && m[gi] === undefined) gi++
-    const kind = names[gi - 1]
-    if (kind === 'pre') { gap(m.index, m.index + m[gi].length); out.push({ s: m.index + m[gi].length, e: m.index + m[0].length, cls: CODE_TOKEN_CLASS.kw }) }
-    else out.push({ s: m.index, e: m.index + m[0].length, cls: kind ? CODE_TOKEN_CLASS[kind] : undefined })
-    last = m.index + m[0].length
-  }
-  gap(last, line.length)
+  codeWalk(line, lang,
+    (from, to) => { for (const m of line.slice(from, to).matchAll(CODE_PIECE)) out.push({ s: from + m.index, e: from + m.index + m[0].length }) },
+    (s, e, cls) => out.push({ s, e, cls }))
   return out
 }
-const CODE_SEG_CACHE = new Map<string, CodeSegment[]>()
-function codeSegmentsCached(text: string, lang: CodeLanguage): CodeSegment[] {
-  const k = lang + '\u0000' + text
-  let v = CODE_SEG_CACHE.get(k)
-  if (!v) { v = codeSegments(text, lang); if (CODE_SEG_CACHE.size >= CODE_HL_CACHE_MAX) CODE_SEG_CACHE.delete(CODE_SEG_CACHE.keys().next().value!); CODE_SEG_CACHE.set(k, v) }
-  return v
-}
+const codeSegmentsCached = (() => { const get = boundedCache<CodeSegment[]>(CODE_CACHE_MAX); return (text: string, lang: CodeLanguage) => get(lang + '\u0000' + text, () => codeSegments(text, lang)) })()
 
 /** A mark's part on one line (columns), with its look. */
 type CodeLineMark = { start: number; end: number; color: string; variant: 'wavy' | 'solid' }
@@ -186,8 +216,9 @@ const CODE_MARK = 'rounded-[var(--r-sm)] bg-[color-mix(in_srgb,var(--code-mark)_
  * offsets in the code (`data-o`, `data-e`) so the pointer maps to a token without measuring; marked parts are wrapped in
  * an underline. Memoised: a hover re-renders only the lines whose marks change.
  */
-const CodeLineText = memo(function CodeLineText({ text, lang, plain, start, marks, interactive }: { text: string; lang: CodeLanguage; plain?: boolean; start: number; marks?: readonly CodeLineMark[]; markKey?: string; interactive: boolean }) {
+const CodeLineText = memo(function CodeLineText({ text, lang, plain: plainProp, start, marks, interactive }: { text: string; lang?: CodeLanguage; plain?: boolean; start: number; marks?: readonly CodeLineMark[]; markKey?: string; interactive: boolean }) {
   if (!text) return ' '
+  const plain = plainProp || !lang
   if (!marks?.length && !interactive) return <>{plain ? text : codeHighlightCached(text, lang)}</>
   const segs = plain ? [{ s: 0, e: text.length } as CodeSegment] : codeSegmentsCached(text, lang)
   const out: ReactNode[] = []
@@ -216,21 +247,11 @@ const CodeLineText = memo(function CodeLineText({ text, lang, plain, start, mark
 type CodeRow = { text: string; no?: number | null; kind?: 'hi' | 'add' | 'del' | 'hunk' | 'blank'; plain?: boolean; /** offset of the line in the code */ start?: number; marks?: CodeLineMark[]; markKey?: string }
 const CODE_ROW_BG = { hi: 'bg-[color-mix(in_srgb,var(--accent)_10%,transparent)]', add: 'bg-[color-mix(in_srgb,var(--ok)_11%,transparent)]', del: 'bg-[color-mix(in_srgb,var(--bad)_10%,transparent)]', hunk: 'bg-[var(--muted)] text-[var(--fg3)]', blank: 'bg-[color-mix(in_srgb,var(--muted)_60%,transparent)]' }
 
-/** Highlighted lines are cached by language and text: re-renders, tab switches and remounts reuse the same elements. */
-const CODE_HL_CACHE = new Map<string, ReactNode[]>()
-const CODE_HL_CACHE_MAX = 3000
-function codeHighlightCached(text: string, lang: CodeLanguage): ReactNode[] {
-  const k = lang + '\u0000' + text
-  let v = CODE_HL_CACHE.get(k)
-  if (!v) { v = highlightCode(text, lang); if (CODE_HL_CACHE.size >= CODE_HL_CACHE_MAX) CODE_HL_CACHE.delete(CODE_HL_CACHE.keys().next().value!); CODE_HL_CACHE.set(k, v) }
-  return v
-}
-
 /**
  * The rows of a code view. Memoised (by row content), and focusable with a label only while it actually scrolls,
  * so keyboard users can scroll it without adding a Tab stop to every short snippet.
  */
-const CodeRows = memo(function CodeRows({ rows, lang, wrap, numbers = true, label, className, onToken }: { rows: CodeRow[]; lang: CodeLanguage; wrap?: boolean; numbers?: boolean; label?: string; className?: string;
+const CodeRows = memo(function CodeRows({ rows, lang, wrap, numbers = true, label, className, onToken }: { rows: CodeRow[]; /** none: plain text */ lang?: CodeLanguage; wrap?: boolean; numbers?: boolean; label?: string; className?: string;
   /** token events (keep its identity stable): the mouse moved onto a token (null: off the tokens), or a token was clicked */ onToken?: (type: 'hover' | 'click', at: { start: number; end: number } | null) => void }) {
   const ref = useRef<HTMLPreElement>(null)
   const [scrolls, setScrolls] = useState(false)
@@ -256,7 +277,7 @@ const CodeRows = memo(function CodeRows({ rows, lang, wrap, numbers = true, labe
           <span className={cn('min-w-0 flex-1', wrap ? 'break-words whitespace-pre-wrap' : 'whitespace-pre')}>
             {r.marks || onToken
               ? <CodeLineText text={r.text} lang={lang} plain={r.plain} start={r.start ?? 0} marks={r.marks} markKey={r.markKey} interactive={!!onToken} />
-              : r.plain ? r.text : (r.text ? codeHighlightCached(r.text, lang) : ' ')}
+              : r.plain || !lang ? r.text || ' ' : (r.text ? codeHighlightCached(r.text, lang) : ' ')}
           </span>
         </span>
       ))}
@@ -273,11 +294,41 @@ const CODE_BOX = 'overflow-hidden rounded-[var(--r-lg)] border border-[var(--lin
 const CODE_TOOL = '!h-7 !gap-1 !px-2 font-medium text-[var(--fg2)] hover:text-[var(--fg)] aria-pressed:!bg-[var(--muted)] aria-pressed:text-[var(--fg)] [@media(pointer:coarse)]:!h-9 [@media(pointer:coarse)]:min-w-9'
 
 /** Copy button for a code header: "Copy" → "Copied" (icon only on phones, or always with `iconOnly`). */
-function CodeCopy({ text, iconOnly, label }: { text: () => string; iconOnly?: boolean; label?: string }) {
+export function CodeCopy({ text, iconOnly, label }: { text: () => string; iconOnly?: boolean; label?: string }) {
   const phone = useMediaQuery('(max-width: 639px)')
   const icon = iconOnly || phone
   return <CopyButton text={text} label={label ?? 'Copy'} size={icon ? 'icon-sm' : 'sm'} iconOnly={icon} variant="ghost" className={icon ? 'text-[var(--fg2)] hover:text-[var(--fg)]' : CODE_TOOL} />
 }
+
+/**
+ * The frame of a code view (CodeBlock, Diff, Markdown's plain fences): a bordered box whose header holds a file icon and
+ * `name`, a `badge` (the language), `meta` (a stat), then `tools` at the end. No highlighter inside.
+ */
+export function CodeFrame({ name, badge, meta, tools, className, boxRef, children }:
+  { name: ReactNode; badge?: ReactNode; meta?: ReactNode; tools?: ReactNode; className?: string; boxRef?: Ref<HTMLDivElement>; children: ReactNode }) {
+  return (
+    <div ref={boxRef} className={cn(CODE_BOX, className)}>
+      <div className={CODE_HEAD_WRAP}>
+        <span className="flex min-w-0 items-center gap-1.5 font-medium text-[var(--fg)]"><Icon name="file" size={13} className="text-[var(--fg3)]" /><span className="truncate">{name}</span></span>
+        {badge != null && <span className="flex-none rounded-[var(--r-sm)] bg-[var(--muted)] px-1.5 py-0.5 font-[family-name:var(--mono)] text-[11px] font-medium text-[var(--fg3)] max-[420px]:hidden">{badge}</span>}
+        {meta}
+        <span className="flex-1" />
+        {tools}
+      </div>
+      {children}
+    </div>
+  )
+}
+
+/** "+N −M" for a diff header. */
+function DiffStat({ adds, dels }: { adds: number; dels: number }) {
+  return <span className="ui-num flex-none text-[11px]"><span className="text-[var(--ok)]">+{adds}</span> <span className="text-[var(--bad)]">−{dels}</span></span>
+}
+const DIFF_KIND = { '+': 'add', '-': 'del', '=': undefined } as const
+/** A line diff as code rows: removed lines carry their number in before, the others their number in after. */
+const diffCodeRows = (rows: readonly CodeDiffRow[]): CodeRow[] => rows.map(r => ({ text: r.text, no: r.type === '-' ? r.a : r.b, kind: DIFF_KIND[r.type] }))
+/** A hunk header's range: "start,count" with git's start 0 for an empty side. */
+const diffRange = (n: number) => `${n ? 1 : 0},${n}`
 
 /** Underlined tabs that sit inside a code header. ← / → (Home / End) move between tabs; when they overflow (phones) the clipped edges fade. */
 function CodeHeaderTabs({ tabs, value, onChange, label }: { tabs: string[]; value: string; onChange: (v: string) => void; label: string }) {
@@ -322,28 +373,27 @@ export function CodeBlock({ code, filename, language, lineNumbers = true, highli
     /** the mouse moved onto a token (word, operator, string…) or off the tokens (null) */ onTokenHover?: (token: CodeTokenRange | null) => void
     /** a token was clicked or tapped */ onTokenClick?: (token: CodeTokenRange) => void
     previous?: string; defaultWrap?: boolean; collapseAt?: number | false; className?: string }) {
-  const lang = language ?? codeLanguageOf(filename)
-  const lines = useMemo(() => code.replace(/\n$/, '').split('\n'), [code])
+  const lang = language ?? (filename === undefined ? 'ts' : codeLanguageOf(filename))
+  const lines = useMemo(() => codeLines(code), [code])
   const [diffOn, setDiffOn] = useState(false)
   const [diffSeen, setDiffSeen] = useState(false) // the diff is computed the first time Changes is opened, not on render
-  const diff = useMemo(() => previous == null || !diffSeen ? null : codeLineDiff(previous.replace(/\n$/, '').split('\n'), lines), [previous, lines, diffSeen])
-  const adds = diff?.filter(r => r.type === '+').length ?? 0, dels = diff?.filter(r => r.type === '-').length ?? 0
+  const diff = useMemo(() => previous == null || !diffSeen ? null : codeLineDiff(codeLines(previous), lines), [previous, lines, diffSeen])
   const [box, boxW] = useWidth<HTMLDivElement>()
   const [wrapSet, setWrap] = useState<boolean | null>(null) // null until the reader toggles it
   const wrap = wrapSet ?? defaultWrap ?? (boxW > 0 && boxW < 520)
   const [open, setOpen] = useState(false)
   const [inner, { height: full }] = useSize<HTMLDivElement>()
-  const hiKey = highlight.join(',')
+  const hi = useStableArray(highlight)
   const markKey = marks?.map(m => `${m.start}:${m.end}:${m.color ?? ''}:${m.variant ?? ''}`).join('|') ?? ''
   const starts = useMemo(() => { let at = 0; return lines.map(l => { const s = at; at += l.length + 1; return s }) }, [lines])
   const rows: CodeRow[] = useMemo(() => {
-    if (diffOn && diff) return diff.map(r => ({ text: r.text, no: r.type === '-' ? r.a : r.b, kind: r.type === '+' ? 'add' : r.type === '-' ? 'del' : undefined }))
+    if (diffOn && diff) return diffCodeRows(diff)
     const parts = marks?.length ? codeMarkRanges(lines, marks) : null
     return lines.map((text, i): CodeRow => {
       const ms = parts?.[i].map(p => ({ start: p.start, end: p.end, color: marks![p.mark].color ?? 'var(--accent)', variant: marks![p.mark].variant ?? 'wavy' }))
-      return { text, no: i + 1, kind: highlight.includes(i + 1) ? 'hi' : undefined, start: starts[i], ...(ms?.length ? { marks: ms, markKey: ms.map(m => `${m.start}:${m.end}:${m.color}:${m.variant}`).join('|') } : null) }
+      return { text, no: i + 1, kind: hi.includes(i + 1) ? 'hi' : undefined, start: starts[i], ...(ms?.length ? { marks: ms, markKey: ms.map(m => `${m.start}:${m.end}:${m.color}:${m.variant}`).join('|') } : null) }
     })
-  }, [diffOn, diff, lines, starts, hiKey, markKey]) // eslint-disable-line react-hooks/exhaustive-deps
+  }, [diffOn, diff, lines, starts, hi, markKey]) // eslint-disable-line react-hooks/exhaustive-deps
   // token events: one stable handler (CodeRows is memoised on it) that reads the latest callbacks and reports changes only
   const tokenProps = useRef({ code, onTokenHover, onTokenClick }); tokenProps.current = { code, onTokenHover, onTokenClick }
   const lastToken = useRef<string | null>(null)
@@ -363,20 +413,16 @@ export function CodeBlock({ code, filename, language, lineNumbers = true, highli
   const measured = useRef(false)
   useEffect(() => { if (full > 0) measured.current = true }, [full])
   return (
-    <div ref={box} className={cn(CODE_BOX, className)}>
-      <div className={CODE_HEAD_WRAP}>
-        <span className="flex min-w-0 items-center gap-1.5 font-medium text-[var(--fg)]"><Icon name="file" size={13} className="text-[var(--fg3)]" /><span className="truncate">{filename ?? 'snippet'}</span></span>
-        <span className="flex-none rounded-[var(--r-sm)] bg-[var(--muted)] px-1.5 py-0.5 font-[family-name:var(--mono)] text-[11px] font-medium text-[var(--fg3)] max-[420px]:hidden">{CODE_LANGUAGE_NAMES[lang]}</span>
-        <span className="flex-1" />
-        {previous != null && (
-          <Button size="sm" variant="ghost" className={CODE_TOOL} aria-pressed={diffOn} onClick={() => { setDiffSeen(true); setDiffOn(v => !v) }} title={'Changes since the previous version'}>
-            <Icon name="diff" size={13} /><span className="max-sm:sr-only">{'Changes'}</span>
-            {diff && <span className="ui-num text-[11px]"><span className="text-[var(--ok)]">+{adds}</span> <span className="text-[var(--bad)]">−{dels}</span></span>}
-          </Button>
-        )}
-        <Button size="sm" variant="ghost" className={CODE_TOOL} aria-pressed={wrap} onClick={() => setWrap(!wrap)} title={'Wrap lines'}><Icon name="wrap" size={13} className="sm:hidden" /><span className="max-sm:hidden">{'Wrap'}</span><span className="sr-only sm:hidden">{'Wrap lines'}</span></Button>
-        <CodeCopy text={() => code} />
-      </div>
+    <CodeFrame boxRef={box} className={className} name={filename ?? 'snippet'} badge={lang ? CODE_LANGUAGE_NAMES[lang] : 'Text'} tools={<>
+      {previous != null && (
+        <Button size="sm" variant="ghost" className={CODE_TOOL} aria-pressed={diffOn} onClick={() => { setDiffSeen(true); setDiffOn(v => !v) }} title={'Changes since the previous version'}>
+          <Icon name="diff" size={13} /><span className="max-sm:sr-only">{'Changes'}</span>
+          {diff && <DiffStat {...diffStat(diff)} />}
+        </Button>
+      )}
+      <Button size="sm" variant="ghost" className={CODE_TOOL} aria-pressed={wrap} onClick={() => setWrap(!wrap)} title={'Wrap lines'}><Icon name="wrap" size={13} className="sm:hidden" /><span className="max-sm:hidden">{'Wrap'}</span><span className="sr-only sm:hidden">{'Wrap lines'}</span></Button>
+      <CodeCopy text={() => code} />
+    </>}>
       <motion.div className="relative overflow-hidden" initial={false} animate={{ height }} transition={measured.current ? spring(0.12, 0.45) : { duration: 0 }}>
         <div ref={inner}>
           <motion.div key={String(diffOn)} initial={{ opacity: 0.3 }} animate={{ opacity: 1 }} transition={{ duration: 0.2 }}>
@@ -391,7 +437,7 @@ export function CodeBlock({ code, filename, language, lineNumbers = true, highli
           </div>
         )}
       </motion.div>
-    </div>
+    </CodeFrame>
   )
 }
 
@@ -424,10 +470,11 @@ export function InstallCommand({ pkg, value, defaultValue = 'npm', onChange, cla
 export type CodeTab = { label: string; code: string; language?: CodeLanguage }
 /** The same example in several languages. Tabs slide, the box animates its height, Copy copies the open tab. */
 export function CodeTabs({ tabs, value, defaultValue, onChange, className }: { tabs: CodeTab[]; value?: string; defaultValue?: string; onChange?: (v: string) => void; className?: string }) {
-  const [cur, setCur] = useControllable(value, defaultValue ?? tabs[0].label, onChange)
+  const [cur, setCur] = useControllable(value, defaultValue ?? tabs[0]?.label ?? '', onChange)
   const tab = tabs.find(t => t.label === cur) ?? tabs[0]
   const [inner, { height: h }] = useSize<HTMLDivElement>()
-  const rows = useMemo(() => tab.code.split('\n').map((text, i): CodeRow => ({ text, no: i + 1 })), [tab.code])
+  const rows = useMemo(() => codeLines(tab?.code ?? '').map((text, i): CodeRow => ({ text, no: i + 1 })), [tab?.code])
+  if (!tab) return null
   return (
     <div className={cn(CODE_BOX, className)}>
       <div className={cn(CODE_HEAD, '!ps-1')}>
@@ -488,6 +535,7 @@ export function Terminal({ lines, title = 'zsh', className }: { lines: TerminalL
   return (
     <div ref={box} className={cn('overflow-hidden rounded-[var(--r-lg)] border border-[var(--line)] bg-[color-mix(in_srgb,var(--bg)_60%,var(--muted))] text-[var(--fg)]', className)}>
       <div className="flex h-[34px] items-center gap-1.5 border-b border-[var(--line)] bg-[color-mix(in_srgb,var(--card)_50%,transparent)] pe-1.5 ps-3 text-[11px] text-[var(--fg3)] [@media(pointer:coarse)]:h-11">
+        {/* the window buttons keep their fixed red, amber and green in every theme: they draw a window, not a state */}
         <i className="h-2.5 w-2.5 rounded-full bg-[#ED6A5E]" /><i className="h-2.5 w-2.5 rounded-full bg-[#F4BF4F]" /><i className="h-2.5 w-2.5 rounded-full bg-[#61C554]" />
         <span className="ms-2">{title}</span>
         <IconButton icon={<Icon name="replay" size={13} />} label={'Replay'} onClick={play} className="ms-auto [@media(pointer:coarse)]:!h-9 [@media(pointer:coarse)]:!w-9" />
@@ -516,47 +564,36 @@ export function Terminal({ lines, title = 'zsh', className }: { lines: TerminalL
  */
 export function Diff({ before, after, filename, language, hunk, defaultMode = 'unified', className }:
   { before: string; after: string; filename?: string; language?: CodeLanguage; hunk?: string; defaultMode?: 'unified' | 'split'; className?: string }) {
-  const lang = language ?? codeLanguageOf(filename)
+  const lang = language ?? (filename === undefined ? 'ts' : codeLanguageOf(filename))
   const [picked, setMode] = useState(defaultMode)
   const [box, boxW] = useWidth<HTMLDivElement>()
   const narrow = boxW > 0 && boxW < 560, mode = narrow ? 'unified' : picked
-  const A = useMemo(() => before.split('\n'), [before]), B = useMemo(() => after.split('\n'), [after])
+  const A = useMemo(() => codeLines(before), [before]), B = useMemo(() => codeLines(after), [after])
   const rows = useMemo(() => codeLineDiff(A, B), [A, B])
-  const adds = rows.filter(r => r.type === '+').length, dels = rows.filter(r => r.type === '-').length
-  const head: CodeRow = { text: `@@ -1,${A.length} +1,${B.length} @@${hunk ? ' ' + hunk : ''}`, kind: 'hunk', plain: true }
-  // split view: pair each run of removals with the following run of additions
-  const pairs = useMemo(() => {
-    const out: [CodeRow, CodeRow][] = []
-    for (let i = 0; i < rows.length;) {
-      if (rows[i].type === '=') { const r = rows[i++]; out.push([{ text: r.text, no: r.a }, { text: r.text, no: r.b }]); continue }
-      const del: CodeDiffRow[] = [], add: CodeDiffRow[] = []
-      while (i < rows.length && rows[i].type === '-') del.push(rows[i++])
-      while (i < rows.length && rows[i].type === '+') add.push(rows[i++])
-      for (let k = 0; k < Math.max(del.length, add.length); k++) out.push([
-        del[k] ? { text: del[k].text, no: del[k].a, kind: 'del' } : { text: '', kind: 'blank', plain: true },
-        add[k] ? { text: add[k].text, no: add[k].b, kind: 'add' } : { text: '', kind: 'blank', plain: true },
-      ])
-    }
-    return out
-  }, [rows])
+  const head: CodeRow = { text: `@@ -${diffRange(A.length)} +${diffRange(B.length)} @@${hunk ? ' ' + hunk : ''}`, kind: 'hunk', plain: true }
+  // split view: removals on the left beside the additions that replace them, blank cells where one side runs out
+  const pairs = useMemo(() => diffHunks(rows).flatMap((h): [CodeRow, CodeRow][] => {
+    if ('eq' in h) return [[{ text: h.eq.text, no: h.eq.a }, { text: h.eq.text, no: h.eq.b }]]
+    const blank: CodeRow = { text: '', kind: 'blank', plain: true }
+    return Array.from({ length: Math.max(h.del.length, h.add.length) }, (_, k) => [
+      h.del[k] ? { text: h.del[k].text, no: h.del[k].a, kind: 'del' } : blank,
+      h.add[k] ? { text: h.add[k].text, no: h.add[k].b, kind: 'add' } : blank,
+    ])
+  }), [rows])
   return (
-    <div ref={box} className={cn(CODE_BOX, className)}>
-      <div className={CODE_HEAD_WRAP}>
-        <span className="flex min-w-0 items-center gap-1.5 font-medium"><Icon name="file" size={13} className="text-[var(--fg3)]" /><span className="truncate">{filename ?? 'changes'}</span></span>
-        <span className="ui-num flex-none text-[11px]"><span className="text-[var(--ok)]">+{adds}</span> <span className="text-[var(--bad)]">−{dels}</span></span>
-        <span className="flex-1" />
-        {!narrow && <SegmentedControl size="sm" options={[{ value: 'unified', label: 'Unified' }, { value: 'split', label: 'Split' }]} value={mode} onChange={v => setMode(v as 'unified' | 'split')} className="!p-0.5" />}
-        <CodeCopy text={() => after} iconOnly label={'Copy new version'} />
-      </div>
+    <CodeFrame boxRef={box} className={className} name={filename ?? 'changes'} meta={<DiffStat {...diffStat(rows)} />} tools={<>
+      {!narrow && <SegmentedControl size="sm" options={[{ value: 'unified', label: 'Unified' }, { value: 'split', label: 'Split' }]} value={mode} onChange={v => setMode(v as 'unified' | 'split')} className="!p-0.5" />}
+      <CodeCopy text={() => after} iconOnly label={'Copy new version'} />
+    </>}>
       <motion.div key={mode} initial={{ opacity: 0 }} animate={{ opacity: 1 }} transition={{ duration: 0.2 }}>
         {mode === 'unified'
-          ? <CodeRows lang={lang} label={`Changes to ${filename ?? 'the file'}`} rows={[head, ...rows.map((r): CodeRow => ({ text: r.text, no: r.type === '-' ? r.a : r.b, kind: r.type === '+' ? 'add' : r.type === '-' ? 'del' : undefined }))]} />
+          ? <CodeRows lang={lang} label={`Changes to ${filename ?? 'the file'}`} rows={[head, ...diffCodeRows(rows)]} />
           : <div className="grid grid-cols-2">
-              <CodeRows lang={lang} label={'Before'} rows={[{ ...head, text: `@@ -1,${A.length} @@` }, ...pairs.map(p => p[0])]} />
-              <CodeRows lang={lang} label={'After'} rows={[{ ...head, text: `@@ +1,${B.length} @@` }, ...pairs.map(p => p[1])]} className="border-s border-[var(--line)]" />
+              <CodeRows lang={lang} label={'Before'} rows={[{ ...head, text: `@@ -${diffRange(A.length)} @@` }, ...pairs.map(p => p[0])]} />
+              <CodeRows lang={lang} label={'After'} rows={[{ ...head, text: `@@ +${diffRange(B.length)} @@` }, ...pairs.map(p => p[1])]} className="border-s border-[var(--line)]" />
             </div>}
       </motion.div>
-    </div>
+    </CodeFrame>
   )
 }
 
@@ -566,6 +603,6 @@ export function Diff({ before, after, filename, language, hunk, defaultMode = 'u
  * `<Markdown renderCode={markdownCodeBlock}>`. Kept out of Markdown so the highlighter is only bundled where it is used.
  */
 export const markdownCodeBlock: MarkdownCodeRenderer = ({ code, lang }) => {
-  const language = CODE_FENCE_LANGS[lang.toLowerCase()]
+  const language = codeFenceLang(lang.toLowerCase())
   return language ? <CodeBlock code={code} language={language} collapseAt={false} className="[overflow-wrap:normal]" /> : null
 }

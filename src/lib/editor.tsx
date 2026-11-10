@@ -1,6 +1,6 @@
-import { useEffect, useId, useLayoutEffect, useRef, useState, type ReactNode, type KeyboardEvent as RKeyboardEvent } from 'react'
+import { useEffect, useId, useLayoutEffect, useRef, useState, type ReactNode, type KeyboardEvent as RKeyboardEvent, type RefObject } from 'react'
 import { AnimatePresence, motion } from 'motion/react'
-import { Avatar, Button, Icon, type IconName, Spinner, cn, inputClass, isCoarsePointer, safeUrl, spring, useOutside, useRoving, useTheme, plural, useResizeObserver, useListbox, gridKeyMove } from './core'
+import { Avatar, Button, Icon, type IconName, Spinner, TEXT_LINK_SCHEMES, clamp, cn, formatHotkey, inputClass, isCoarsePointer, safeUrl, spring, useLatest, useOutside, useRoving, plural, resolveColor, useResizeObserver, useListbox, useThemeVersion, gridKeyMove } from './core'
 import { play, shake } from './motion'
 import { FloatingPanel, MenuLabel } from './overlay'
 import { OptionList } from './select'
@@ -8,18 +8,30 @@ import { type Option } from './fields'
 
 const EditorGlyph = ({ d }: { d: IconName }) => <Icon name={d} size={15} />
 
-type RteTool = { cmd: string; label: string; glyph: ReactNode; keys?: string; /** accessible name when it differs from `label` (it must start with the visible glyph text) */ name?: string }
+/** The commands RichTextEditor's toolbar, bubble, shortcuts and Markdown shortcuts run. */
+type RteCmd = 'bold' | 'italic' | 'underline' | 'strikeThrough' | 'h2' | 'h3' | 'p' | 'insertUnorderedList' | 'insertOrderedList' | 'blockquote' | 'code' | 'link'
+/**
+ * A toolbar tool. `kind`: 'exec' runs execCommand and reads queryCommandState; 'block' toggles formatBlock to `cmd`;
+ * 'custom' has its own handler. A tool with a `tag` is on while the caret is inside that element. `block`: a block format
+ * (Paragraph is on when none is). `shortcut`: the key with ⌘/Ctrl. `bubble`: also in the selection bubble.
+ * `name`: accessible name when it differs from `label` (it must start with the visible glyph text).
+ */
+type RteTool = { cmd: RteCmd; kind: 'exec' | 'block' | 'custom'; tag?: string; block?: boolean; label: string; glyph: ReactNode; shortcut?: string; bubble?: boolean; name?: string }
 // the B / I / U / S / H1 / H2 / ¶ glyphs are the formatting marks themselves, the same in every language
 const RTE_TOOLS: (RteTool | '|')[] = [
-  { cmd: 'bold', label: 'Bold', glyph: <b>B</b>, keys: '⌘B' }, { cmd: 'italic', label: 'Italic', glyph: <i className="font-serif">I</i>, keys: '⌘I' },
-  { cmd: 'underline', label: 'Underline', glyph: <u>U</u>, keys: '⌘U' }, { cmd: 'strikeThrough', label: 'Strikethrough', glyph: <s>S</s> }, '|',
-  { cmd: 'h2', label: 'Heading 1', name: 'H1 heading', glyph: 'H1' }, { cmd: 'h3', label: 'Heading 2', name: 'H2 heading', glyph: 'H2' }, { cmd: 'p', label: 'Paragraph', glyph: '¶' }, '|',
-  { cmd: 'insertUnorderedList', label: 'Bulleted list', glyph: <EditorGlyph d="listBullet" /> }, { cmd: 'insertOrderedList', label: 'Numbered list', glyph: <EditorGlyph d="listOrdered" /> },
-  { cmd: 'blockquote', label: 'Quote', glyph: <EditorGlyph d="quote" /> }, { cmd: 'code', label: 'Inline code', glyph: <EditorGlyph d="code" /> },
-  { cmd: 'link', label: 'Link', glyph: <EditorGlyph d="link" />, keys: '⌘K' },
+  { cmd: 'bold', kind: 'exec', label: 'Bold', glyph: <b>B</b>, shortcut: 'b', bubble: true }, { cmd: 'italic', kind: 'exec', label: 'Italic', glyph: <i className="font-serif">I</i>, shortcut: 'i', bubble: true },
+  { cmd: 'underline', kind: 'exec', label: 'Underline', glyph: <u>U</u>, shortcut: 'u', bubble: true }, { cmd: 'strikeThrough', kind: 'exec', label: 'Strikethrough', glyph: <s>S</s> }, '|',
+  { cmd: 'h2', kind: 'block', tag: 'H2', block: true, label: 'Heading 1', name: 'H1 heading', glyph: 'H1' }, { cmd: 'h3', kind: 'block', tag: 'H3', block: true, label: 'Heading 2', name: 'H2 heading', glyph: 'H2' },
+  { cmd: 'p', kind: 'block', block: true, label: 'Paragraph', glyph: '¶' }, '|',
+  { cmd: 'insertUnorderedList', kind: 'exec', block: true, label: 'Bulleted list', glyph: <EditorGlyph d="listBullet" /> }, { cmd: 'insertOrderedList', kind: 'exec', block: true, label: 'Numbered list', glyph: <EditorGlyph d="listOrdered" /> },
+  { cmd: 'blockquote', kind: 'block', tag: 'BLOCKQUOTE', block: true, label: 'Quote', glyph: <EditorGlyph d="quote" /> }, { cmd: 'code', kind: 'custom', tag: 'CODE', label: 'Inline code', glyph: <EditorGlyph d="code" /> },
+  { cmd: 'link', kind: 'custom', tag: 'A', label: 'Link', glyph: <EditorGlyph d="link" />, shortcut: 'k', bubble: true },
 ]
-const RTE_BUBBLE = ['bold', 'italic', 'underline', 'link']
-const RTE_MD: Record<string, string> = { '#': 'h2', '##': 'h3', '-': 'insertUnorderedList', '*': 'insertUnorderedList', '1.': 'insertOrderedList', '>': 'blockquote' }
+const RTE_LIST = RTE_TOOLS.filter((x): x is RteTool => x !== '|')
+const RTE_SHORTCUTS: Record<string, RteCmd> = Object.fromEntries(RTE_LIST.filter(t => t.shortcut).map(t => [t.shortcut, t.cmd]))
+const RTE_MD: Record<string, RteCmd> = { '#': 'h2', '##': 'h3', '-': 'insertUnorderedList', '*': 'insertUnorderedList', '1.': 'insertOrderedList', '>': 'blockquote' }
+/** Half the width the selection bubble and the link field need: they stay this far from the editor's edges. */
+const RTE_BUBBLE_HALF = 90, RTE_LINK_HALF = 130
 const rteContent =
   'min-h-[200px] px-4 py-4 text-sm leading-[1.7] outline-none [@media(pointer:coarse)]:text-base [&_a]:text-[var(--accent)] [&_a]:underline ' +
   '[&_blockquote]:m-0 [&_blockquote]:mb-2.5 [&_blockquote]:rounded-[var(--r-md)] [&_blockquote]:bg-[var(--muted)] [&_blockquote]:px-3 [&_blockquote]:py-2 [&_blockquote]:text-[var(--fg2)] [&_blockquote]:italic ' +
@@ -35,12 +47,11 @@ const RTE_TAGS = new Set(['P', 'H2', 'H3', 'UL', 'OL', 'LI', 'B', 'STRONG', 'I',
 const RTE_ALIAS: Record<string, string> = { STRIKE: 'S', DEL: 'S', INS: 'U', DIV: 'P', H1: 'H2', H4: 'H3', H5: 'H3', H6: 'H3' }
 /** Elements whose content is code, form controls or embedded documents, never text a person wrote. */
 const RTE_DROP = new Set(['SCRIPT', 'STYLE', 'TEMPLATE', 'NOSCRIPT', 'IFRAME', 'FRAME', 'FRAMESET', 'OBJECT', 'EMBED', 'SVG', 'MATH', 'TEXTAREA', 'SELECT', 'OPTION', 'TITLE', 'HEAD', 'META', 'LINK', 'XMP', 'NOEMBED', 'NOFRAMES', 'PLAINTEXT'])
-const RTE_HREF = ['https:', 'http:', 'mailto:']
 const rteEscape = (s: string) => s.replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[c]!)
 
 /**
  * Sanitize HTML for RichTextEditor with a fixed allowlist: p, h2, h3, ul, ol, li, b/strong, i/em, u, s, code, pre,
- * blockquote, a and br. The only attribute kept is `href` on links (https, http, mailto or relative; anything else
+ * blockquote, a and br. The only attribute kept is `href` on links (https, http, mailto, tel or relative; anything else
  * unwraps the link). Comments, scripts, styles, frames and form controls are removed; other elements are unwrapped
  * and keep their text. Parses with an inert DOMParser document (nothing loads or runs); without a DOM (SSR) the
  * input is escaped to plain text.
@@ -60,7 +71,7 @@ export function sanitizeRichText(html: string): string {
       if (!RTE_TAGS.has(name)) { copy(c, to, depth + 1); continue }
       let el: Element | null = doc.createElement(name.toLowerCase())
       if (name === 'A') {
-        const href = safeUrl((c as Element).getAttribute('href'), { allow: RTE_HREF, fallback: '' })
+        const href = safeUrl((c as Element).getAttribute('href'), { allow: TEXT_LINK_SCHEMES, fallback: '' })
         if (href) el.setAttribute('href', href); else el = null
       }
       if (!el) { copy(c, to, depth + 1); continue }
@@ -81,38 +92,79 @@ function editorRangeAt(x: number, y: number): Range | null {
 }
 /** beforeinput types that bring outside content in; handled by the component instead of the browser. */
 const EDITOR_FOREIGN_INPUT = ['insertFromDrop', 'insertFromPaste', 'insertFromPasteAsQuotation', 'insertFromYank']
+/** A beforeinput target range as a live Range. */
+function staticToRange(r: StaticRange | undefined): Range | null {
+  if (!r) return null
+  const at = document.createRange(); at.setStart(r.startContainer, r.startOffset); at.setEnd(r.endContainer, r.endOffset)
+  return at
+}
+/**
+ * Takes over drops and pastes that reach a contentEditable without the React handlers (native beforeinput): `insert`
+ * gets the data, where it lands and the input type. `skip` leaves one to the browser.
+ */
+function useForeignInput(ref: RefObject<HTMLElement | null>, insert: (data: DataTransfer | null, at: Range | null, type: string) => void, skip?: (type: string) => boolean) {
+  const cb = useLatest({ insert, skip })
+  useEffect(() => {
+    const el = ref.current; if (!el) return
+    const before = (e: InputEvent) => {
+      if (!EDITOR_FOREIGN_INPUT.includes(e.inputType) || cb.current.skip?.(e.inputType)) return
+      e.preventDefault()
+      cb.current.insert(e.dataTransfer, staticToRange(e.getTargetRanges?.()[0]), e.inputType)
+    }
+    el.addEventListener('beforeinput', before)
+    return () => el.removeEventListener('beforeinput', before)
+  }, [ref, cb])
+}
+
+/**
+ * The href a typed link gets: kept when it is relative (`/docs`, `#top`, `?q`, `./x`) or uses a text link scheme
+ * (https, http, mailto, tel); anything else, such as `example.com`, gets `https://` in front.
+ */
+export function richTextHref(url: string): string {
+  const u = url.trim()
+  if (/^[/#?.]/.test(u) || (/^[a-z][a-z0-9+.-]*:/i.test(u) && safeUrl(u, { allow: TEXT_LINK_SCHEMES, fallback: '' }))) return u
+  return `https://${u}`
+}
+
+/** RichTextEditor's save indicator: nothing ('idle'), "Saving…", "Saved" or "Couldn’t save". */
+export type RichTextSaveState = 'idle' | 'saving' | 'saved' | 'error'
+const RTE_SAVE_TEXT = { saving: 'Saving…', saved: 'Saved', error: 'Couldn’t save' } as const
 
 /**
  * Rich text editor on contentEditable. Toolbar buttons light up for the formatting under the caret; selecting text shows a
  * floating bubble (bold, italic, underline, link). ⌘B / ⌘I / ⌘U / ⌘K work, and at the start of a line "# ", "## ", "- ",
- * "1. " and "> " turn into headings, lists and quotes. The footer counts words and read time and shows "Saving… / Saved".
- * `onChange` receives the HTML (debounced; a pending save is flushed when the editor unmounts).
+ * "1. " and "> " turn into headings, lists and quotes. The footer counts words and read time.
+ * `onChange` receives the HTML (debounced; a pending change is handed over when the editor unmounts). The footer says
+ * "Saved" only when a save was confirmed: return a Promise from `onChange` ("Saving…", then "Saved" when it resolves or
+ * "Couldn’t save" when it rejects), or drive the indicator yourself with `saveState`. A plain `onChange` shows none.
  * Everything that becomes HTML (`defaultValue`, dropped content, the `onChange` output) goes through `sanitize`
  * (default `sanitizeRichText`; pass DOMPurify with your own config if you need more). Paste inserts plain text.
  */
-export function RichTextEditor({ defaultValue = '', placeholder: placeholderProp, onChange, sanitize = sanitizeRichText, className, 'aria-label': ariaLabelProp }:
-  { defaultValue?: string; placeholder?: string; onChange?: (html: string) => void; sanitize?: (html: string) => string; className?: string; 'aria-label'?: string }) {
+export function RichTextEditor({ defaultValue = '', placeholder: placeholderProp, onChange, saveState, sanitize = sanitizeRichText, className, 'aria-label': ariaLabelProp }:
+  { defaultValue?: string; placeholder?: string; onChange?: (html: string) => void | Promise<unknown>; saveState?: RichTextSaveState; sanitize?: (html: string) => string; className?: string; 'aria-label'?: string }) {
   const host = useRef<HTMLDivElement>(null), body = useRef<HTMLDivElement>(null), bar = useRef<HTMLDivElement>(null)
   const placeholder = placeholderProp ?? 'Start writing… type # for a heading, - for a list', ariaLabel = ariaLabelProp ?? 'Editor'
   const saved = useRef<Range | null>(null)
-  const [active, setActive] = useState<string[]>([])
+  const [active, setActive] = useState<RteCmd[]>([])
   const [bubble, setBubble] = useState<{ x: number; y: number; below?: boolean } | null>(null)
   const [link, setLink] = useState<string | null>(null) // URL being typed in the bubble
   const [words, setWords] = useState(0)
   const [empty, setEmpty] = useState(!defaultValue)
   const isEmpty = () => { const b = body.current; return !b || (!b.innerText.trim() && !b.querySelector('li,h2,h3,blockquote,pre')) }
-  const [saving, setSaving] = useState(false)
+  const [ownSave, setOwnSave] = useState<RichTextSaveState>('idle')
+  const save = saveState ?? ownSave
+  const saveSeq = useRef(0) // bumped by every edit: a save result for older text is ignored
   const [tab, setTab] = useState(0) // roving tab stop in the toolbar
   const timer = useRef<ReturnType<typeof setTimeout>>(undefined)
   const pending = useRef<string | null>(null) // HTML not yet handed to onChange
-  const notify = useRef(onChange), clean = useRef(sanitize)
-  useLayoutEffect(() => { notify.current = onChange; clean.current = sanitize })
+  const notify = useLatest(onChange), clean = useLatest(sanitize)
   const ownDrag = useRef(false) // a drag that started inside the editor (moving its own text) stays native
   const linkOpen = useRef(false)
   useEffect(() => { linkOpen.current = link !== null }, [link])
+  const separator = useRef('') // the page's paragraph separator, restored when the editor loses focus
 
   const count = () => (body.current?.innerText.trim().match(/\S+/g) || []).length
-  useLayoutEffect(() => { if (body.current) { body.current.innerHTML = clean.current(defaultValue); setWords(count()); setEmpty(isEmpty()) }; document.execCommand('defaultParagraphSeparator', false, 'p') }, []) // eslint-disable-line react-hooks/exhaustive-deps
+  useLayoutEffect(() => { if (body.current) { body.current.innerHTML = clean.current(defaultValue); setWords(count()); setEmpty(isEmpty()) } }, []) // eslint-disable-line react-hooks/exhaustive-deps
 
   const inside = (n: Node | null) => !!n && !!body.current?.contains(n)
   const closest = (tag: string) => {
@@ -120,30 +172,39 @@ export function RichTextEditor({ defaultValue = '', placeholder: placeholderProp
     for (; n && n !== body.current; n = n.parentNode) if (n.nodeType === 1 && (n as Element).tagName === tag) return n as HTMLElement
     return null
   }
+  /** Where a bubble `half` px wide goes for a selection rect: above it, or below on touch (the OS menu sits above). */
+  const bubbleAt = (r: DOMRect, half: number) => {
+    const h = host.current!.getBoundingClientRect(), below = isCoarsePointer()
+    return { x: clamp(r.left - h.left + r.width / 2, half, h.width - half), y: below ? (r.bottom || h.top + 60) - h.top + 10 : (r.top || h.top + 60) - h.top - 8, below }
+  }
   const sync = () => {
     const s = getSelection()
     if (!s?.rangeCount || !inside(s.anchorNode)) { if (!linkOpen.current) setBubble(null); return }
     saved.current = s.getRangeAt(0).cloneRange()
-    const on = ['bold', 'italic', 'underline', 'strikeThrough', 'insertUnorderedList', 'insertOrderedList'].filter(c => { try { return document.queryCommandState(c) } catch { return false } })
-    for (const [tag, cmd] of [['H2', 'h2'], ['H3', 'h3'], ['BLOCKQUOTE', 'blockquote'], ['CODE', 'code'], ['A', 'link']]) if (closest(tag)) on.push(cmd)
-    if (!on.some(c => ['h2', 'h3', 'blockquote', 'insertUnorderedList', 'insertOrderedList'].includes(c))) on.push('p')
-    setActive(on)
+    const on = RTE_LIST.filter(t => t.kind === 'exec' ? (() => { try { return document.queryCommandState(t.cmd) } catch { return false } })() : !!t.tag && !!closest(t.tag))
+    setActive([...on.map(t => t.cmd), ...(on.some(t => t.block) ? [] : ['p' as const])])
     if (linkOpen.current) return
     if (s.isCollapsed) return setBubble(null)
-    const r = s.getRangeAt(0).getBoundingClientRect(), h = host.current!.getBoundingClientRect()
-    const below = isCoarsePointer() // touch: the OS copy/paste menu sits above the selection, so the bubble goes under it
-    setBubble({ x: Math.min(h.width - 90, Math.max(90, r.left - h.left + r.width / 2)), y: below ? r.bottom - h.top + 10 : r.top - h.top - 8, below })
+    setBubble(bubbleAt(s.getRangeAt(0).getBoundingClientRect(), RTE_BUBBLE_HALF))
   }
   useEffect(() => {
     document.addEventListener('selectionchange', sync)
     return () => document.removeEventListener('selectionchange', sync)
   }, []) // eslint-disable-line react-hooks/exhaustive-deps
-  const changed = () => {
-    setWords(count()); setEmpty(isEmpty()); setSaving(true); clearTimeout(timer.current)
-    pending.current = body.current?.innerHTML ?? ''
-    timer.current = setTimeout(() => { setSaving(false); const html = pending.current; pending.current = null; if (html !== null) notify.current?.(clean.current(html)) }, 700)
+  /** Hand the HTML to onChange; a Promise it returns drives the save indicator. */
+  const deliver = (html: string) => {
+    const seq = saveSeq.current, r = notify.current?.(clean.current(html))
+    if (!r || typeof r.then !== 'function') return
+    setOwnSave('saving')
+    r.then(() => { if (seq === saveSeq.current) setOwnSave('saved') }, () => { if (seq === saveSeq.current) setOwnSave('error') })
   }
-  useEffect(() => () => { clearTimeout(timer.current); if (pending.current !== null) notify.current?.(clean.current(pending.current)) }, []) // don't drop the last edit
+  const changed = () => {
+    setWords(count()); setEmpty(isEmpty()); clearTimeout(timer.current)
+    saveSeq.current++; setOwnSave('idle')
+    pending.current = body.current?.innerHTML ?? ''
+    timer.current = setTimeout(() => { const html = pending.current; pending.current = null; if (html !== null) deliver(html) }, 700)
+  }
+  useEffect(() => () => { clearTimeout(timer.current); if (pending.current !== null) notify.current?.(clean.current(pending.current)) }, []) // eslint-disable-line react-hooks/exhaustive-deps -- don't drop the last edit
   /** Insert outside content at `at` (or the caret): sanitized HTML when there is any, else plain text. */
   const insertForeign = (data: DataTransfer | null, at: Range | null) => {
     const el = body.current, s = getSelection(); if (!el || !s || !data) return
@@ -155,26 +216,18 @@ export function RichTextEditor({ defaultValue = '', placeholder: placeholderProp
     else if (text) document.execCommand('insertText', false, text)
     sync(); changed()
   }
-  useEffect(() => { // backstop for drops/pastes that skip the React handlers (native beforeinput)
-    const el = body.current; if (!el) return
-    const before = (e: InputEvent) => {
-      if (!EDITOR_FOREIGN_INPUT.includes(e.inputType) || (e.inputType === 'insertFromDrop' && ownDrag.current)) return
-      e.preventDefault()
-      const r = e.getTargetRanges?.()[0], at = r ? document.createRange() : null
-      if (r && at) { at.setStart(r.startContainer, r.startOffset); at.setEnd(r.endContainer, r.endOffset) }
-      if (e.inputType === 'insertFromDrop') insertForeign(e.dataTransfer, at)
-      else { const t = e.dataTransfer?.getData('text/plain'); if (t) { document.execCommand('insertText', false, t); sync(); changed() } }
-    }
-    el.addEventListener('beforeinput', before)
-    return () => el.removeEventListener('beforeinput', before)
-  }, []) // eslint-disable-line react-hooks/exhaustive-deps
+  useForeignInput(body, (data, at, type) => {
+    if (type === 'insertFromDrop') return insertForeign(data, at)
+    const t = data?.getData('text/plain'); if (t) { document.execCommand('insertText', false, t); sync(); changed() }
+  }, type => type === 'insertFromDrop' && ownDrag.current)
   const restore = () => {
     body.current?.focus({ preventScroll: true })
     const s = getSelection(); if (saved.current && s) { s.removeAllRanges(); s.addRange(saved.current) }
   }
-  const exec = (cmd: string) => {
+  const exec = (cmd: RteCmd) => {
     restore()
-    if (['h2', 'h3', 'blockquote', 'p'].includes(cmd)) document.execCommand('formatBlock', false, active.includes(cmd) && cmd !== 'p' ? 'p' : cmd)
+    const tool = RTE_LIST.find(t => t.cmd === cmd)!
+    if (tool.kind === 'block') document.execCommand('formatBlock', false, active.includes(cmd) && cmd !== 'p' ? 'p' : cmd)
     else if (cmd === 'code') {
       const c = closest('CODE')
       if (c) c.replaceWith(document.createTextNode(c.textContent ?? ''))
@@ -184,10 +237,8 @@ export function RichTextEditor({ defaultValue = '', placeholder: placeholderProp
       if (a) { const r = document.createRange(); r.selectNodeContents(a); const s = getSelection()!; s.removeAllRanges(); s.addRange(r); document.execCommand('unlink') }
       else {
         const s = getSelection(); if (!s?.rangeCount) return
-        const r = s.getRangeAt(0).getBoundingClientRect(), h = host.current!.getBoundingClientRect()
         saved.current = s.getRangeAt(0).cloneRange()
-        const below = isCoarsePointer()
-        setBubble({ x: Math.min(h.width - 130, Math.max(130, r.left - h.left + r.width / 2)), y: below ? (r.bottom || h.top + 60) - h.top + 10 : (r.top || h.top + 60) - h.top - 8, below })
+        setBubble(bubbleAt(s.getRangeAt(0).getBoundingClientRect(), RTE_LINK_HALF))
         setLink(''); return
       }
     } else document.execCommand(cmd)
@@ -197,7 +248,7 @@ export function RichTextEditor({ defaultValue = '', placeholder: placeholderProp
     setLink(null); restore()
     const u = url.trim()
     if (u) {
-      const href = /^(https?:|mailto:)/i.test(u) ? u : `https://${u}`
+      const href = richTextHref(u)
       if (getSelection()?.isCollapsed) { const a = document.createElement('a'); a.href = href; a.textContent = u; const r = getSelection()!.getRangeAt(0); r.insertNode(a); r.setStartAfter(a); r.collapse(true) }
       else document.execCommand('createLink', false, href)
       changed()
@@ -205,24 +256,23 @@ export function RichTextEditor({ defaultValue = '', placeholder: placeholderProp
     sync()
   }
   const onKeyDown = (e: RKeyboardEvent) => {
-    const mod = e.metaKey || e.ctrlKey, k = e.key.toLowerCase()
-    if (mod && !e.shiftKey && !e.altKey && ['b', 'i', 'u', 'k'].includes(k)) { e.preventDefault(); e.stopPropagation(); return exec({ b: 'bold', i: 'italic', u: 'underline', k: 'link' }[k]!) }
+    const mod = e.metaKey || e.ctrlKey, cmd = RTE_SHORTCUTS[e.key.toLowerCase()]
+    if (mod && !e.shiftKey && !e.altKey && cmd) { e.preventDefault(); e.stopPropagation(); return exec(cmd) }
     if (e.key !== ' ') return
     const s = getSelection(); if (!s?.rangeCount || !s.isCollapsed) return
     const node = s.anchorNode; if (!node || node.nodeType !== 3 || node.previousSibling) return
-    const marker = (node.textContent ?? '').slice(0, s.anchorOffset), cmd = RTE_MD[marker]; if (!cmd) return
+    const marker = (node.textContent ?? '').slice(0, s.anchorOffset), md = RTE_MD[marker]; if (!md) return
     e.preventDefault()
     // Delete the marker with a native delete (keeps the emptied block editable), then convert the block.
     const r = document.createRange(); r.setStart(node, 0); r.setEnd(node, s.anchorOffset); s.removeAllRanges(); s.addRange(r); document.execCommand('delete')
-    if (cmd.startsWith('insert')) document.execCommand(cmd); else document.execCommand('formatBlock', false, cmd)
+    if (md.startsWith('insert')) document.execCommand(md); else document.execCommand('formatBlock', false, md)
     sync(); changed()
   }
-  const tools = RTE_TOOLS.filter((x): x is RteTool => x !== '|')
-  const toolbarKeys = useRoving(tools.length, () => {}, { orientation: 'horizontal', index: tab, onMove: n => { setTab(n); bar.current?.querySelectorAll<HTMLElement>('button')[n]?.focus() } })
+  const toolbarKeys = useRoving(RTE_LIST.length, () => {}, { orientation: 'horizontal', index: tab, onMove: n => { setTab(n); bar.current?.querySelectorAll<HTMLElement>('button')[n]?.focus() } })
   const toolBtn = (tool: RteTool, inBubble: boolean) => {
-    const on = active.includes(tool.cmd), i = tools.indexOf(tool), label = tool.label
+    const on = active.includes(tool.cmd), i = RTE_LIST.indexOf(tool), label = tool.label
     return (
-      <motion.button type="button" key={tool.cmd} whileTap={{ scale: 0.85 }} aria-label={tool.name ?? label} title={tool.keys ? `${label} ${tool.keys}` : label} aria-pressed={on}
+      <motion.button type="button" key={tool.cmd} whileTap={{ scale: 0.85 }} aria-label={tool.name ?? label} title={tool.shortcut ? `${label} ${formatHotkey(`mod+${tool.shortcut}`)}` : label} aria-pressed={on}
         tabIndex={inBubble ? -1 : i === tab ? 0 : -1} onMouseDown={e => e.preventDefault()} onClick={() => { if (!inBubble) setTab(i); exec(tool.cmd) }}
         className={cn('grid h-[30px] min-w-[30px] flex-none cursor-pointer place-items-center rounded-[var(--r-md)] border-0 px-1.5 text-[13px] font-semibold transition-colors [@media(pointer:coarse)]:h-9 [@media(pointer:coarse)]:min-w-9',
           inBubble ? (on ? 'bg-[color-mix(in_srgb,var(--on-primary)_15%,transparent)] text-[var(--on-primary)]' : 'bg-transparent text-[color-mix(in_srgb,var(--on-primary)_75%,transparent)] hover:bg-[color-mix(in_srgb,var(--on-primary)_15%,transparent)] hover:text-[var(--on-primary)]')
@@ -241,6 +291,9 @@ export function RichTextEditor({ defaultValue = '', placeholder: placeholderProp
       {empty && <span aria-hidden className="pointer-events-none absolute top-4 start-4 text-sm text-[var(--fg3)] [@media(pointer:coarse)]:text-base">{placeholder}</span>}
       <div ref={body} contentEditable suppressContentEditableWarning role="textbox" aria-multiline aria-label={ariaLabel} aria-placeholder={placeholder} spellCheck={false}
         className={rteContent} onInput={() => { sync(); changed() }} onKeyDown={onKeyDown} onKeyUp={sync} onMouseUp={sync} onTouchEnd={() => setTimeout(sync, 0)}
+        // Enter makes <p> while the editor has focus; the setting is document-wide, so the page's own comes back on blur
+        onFocus={() => { try { separator.current = document.queryCommandValue('defaultParagraphSeparator'); document.execCommand('defaultParagraphSeparator', false, 'p') } catch { /* unsupported */ } }}
+        onBlur={() => { if (separator.current && separator.current !== 'p') document.execCommand('defaultParagraphSeparator', false, separator.current) }}
         onPaste={e => { e.preventDefault(); document.execCommand('insertText', false, e.clipboardData.getData('text/plain')) }}
         onDragStart={() => { ownDrag.current = true }} onDragEnd={() => { ownDrag.current = false }}
         onDragOver={e => { if (!ownDrag.current) e.dataTransfer.dropEffect = 'copy' }}
@@ -252,17 +305,21 @@ export function RichTextEditor({ defaultValue = '', placeholder: placeholderProp
       </div>
       <div className="flex justify-between border-t border-[var(--line)] px-3 py-2 text-xs text-[var(--fg3)]">
         <span className="tabular-nums">{`${plural(words, 'word')} · ${Math.max(1, Math.round(words / 220))} min read`}</span>
-        <AnimatePresence mode="wait" initial={false}>
-          <motion.span key={String(saving)} initial={{ opacity: 0, y: 3 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0, y: -3 }} transition={{ duration: 0.15 }} className="flex items-center gap-1" aria-live="polite">
-            {saving ? 'Saving…' : <><Icon name="check" size={12} className="text-[var(--ok)]" />{'Saved'}</>}
-          </motion.span>
-        </AnimatePresence>
+        <span aria-live="polite" className="flex items-center">
+          <AnimatePresence mode="wait" initial={false}>
+            {save !== 'idle' && (
+              <motion.span key={save} initial={{ opacity: 0, y: 3 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0, y: -3 }} transition={{ duration: 0.15 }} className={cn('flex items-center gap-1', save === 'error' && 'text-[var(--bad)]')}>
+                {save === 'saved' && <Icon name="check" size={12} className="text-[var(--ok)]" />}{save === 'error' && <Icon name="alertCircle" size={12} />}{RTE_SAVE_TEXT[save]}
+              </motion.span>
+            )}
+          </AnimatePresence>
+        </span>
       </div>
       <AnimatePresence>
         {bubble && (
           <motion.div key="bubble" role="toolbar" aria-label={'Selection formatting'} initial={{ opacity: 0, y: 4 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0, transition: { duration: 0.1 } }} transition={spring(0.3, 0.25)}
             className={cn('absolute z-10 flex max-w-[calc(100%-8px)] -translate-x-1/2 gap-0.5 rounded-[var(--r-md)] bg-[var(--primary)] p-1 shadow-[var(--shadow)]', !bubble.below && '-translate-y-full')} style={{ left: bubble.x, top: bubble.y }}>
-            {link === null ? tools.filter(t => RTE_BUBBLE.includes(t.cmd)).map(t => toolBtn(t, true)) : (
+            {link === null ? RTE_LIST.filter(t => t.bubble).map(t => toolBtn(t, true)) : (
               <input autoFocus value={link} onChange={e => setLink(e.target.value)} placeholder={'Paste a link, Enter to apply'} aria-label={'Link URL'}
                 onKeyDown={e => { if (e.key === 'Enter') { e.preventDefault(); applyLink(link) } if (e.key === 'Escape') { e.preventDefault(); e.stopPropagation(); setLink(null); restore(); sync() } }}
                 onBlur={() => { setLink(null); setBubble(null) }}
@@ -291,8 +348,9 @@ const MENTION_CMD = 'inline-block rounded-[var(--r-sm)] bg-[var(--warn-soft)] px
  */
 export function MentionsInput({ people = [], commands = [], placeholder: ph, onSend, className }:
   { people?: MentionPerson[]; commands?: MentionCommand[]; placeholder?: string; className?: string; onSend?: (segments: MentionSegment[], text: string) => void }) {
-  const placeholder = ph ?? `Write a message…${(people.length && commands.length ? 'both' : people.length ? 'people' : commands.length ? 'commands' : 'none') === 'both' ? ' try @ or /' : (people.length && commands.length ? 'both' : people.length ? 'people' : commands.length ? 'commands' : 'none') === 'people' ? ' try @' : (people.length && commands.length ? 'both' : people.length ? 'people' : commands.length ? 'commands' : 'none') === 'commands' ? ' try /' : ''}`
-  const host = useRef<HTMLDivElement>(null), ed = useRef<HTMLDivElement>(null), lid = useId()
+  const hint = people.length && commands.length ? ' try @ or /' : people.length ? ' try @' : commands.length ? ' try /' : ''
+  const placeholder = ph ?? `Write a message…${hint}`
+  const host = useRef<HTMLDivElement>(null), ed = useRef<HTMLDivElement>(null)
   const made = useRef(new WeakSet<Node>()) // tokens this component created; nothing else becomes a segment
   const [pop, setPop] = useState<{ type: '@' | '/'; q: string; x: number; y: number } | null>(null)
   const [sent, setSent] = useState<{ id: number; segs: MentionSegment[] } | null>(null)
@@ -301,7 +359,8 @@ export function MentionsInput({ people = [], commands = [], placeholder: ph, onS
   const open = !!pop && items.length > 0
   const options: Option[] = items.map(it => 'cmd' in it ? { value: it.cmd, label: it.cmd, hint: it.hint }
     : { value: it.id, label: it.name, hint: it.sub, leading: <Avatar name={it.name} size={22} className="!border-0" /> })
-  const { active: idx, setActive: setIdx, onKeyDown: rove } = useRoving(items.length, i => insert(items[i]), { homeEnd: false })
+  const lb = useListbox(options, i => insert(items[i]), { open, setOpen: o => { if (!o) setPop(null) }, input: true })
+  const idx = Math.min(lb.active, Math.max(0, items.length - 1))
   const detect = () => {
     const s = getSelection(), node = s?.anchorNode
     if (!s?.rangeCount || !node || node.nodeType !== 3 || !ed.current?.contains(node)) return setPop(null)
@@ -310,7 +369,8 @@ export function MentionsInput({ people = [], commands = [], placeholder: ph, onS
     const r = s.getRangeAt(0).cloneRange(); r.collapse(true)
     const rect = r.getClientRects()[0] ?? ed.current.getBoundingClientRect(), h = host.current!.getBoundingClientRect()
     const w = Math.min(230, h.width)
-    setPop(p => { if (!p || p.type !== m[2]) setIdx(0); return { type: m[2] as '@' | '/', q: m[3].toLowerCase(), x: Math.max(0, Math.min(h.width - w, rect.left - h.left)), y: rect.bottom - h.top + 6 } })
+    if (pop?.type !== m[2]) lb.setActive(0)
+    setPop({ type: m[2] as '@' | '/', q: m[3].toLowerCase(), x: Math.max(0, Math.min(h.width - w, rect.left - h.left)), y: rect.bottom - h.top + 6 })
   }
   const insert = (it: MentionPerson | MentionCommand) => {
     const s = getSelection(), node = s?.anchorNode
@@ -338,7 +398,7 @@ export function MentionsInput({ people = [], commands = [], placeholder: ph, onS
     const walk = (n: Node) => n.childNodes.forEach(c => {
       if (c.nodeType === 3) { const t = (c.textContent ?? '').replace(/ /g, ' '); const last = out[out.length - 1]; if (last?.type === 'text') last.value += t; else out.push({ type: 'text', value: t }) }
       else if (c instanceof HTMLElement && made.current.has(c) && token(c)) out.push(token(c)!)
-      else if (c instanceof HTMLElement) { if (c.tagName === 'BR' || c.tagName === 'DIV') out.push({ type: 'text', value: '\n' }); walk(c) }
+      else if (c instanceof HTMLElement) { if (c.tagName === 'BR' || c.tagName === 'DIV' || c.tagName === 'P') out.push({ type: 'text', value: '\n' }); walk(c) }
     })
     if (ed.current) walk(ed.current)
     return out
@@ -348,18 +408,7 @@ export function MentionsInput({ people = [], commands = [], placeholder: ph, onS
     if (at && el.contains(at.startContainer)) { s.removeAllRanges(); s.addRange(at) }
     if (s.rangeCount && el.contains(s.anchorNode)) document.execCommand('insertText', false, text)
   }
-  useEffect(() => { // backstop for drops/pastes that skip the React handlers: plain text only
-    const el = ed.current; if (!el) return
-    const before = (e: InputEvent) => {
-      if (!EDITOR_FOREIGN_INPUT.includes(e.inputType)) return
-      e.preventDefault()
-      const r = e.getTargetRanges?.()[0], at = r ? document.createRange() : null
-      if (r && at) { at.setStart(r.startContainer, r.startOffset); at.setEnd(r.endContainer, r.endOffset) }
-      insertPlain(e.dataTransfer?.getData('text/plain'), at)
-    }
-    el.addEventListener('beforeinput', before)
-    return () => el.removeEventListener('beforeinput', before)
-  }, [])
+  useForeignInput(ed, (data, at) => insertPlain(data?.getData('text/plain'), at))
   const send = () => {
     const el = ed.current; if (!el) return
     if (!el.textContent?.trim()) return shake(el, 4)
@@ -370,27 +419,26 @@ export function MentionsInput({ people = [], commands = [], placeholder: ph, onS
   return (
     <div ref={host} className={cn('relative flex flex-col gap-3', className)}>
       <div ref={ed} contentEditable suppressContentEditableWarning role="textbox" aria-multiline aria-label={'Message'} data-ph={placeholder} spellCheck={false}
-        aria-controls={open ? lid : undefined} aria-activedescendant={open ? `${lid}-${idx}` : undefined} aria-autocomplete="list"
+        aria-controls={open ? lb.id : undefined} aria-activedescendant={open ? `${lb.id}-${idx}` : undefined} aria-autocomplete="list"
         className={cn(inputClass, '!h-auto min-h-[90px] !py-2.5 text-sm leading-relaxed whitespace-pre-wrap empty:before:text-[var(--fg3)] empty:before:content-[attr(data-ph)]')}
         onInput={() => { const el = ed.current!; if (!el.textContent && !el.querySelector('[data-kind]')) el.innerHTML = ''; detect() }}
         onKeyUp={e => { if (['ArrowLeft', 'ArrowRight', 'Home', 'End'].includes(e.key)) detect() }}
-        onBlur={() => setTimeout(() => setPop(null), 150)}
+        onBlur={() => setPop(null)}
         onPaste={e => { e.preventDefault(); document.execCommand('insertText', false, e.clipboardData.getData('text/plain')) }}
         onDragOver={e => { e.dataTransfer.dropEffect = 'copy' }}
         onDrop={e => { e.preventDefault(); insertPlain(e.dataTransfer.getData('text/plain'), editorRangeAt(e.clientX, e.clientY)); detect() }}
         onKeyDown={e => {
           if (e.nativeEvent.isComposing) return // Enter confirming an IME candidate is not a send
           if (!open) { if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); send() } return }
-          if (e.key === 'Tab') { e.preventDefault(); insert(items[Math.min(idx, items.length - 1)]) }
-          else if (e.key === 'Escape') { e.preventDefault(); e.stopPropagation(); setPop(null) }
-          else rove(e)
+          if (e.key === 'Tab') { e.preventDefault(); insert(items[idx]) }
+          else lb.onKeyDown(e)
         }} />
       {/* zero-size anchor at the caret (a physical x from the caret's rect); the shared floating panel flips and clamps itself from there */}
       <div className="absolute" style={{ left: pop?.x ?? 0, top: (pop?.y ?? 0) - 6 }}>
         <FloatingPanel open={open} placement="bottom-start" role="presentation" className="max-h-60 w-[230px] overflow-auto overscroll-contain">
           <MenuLabel>{(pop?.type === '/' ? 'Commands' : 'People')}</MenuLabel>
-          <OptionList id={lid} label={(pop?.type === '/' ? 'Commands' : 'People')} options={options} active={idx} query={pop?.type === '@' ? pop.q : undefined}
-            isSelected={() => false} onPick={i => insert(items[i])} onHover={setIdx} />
+          <OptionList id={lb.id} label={(pop?.type === '/' ? 'Commands' : 'People')} options={options} active={idx} query={pop?.type === '@' ? pop.q : undefined}
+            isSelected={() => false} onPick={i => insert(items[i])} onHover={lb.setActive} />
         </FloatingPanel>
       </div>
       <div className="flex items-center justify-between gap-2">
@@ -466,7 +514,8 @@ export function SignaturePad({ onConfirm, height = 170, className }: { onConfirm
   const redraw = () => {
     const c = cv.current, g = c?.getContext('2d'); if (!c || !g) return
     g.clearRect(0, 0, c.width, c.height)
-    g.strokeStyle = getComputedStyle(c).getPropertyValue('--fg').trim() || '#111'; g.lineCap = 'round'; g.lineJoin = 'round'
+    const [r, gr, b, a] = resolveColor(c, 'var(--fg)', [17, 17, 17, 1])
+    g.strokeStyle = `rgba(${r},${gr},${b},${a})`; g.lineCap = 'round'; g.lineJoin = 'round'
     const k = dpr.current
     for (const s of strokes.current) {
       if (s.length === 1) { g.fillStyle = g.strokeStyle; g.beginPath(); g.arc(s[0].x * k, s[0].y * k, (s[0].w * k) / 2, 0, Math.PI * 2); g.fill(); continue }
@@ -480,8 +529,8 @@ export function SignaturePad({ onConfirm, height = 170, className }: { onConfirm
   }
   useResizeObserver(cv, c => { dpr.current = Math.min(2, devicePixelRatio || 1); c.width = c.clientWidth * dpr.current; c.height = c.clientHeight * dpr.current; redraw() })
   // re-ink on theme changes (also with UIProvider target="self", where <html> never changes)
-  const { tokens: sigTokens } = useTheme()
-  useEffect(() => { redraw() }, [sigTokens]) // eslint-disable-line react-hooks/exhaustive-deps
+  const themeVersion = useThemeVersion(box)
+  useEffect(() => { redraw() }, [themeVersion]) // eslint-disable-line react-hooks/exhaustive-deps
   const pt = (e: React.PointerEvent, w: number): SigPoint => { const r = cv.current!.getBoundingClientRect(); return { x: e.clientX - r.left, y: e.clientY - r.top, t: performance.now(), w } }
   const undo = () => { strokes.current.pop(); setCount(strokes.current.length); setDone(false); redraw() }
   const clear = () => { strokes.current = []; setCount(0); setDone(false); redraw() }
@@ -545,7 +594,7 @@ export function AddressAutocomplete({ addresses, onChange, placeholder: placehol
   useEffect(() => () => timers.current.forEach(clearTimeout), [])
   const term = q.trim().toLowerCase()
   const items = term.length < 2 ? [] : addresses.filter(a => `${a.street} ${a.city}`.toLowerCase().includes(term)).slice(0, 5)
-  const shown = open && items.length > 0
+  const shown = open && term.length >= 2
   const options: Option[] = items.map(a => ({ value: `${a.street}|${a.postcode}`, label: a.street, hint: `${a.city}, ${a.country}`, icon: 'mapPin' }))
   const lb = useListbox(options, i => choose(items[i]), { open: shown, setOpen, input: true })
   const choose = (a: AddressRecord) => {
@@ -560,11 +609,11 @@ export function AddressAutocomplete({ addresses, onChange, placeholder: placehol
       <div className="relative">
         <label htmlFor={`${base}-street`} className="mb-1.5 block text-[13px] font-medium">{label}</label>
         <input id={`${base}-street`} value={q} placeholder={placeholder} autoComplete="off" {...lb.comboProps} className={inputClass}
-          onChange={e => { setQ(e.target.value); lb.setActive(0); setOpen(true) }} onFocus={() => setOpen(true)} onBlur={() => setTimeout(() => setOpen(false), 120)}
+          onChange={e => { setQ(e.target.value); lb.setActive(0); setOpen(true) }} onFocus={() => setOpen(true)} onBlur={() => setOpen(false)}
           onKeyDown={e => { if (shown && !e.nativeEvent.isComposing) lb.onKeyDown(e) }} />
         <FloatingPanel open={shown} matchWidth flip="scroll" role="presentation" className="max-h-64 overflow-auto overscroll-contain">
           <OptionList id={lb.id} label={'Suggestions'} options={options} active={Math.min(lb.active, Math.max(0, items.length - 1))} query={term} isSelected={() => false}
-            onPick={i => choose(items[i])} onHover={lb.setActive} />
+            onPick={i => choose(items[i])} onHover={lb.setActive} empty={'No matching addresses'} />
         </FloatingPanel>
       </div>
       <div className="grid grid-cols-[minmax(0,2fr)_minmax(0,1fr)] gap-2.5">
@@ -576,46 +625,66 @@ export function AddressAutocomplete({ addresses, onChange, placeholder: placehol
   )
 }
 
-export const EMOJI_CATEGORIES: [icon: string, name: string, emoji: string][] = [
-  ['😊', 'Smileys', '😀 😃 😄 😁 😆 😅 🤣 😂 🙂 😉 😊 😇 🥰 😍 🤩 😘 😋 😜 🤪 😎 🤓 🧐 🤔 🤗 🤭 😴 😮 😢 😭 😤 😡 🥳'],
-  ['👍', 'Gestures', '👍 👎 👏 🙌 👐 🤝 🙏 ✌️ 🤞 🤟 🤘 👌 🤌 👋 💪 ✍️ 👀 🧠 🫶 ❤️ 🧡 💛 💚 💙 💜 🖤 🤍 💯 ✨ 🔥 ⭐ 🎉'],
-  ['🐶', 'Nature', '🐶 🐱 🐭 🐹 🐰 🦊 🐻 🐼 🐨 🐯 🦁 🐮 🐸 🐵 🐔 🐧 🐦 🦄 🐝 🦋 🌸 🌻 🌲 🌵 🍀 🌍 🌙 ☀️ ⛅ 🌈 ❄️ 🌊'],
-  ['🍕', 'Food', '🍎 🍐 🍊 🍋 🍌 🍉 🍇 🍓 🫐 🍒 🥑 🥦 🥕 🌽 🍞 🧀 🍳 🥞 🍔 🍟 🍕 🌮 🍣 🍜 🍩 🍪 🎂 🍫 ☕ 🍵 🥤 🍷'],
-  ['🚀', 'Objects', '🚀 ✈️ 🚗 🚲 ⛵ 🏠 🏔️ 💻 ⌨️ 📱 📷 🎧 🎮 💡 🔒 🔑 🔧 🧪 📈 📌 📎 ✏️ 📚 🗂️ 📅 ⏰ 💰 🎁 🏆 🎯 🧩 ✅'],
+export const EMOJI_CATEGORIES: [icon: string, name: string, emoji: readonly string[]][] = [
+  ['😊', 'Smileys', ['😀', '😃', '😄', '😁', '😆', '😅', '🤣', '😂', '🙂', '😉', '😊', '😇', '🥰', '😍', '🤩', '😘', '😋', '😜', '🤪', '😎', '🤓', '🧐', '🤔', '🤗', '🤭', '😴', '😮', '😢', '😭', '😤', '😡', '🥳']],
+  ['👍', 'Gestures', ['👍', '👎', '👏', '🙌', '👐', '🤝', '🙏', '✌️', '🤞', '🤟', '🤘', '👌', '🤌', '👋', '💪', '✍️', '👀', '🧠', '🫶', '❤️', '🧡', '💛', '💚', '💙', '💜', '🖤', '🤍', '💯', '✨', '🔥', '⭐', '🎉']],
+  ['🐶', 'Nature', ['🐶', '🐱', '🐭', '🐹', '🐰', '🦊', '🐻', '🐼', '🐨', '🐯', '🦁', '🐮', '🐸', '🐵', '🐔', '🐧', '🐦', '🦄', '🐝', '🦋', '🌸', '🌻', '🌲', '🌵', '🍀', '🌍', '🌙', '☀️', '⛅', '🌈', '❄️', '🌊']],
+  ['🍕', 'Food', ['🍎', '🍐', '🍊', '🍋', '🍌', '🍉', '🍇', '🍓', '🫐', '🍒', '🥑', '🥦', '🥕', '🌽', '🍞', '🧀', '🍳', '🥞', '🍔', '🍟', '🍕', '🌮', '🍣', '🍜', '🍩', '🍪', '🎂', '🍫', '☕', '🍵', '🥤', '🍷']],
+  ['🚀', 'Objects', ['🚀', '✈️', '🚗', '🚲', '⛵', '🏠', '🏔️', '💻', '⌨️', '📱', '📷', '🎧', '🎮', '💡', '🔒', '🔑', '🔧', '🧪', '📈', '📌', '📎', '✏️', '📚', '🗂️', '📅', '⏰', '💰', '🎁', '🏆', '🎯', '🧩', '✅']],
 ]
-const EMOJI_NAMES: Record<string, string> = {
-  '👍': 'thumbs up yes', '👎': 'thumbs down no', '🔥': 'fire hot', '🎉': 'party tada celebrate', '❤️': 'heart love', '😂': 'laugh joy tears', '🤣': 'laugh rolling', '🚀': 'rocket launch ship',
-  '✅': 'check done', '👀': 'eyes look', '🙏': 'thanks pray please', '💯': 'hundred', '🍕': 'pizza', '☕': 'coffee', '🐶': 'dog puppy', '🐱': 'cat', '😍': 'love heart eyes',
-  '🤔': 'thinking hmm', '😎': 'cool sunglasses', '✨': 'sparkles', '😀': 'smile grin happy', '😊': 'smile blush happy', '🙂': 'smile', '😉': 'wink', '😢': 'sad cry', '😭': 'cry sob',
-  '😡': 'angry', '🥳': 'party celebrate', '👏': 'clap applause', '🙌': 'hooray raise hands', '👋': 'wave hello hi', '💪': 'strong muscle', '⭐': 'star', '🌈': 'rainbow', '☀️': 'sun',
-  '🍎': 'apple', '🍔': 'burger', '🍩': 'donut', '🎂': 'cake birthday', '🍷': 'wine', '💡': 'idea bulb', '🏆': 'trophy win', '🎯': 'target goal', '💻': 'laptop computer', '📅': 'calendar date', '🐛': 'bug',
+/** An emoji's accessible name, then extra search words. Emoji without an entry keep the name the screen reader gives the glyph. */
+const EMOJI_INFO: Record<string, readonly [name: string, ...keywords: string[]]> = {
+  '👍': ['thumbs up', 'yes', 'like'], '👎': ['thumbs down', 'no', 'dislike'], '🔥': ['fire', 'hot'], '🎉': ['party popper', 'tada', 'celebrate'],
+  '❤️': ['red heart', 'love'], '😂': ['face with tears of joy', 'laugh'], '🤣': ['rolling on the floor laughing', 'laugh'], '🚀': ['rocket', 'launch', 'ship'],
+  '✅': ['check mark', 'done', 'yes'], '👀': ['eyes', 'look'], '🙏': ['folded hands', 'thanks', 'pray', 'please'], '💯': ['hundred points'], '🍕': ['pizza'],
+  '☕': ['hot beverage', 'coffee'], '🐶': ['dog face', 'puppy'], '🐱': ['cat face'], '😍': ['smiling face with heart eyes', 'love'], '🤔': ['thinking face', 'hmm'],
+  '😎': ['smiling face with sunglasses', 'cool'], '✨': ['sparkles'], '😀': ['grinning face', 'smile', 'happy'], '😊': ['smiling face with smiling eyes', 'smile', 'blush', 'happy'],
+  '🙂': ['slightly smiling face', 'smile'], '😉': ['winking face', 'wink'], '😢': ['crying face', 'sad', 'cry'], '😭': ['loudly crying face', 'cry', 'sob'], '😡': ['enraged face', 'angry'],
+  '🥳': ['partying face', 'party', 'celebrate'], '👏': ['clapping hands', 'clap', 'applause'], '🙌': ['raising hands', 'hooray'], '👋': ['waving hand', 'wave', 'hello', 'hi'],
+  '💪': ['flexed biceps', 'strong', 'muscle'], '⭐': ['star'], '🌈': ['rainbow'], '☀️': ['sun'], '🍎': ['red apple'], '🍔': ['hamburger', 'burger'], '🍩': ['doughnut', 'donut'],
+  '🎂': ['birthday cake'], '🍷': ['wine glass'], '💡': ['light bulb', 'idea'], '🏆': ['trophy', 'win'], '🎯': ['direct hit', 'target', 'goal'], '💻': ['laptop', 'computer'], '📅': ['calendar', 'date'],
 }
-const EMOJI_ALL = EMOJI_CATEGORIES.flatMap(c => c[2].split(' '))
+const EMOJI_ALL = EMOJI_CATEGORIES.flatMap(c => c[2])
+const emojiMatches = (e: string, term: string) => EMOJI_INFO[e]?.some(w => w.includes(term)) ?? false
+const EMOJI_COLS = 8
+const EMOJI_GRID = { gridTemplateColumns: `repeat(${EMOJI_COLS}, minmax(0, 1fr))` }
 
 /**
- * Emoji panel: category tabs, a search field (shows "N results" or an empty state), a Recent row, and an 8-column grid
- * you can walk with the arrow keys. Calls `onPick` with the emoji; Escape calls `onClose`.
+ * Emoji panel: category tabs, a search field (shows "N results", or that nothing matched), a Recent row, and an
+ * 8-column grid. Each grid is one Tab stop: the arrow keys move inside it (↓ from Recent's last row goes on into the
+ * grid below, in the same column), Home/End go to the ends of the row. Calls `onPick` with the emoji; Escape calls `onClose`.
  */
 export function EmojiPicker({ onPick, onClose, recent = [], className }: { onPick: (e: string) => void; onClose?: () => void; recent?: string[]; className?: string }) {
   const [cat, setCat] = useState(0)
   const [q, setQ] = useState('')
   const catName = (i: number) => EMOJI_CATEGORIES[i][1]
-  const grid = useRef<HTMLDivElement>(null), tabs = useRef<HTMLDivElement>(null)
+  const tabs = useRef<HTMLDivElement>(null), recentGrid = useRef<HTMLDivElement>(null), mainGrid = useRef<HTMLDivElement>(null)
   const term = q.trim().toLowerCase()
   const tabKeys = useRoving(EMOJI_CATEGORIES.length, () => {}, { orientation: 'horizontal', index: cat,
     onMove: n => { setCat(n); setQ(''); tabs.current?.querySelectorAll<HTMLElement>('[role=tab]')[n]?.focus() } })
-  const list = term ? EMOJI_ALL.filter(e => (EMOJI_NAMES[e] ?? '').includes(term)) : EMOJI_CATEGORIES[cat][2].split(' ')
-  const cell = (e: string, i: number, row: string) => (
-    <button type="button" key={row + e + i} aria-label={EMOJI_NAMES[e]?.split(' ')[0] ?? e} onClick={() => onPick(e)}
+  const list = term ? EMOJI_ALL.filter(e => emojiMatches(e, term)) : EMOJI_CATEGORIES[cat][2]
+  const showRecent = recent.length > 0 && !term
+  const [stop, setStop] = useState({ r: 0, g: 0 }) // each grid's Tab stop
+  const at = { r: Math.min(stop.r, recent.length - 1), g: Math.min(stop.g, list.length - 1) }
+  const focusCell = (grid: 'r' | 'g', i: number) => {
+    const box = grid === 'r' ? recentGrid.current : mainGrid.current
+    setStop(s => ({ ...s, [grid]: i })); box?.querySelectorAll<HTMLElement>('button')[i]?.focus()
+  }
+  const gridKeys = (grid: 'r' | 'g', count: number) => (e: RKeyboardEvent) => {
+    const i = Number((e.target as HTMLElement).dataset.i), to = Number.isNaN(i) ? null : gridKeyMove(e.key, i, count, EMOJI_COLS)
+    if (to === null) return
+    e.preventDefault()
+    const col = i % EMOJI_COLS
+    if (grid === 'r' && e.key === 'ArrowDown' && i + EMOJI_COLS >= count && list.length) return focusCell('g', Math.min(col, list.length - 1))
+    if (grid === 'g' && e.key === 'ArrowUp' && i < EMOJI_COLS && showRecent) { const last = recent.length - 1; return focusCell('r', Math.min(last - (last % EMOJI_COLS) + col, last)) }
+    focusCell(grid, to)
+  }
+  const cell = (grid: 'r' | 'g') => (e: string, i: number) => (
+    <button type="button" key={grid + e + i} data-i={i} aria-label={EMOJI_INFO[e]?.[0]} tabIndex={i === at[grid] ? 0 : -1} onFocus={() => setStop(s => ({ ...s, [grid]: i }))} onClick={() => onPick(e)}
       className="grid h-8 cursor-pointer place-items-center rounded-[var(--r-md)] border-0 bg-transparent text-[19px] leading-none outline-none hover:bg-[var(--muted)] focus-visible:bg-[var(--muted)] [@media(pointer:coarse)]:h-10 [@media(pointer:coarse)]:text-[22px]">{e}</button>
   )
-  const onGridKey = (e: RKeyboardEvent) => {
-    const btns = [...(grid.current?.querySelectorAll<HTMLElement>('[data-emoji-grid] button') ?? [])], i = btns.indexOf(document.activeElement as HTMLElement)
-    const to = i < 0 || e.key === 'Home' || e.key === 'End' ? null : gridKeyMove(e.key, i, btns.length, 8, true)
-    if (to !== null) { e.preventDefault(); btns[to]?.focus() }
-  }
   return (
-    <div ref={grid} className={cn('w-[300px] max-w-[calc(100vw-32px)]', className)} onKeyDown={e => { if (e.key === 'Escape') { e.stopPropagation(); onClose?.() } else onGridKey(e) }}>
+    <div className={cn('w-[300px] max-w-[calc(100vw-32px)]', className)} onKeyDown={e => { if (e.key === 'Escape') { e.stopPropagation(); onClose?.() } }}>
       <div ref={tabs} role="tablist" aria-label={'Emoji categories'} className="flex gap-0.5 border-b border-[var(--line)] p-1.5" onKeyDown={e => { if (['ArrowLeft', 'ArrowRight', 'Home', 'End'].includes(e.key)) { e.stopPropagation(); tabKeys.onKeyDown(e) } }}>
         {EMOJI_CATEGORIES.map(([icon, name], i) => {
           const on = i === cat && !term
@@ -629,15 +698,16 @@ export function EmojiPicker({ onPick, onClose, recent = [], className }: { onPic
         })}
       </div>
       <div className="px-2 pt-2"><input autoFocus={!isCoarsePointer()} value={q} onChange={e => setQ(e.target.value)} placeholder={'Search emoji'} aria-label={'Search emoji'} className={cn(inputClass, '!h-[30px]')} /></div>
-      {recent.length > 0 && !term && (
+      {showRecent && (
         <>
           <div className="px-2.5 pt-1.5 text-[11px] text-[var(--fg3)]">{'Recent'}</div>
-          <div data-emoji-grid className="grid grid-cols-8 gap-0.5 px-2 pt-1">{recent.map((e, i) => cell(e, i, 'r'))}</div>
+          <div ref={recentGrid} role="group" aria-label={'Recent'} className="grid gap-0.5 px-2 pt-1" style={EMOJI_GRID} onKeyDown={gridKeys('r', recent.length)}>{recent.map(cell('r'))}</div>
         </>
       )}
-      <div className="px-2.5 pt-1.5 text-[11px] text-[var(--fg3)]" aria-live="polite">{term ? (list.length === 0 ? 'No results' : list.length === 1 ? `${list.length} result` : `${list.length} results`) : catName(cat)}</div>
-      <div data-emoji-grid className="grid max-h-[200px] grid-cols-8 gap-0.5 overflow-auto overscroll-contain p-2 [@media(pointer:coarse)]:max-h-[min(240px,40dvh)]">
-        {list.length ? list.map((e, i) => cell(e, i, 'g')) : <span className="col-span-full p-2.5 text-center text-xs text-[var(--fg3)]">{`No emoji found for “${q.trim()}”`}</span>}
+      <div className="px-2.5 pt-1.5 text-[11px] text-[var(--fg3)]" aria-live="polite">{term ? plural(list.length, 'result', 'results', { zero: `No emoji found for “${q.trim()}”` }) : catName(cat)}</div>
+      <div ref={mainGrid} role="group" aria-label={term ? 'Results' : catName(cat)} className="grid max-h-[200px] gap-0.5 overflow-auto overscroll-contain p-2 [@media(pointer:coarse)]:max-h-[min(240px,40dvh)]" style={EMOJI_GRID}
+        onKeyDown={gridKeys('g', list.length)}>
+        {list.map(cell('g'))}
       </div>
     </div>
   )
@@ -654,6 +724,8 @@ export function EmojiInput({ placeholder: placeholderProp, onChange, className }
   const [recent, setRecent] = useState<string[]>([])
   const [counts, setCounts] = useState<[string, number][]>([])
   const input = useRef<HTMLInputElement>(null), btn = useRef<HTMLButtonElement>(null), wrap = useRef<HTMLDivElement>(null)
+  const caret = useRef<number | null>(null) // where the caret goes once the picked emoji is in the text
+  useLayoutEffect(() => { const at = caret.current, el = input.current; if (at === null || !el) return; caret.current = null; el.focus(); el.setSelectionRange(at, at) }, [text])
   useOutside([wrap], () => setOpen(false), open)
   const pick = (e: string) => {
     const el = input.current, s = el?.selectionStart ?? text.length, en = el?.selectionEnd ?? text.length
@@ -662,7 +734,7 @@ export function EmojiInput({ placeholder: placeholderProp, onChange, className }
     setRecent(r => [e, ...r.filter(x => x !== e)].slice(0, 8))
     setCounts(c => c.some(([k]) => k === e) ? c.map(([k, n]) => [k, k === e ? n + 1 : n] as [string, number]) : [...c, [e, 1]])
     setOpen(false)
-    requestAnimationFrame(() => { el?.focus(); el?.setSelectionRange(s + e.length, s + e.length) })
+    caret.current = s + e.length
   }
   const unreact = (e: string) => setCounts(c => c.map(([k, n]) => [k, k === e ? n - 1 : n] as [string, number]).filter(([, n]) => n > 0))
   return (
