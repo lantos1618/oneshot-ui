@@ -59,7 +59,7 @@ describe('highlightCode', () => {
     expect(codeLanguageOf('x.zsh')).toBe('sh')
     expect(codeLanguageOf('package.json')).toBe('json')
     expect(codeLanguageOf('index.mjs')).toBe('js')
-    expect(codeLanguageOf(undefined)).toBe('ts')
+    expect(codeLanguageOf(undefined)).toBeUndefined()
   })
 })
 

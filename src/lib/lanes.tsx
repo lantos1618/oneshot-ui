@@ -1,11 +1,11 @@
 import { memo, useCallback, useEffect, useImperativeHandle, useLayoutEffect, useMemo, useRef, useState, type HTMLAttributes, type KeyboardEvent as RKeyboardEvent, type MouseEvent as RMouseEvent, type ReactElement, type ReactNode, type Ref } from 'react'
 import { motion } from 'motion/react'
-import { cn, useCoarsePointer, useControllable } from './core'
-import { useVirtual } from './virtual'
+import { cn, isEditableTarget, useCoarsePointer, useControllable, useStableArray } from './core'
+import { useVirtual, type VirtualAlign } from './virtual'
 
 /**
  * A node: a unique `id`, the ids of its `parents` (first parent first: the line it continues), an optional `time` (for
- * `order: 'time'`) and an optional `group` (a branch or thread key: it colours the lane the node starts and is what
+ * `order: 'time'`; a node whose time is missing or not finite comes after the timed ones) and an optional `group` (a branch or thread key: it colours the lane the node starts and is what
  * `pin` names). Extend it with anything your rows render: `layoutLanes<MyNode>` hands your objects back.
  */
 export type LaneNode = { id: string; parents: readonly string[]; time?: number; group?: string }
@@ -311,7 +311,7 @@ export function layoutLanes<N extends LaneNode>(input: readonly N[], options: La
   const before = order === 'input'
     // children first: in a 'down' list that is your order; in an 'up' list (oldest first) it is your order reversed
     ? (direction === 'up' ? (a: number, b: number) => a > b : (a: number, b: number) => a < b)
-    : (a: number, b: number) => { const ta = nodes[a].time ?? 0, tb = nodes[b].time ?? 0; return ta !== tb ? ta > tb : nodes[a].id < nodes[b].id }
+    : (a: number, b: number) => { const ta = laneTime(nodes[a]), tb = laneTime(nodes[b]); return ta !== tb ? ta > tb : nodes[a].id < nodes[b].id }
   const sequence = laneOrder(inputParents, order, before)
   const n = sequence.length
   const rowOfInput = new Int32Array(nodes.length)
@@ -407,6 +407,9 @@ export function layoutLanes<N extends LaneNode>(input: readonly N[], options: La
   const index = up ? new Map(rows.map(row => [row.node.id, row.index])) : rowById
   return { rows, laneCount: n ? lanes.widest + 1 : 0, rowOf: id => index.get(id) ?? -1, index, direction, palette }
 }
+
+/** A node's time for `order: 'time'`: a node without a finite `time` comes after every timed one. */
+const laneTime = (n: LaneNode) => (Number.isFinite(n.time) ? n.time! : -Infinity)
 
 /** The default `color` for a palette of `size` colours (see laneColor). */
 const laneColorFor = (size: number) => (group: string, pinned: readonly string[]) => laneColor(group, pinned, size)
@@ -544,9 +547,9 @@ const LANE_NONE: readonly string[] = []
  */
 export function useLaneGraph<N extends LaneNode>(source: readonly N[] | LaneLayout<N>, options: LaneGraphOptions<N> = {}): LaneGraphState<N> {
   const { order, direction, pin, pinStart, palette, color, laneGroup, firstParentLanes, selected: selectedProp, defaultSelected = null, onSelect, active: activeProp, onActiveChange, highlight: mode = 'ancestry', hovered, onHoverChange } = options
-  const pinKey = (pin ?? LANE_NONE).join('\u0000')
-  const layout = useMemo(() => ('rows' in source ? source as LaneLayout<N> : layoutLanes(source as readonly N[], { order, direction, pin: pinKey ? pinKey.split('\u0000') : [], pinStart, palette, color, laneGroup, firstParentLanes })),
-    [source, order, direction, pinKey, pinStart, palette, color, laneGroup, firstParentLanes])
+  const pins = useStableArray(pin ?? LANE_NONE)
+  const layout = useMemo(() => ('rows' in source ? source as LaneLayout<N> : layoutLanes(source as readonly N[], { order, direction, pin: pins, pinStart, palette, color, laneGroup, firstParentLanes })),
+    [source, order, direction, pins, pinStart, palette, color, laneGroup, firstParentLanes])
   const count = layout.rows.length
   const [innerActive, setInnerActive] = useState(0)
   const active = Math.min(activeProp ?? innerActive, Math.max(0, count - 1))
@@ -600,11 +603,13 @@ export function useLaneGraph<N extends LaneNode>(source: readonly N[] | LaneLayo
 /** What a row knows about itself while rendering. */
 export type LaneRowState = { active: boolean; selected: boolean; /** on the lit line */ lit: boolean; /** the line is lit and this row is not on it */ dimmed: boolean }
 
+/** Where a row scrolls to: into view ('auto'), the middle or the top. */
+export type LaneAlign = Exclude<VirtualAlign, 'end'>
 /** LaneGraph's imperative handle. */
 export type LaneGraphHandle = {
   /** move the Tab stop (and focus, unless `focus: false`) to a row, scrolling it into view */
-  goTo: (index: number, options?: { focus?: boolean; align?: 'auto' | 'center' | 'start' }) => void
-  scrollToId: (id: string, align?: 'auto' | 'center' | 'start') => void
+  goTo: (index: number, options?: { focus?: boolean; align?: LaneAlign }) => void
+  scrollToId: (id: string, align?: LaneAlign) => void
   focus: () => void
   element: HTMLDivElement | null
 }
@@ -634,13 +639,15 @@ export type LaneGraphProps<N extends LaneNode = LaneNode> = LaneGraphOptions<N> 
   /** ring a row's node (HEAD, the current message) */ emphasis?: (row: LaneRow<N>) => boolean
   /** shown when there are no rows */ empty?: ReactNode
   /** min width of the rows (they then scroll sideways) */ contentMinWidth?: number
-  /** ids to fade in (default: rows that weren't in the previous layout, when at most 500 arrive at once) */ fresh?: ReadonlySet<string> | null
+  /** ids to fade in (default: rows that weren't in the previous layout, when at most LANE_FRESH_MAX arrive at once) */ fresh?: ReadonlySet<string> | null
+  /** the ids LaneGraph fades in by default as they arrive (e.g. to announce them) */ onFresh?: (ids: ReadonlySet<string>) => void
   /** wraps the scroller element (e.g. in a ContextMenuTrigger asChild): keep it the direct child */ wrapScroller?: (scroller: ReactElement) => ReactNode
   className?: string; 'aria-label'?: string; ref?: Ref<LaneGraphHandle>
 } & Pick<HTMLAttributes<HTMLDivElement>, 'aria-colcount' | 'aria-describedby'>
 
 const LANE_NAV_KEYS = new Set(['ArrowLeft', 'ArrowRight', 'ArrowUp', 'ArrowDown', 'Home', 'End', 'PageUp', 'PageDown'])
-const laneEditable = (t: EventTarget | null) => t instanceof Element && !!t.closest('input,textarea,select,[contenteditable="true"],[contenteditable=""]')
+/** New rows fade in only when at most this many arrive at once (a whole new data set just appears), for LANE_FRESH_MS. */
+const LANE_FRESH_MAX = 500, LANE_FRESH_MS = 1200
 /** A control inside a row (its own button, link or field): clicking it doesn't also activate the row. */
 const laneControl = (target: EventTarget | null, row: Element) => {
   const el = target instanceof Element ? target.closest('button,a[href],input,select,textarea,label,summary,[role=button],[role=switch],[role=checkbox],[role=menuitem],[role=tab]') : null
@@ -698,7 +705,7 @@ const LaneRowView = memo(function LaneRowView({ row, start, height, columns, gut
  */
 export function LaneGraph<N extends LaneNode>(props: LaneGraphProps<N>) {
   const { nodes, renderRow, rowHeight: rowHeightProp, estimateRowHeight = 72, laneWidth = 14, nodeY, maxLanes, anchor = 'start', keyboard = true, onActivate, onContextMenu, onKeyDown,
-    height = 420, fit = true, header, headerHeight = 0, columns = 'minmax(0,1fr)', cells = false, rowLabel, rowClassName, rowAttrs, emphasis, empty, contentMinWidth, fresh: freshProp, wrapScroller,
+    height = 420, fit = true, header, headerHeight = 0, columns = 'minmax(0,1fr)', cells = false, rowLabel, rowClassName, rowAttrs, emphasis, empty, contentMinWidth, fresh: freshProp, onFresh, wrapScroller,
     className, 'aria-label': ariaLabel, ref, ...rest } = props
   const { 'aria-colcount': colCount, 'aria-describedby': describedBy } = rest
   const g = useLaneGraph(nodes, props)
@@ -717,7 +724,7 @@ export function LaneGraph<N extends LaneNode>(props: LaneGraphProps<N>) {
 
   /* moving the Tab stop: scroll, then focus the row once it has rendered */
   const pendingFocus = useRef<number | null>(null)
-  const goTo = useCallback((i: number, { focus = true, align = 'auto' as 'auto' | 'center' | 'start' } = {}) => {
+  const goTo = useCallback((i: number, { focus = true, align = 'auto' as LaneAlign } = {}) => {
     if (!count) return
     const k = Math.max(0, Math.min(count - 1, i))
     setActive(k)
@@ -745,11 +752,11 @@ export function LaneGraph<N extends LaneNode>(props: LaneGraphProps<N>) {
     const prev = seen.current, el = scrollRef.current
     seen.current = { layout, items: v.items }
     if (!prev || prev.layout === layout) return
-    // fade in what is new (a handful at a time: a whole new data set just appears)
     const added = freshProp === undefined ? layout.rows.filter(r => prev.layout.rowOf(r.node.id) < 0) : []
-    if (freshProp === undefined && added.length && added.length <= 500 && prev.layout.rows.length) {
-      setFresh(new Set(added.map(r => r.node.id)))
-      clearTimeout(freshTimer.current); freshTimer.current = setTimeout(() => setFresh(null), 1200)
+    if (freshProp === undefined && added.length && added.length <= LANE_FRESH_MAX && prev.layout.rows.length) {
+      const ids = new Set(added.map(r => r.node.id))
+      setFresh(ids); onFresh?.(ids)
+      clearTimeout(freshTimer.current); freshTimer.current = setTimeout(() => setFresh(null), LANE_FRESH_MS)
     }
     if (anchor === 'end' || !el || el.scrollTop <= 0) return
     // the row at the top of the view before the change, and how far into it the reader was
@@ -772,7 +779,7 @@ export function LaneGraph<N extends LaneNode>(props: LaneGraphProps<N>) {
   const onHover = useCallback((i: number) => setHover(i), [setHover])
   const handleKey = (e: RKeyboardEvent<HTMLDivElement>) => {
     onKeyDown?.(e, rows[active])
-    if (e.defaultPrevented || !keyboard || laneEditable(e.target) || e.altKey || e.ctrlKey || e.metaKey) return
+    if (e.defaultPrevented || !keyboard || isEditableTarget(e.target) || e.altKey || e.ctrlKey || e.metaKey) return
     const stop = () => { e.preventDefault(); e.stopPropagation() }
     if (e.key === 'ContextMenu' || (e.shiftKey && e.key === 'F10')) { // open the row's menu where the row is
       stop()
