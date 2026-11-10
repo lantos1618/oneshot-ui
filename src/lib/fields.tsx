@@ -1,6 +1,7 @@
 import { createContext, useContext, useEffect, useId, useRef, useState, type AriaAttributes, type FormEvent, type FormHTMLAttributes, type ReactNode, type Ref } from 'react'
 import { motion } from 'motion/react'
 import { FormFieldContext, type FormControlProps, type FormFieldState, useFormControl, Badge, ICONS, Icon, type IconName, cn, spring, useCoarsePointer, useRoving, composeRefs } from './core'
+import { ActiveIndicator } from './motion'
 
 /**
  * Frame for composite fields (an input plus addons, chips or buttons inside one border): focus ring while anything inside
@@ -264,14 +265,6 @@ export function RadioGroup({ options, value, defaultValue, onChange, label, clas
       {fc.inputs}
     </div>
   )
-}
-
-/**
- * The sliding highlight shared by SegmentedControl, Tabs, NavList, pricing toggles...
- * Render it inside the active item; motion animates it between items with the same `group`.
- */
-export function ActiveIndicator({ group, className }: { group: string; className?: string }) {
-  return <motion.span layoutId={group} className={cn('absolute inset-0', className)} transition={spring(0.2, 0.45)} />
 }
 
 /**

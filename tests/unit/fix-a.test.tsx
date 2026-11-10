@@ -18,8 +18,8 @@ describe('A-H1: one source for the default palette', () => {
     for (const [k, v] of Object.entries(themeTokens(DEFAULT_THEME, dark))) expect(TOKENS).toContain(`--${k}:${v};`)
   })
 
-  it('names only tokens ThemeScript accepts, plus the fixed scales', () => {
-    const names = [...TOKENS.matchAll(/--([a-z0-9-]+):/g)].map(m => m[1]).filter(n => !/^(t|h)-|^(mono|r-full|hit|ui-play)$/.test(n))
+  it('names only tokens ThemeScript accepts, plus the fixed scales and the --ui-* animation variables', () => {
+    const names = [...TOKENS.matchAll(/--([a-z0-9-]+):/g)].map(m => m[1]).filter(n => !/^(t|h|ui)-|^(mono|r-full|hit)$/.test(n))
     expect(names.filter(n => !THEME_TOKEN_NAMES.includes(n))).toEqual([])
   })
 })

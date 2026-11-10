@@ -1,5 +1,5 @@
-/** State and DOM hooks: controllable state, outside clicks, an active index, flashes, a live region, sizes, media queries, touch, pointer drag, long press, hotkeys, focus trap, roving focus, scroll edges, clocks, debouncing, object URLs, canvas sizing. Part of @lyndon/ui/core. */
-import { type Context, type FocusEvent as ReactFocusEvent, type ReactNode, type PointerEvent as ReactPointerEvent, type RefObject, type KeyboardEvent as RKeyboardEvent, useCallback, useEffect, useContext, useId, useLayoutEffect, useMemo, useRef, useState, useSyncExternalStore } from 'react'
+/** State and DOM hooks: controllable state, outside clicks, presence and in-view (for the CSS animations), an active index, flashes, a live region, sizes, media queries, touch, pointer drag, long press, hotkeys, focus trap, roving focus, scroll edges, clocks, debouncing, object URLs, canvas sizing. Part of @lyndon/ui/core. */
+import { type Context, type CSSProperties, type FocusEvent as ReactFocusEvent, type ReactNode, type PointerEvent as ReactPointerEvent, type RefObject, type KeyboardEvent as RKeyboardEvent, useCallback, useEffect, useContext, useId, useLayoutEffect, useMemo, useRef, useState, useSyncExternalStore } from 'react'
 import { clamp, focusables } from './helpers'
 import { uiShared } from './shared'
 
@@ -114,6 +114,81 @@ export const useCoarsePointer = () => useMediaQuery('(pointer: coarse)')
 
 /** Has the user asked for reduced motion? A plain call for event handlers and effects (false on the server). */
 export const prefersReducedMotion = () => mqNow(REDUCED_MOTION_Q)
+
+/** Live "reduce motion" preference (false on the server). Pair with the CSS, which already tones the `ui-*` animations down. */
+export const useReducedMotion = () => useMediaQuery(REDUCED_MOTION_Q)
+
+type InViewEntry = (visible: boolean) => void
+const inViewObservers = uiShared('in-view', () => new Map<string, { io: IntersectionObserver; cbs: WeakMap<Element, InViewEntry>; of: typeof IntersectionObserver }>())
+/**
+ * True while at least `amount` (0…1) of `ref` is inside the viewport grown by `margin` (CSS margin syntax, '64px').
+ * `once` keeps it true after the first time. Elements with the same options share one IntersectionObserver. True when
+ * the browser has no IntersectionObserver; false on the server.
+ */
+export function useInView(ref: RefObject<Element | null>, { margin = '0px', amount = 0, once = false }: { margin?: string; amount?: number; once?: boolean } = {}) {
+  const [inView, setInView] = useState(false)
+  useEffect(() => {
+    const el = ref.current
+    if (!el) return
+    if (typeof IntersectionObserver === 'undefined') { setInView(true); return }
+    const key = `${margin}|${amount}`
+    let o = inViewObservers.get(key)
+    if (o?.of !== IntersectionObserver) {
+      const cbs = new WeakMap<Element, InViewEntry>()
+      const io = new IntersectionObserver(es => es.forEach(e => cbs.get(e.target)?.(e.isIntersecting && e.intersectionRatio >= amount)), { rootMargin: margin, threshold: amount })
+      inViewObservers.set(key, o = { io, cbs, of: IntersectionObserver })
+    }
+    const obs = o
+    const stop = () => { obs.cbs.delete(el); obs.io.unobserve(el) }
+    obs.cbs.set(el, v => { setInView(v); if (v && once) stop() })
+    obs.io.observe(el)
+    return stop
+  }, [ref, margin, amount, once])
+  return inView
+}
+
+/**
+ * `animation-play-state` for infinite CSS animations (spinners, shimmer, bobbing): paused while the element is off
+ * screen. Spread `style` and attach `ref`; `--ui-play` reaches `::after` animations and children that read it.
+ */
+export function usePlayState<T extends Element>() {
+  const ref = useRef<T>(null)
+  const play = useInView(ref, { margin: '64px' }) ? 'running' : 'paused'
+  return { ref, style: { animationPlayState: play, '--ui-play': play } as CSSProperties }
+}
+
+/**
+ * Calls `done` once the finite animations on `el` and its subtree have finished (at most `maxMs` later), or right away
+ * when there are none: no element, no Web Animations API, reduced motion off in CSS. Returns a cancel function.
+ */
+export function whenAnimationsDone(el: Element | null | undefined, done: () => void, maxMs = 700): () => void {
+  const anims = el?.getAnimations?.({ subtree: true }).filter(a => Number.isFinite(a.effect?.getComputedTiming().endTime)) ?? []
+  if (!anims.length) { done(); return () => {} }
+  let live = true
+  const finish = () => { if (live) { live = false; clearTimeout(t); done() } }
+  const t = setTimeout(finish, maxMs)
+  Promise.allSettled(anims.map(a => a.finished)).then(finish)
+  return () => { live = false; clearTimeout(t) }
+}
+
+/**
+ * Mount and unmount with an exit animation: `mounted` stays true after `show` turns false until the animations on `ref`
+ * finish, with `exiting` true meanwhile (spread `presenceProps(p)` on the element so the `ui-out` keyframes play).
+ * `enter` is false for an element that was already shown on the first render (unless `appear`), so it can skip its
+ * entrance. Showing it again during the exit cancels the exit.
+ */
+export function usePresence<T extends Element = HTMLElement>(show: boolean, { appear = false }: { appear?: boolean } = {}) {
+  const ref = useRef<T>(null)
+  const [state, setState] = useState({ mounted: show, enter: appear })
+  if (show && !state.mounted) setState({ mounted: true, enter: true })
+  const exiting = state.mounted && !show
+  useLayoutEffect(() => exiting ? whenAnimationsDone(ref.current, () => setState(s => ({ ...s, mounted: false }))) : undefined, [exiting])
+  return { ref, mounted: show || state.mounted, exiting, enter: state.enter }
+}
+
+/** Data attributes for a node under usePresence: `data-ui-exit` (plus inert, aria-hidden) while leaving, `data-ui-still` when it skips its entrance. */
+export const presenceProps = ({ exiting, enter }: { exiting: boolean; enter: boolean }) =>
+  exiting ? { 'data-ui-exit': '', inert: true, 'aria-hidden': true } as const : enter ? undefined : { 'data-ui-still': '' } as const
 
 /** Is the primary pointer coarse (touch)? A plain call for event handlers and effects; in render use useCoarsePointer. */
 export const isCoarsePointer = () => mqNow('(pointer: coarse)')

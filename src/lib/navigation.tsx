@@ -1,7 +1,7 @@
 import { createContext, useCallback, useContext, useEffect, useId, useLayoutEffect, useMemo, useRef, useState, type ButtonHTMLAttributes, type HTMLAttributes, type ReactNode, type Ref, type KeyboardEvent as RKeyboardEvent, type MouseEvent as ReactMouseEvent } from 'react'
 import { AnimatePresence, motion, type Variants } from 'motion/react'
 import { type AsChildProps, Avatar, Button, type ButtonProps, Icon, IconButton, type IconName, ScrollEdges, StatusIcon, cn, prefersReducedMotion, safeUrl, spring, useCoarsePointer, useComposedRefs, useControllable, useHotkey, useOutside, useScrollEdges, fmt, useResizeObserver, useRequiredContext, PartButton, focusStep, focusables, idPart, useLatest } from './core'
-import { ActiveIndicator } from './fields'
+import { ActiveIndicator } from './motion'
 import { Tooltip } from './overlay'
 
 /**

@@ -1,4 +1,4 @@
-/** Pure helpers: class names (cn, variants), motion constants (spring, MOTION, EASE_OUT, popIn), numbers and ids, list moves, key-to-move maps, typeahead, scroll reveal, focusable elements, downloads and the clipboard. Part of @lyndon/ui/core. */
+/** Pure helpers: class names (cn, variants), motion constants (spring, springEasing, MOTION, EASE_OUT), numbers and ids, list moves, key-to-move maps, typeahead, scroll reveal, focusable elements, downloads and the clipboard. Part of @lyndon/ui/core. */
 
 /** Join class names. (Add tailwind-merge here if you want later classes to override earlier ones.) */
 export function cn(...c: (string | false | null | undefined | 0)[]) {
@@ -24,6 +24,31 @@ export const EASE_OUT: [number, number, number, number] = [0.22, 1, 0.36, 1]
 /** EASE_OUT as a CSS timing function, for `transition` / `animation` strings and `ease-[…]` classes. */
 export const EASE_OUT_CSS = 'cubic-bezier(.22,1,.36,1)'
 
+const springEasings = new Map<string, string>()
+/**
+ * spring(bounce, duration) as a CSS / WAAPI easing: a `linear()` curve sampled from a damped spring that settles in
+ * `duration` seconds, and that duration in ms. The shape depends only on `bounce`. Where `linear()` is unsupported, use
+ * the `fallback` (a cubic-bezier with the same overshoot direction).
+ */
+export function springEasing(bounce = 0.25, duration = 0.45): { easing: string; fallback: string; ms: number } {
+  const ms = Math.round(duration * 1000), b = clamp(bounce, 0, 0.9), key = b.toFixed(3)
+  const fallback = b >= 0.4 ? 'cubic-bezier(.34,1.56,.64,1)' : b >= 0.2 ? 'cubic-bezier(.3,1.25,.5,1)' : EASE_OUT_CSS
+  let easing = springEasings.get(key)
+  if (!easing) {
+    // damping ratio and natural frequency for a settle time of 1: the envelope is down to 0.1% at t = 1
+    const z = 1 - b, wd = (w: number) => w * Math.sqrt(1 - z * z)
+    const env = (w: number) => (z < 1 ? Math.exp(-z * w) / Math.sqrt(1 - z * z) : (1 + w) * Math.exp(-w))
+    let lo = 0.5, hi = 200
+    for (let i = 0; i < 40; i++) { const mid = (lo + hi) / 2; if (env(mid) > 0.001) lo = mid; else hi = mid }
+    const w = hi
+    const x = (t: number) => (z < 1 ? 1 - Math.exp(-z * w * t) * (Math.cos(wd(w) * t) + (z * w / wd(w)) * Math.sin(wd(w) * t)) : 1 - (1 + w * t) * Math.exp(-w * t))
+    const n = 32, pts = Array.from({ length: n + 1 }, (_, i) => (i === n ? 1 : +x(i / n).toFixed(3)))
+    easing = `linear(${pts.join(',')})`
+    springEasings.set(key, easing)
+  }
+  return { easing, fallback, ms }
+}
+
 /**
  * Named springs, so similar elements move alike: `press` (a tap pops back), `pop` (a mark or badge appearing), `panel`
  * (popovers, menus), `layout` (items sliding to a new place), `settle` (calm repositioning, reorder).
@@ -31,15 +56,6 @@ export const EASE_OUT_CSS = 'cubic-bezier(.22,1,.36,1)'
 export const MOTION = {
   press: spring(0.5, 0.3), pop: spring(0.5, 0.35), panel: spring(0.25, 0.3), layout: spring(0.3, 0.35), settle: spring(0.2, 0.3),
 } as const
-
-/** A popover entrance for a motion element (`<motion.div {...popIn(up)}>`): fade, a 4px slide from the anchor and a slight scale. `up`: it opens above. */
-export const popIn = (up = false) => ({
-  initial: { opacity: 0, y: up ? 4 : -4, scale: 0.97 }, animate: { opacity: 1, y: 0, scale: 1 },
-  exit: { opacity: 0, scale: 0.97, transition: { duration: 0.12 } }, transition: MOTION.panel,
-})
-
-/** popIn() for a panel that opens below its anchor. */
-export const POP_IN = popIn()
 
 /**
  * Variants for content that slides sideways when it changes (pagers, steps, mega menus): pass the direction as `custom`
