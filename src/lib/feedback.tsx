@@ -1,6 +1,6 @@
 import { createContext, isValidElement, useCallback, useContext, useEffect, useLayoutEffect, useMemo, useRef, useState, useSyncExternalStore, type MouseEvent as ReactMouseEvent, type ReactNode } from 'react'
 import { AnimatePresence, type AnimationPlaybackControls, animate, motion, useAnimate, useInView, useIsPresent, useMotionValue, useTransform, type Transition } from 'motion/react'
-import { AnimatedNumber, Badge, Button, type ButtonProps, Icon, IconButton, type IconName, Spinner, TONE_SOFT, type Tone, cn, prefersReducedMotion, sleep, spring, uiAddHost, uiShared, useControllable, fmt, surface, useResizeObserver, useStatusFlash, writeClipboard } from './core'
+import { AnimatedNumber, Badge, Button, type ButtonProps, Icon, IconButton, type IconName, Spinner, TONE_SOFT, type Tone, clamp, cn, prefersReducedMotion, resolveColor, spring, uiAddHost, uiShared, useControllable, surface, useResizeObserver, useStatusFlash, writeClipboard, FLASH_MS, useFlash, useLatest } from './core'
 import { CheckMark } from './fields'
 
 /** A toast's id: the one `toast()` returns, or your own (`toast({ id: 'save', … })` replaces the toast with that id). */
@@ -50,6 +50,10 @@ type ToastItem = ToastInput & { id: ToastId; rev: number }
  */
 type ToastQueue = { items: ToastItem[]; max: number; listeners: Set<() => void>; position?: ToastPosition }
 const TOAST_KEEP = 50 // queued toasts beyond this drop the oldest, so a runaway loop can't pile them up without limit
+/** How long a toast stays on screen by default (ms): a plain one, and one with an action button (more time to reach it). */
+const TOAST_MS = { plain: 4200, action: 6000 } as const
+/** The on-screen cap of a queue: a whole number of at least 1 (5 when it isn't finite). */
+const toastMax = (max: number) => Math.max(1, Math.floor(Number.isFinite(max) ? max : 5))
 const toastQueue = (max = 5): ToastQueue => ({ items: [], max, listeners: new Set() })
 const toastEmit = (q: ToastQueue) => q.listeners.forEach(l => l())
 /** ids for toasts without one, and revisions: unique per add or update, so a toast re-shown under the same id is new again */
@@ -98,7 +102,7 @@ function toastApi(q: ToastQueue, mount?: () => void): ToastApi {
     },
     configure: ({ position, max }: { position?: ToastPosition; max?: number }) => {
       if (position) q.position = position
-      if (max !== undefined) q.max = Math.max(1, Math.floor(Number.isFinite(max) ? max : 5))
+      if (max !== undefined) q.max = toastMax(max)
       toastEmit(q)
     },
   })
@@ -126,7 +130,7 @@ function ToastPageRegion() { return <ToastRegion queue={toastPage} /> }
  */
 export function ToastProvider({ children, max = 5, position }: { children: ReactNode; max?: number; position?: ToastPosition }) {
   const [queue] = useState(() => toastQueue())
-  queue.max = Math.max(1, Math.floor(Number.isFinite(max) ? max : 5))
+  queue.max = toastMax(max)
   queue.position = position
   const api = useMemo(() => toastApi(queue), [queue])
   return (
@@ -161,11 +165,13 @@ function ToastRegion({ queue }: { queue: ToastQueue }) {
   const hidden = useSyncExternalStore(toastSubscribeHidden, () => document.visibilityState === 'hidden', () => false)
   const [hover, setHover] = useState(false), [focused, setFocused] = useState(false)
   const [heights, setHeights] = useState<Record<string, number>>({})
-  const close = useCallback((id: ToastId, reason: ToastDismissReason) => {
-    toastDismiss(queue, id, reason)
-    setHeights(({ [String(id)]: _gone, ...rest }) => rest) // eslint-disable-line @typescript-eslint/no-unused-vars
-    setHover(false)
-  }, [queue])
+  const close = useCallback((id: ToastId, reason: ToastDismissReason) => { toastDismiss(queue, id, reason); setHover(false) }, [queue])
+  // drop the heights of toasts that left by any route (✕, toast.dismiss, eviction), so the map doesn't grow with every id
+  useEffect(() => setHeights(m => {
+    const live = new Set(items.map(x => String(x.id))), gone = Object.keys(m).filter(k => !live.has(k))
+    if (!gone.length) return m
+    const next = { ...m }; gone.forEach(k => delete next[k]); return next
+  }), [items])
   const report = useCallback((id: ToastId, h: number) => setHeights(m => m[String(id)] === h ? m : { ...m, [String(id)]: h }), [])
   // announcements: one node per message (a new key), so the same text twice is still read; each id+rev only once
   const [said, setSaid] = useState<{ polite: [number, string]; assertive: [number, string] }>({ polite: [0, ''], assertive: [0, ''] })
@@ -214,7 +220,16 @@ function ToastRegion({ queue }: { queue: ToastQueue }) {
   )
 }
 
-const TOAST_ICON: Record<Exclude<ToastTone, 'loading'>, [IconName, string]> = { ok: ['check', TONE_SOFT.ok], info: ['info', TONE_SOFT.accent], warn: ['alert', TONE_SOFT.warn], bad: ['alert', TONE_SOFT.bad] }
+/** The icon of each semantic tone (Alert, toasts). */
+const TONE_ICON: Record<Tone, IconName> = { neutral: 'info', accent: 'info', ok: 'check', warn: 'alert', bad: 'alert', danger: 'alert' }
+/** Each toast tone's icon (none: a spinner), its tint, and the word screen readers hear in front of it (the icon is decorative). */
+const TOAST_TONE: Record<ToastTone, { icon: IconName | null; tint: string; word: string }> = {
+  ok: { icon: TONE_ICON.ok, tint: TONE_SOFT.ok, word: 'Success' },
+  info: { icon: TONE_ICON.accent, tint: TONE_SOFT.accent, word: 'Info' },
+  warn: { icon: TONE_ICON.warn, tint: TONE_SOFT.warn, word: 'Warning' },
+  bad: { icon: TONE_ICON.bad, tint: TONE_SOFT.bad, word: 'Error' },
+  loading: { icon: null, tint: TONE_SOFT.neutral, word: 'Loading' },
+}
 
 /**
  * One toast. Dismiss with the ✕, by swiping it toward its edge (the end edge, or the start edge for start stacks; either
@@ -233,16 +248,10 @@ function Toast({ t, lift, top, align, paused, onSize, onClose: closeById, announ
   useEffect(() => () => { if (hovered.current) onHover(false) }, [onHover])
   const box = useRef<HTMLDivElement>(null), titleEl = useRef<HTMLElement>(null), descEl = useRef<HTMLSpanElement>(null)
   const onClose = useCallback((reason: ToastDismissReason) => closeById(t.id, reason), [closeById, t.id])
-  const tone = t.tone ?? 'ok'
-  const duration = tone === 'loading' ? Infinity : t.duration ?? (t.action ? 6000 : 4200)
-  useLayoutEffect(() => { // report the height before paint, so the stack lifts the others in the same frame
-    const el = box.current; if (!el) return
-    onSize(t.id, el.offsetHeight)
-    const ro = new ResizeObserver(() => onSize(t.id, el.offsetHeight))
-    ro.observe(el); return () => ro.disconnect()
-  }, [t.id, onSize])
-  // the icon is decorative, so the tone is a word: on screen for screen readers, and in front of the announcement
-  const toneWord = (tone === 'bad' ? 'Error' : tone === 'warn' ? 'Warning' : tone === 'info' ? 'Info' : tone === 'loading' ? 'Loading' : 'Success')
+  const tone = t.tone ?? 'ok', look = TOAST_TONE[tone] ?? TOAST_TONE.ok, toneWord = look.word
+  const duration = tone === 'loading' ? Infinity : t.duration ?? (t.action ? TOAST_MS.action : TOAST_MS.plain)
+  // the height is read before paint, so the stack lifts the others in the same frame
+  useResizeObserver(box, el => onSize(t.id, el.offsetHeight), [t.id])
   useEffect(() => {
     const said = [titleEl.current?.textContent, descEl.current?.textContent].map(s => s?.trim()).filter(Boolean).join('. ')
     if (said) announce(t.id, t.rev, tone, `${toneWord}: ${said}`)
@@ -257,7 +266,7 @@ function Toast({ t, lift, top, align, paused, onSize, onClose: closeById, announ
   // swipe: toward the stack's own edge (end, or start for start stacks; centred stacks either way)
   const side = align === 'start' ? -1 : align === 'end' ? 1 : 0, v = top ? 1 : -1
   const out = (n: number) => n * (side || 1)
-  const [icon, iconTone] = tone === 'loading' ? [null, TONE_SOFT.neutral] : TOAST_ICON[tone]
+  const { icon, tint: iconTone } = look
   return (
     <motion.div ref={box} initial={{ opacity: 0, y: v * lift - v * 20, scale: 0.95 }} animate={{ opacity: 1, y: v * lift, scale: 1 }}
       exit={{ opacity: 0, x: side ? 60 * side : 0, scale: side ? 1 : 0.95, transition: { duration: 0.2 } }} transition={spring(0.3, 0.45)}
@@ -281,51 +290,69 @@ function Toast({ t, lift, top, align, paused, onSize, onClose: closeById, announ
   )
 }
 
-const ALERT_ICON: Record<Tone, IconName> = { neutral: 'info', accent: 'info', ok: 'check', warn: 'alert', bad: 'alert', danger: 'alert' }
 /** Tinted message: icon + bold title + text. */
 export function Alert({ tone = 'accent', title, children, action, className }:
   { tone?: Tone; title: ReactNode; children?: ReactNode; action?: ReactNode; className?: string }) {
   return (
     <div role={tone === 'bad' ? 'alert' : 'status'} className={cn('flex items-start gap-2.5 rounded-[var(--r-md)] p-3 text-[13px]', TONE_SOFT[tone], className)}>
-      <Icon name={ALERT_ICON[tone]} size={16} className="mt-0.5" />
+      <Icon name={TONE_ICON[tone]} size={16} className="mt-0.5" />
       <p className="m-0 flex-1 text-[var(--fg)]"><b className="block font-semibold">{title}</b>{children && <span className="text-[var(--fg2)]">{children}</span>}</p>
       {action}
     </div>
   )
 }
 
-const PROGRESS_TONE = { primary: 'bg-[var(--primary)]', ok: 'bg-[var(--ok)]', warn: 'bg-[var(--warn)]', bad: 'bg-[var(--bad)]', accent: 'bg-[var(--accent)]' } as const
+/** The fill colour of Progress and ProgressRing in each tone. */
+const PROGRESS_TONE = { primary: 'var(--primary)', accent: 'var(--accent)', ok: 'var(--ok)', warn: 'var(--warn)', bad: 'var(--bad)' } as const
+export type ProgressTone = keyof typeof PROGRESS_TONE
+/** `value` of `max` as a fraction in [0, 1] (0 for a `max` of zero or less, or a value that isn't a number). */
+const progressFraction = (value: number, max: number) => (max > 0 && Number.isFinite(value) ? clamp(value / max, 0, 1) : 0)
+
 /** Linear progress bar; the fill springs to each new value. `label` names it for screen readers (default "Progress"; say what is progressing). */
 export function Progress({ value, max = 100, tone = 'primary', className, label }:
-  { value: number; max?: number; tone?: keyof typeof PROGRESS_TONE; className?: string; label?: string }) {
+  { value: number; max?: number; tone?: ProgressTone; className?: string; label?: string }) {
+  const f = progressFraction(value, max)
   return (
-    <div role="progressbar" aria-label={label ?? 'Progress'} aria-valuenow={Math.round(value)} aria-valuemin={0} aria-valuemax={max} className={cn('h-1.5 overflow-hidden rounded-full bg-[var(--muted)]', className)}>
-      <motion.div className={cn('h-full rounded-full transition-colors duration-300', PROGRESS_TONE[tone])} initial={false} animate={{ width: `${Math.min(100, (value / max) * 100)}%` }} transition={spring(0.1, 0.5)} />
+    <div role="progressbar" aria-label={label ?? 'Progress'} aria-valuenow={Math.round(f * Math.max(0, max))} aria-valuemin={0} aria-valuemax={Math.max(0, max)} className={cn('h-1.5 overflow-hidden rounded-full bg-[var(--muted)]', className)}>
+      <motion.div className="h-full rounded-full transition-colors duration-300" style={{ background: PROGRESS_TONE[tone] }} initial={false} animate={{ width: `${f * 100}%` }} transition={spring(0.1, 0.5)} />
     </div>
   )
 }
 
 /**
- * Circular progress with a percentage in the middle (or `label`). Pulses once when it reaches 100. `aria-label` names the
- * progressbar for screen readers (default "Progress").
+ * A decorative ring filled to `value` (0…1) from the top, clockwise: a `track` circle and an arc in `color` (or
+ * `barClassName`, e.g. a stroke class that changes with a tone). Hidden from screen readers; the caller names what it
+ * measures (ProgressRing adds the progressbar role).
+ */
+export function Ring({ value, size = 20, stroke = 2.5, color = 'var(--primary)', track = 'var(--muted)', transition = spring(0.1, 0.6), className, barClassName }:
+  { value: number; size?: number; stroke?: number; color?: string; track?: string; transition?: Transition; className?: string; barClassName?: string }) {
+  const r = (size - stroke) / 2, c = 2 * Math.PI * r, mid = size / 2
+  return (
+    <svg width={size} height={size} viewBox={`0 0 ${size} ${size}`} aria-hidden className={cn('-rotate-90', className)}>
+      <circle cx={mid} cy={mid} r={r} fill="none" stroke={track} strokeWidth={stroke} />
+      <motion.circle cx={mid} cy={mid} r={r} fill="none" stroke={color} strokeWidth={stroke} strokeLinecap="round" strokeDasharray={c} className={barClassName}
+        initial={false} animate={{ strokeDashoffset: c * (1 - (Number.isFinite(value) ? clamp(value, 0, 1) : 0)) }} transition={transition} />
+    </svg>
+  )
+}
+
+/**
+ * Circular progress with a percentage in the middle (or `label`), out of 100. Pulses once when it reaches 100.
+ * `aria-label` names the progressbar for screen readers (default "Progress").
  */
 export function ProgressRing({ value, size = 56, stroke = 5, label, tone = 'primary', className, 'aria-label': ariaLabel }:
-  { value: number; size?: number; stroke?: number; label?: ReactNode; tone?: 'primary' | 'ok'; className?: string; 'aria-label'?: string }) {
-  const r = (size - stroke) / 2, c = 2 * Math.PI * r
+  { value: number; size?: number; stroke?: number; label?: ReactNode; tone?: ProgressTone; className?: string; 'aria-label'?: string }) {
+  const f = progressFraction(value, 100)
   const [scope, animate] = useAnimate()
-  const prev = useRef(value)
+  const prev = useRef(f)
   useEffect(() => {
-    if (value >= 100 && prev.current < 100 && scope.current) animate(scope.current, { scale: [1, 1.08, 1] }, { duration: 0.45, ease: 'easeOut' })
-    prev.current = value
-  }, [value, animate, scope])
+    if (f >= 1 && prev.current < 1 && scope.current) animate(scope.current, { scale: [1, 1.08, 1] }, { duration: 0.45, ease: 'easeOut' })
+    prev.current = f
+  }, [f, animate, scope])
   return (
-    <div ref={scope} className={cn('relative inline-grid place-items-center', className)} style={{ width: size, height: size }} role="progressbar" aria-label={ariaLabel ?? 'Progress'} aria-valuenow={Math.round(value)} aria-valuemin={0} aria-valuemax={100}>
-      <svg width={size} height={size} className="-rotate-90">
-        <circle cx={size / 2} cy={size / 2} r={r} fill="none" stroke="var(--muted)" strokeWidth={stroke} />
-        <motion.circle cx={size / 2} cy={size / 2} r={r} fill="none" stroke={tone === 'ok' ? 'var(--ok)' : 'var(--primary)'} strokeWidth={stroke} strokeLinecap="round"
-          strokeDasharray={c} initial={false} animate={{ strokeDashoffset: c * (1 - Math.min(100, value) / 100) }} transition={spring(0.1, 0.6)} />
-      </svg>
-      <span className={cn('absolute font-semibold', size < 52 ? 'text-[11px]' : 'text-xs')}>{label ?? <AnimatedNumber value={Math.min(100, value) / 100} format={{ style: 'percent' }} />}</span>
+    <div ref={scope} className={cn('relative inline-grid place-items-center', className)} style={{ width: size, height: size }} role="progressbar" aria-label={ariaLabel ?? 'Progress'} aria-valuenow={Math.round(f * 100)} aria-valuemin={0} aria-valuemax={100}>
+      <Ring value={f} size={size} stroke={stroke} color={PROGRESS_TONE[tone]} />
+      <span className={cn('absolute font-semibold', size < 52 ? 'text-[11px]' : 'text-xs')}>{label ?? <AnimatedNumber value={f} format={{ style: 'percent' }} />}</span>
     </div>
   )
 }
@@ -419,36 +446,35 @@ export function Banner({ children, badge, open, defaultOpen = true, onOpenChange
 }
 
 /**
- * Runs an async action: the button's width tweens down to a spinner square, then out to a green
- * “Saved” with a drawn check, then back. Content never stretches: only the frame's width animates.
+ * Runs an async action: the button's width tweens down to a spinner square, then out to a green “Saved” with a drawn
+ * check, then back. If the promise rejects it shows a red `errorLabel` instead (and calls `onError` with the reason),
+ * so a failed save never looks saved. Content never stretches: only the frame's width animates.
  */
-export function AsyncButton({ onClick, children, successLabel: successProp, variant = 'primary', size, className, ...p }:
-  Omit<ButtonProps, 'onClick'> & { onClick: () => Promise<unknown>; /** default "Saved" */ successLabel?: string }) {
-  const successLabel = successProp ?? 'Saved'
-  const [state, setState] = useState<'idle' | 'loading' | 'done'>('idle')
+export function AsyncButton({ onClick, onError, children, successLabel = 'Saved', errorLabel = 'Couldn’t save', variant = 'primary', size, className, ...p }:
+  Omit<ButtonProps, 'onClick'> & { onClick: () => Promise<unknown>; /** called with the rejection reason */ onError?: (error: unknown) => void
+    /** default "Saved" */ successLabel?: string; /** default "Couldn’t save" */ errorLabel?: string }) {
+  const [loading, setLoading] = useState(false)
+  const [result, flash] = useFlash<'' | 'done' | 'error'>(FLASH_MS, '')
+  const state = loading ? 'loading' : result || 'idle'
   const [w, setW] = useState<number>()
-  const probe = useRef<HTMLSpanElement>(null)
+  const probe = useRef<HTMLButtonElement>(null)
   const busy = useRef(false) // width changes tween only around a run; otherwise (fonts loading, new label) they snap
   const run = async () => {
     busy.current = true
-    setState('loading')
-    try { await onClick(); setState('done'); await sleep(1500) } finally { setState('idle') }
+    setLoading(true)
+    try { await onClick(); flash('done') } catch (err) { flash('error'); onError?.(err) } finally { setLoading(false) }
   }
   const check = (draw: boolean) => <CheckMark checked size={14} strokeWidth={3} draw={draw} delay={0.1} duration={0.35} />
-  const body = (live: boolean) => state === 'loading' ? <Spinner /> : state === 'done' ? <>{check(live)}{successLabel}</> : children
-  useLayoutEffect(() => {
-    const el = probe.current?.firstElementChild as HTMLElement | null
-    if (!el) return
-    const read = () => setW(state === 'loading' ? el.offsetHeight : el.offsetWidth)
-    read()
-    const ro = new ResizeObserver(read); ro.observe(el) // e.g. web fonts finishing loading
-    return () => ro.disconnect()
-  }, [state, children, successLabel, size])
+  const body = (live: boolean) => state === 'loading' ? <Spinner /> : state === 'done' ? <>{check(live)}{successLabel}</>
+    : state === 'error' ? <><Icon name="alert" size={14} strokeWidth={2.4} />{errorLabel}</> : children
+  // the probe follows web fonts finishing loading, too
+  useResizeObserver(probe, el => setW(state === 'loading' ? el.offsetHeight : el.offsetWidth), [state, children, successLabel, errorLabel, size])
   return (
     <motion.span className={cn('relative inline-flex align-middle', className)} initial={false} animate={{ width: w ?? 'auto' }}
       transition={state === 'idle' && !busy.current ? { duration: 0 } : spring(0.12, 0.4)} onAnimationComplete={() => { if (state === 'idle') busy.current = false }}>
       <Button variant={variant} size={size} disabled={state !== 'idle'} onClick={run} aria-live="polite" {...p}
-        className={cn('w-full !px-0', state === 'done' && '!border-[var(--ok)] !bg-[var(--ok)] !text-[var(--card)] !opacity-100', state === 'loading' && '!opacity-100')}>
+        className={cn('w-full !px-0', state === 'done' && '!border-[var(--ok)] !bg-[var(--ok)] !text-[var(--card)] !opacity-100',
+          state === 'error' && '!border-[var(--bad)] !bg-[var(--bad)] !text-[var(--card)] !opacity-100', state === 'loading' && '!opacity-100')}>
         <AnimatePresence mode="popLayout" initial={false}>
           <motion.span key={state} className="flex items-center gap-1.5 whitespace-nowrap" initial={{ opacity: 0, scale: 0.6 }} animate={{ opacity: 1, scale: 1 }} exit={{ opacity: 0, scale: 0.6 }} transition={spring(0.3, 0.3)}>
             {body(true)}
@@ -456,21 +482,26 @@ export function AsyncButton({ onClick, children, successLabel: successProp, vari
         </AnimatePresence>
       </Button>
       {/* invisible twin at natural width: what the frame tweens to */}
-      <span ref={probe} aria-hidden className="pointer-events-none invisible absolute top-0 start-0 w-max">
-        <Button variant={variant} size={size} tabIndex={-1}><span className="flex items-center gap-1.5">{body(false)}</span></Button>
+      <span aria-hidden className="pointer-events-none invisible absolute top-0 start-0 w-max">
+        <Button ref={probe} variant={variant} size={size} tabIndex={-1}><span className="flex items-center gap-1.5">{body(false)}</span></Button>
       </span>
     </motion.span>
   )
 }
 
-/** Heart that bursts on like, with a rolling count. Controlled (`liked`) or uncontrolled (`defaultLiked`). */
+/**
+ * Heart that bursts on like, with a rolling count. Controlled (`liked`) or uncontrolled (`defaultLiked`). `count` is the
+ * total as loaded, counting this viewer's like if it started liked; the display adds or removes the viewer's like from there.
+ */
 export function LikeButton({ count, liked: likedProp, defaultLiked = false, onChange, className }:
   { count: number; liked?: boolean; defaultLiked?: boolean; onChange?: (liked: boolean) => void; className?: string }) {
   const [liked, setLiked] = useControllable(likedProp, defaultLiked, onChange)
-  const total = count + (liked ? 1 : 0) - (defaultLiked ? 1 : 0)
+  const [initial] = useState(liked)
+  const total = count + (liked ? 1 : 0) - (initial ? 1 : 0)
   return (
     <Button aria-pressed={liked} aria-label={`Like, ${total}`} className={className} onClick={() => setLiked(!liked)}>
-      <motion.span animate={liked ? { scale: [1, 1.45, 1], rotate: [0, -12, 0] } : { scale: 1 }} transition={spring(0.5, 0.5)}
+      {/* keyframes need a timed ease: motion's springs take only two */}
+      <motion.span animate={liked ? { scale: [1, 1.45, 1], rotate: [0, -12, 0] } : { scale: 1, rotate: 0 }} transition={liked ? { duration: 0.45, ease: 'easeOut' } : spring(0.5, 0.5)}
         className={liked ? 'text-[var(--bad)]' : ''}><Icon name="heart" fill={liked ? 'currentColor' : 'none'} /></motion.span>
       <AnimatedNumber value={total} />
     </Button>
@@ -539,7 +570,8 @@ const HOLD_MIN_MS = 500
  * Press and hold (pointer, touch, Space or Enter) to confirm a destructive action. The fill sweeps
  * across and the label inverts exactly where the fill has reached; releasing early springs it back.
  * When it completes the button pops, shows `doneLabel`, and resets after `resetAfter` ms.
- * A status line under it reads Keep holding… / Cancelled / done (`status={false}` hides it).
+ * A polite status line under it reads Keep holding… / Cancelled / `doneLabel` (`status` overrides any of them,
+ * `status={false}` hides it).
  * `duration` is at least 500 ms. It guards against slips, not against a hostile page: serve pages that use it with
  * `frame-ancestors 'none'` (or 'self') so another site can't frame it and coach a user into holding.
  */
@@ -552,7 +584,7 @@ export function HoldToConfirm({ onConfirm, duration = 1200, children, doneLabel,
   const clip = useTransform(p, v => `inset(0 ${100 - v * 100}% 0 0)`)
   const ctl = useRef<AnimationPlaybackControls | null>(null), reset = useRef<ReturnType<typeof setTimeout>>(undefined)
   const [scope, animateEl] = useAnimate()
-  const confirm = useRef(onConfirm); confirm.current = onConfirm
+  const confirm = useLatest(onConfirm)
   const set = (ph: HoldPhase) => { phaseRef.current = ph; setPhase(ph) }
   useEffect(() => () => { ctl.current?.stop(); clearTimeout(reset.current) }, [])
 
@@ -573,8 +605,9 @@ export function HoldToConfirm({ onConfirm, duration = 1200, children, doneLabel,
     ctl.current?.stop(); set('cancelled')
     ctl.current = animate(p, 0, spring(0.1, 0.3))
   }
-  const label = phase === 'done' ? <><Icon name="check" size={13} strokeWidth={3} />{doneLabel ?? 'Deleted'}</> : children ?? 'Hold to delete'
-  const said: Record<HoldPhase, ReactNode> = { idle: 'Release early to cancel', holding: 'Keep holding…', cancelled: 'Cancelled. Release early to cancel', done: 'Deleted' }
+  const done = doneLabel ?? 'Deleted'
+  const label = phase === 'done' ? <><Icon name="check" size={13} strokeWidth={3} />{done}</> : children ?? 'Hold to delete'
+  const said: Record<HoldPhase, ReactNode> = { idle: '', holding: 'Keep holding…', cancelled: 'Cancelled', done }
   const msg = status === false ? null : { ...said, ...status }[phase]
   return (
     <div className={cn('flex flex-col items-start gap-2', className)}>
@@ -590,10 +623,14 @@ export function HoldToConfirm({ onConfirm, duration = 1200, children, doneLabel,
           <motion.span aria-hidden className="absolute inset-0 flex items-center justify-center gap-1.5 text-white" style={{ clipPath: clip }}>{label}</motion.span>
         </Button>
       </span>
-      {msg && <span aria-live="polite" className={cn('text-xs', phase === 'done' ? 'font-medium text-[var(--bad)]' : 'text-[var(--fg3)]')}>{msg}</span>}
+      {/* always mounted (empty while idle), so the first change is announced */}
+      {status !== false && <span aria-live="polite" className={cn('min-h-4 text-xs', phase === 'done' ? 'font-medium text-[var(--bad)]' : 'text-[var(--fg3)]')}>{msg}</span>}
     </div>
   )
 }
+
+/** How long the green "Back online" bar stays before it slides away (ms). */
+const BACK_ONLINE_MS = 2200
 
 /**
  * Connection bar for the top of a view. When `online` turns false it slides down, explains that edits are kept
@@ -613,12 +650,11 @@ export function OfflineIndicator({ online, onRetry, retryEvery = 5, paused = fal
   const [left, setLeft] = useState(retryEvery)
   const [retrying, setRetrying] = useState(false)
   const [changed, setChanged] = useState(false) // the live region speaks only after a change, never on mount
-  const was = useRef(online), retry = useRef(onRetry), count = useRef(retryEvery), spinT = useRef<ReturnType<typeof setTimeout>>(undefined)
-  retry.current = onRetry
+  const was = useRef(online), retry = useLatest(onRetry), count = useRef(retryEvery), spinT = useRef<ReturnType<typeof setTimeout>>(undefined)
   const runRetry = useCallback(() => {
     retry.current?.(); count.current = retryEvery; setLeft(retryEvery)
     setRetrying(true); clearTimeout(spinT.current); spinT.current = setTimeout(() => setRetrying(false), 1000)
-  }, [retryEvery])
+  }, [retryEvery, retry])
   useEffect(() => () => clearTimeout(spinT.current), [])
   useEffect(() => {
     if (online === was.current) return
@@ -626,22 +662,16 @@ export function OfflineIndicator({ online, onRetry, retryEvery = 5, paused = fal
     if (online) { setMode('back'); return }
     count.current = retryEvery; setLeft(retryEvery); setRetrying(false); setMode('offline')
   }, [online, retryEvery])
-  useEffect(() => { if (mode !== 'back') return; const id = setTimeout(() => setMode('hidden'), 2200); return () => clearTimeout(id) }, [mode])
+  useEffect(() => { if (mode !== 'back') return; const id = setTimeout(() => setMode('hidden'), BACK_ONLINE_MS); return () => clearTimeout(id) }, [mode])
   useEffect(() => {
     if (mode !== 'offline' || paused) return
     const id = setInterval(() => { count.current -= 1; if (count.current <= 0) runRetry(); else setLeft(count.current) }, 1000)
     return () => clearInterval(id)
   }, [mode, paused, runRetry])
   const offline = mode === 'offline'
-  // the countdown keeps one width: every digit is stacked invisibly in the same cell (tabular in Latin, any width in
-  // drawn by CSS so the text stays "Retrying in 4 s" for copy and tests
+  // one width for every count (tabular digits), so the text after it never moves
   const digits = String(Math.max(1, Math.floor(retryEvery))).length
-  const num = (
-    <span className="ui-num inline-grid justify-items-center font-semibold [&>*]:[grid-area:1/1]">
-      {'0123456789'.split('').map(d => <span key={d} data-n={fmt.number(Number(d.repeat(digits)))} className="invisible before:content-[attr(data-n)]" />)}
-      <span>{fmt.number(left)}</span>
-    </span>
-  )
+  const num = <span className="ui-num inline-block text-center font-semibold" style={{ minWidth: `${digits}ch` }}>{left}</span>
   const live = !changed || mode === 'hidden' ? '' : offline ? 'You’re offline. Retrying automatically.' : (backMessage ?? 'Back online.')
   const layer = 'col-start-1 row-start-1 flex min-w-0 items-center gap-2 transition-opacity duration-200'
   return (
@@ -678,22 +708,27 @@ export function OfflineIndicator({ online, onRetry, retryEvery = 5, paused = fal
   )
 }
 
+const CONFETTI_COLORS = ['--c2', '--c3', '--c4', '--bad', '--warn']
 /** Confetti burst from a point (defaults to screen centre). Use it for real milestones, not every click. */
 export function confetti({ x = innerWidth / 2, y = innerHeight / 2, count = 120 } = {}) {
   if (prefersReducedMotion()) return
-  const c = document.createElement('canvas'); c.width = innerWidth; c.height = innerHeight
+  const c = document.createElement('canvas'), ctx = c.getContext('2d')
+  if (!ctx) return
+  c.width = innerWidth; c.height = innerHeight
   c.style.cssText = 'position:fixed;inset:0;pointer-events:none;z-index:100'; document.body.appendChild(c)
-  const ctx = c.getContext('2d')!, cs = getComputedStyle(document.documentElement)
-  const colors = ['--c2', '--c3', '--c4', '--bad', '--warn'].map(k => cs.getPropertyValue(k).trim() || '#2563EB')
+  const colors = CONFETTI_COLORS.map(k => { const [r, g, b, a] = resolveColor(document.body, `var(${k}, var(--accent))`); return `rgba(${r},${g},${b},${a})` })
   const ps = Array.from({ length: count }, () => {
     const a = Math.random() * Math.PI * 2, v = 4 + Math.random() * 9
     return { x, y, vx: Math.cos(a) * v, vy: Math.sin(a) * v - 6, r: Math.random() * Math.PI, vr: (Math.random() - 0.5) * 0.4, w: 5 + Math.random() * 5, c: colors[Math.floor(Math.random() * colors.length)] }
   })
   const t0 = performance.now()
+  let last = t0
   const frame = (t: number) => {
-    const life = (t - t0) / 1800; ctx.clearRect(0, 0, c.width, c.height)
+    // the physics is tuned per 60 Hz frame; scale it by the real frame time so fast screens don't throw twice as far
+    const k = Math.min(4, (t - last) / (1000 / 60)), life = (t - t0) / 1800
+    last = t; ctx.clearRect(0, 0, c.width, c.height)
     for (const p of ps) {
-      p.vy += 0.32; p.vx *= 0.985; p.x += p.vx; p.y += p.vy; p.r += p.vr
+      p.vy += 0.32 * k; p.vx *= 0.985 ** k; p.x += p.vx * k; p.y += p.vy * k; p.r += p.vr * k
       ctx.save(); ctx.globalAlpha = Math.max(0, 1 - life); ctx.translate(p.x, p.y); ctx.rotate(p.r); ctx.fillStyle = p.c; ctx.fillRect(-p.w / 2, -p.w / 4, p.w, p.w / 2); ctx.restore()
     }
     if (life < 1) requestAnimationFrame(frame); else c.remove()

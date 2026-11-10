@@ -1,10 +1,10 @@
 import { useId, useRef, useState, type KeyboardEvent as RKeyboardEvent } from 'react'
 import { LayoutGroup, motion } from 'motion/react'
-import { AvatarStack, Badge, DeltaBadge, Icon, ScrollEdges, StatusIcon, type StatusIconStatus, TOUCH, type Tone, cn, safeColor, spring, surface, useCoarsePointer, useControllable, useRefocus, useScrollEdges, SparkChart, plural, fmt } from './core'
+import { AvatarStack, Badge, DeltaBadge, Icon, ScrollEdges, StatusIcon, type StatusIconStatus, TOUCH, type Tone, cn, safeColor, spring, surface, useCoarsePointer, useControllable, useRefocus, useScrollEdges, SparkChart, plural, fmt, moveById, uid } from './core'
 import { Collapse, useToast } from './feedback'
 import { useDragSort } from './layout'
 
-/** Move an item (by id) inside a list of lists to `index` of list `to`. */
+/** Move an item (by id) out of whichever list holds it to `index` of list `to` (the index counts without the item). */
 function kanbanMove<C extends { id: string }, I extends { id: string }>(cols: C[], get: (c: C) => I[], set: (c: C, items: I[]) => C, id: string, to: string, index: number) {
   let item: I | undefined
   const stripped = cols.map(c => { const items = get(c), i = items.findIndex(x => x.id === id); if (i < 0) return c; item = items[i]; return set(c, items.filter(x => x.id !== id)) })
@@ -26,7 +26,9 @@ export type KanbanCard = {
 export type KanbanCheckStatus = 'ok' | 'bad' | 'running'
 export type KanbanColumn = { id: string; title: string; color?: string; /** WIP limit */ limit?: number; cards: KanbanCard[] }
 
-const KB_PRI: Record<string, string> = { High: 'var(--bad)', Med: 'var(--warn)', Low: 'var(--fg3)' }
+const KB_PRI: Record<NonNullable<KanbanCard['priority']>, { color: string; label: string }> = {
+  High: { color: 'var(--bad)', label: 'High priority' }, Med: { color: 'var(--warn)', label: 'Medium priority' }, Low: { color: 'var(--fg3)', label: 'Low priority' },
+}
 const KB_CHECK: Record<KanbanCheckStatus, [StatusIconStatus, string]> = { ok: ['done', 'passed'], bad: ['failed', 'failed'], running: ['active', 'running'] }
 
 /** Metric panel inside a card: value, change pill and a sparkline that fills the rest of the row. */
@@ -67,7 +69,7 @@ export function Kanban({ value, defaultValue = [], onChange, doneColumn, newCard
   const [openChk, setOpenChk] = useState<string[]>([])
   const moveCard = (id: string, to: string, index: number) =>
     update(cs => kanbanMove(cs, c => c.cards, (c, cards) => ({ ...c, cards }), id, to, index))
-  const moveCol = (id: string, index: number) => update(cs => { const c = cs.find(x => x.id === id)!; const rest = cs.filter(x => x.id !== id); return [...rest.slice(0, index), c, ...rest.slice(index)] })
+  const moveCol = (id: string, index: number) => update(cs => moveById(cs, id, index))
   const checkLimit = (colId: string) => {
     const c = ref.current.find(x => x.id === colId)
     if (c?.limit && c.cards.length > c.limit) toast({ title: 'WIP limit exceeded', description: `${c.title} has more than ${plural(c.limit, 'card')}`, tone: 'bad' })
@@ -105,7 +107,7 @@ export function Kanban({ value, defaultValue = [], onChange, doneColumn, newCard
     }),
   })))
   const add = (colId: string, title: string) => {
-    const id = `kb${Date.now().toString(36)}`
+    const id = uid('card')
     update(cs => cs.map(c => c.id === colId ? { ...c, cards: [...c.cards, { ...(newCard?.(title) ?? { title }), id, title }] } : c))
     checkLimit(colId)
   }
@@ -150,7 +152,7 @@ export function Kanban({ value, defaultValue = [], onChange, doneColumn, newCard
                     onKeyDown={e => {
                       if (e.key === 'Escape') setAdding(null)
                       if (e.key === 'Enter' && !e.shiftKey && !e.nativeEvent.isComposing) { e.preventDefault(); const v = e.currentTarget.value.trim(); if (!v) return setAdding(null); add(col.id, v); e.currentTarget.value = '' }
-                    }} onBlur={() => setTimeout(() => setAdding(a => a === col.id ? null : a), 120)}
+                    }} onBlur={() => setAdding(a => a === col.id ? null : a)}
                     className={cn('w-full resize-none rounded-[var(--r-md)] border border-[var(--line2)] bg-[var(--card)] px-2.5 py-2 text-[13px] outline-none placeholder:text-[var(--fg3)] focus:border-[var(--fg3)]', TOUCH.input)} />
                   : <button onClick={() => setAdding(col.id)} className={cn('cursor-pointer rounded-[var(--r-md)] border-0 bg-transparent px-1.5 py-1.5 text-start text-xs font-medium text-[var(--fg3)] hover:bg-[var(--card)] hover:text-[var(--fg)] [@media(pointer:coarse)]:text-[13px]', TOUCH.row)}>{'+ Add card'}</button>}
               </motion.div>
@@ -158,7 +160,6 @@ export function Kanban({ value, defaultValue = [], onChange, doneColumn, newCard
           })}
         </div>
         <ScrollEdges {...edges} hint={'More columns'} at="top" className="!bottom-1" />
-
         </div>
       </div>
     </LayoutGroup>
@@ -171,8 +172,7 @@ function KanbanCardView({ card, dragging, sortProps, label, hint, open, onToggle
   const done = card.checklist?.filter(x => x.done).length ?? 0, total = card.checklist?.length ?? 0
   const people = card.assignees ?? (card.assignee ? [card.assignee] : [])
   const coarse = useCoarsePointer()
-
-
+  const pri = card.priority && KB_PRI[card.priority]
   return (
     <motion.div layout layoutId={`kb-${card.id}`} transition={spring(0.18, 0.4)} {...sortProps} role="listitem"
       initial={{ opacity: 0, scale: 0.96 }} animate={{ opacity: 1, scale: 1 }}
@@ -227,7 +227,7 @@ function KanbanCardView({ card, dragging, sortProps, label, hint, open, onToggle
       )}
       {/* wraps (avatars drop to their own line) rather than spilling out of a narrow column */}
       <div className="flex min-w-0 flex-wrap items-center gap-x-2 gap-y-1 text-[11px] whitespace-nowrap text-[var(--fg3)]">
-        {card.priority && <span role="img" aria-label={String(card.priority === 'High' ? 'High priority' : card.priority === 'Med' ? 'Medium priority' : card.priority === 'Low' ? 'Low priority' : `${card.priority} priority`)} title={String(card.priority === 'High' ? 'High priority' : card.priority === 'Med' ? 'Medium priority' : card.priority === 'Low' ? 'Low priority' : `${card.priority} priority`)} className="h-[7px] w-[7px] flex-none rounded-[var(--r-sm)]" style={{ background: KB_PRI[card.priority] }} />}
+        {pri && <span role="img" aria-label={pri.label} title={pri.label} className="h-[7px] w-[7px] flex-none rounded-[var(--r-sm)]" style={{ background: pri.color }} />}
         {card.due && <span className="inline-flex items-center gap-1"><Icon name="calendar" size={11} />{card.due}</span>}
         {!!card.comments && <span className="inline-flex items-center gap-1" title={plural(card.comments, 'comment')}><Icon name="message" size={11} />{card.comments}</span>}
         {!!card.attachments && <span className="inline-flex items-center gap-1" title={plural(card.attachments, 'attachment')}><Icon name="paperclip" size={11} />{card.attachments}</span>}

@@ -237,15 +237,32 @@ export function typeaheadIndex(labels: readonly string[], typed: string, from: n
   return -1
 }
 
+/** Whether a composite item can take focus by arrow key: not `disabled` and not aria-disabled (an `asChild` link). */
+const navEnabled = (el: HTMLElement) => !(el as HTMLButtonElement).disabled && el.getAttribute('aria-disabled') !== 'true'
+
 /**
- * The element `key` moves the focus to among `items`, from the focused one: ↑/↓ in a `vertical` list, ←/→ in a
- * `horizontal` one, Home/End to the ends. `loop` wraps around, otherwise it stops at the ends. Null for any other key.
+ * The element `key` moves the focus to among the enabled `items`, from the focused one: ↑/↓ in a `vertical` list, ←/→
+ * in a `horizontal` one, Home/End to the ends. `loop` wraps around, otherwise it stops at the ends. Pass the keyboard
+ * event to leave Alt/Ctrl/⌘ + arrow (history, word moves) to the browser. Null for any other key.
  */
-export function focusStep(items: HTMLElement[], key: string, { orientation = 'vertical', loop = true }: { orientation?: 'horizontal' | 'vertical'; loop?: boolean } = {}): HTMLElement | null {
-  if (!items.length) return null
+export function focusStep(items: HTMLElement[], key: string | { key: string; altKey?: boolean; ctrlKey?: boolean; metaKey?: boolean },
+  { orientation = 'vertical', loop = true }: { orientation?: 'horizontal' | 'vertical'; loop?: boolean } = {}): HTMLElement | null {
+  if (typeof key !== 'string') { if (key.altKey || key.ctrlKey || key.metaKey) return null; key = key.key }
+  const ok = items.filter(navEnabled)
+  if (!ok.length) return null
+  if (key === 'Home') return ok[0]
+  if (key === 'End') return ok[ok.length - 1]
   const [prev, next] = orientation === 'vertical' ? ['ArrowUp', 'ArrowDown'] : ['ArrowLeft', 'ArrowRight']
-  const i = items.indexOf(document.activeElement as HTMLElement)
-  const n = key === next ? i + 1 : key === prev ? (i < 0 ? items.length - 1 : i - 1) : key === 'Home' ? 0 : key === 'End' ? items.length - 1 : null
-  if (n === null) return null
-  return items[loop ? (n + items.length) % items.length : clamp(n, 0, items.length - 1)] ?? null
+  const d = key === next ? 1 : key === prev ? -1 : 0
+  if (!d) return null
+  // step through every item (not only the enabled ones), so a focused disabled item still has neighbours
+  const n = items.length, i = items.indexOf(document.activeElement as HTMLElement)
+  const from = i < 0 ? (d > 0 ? -1 : n) : i
+  for (let s = 1; s <= n; s++) {
+    let j = from + d * s
+    if (loop) j = ((j % n) + n) % n
+    else if (j < 0 || j >= n) return i >= 0 && navEnabled(items[i]) ? items[i] : null
+    if (navEnabled(items[j])) return items[j]
+  }
+  return null
 }

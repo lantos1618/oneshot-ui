@@ -1,7 +1,7 @@
 import { useRef, useState, type AnchorHTMLAttributes, type Ref } from 'react'
 import { AnimatePresence, motion, useInView } from 'motion/react'
 import { Badge, Breadcrumbs, Button, CollapsibleSidebar, ContextMenu, type ContextMenuEntry, DropdownMenu, Icon, IconButton, type IconName, MegaMenu, type MegaMenuItem, MobileTabBar, Pagination, type SidebarEntry, Switch, type TabBarItem, Tabs, Toggle, ToggleGroup, Toolbar, Wizard, cn, spring, useToast } from '../lib'
-import { PhoneFrame } from '../examples'
+import { PhoneFrame, SidebarPage } from '../examples'
 import { Section, Spec } from './kit'
 
 const NAV_SIDEBAR: SidebarEntry[] = [
@@ -307,7 +307,7 @@ export function NavigationSection() {
         <Pagination page={page} total={20} onChange={setPage} />
       </Spec>
       <Spec title="Collapsible sidebar" desc="App navigation that folds to icons. Labels become tooltips when collapsed." span={2} keys={[[["["], "Toggle"]]}>
-        <CollapsibleSidebar items={NAV_SIDEBAR} user={{ name: 'Alex Lee', detail: 'Pro plan' }} />
+        <CollapsibleSidebar title="Northwind" items={NAV_SIDEBAR} user={{ name: 'Alex Lee', detail: 'Pro plan' }}>{item => <SidebarPage item={item} />}</CollapsibleSidebar>
       </Spec>
       <Spec title="Mobile tab bar" desc="Sliding indicator, centre action, badge">
         <NavPhoneDemo />
