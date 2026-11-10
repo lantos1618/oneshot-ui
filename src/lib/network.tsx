@@ -1,5 +1,5 @@
 import { useEffect, useId, useLayoutEffect, useMemo, useReducer, useRef, useState, type CSSProperties, type PointerEvent as ReactPointerEvent } from 'react'
-import { AnimatePresence, animate, motion, useInView, useReducedMotion } from 'motion/react'
+import { AnimatePresence, animate, cubicBezier, motion, useInView, useReducedMotion } from 'motion/react'
 import { AnimatedNumber, Button, ICONS, Icon, StatusIcon, TOUCH, clamp, cn, defineMessages, isTouch, onMouseLeave, safeColor, sleep, spring, surface, useLocale, useMessages, useOutside, useWidth, type IconName } from './core'
 import { Slider } from './forms'
 import { PointerTooltip, usePointerTooltip } from './overlay'
@@ -196,7 +196,12 @@ export function NetworkGraph({ nodes, links, groups, width = 900, height = 340, 
     if (inView) kick(0.3); else force()
   }, [W, H]) // eslint-disable-line react-hooks/exhaustive-deps
   // runs only while on screen and laid out; `running` survives a pause, so it resumes where it left off
-  useFrameLoop(running && awake, () => { tick(); paint(); if (cooled() && dragging === null) { alpha.current = 0.02; setRunning(false) } })
+  // 30 fps on touch screens with one simulation step per 60th of a second elapsed (so it settles in the same time and
+  // along the same path as at 60 fps, with half the repaints)
+  useFrameLoop(running && awake, dt => {
+    for (let n = Math.max(1, Math.min(3, Math.round(dt * 60))); n > 0; n--) tick()
+    paint(); if (cooled() && dragging === null) { alpha.current = 0.02; setRunning(false) }
+  }, { coarseFps: 30 })
   useEffect(() => { if (!running) force() }, [running]) // one React render with the settled positions
   const toSvg = (e: { clientX: number; clientY: number }) => { const svg = svgRef.current!, m = svg.getScreenCTM()!.inverse(), p = new DOMPoint(e.clientX, e.clientY).matrixTransform(m); return p }
   const end = (i: number, e?: ReactPointerEvent) => {
@@ -533,6 +538,8 @@ function dfSprite(color: string, dpr: number) {
   g.globalAlpha = 1; g.fillStyle = color; g.beginPath(); g.arc(r, r, 1.6 * dpr, 0, Math.PI * 2); g.fill()
   return cv
 }
+/** CSS ease-out (cubic-bezier(0, 0, 0.58, 1)), for the engine pulse. */
+const dfEaseOut = cubicBezier(0, 0, 0.58, 1)
 /**
  * Streaming pipeline: particles leave each source at its event rate, pass through the processing engine
  * (its stage label cycles) and fan out to destinations by share. Hover, tap or focus a node to trace its path.
@@ -563,7 +570,7 @@ export function DataFlow({ sources, targets, engine: engineProp, stages: stagesP
   const inView = useInView(box, { once: true, amount: 0.3 })
   const { visible } = useViewport(box, { amount: 0.05 })
   const reduce = useReducedMotion()
-  const pulseC = useRef<SVGCircleElement>(null)
+  const pulseC = useRef<SVGCircleElement>(null), pulseT = useRef(-1)
   const cvRef = useRef<HTMLCanvasElement>(null)
   const sim = useRef({ parts: [] as DfParticle[], acc: sources.map(() => 0), processed: 0, delivered: targets.map(() => 0) })
   const hlRef = useRef(hl); hlRef.current = hl
@@ -659,10 +666,18 @@ export function DataFlow({ sources, targets, engine: engineProp, stages: stagesP
       ring(er + 8, 0.35, 1.5, [3, 7], -1 / 24); ring(er + 18, 0.25, 1, [40, 300], 1 / 9)
       g.setLineDash([]); g.globalAlpha = 1
     }
-    if (pulse) pulseC.current?.animate?.([{ fillOpacity: 0.2 }, { fillOpacity: 0.08 }], { duration: 500, easing: 'ease-out' })
+    // the engine's pulse (every 6th processed particle) fades from 0.2 to 0.08 over 500 ms (ease-out), stepped here with
+    // the particles rather than as an SVG animation of its own at the display's full rate
+    if (pulse) pulseT.current = now
+    const pc = pulseC.current, pu = (now - pulseT.current) / 500
+    if (pc && pulseT.current >= 0) {
+      const v = pu >= 1 ? '0.08' : (0.2 - 0.12 * dfEaseOut(Math.max(0, pu))).toFixed(3)
+      if (pc.getAttribute('fill-opacity') !== v) pc.setAttribute('fill-opacity', v)
+      if (pu >= 1) pulseT.current = -1
+    }
   }
   drawRef.current = (dt, now) => draw(running ? dt : 0, now)
-  useFrameLoop(running, (dt, now) => draw(dt, now))
+  useFrameLoop(running, (dt, now) => draw(dt, now), { coarseFps: 30 }) // particles move by time: 30 fps on touch halves the canvas work
   // leaving the screen (or pausing) keeps the particles where they are; reduced motion clears them
   useEffect(() => { if (reduce) { sim.current.parts = []; drawRef.current(0, 0) } }, [reduce])
   useEffect(() => {

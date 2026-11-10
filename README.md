@@ -603,6 +603,69 @@ Put events and periods on a time axis. One tag type, `TimeTag` (`{ id, at, end?,
   stop; ←/→ move through tags in time order (↑/↓ between lanes), Enter selects, Escape clears.
 - Plots stay left to right in RTL; labels, legends and lists mirror. Strings: `ANNOTATE_MESSAGES`, `TIMELINE_MESSAGES`.
 
+## Git graph
+
+A commit history graph in the style of VS Code's Git Graph, GitKraken or `git log --graph`: lanes, merge and fork
+edges, ref chips, search, a branch filter, details with diffs and a compare mode. It is virtualised (50k commits scroll
+like 50) and never runs git: every action is a callback.
+
+```tsx
+import { GitGraph, parseGitLog } from '@lyndon/ui/gitgraph'
+
+<GitGraph commits={commits} pin={['main', 'develop']}
+  loadCommit={hash => api.commit(hash)}             // → { files: [{ path, status, before?, after? }] }, shown with <Diff>
+  loadDiff={(from, to) => api.diff(from, to)}       // Shift+click a second commit to compare
+  onCheckout={(hash, branch) => …} onCreateBranch={…} onCherryPick={…} onRevert={…} onCompare={…} />
+```
+
+**Data.** `GitCommit = { hash, parents, subject, body?, author: { name, email?, avatar? }, date, refs? }` with
+`GitRef = { name, type: 'branch' | 'remote' | 'tag' | 'head' | 'stash' }` (a `head` ref names the checked-out branch, or
+`HEAD` when detached). Any order. To show a real repository, pipe this into `parseGitLog(text)` (`GIT_LOG_COMMAND`):
+
+```sh
+git log --all --date-order --pretty=format:'%H%x1f%P%x1f%an%x1f%ae%x1f%at%x1f%D%x1f%s%x1e' > log.txt
+```
+
+Fields are split by `\x1f` and records by `\x1e`, so subjects can hold anything. Add `--decorate=full` to tell remote
+branches from local ones without guessing (otherwise `origin/` and `upstream/` prefixes mark remotes), `%x1f%b` before
+`%x1e` to include bodies, and `-n 50000` to cap the history.
+
+**How the graph is made** (`layoutGitGraph(commits, { order, pin, firstParentLanes })`, pure and O(n · lanes)):
+
+1. *Order.* A topological order, children above parents (Kahn's algorithm). `order: 'date'` takes the newest ready
+   commit next (`git log --date-order`); `'topo'` the most recently readied one, which keeps a branch's commits together
+   (`--topo-order`). Ties break on the hash, so the input order never matters.
+2. *Lanes.* One pass down the rows with an array of active lanes, each holding the commit it waits for. A commit takes
+   the lane waiting for it (the leftmost reached through a first parent, so first-parent chains stay straight); other
+   lanes waiting for it end there (fork edges). A commit nobody waits for is a branch tip and takes the leftmost free
+   lane. Its first parent continues its lane; every further parent (several for octopus merges) joins the lane already
+   waiting for it or opens the leftmost lane that was free above the row (merge edges). Roots end their lane; parents
+   missing from the input (shallow clones, filters) end it with a fading stub. `pin` reserves the leftmost lanes for
+   long-lived branches (default: whichever of main/master/trunk exists).
+3. *Colours* belong to branches, not lane numbers: a commit carrying a branch ref starts that branch's colour (a hash of
+   its name into `GIT_LANE_COLORS`, theme tokens; main/master/trunk get `--c1`), merge lanes take the name from
+   "Merge branch 'x'", so commits arriving on top don't reshuffle them.
+4. *Rows draw themselves.* Each row gets its own SVG slice: lanes passing through, edges into its node from the row's
+   top, edges out to its parents' lanes at its bottom (rounded elbows, like TraceWaterfall's connectors). No row needs
+   another's geometry, so `useVirtual` renders ~40 rows of 100k, and edges are kept packed in typed arrays and decoded
+   only for rows on screen. Lanes past `maxLanes` (12; 6 on phones) fold into a dashed "+n lanes" gutter; its header
+   button shows them all and the list then scrolls sideways.
+
+Also exported: `filterGitHistory` (branch filter, `firstParent`, `hideMerged`), `gitRange` (git's `a..b`),
+`gitFirstParentPath`, `gitLaneColor`, `GIT_GRAPH_MESSAGES`.
+
+- Keyboard: one Tab stop (the active row). ↑/↓, Home/End, PageUp/PageDown move; ← goes to the first parent
+  (Shift+← the second), → to the child (time runs down the plot, so these don't mirror in RTL); Enter opens details,
+  Shift+Enter compares with the selection; `/` searches, n/N jump between matches; Escape leaves compare, closes details,
+  then clears the selection; Shift+F10 or the Menu key opens the actions menu (right-click and long-press too).
+- Hover or focus lights the commit's first-parent ancestry and dims the other lanes. Rows are 32 px (44 on touch, two
+  lines at 52 px under 640 px). Details are a side panel from 900 px and a sheet below. Rows are named
+  "Commit a1b2c3d: Fix login, by Ana, 2 days ago"; the graph is an LTR island, the columns mirror in RTL.
+- New commits added at the top keep the reader's place (when scrolled) and fade in; a polite live region counts them.
+- Size: the `git-graph` drop-in is about 280 KB (~80k tokens; it embeds the virtualiser, menus, sheet, Markdown and Diff).
+- Limits: the layout runs on the main thread (~0.1 s per 50k commits on a laptop); for bigger logs, filter by branch or
+  page the history (missing parents render as stubs).
+
 ## Magnets (snapping for sliders and drags)
 
 Opt-in snapping that pulls a drag onto meaningful values and lets go when you push past or flick through:

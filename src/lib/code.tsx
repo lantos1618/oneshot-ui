@@ -41,11 +41,11 @@ const CODE_TOKEN_CLASS: Record<CodeTokenKind, string> = {
   com: 'text-[var(--fg3)] italic',
   str: 'text-[color-mix(in_srgb,var(--ok)_72%,var(--fg))]',
   kw: 'text-[color-mix(in_srgb,var(--bad)_75%,var(--fg))]',
-  num: 'text-[color-mix(in_srgb,var(--c3)_70%,var(--fg))]',
+  num: 'text-[color-mix(in_srgb,var(--c3)_60%,var(--fg))]',
   fn: 'text-[color-mix(in_srgb,var(--accent)_82%,var(--fg))]',
   attr: 'text-[color-mix(in_srgb,var(--warn)_66%,var(--fg))]',
   prop: 'text-[color-mix(in_srgb,var(--accent)_82%,var(--fg))]',
-  var: 'text-[color-mix(in_srgb,var(--c3)_70%,var(--fg))]',
+  var: 'text-[color-mix(in_srgb,var(--c3)_60%,var(--fg))]',
   pre: '',
 }
 const CODE_JS: [RegExp, CodeTokenKind[]] = [/(\/\/.*$)|(`(?:[^`\\]|\\.)*`|'(?:[^'\\]|\\.)*'|"(?:[^"\\]|\\.)*")|\b(const|let|var|function|return|if|else|for|while|import|from|export|default|await|async|new|class|extends|true|false|null|undefined|try|catch|throw|of|in|type|interface|as|satisfies|typeof|keyof)\b|\b(\d+(?:\.\d+)?)\b|([A-Za-z_$][\w$]*)(?=\s*\()/g, ['com', 'str', 'kw', 'num', 'fn']]

@@ -57,11 +57,11 @@ export function DgDot({ path, ms, ease, onDone }: { path: () => SVGPathElement |
     run.current = { lut, n, t0: performance.now() }
     put(0); ref.current.setAttribute('opacity', '1')
   }, []) // eslint-disable-line react-hooks/exhaustive-deps
-  useFrameLoop(active, (_, now) => {
+  useFrameLoop(active, (_, now) => { // by time, so 30 fps on touch screens moves it the same way with half the repaints
     const r = run.current; if (!r) return
     const u = Math.min(1, (now - r.t0) / ms); put(u)
     if (u >= 1) { setActive(false); onDone?.() }
-  })
+  }, { coarseFps: 30 })
   return <circle ref={ref} r={5.5} fill="var(--accent)" stroke="var(--card)" strokeWidth={1.5} opacity={0} />
 }
 

@@ -3,6 +3,21 @@
 All notable changes to `@lyndon/ui`, newest first. While on 0.x, a minor release may break APIs; each breaking
 change is listed with how to migrate.
 
+## 0.7.0
+
+A Git graph, and live demos that are much lighter on phones.
+
+### Added
+- `GitGraph` (`@lyndon/ui/gitgraph`): commit history with lanes, merges and refs; select a commit for its message and diff (`loadCommit`), Shift+click to compare a range (`loadDiff`), search, branch filter, first-parent and hide-merged views, keyboard that follows the graph's edges, and context-menu actions that call your app (`onCheckout`, `onCherryPick`, `onRevert`, …). Virtualised, so 50,000 commits scroll smoothly.
+- `layoutGitGraph`, `parseGitLog` (reads the documented `GIT_LOG_COMMAND` output), `filterGitHistory`, `gitRange` for building your own views; sample history in `@lyndon/ui/examples` (`gitHistory`).
+- `useFrameLoop` takes `{ maxDt, fps, coarseFps }` to cap the frame rate (30 fps on touch screens by default for the live demos).
+
+### Changed
+- `AgentTransitMap` draws its static map once and moves tokens with transforms; `Globe` paints only while something moves; `TraceWaterfall` reveals bars with clipping instead of width; `DataFlow`, `NetworkGraph` and `StateMachine` run at 30 fps on touch screens. Each uses roughly a third to a half less CPU on a phone.
+
+### Fixed
+- Number and variable tokens in code and diffs were too faint on deleted lines in light mode.
+
 ## 0.6.0
 
 Faster on phones, a cleaner audit, and the promised removals.

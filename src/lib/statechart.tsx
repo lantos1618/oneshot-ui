@@ -648,7 +648,7 @@ export function StateMachine({ machines = WF_NONE, order, defaultValue, classNam
   const minW = useMemo(() => maxOf(Object.values(machines).map(x => wfLayout(x).W), 900), [machines])
   const L = useMemo(() => m ? wfLayout(m, minW) : { pos: {}, edges: [], W: minW, H: WF_H, nw: 0 }, [m, minW])
   const repaint = useRef(0)
-  useFrameLoop(visible, dt => { engine.tick(dt); if ((repaint.current += dt) > 0.4) { repaint.current = 0; force() } })
+  useFrameLoop(visible, dt => { engine.tick(dt); if ((repaint.current += dt) > 0.4) { repaint.current = 0; force() } }, { coarseFps: 30 }) // the engine runs on time, not frames
   useEffect(() => engine.subscribe(ev => {
     if (ev.kind === 'queued') { force(); return }
     if (ev.job.type !== type) { if (ev.kind === 'enter' || ev.kind === 'done') force(); return }

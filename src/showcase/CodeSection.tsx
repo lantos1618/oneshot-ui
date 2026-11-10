@@ -1,6 +1,7 @@
-import { useEffect, useState } from 'react'
+import { useEffect, useMemo, useState } from 'react'
 import { useReducedMotion } from 'motion/react'
-import { Citation, CodeBlock, CodeTabs, Diff, InlineCode, InstallCommand, Kbd, Markdown, type Source, Terminal, markdownCodeBlock, useViewport } from '../lib'
+import { Citation, CodeBlock, CodeTabs, Diff, GitGraph, type GitCommit, InlineCode, InstallCommand, Kbd, Markdown, type Source, Switch, Terminal, markdownCodeBlock, useToast, useViewport } from '../lib'
+import { GIT_SAMPLE, GIT_SAMPLE_NOW, gitHistory, gitSampleCommit, gitSampleLoadCommit, gitSampleLoadDiff } from '../examples'
 import { Section, Spec, SpecAction } from './kit'
 
 const IMPORT_CODE = `import { createFlow } from './flow';
@@ -148,9 +149,36 @@ function MarkdownStreamDemo({ still }: { still: boolean }) {
 
 const dim = 'text-[var(--fg3)]', ok = 'text-[var(--ok)]', acc = 'text-[var(--accent)]'
 
+/** The Git graph card: the sample history (or 50k commits), host callbacks as toasts, and "Push" prepending a commit on HEAD. */
+function GitGraphDemo({ big, pushes }: { big: boolean; pushes: number }) {
+  const toast = useToast()
+  const base = useMemo(() => (big ? gitHistory(50_000, { seed: 11 }) : GIT_SAMPLE), [big])
+  // each push adds a commit on top of HEAD's branch and moves HEAD to it
+  const commits = useMemo(() => {
+    let list: GitCommit[] = base
+    for (let k = 1; k <= pushes; k++) {
+      const head = list.find(c => c.refs?.some(r => r.type === 'head'))
+      if (!head) break
+      const ref = head.refs!.find(r => r.type === 'head')!
+      const next = { ...gitSampleCommit(head, GIT_SAMPLE_NOW + k * 7 * 60e3, k), refs: [ref] }
+      list = [next, ...list.map(c => (c === head ? { ...c, refs: c.refs!.filter(r => r !== ref) } : c))]
+    }
+    return list
+  }, [base, pushes])
+  const say = (title: string) => (hash: string) => toast({ title, description: `${hash.slice(0, 7)} · demo: the host runs git` })
+  return (
+    <GitGraph commits={commits} now={GIT_SAMPLE_NOW + pushes * 7 * 60e3} pin={['main', 'develop']} height={480}
+      loadCommit={gitSampleLoadCommit} loadDiff={gitSampleLoadDiff}
+      onCheckout={(hash, branch) => toast({ title: branch ? `Checked out ${branch}` : 'Checked out (detached HEAD)', description: hash.slice(0, 7) })}
+      onCreateBranch={say('Create branch')} onCherryPick={say('Cherry-picked')} onRevert={say('Reverted')} onCopyHash={say('Copied hash')} />
+  )
+}
+
 export function CodeSection() {
   const [mdRun, setMdRun] = useState(0)
   const [mdStill, setMdStill] = useState(false)
+  const [gitBig, setGitBig] = useState(false)
+  const [gitPushes, setGitPushes] = useState(0)
   return (
     <Section id="code" title="Code" desc="Highlighted blocks, tabs, diffs, a terminal and streamed Markdown. Tokenised in the page, no highlighter library.">
       <Spec title="Code block" desc="File name, language, line numbers, highlighted lines, wrap, copy, expand" span={2}>
@@ -188,6 +216,19 @@ export function CodeSection() {
           <SpecAction onClick={() => { setMdStill(false); setMdRun(r => r + 1) }}>Replay</SpecAction>
         </>}>
         <MarkdownStreamDemo key={mdRun} still={mdStill} />
+      </Spec>
+      <Spec title="Git graph" span={3}
+        desc="Commit history with lanes and merges, refs, search, branch filter and compare. Click a commit for its diff; Shift+click a second to compare; right-click for actions"
+        keys={[[['↑', '↓'], 'Commits'], [['←', '→'], 'Parent, child'], [['↵'], 'Details'], [['⇧', 'Click'], 'Compare'], [['/'], 'Search'], [['n', 'N'], 'Next match'], [['⇧', 'F10'], 'Actions'], [['Esc'], 'Close']]}
+        notes={{
+          good: 'Reading how branches came together: lanes keep first-parent chains straight, main and develop stay pinned left, and hovering a commit lights its ancestry. Rows draw their own slice of the graph, so 50k commits scroll like 50.',
+          breaks: 'Very wide histories (dozens of live branches) fold into a "+n lanes" gutter, and the layout is computed in one pass on the main thread (about 0.1 s per 50k commits), so for monorepo-sized logs filter by branch or load the history in pages.',
+        }}
+        actions={<>
+          <SpecAction onClick={() => setGitPushes(n => n + 1)}>Push a commit</SpecAction>
+          <Switch label={<span className="text-xs text-[var(--fg2)]">50k commits</span>} checked={gitBig} onChange={v => { setGitBig(v); setGitPushes(0) }} />
+        </>}>
+        <GitGraphDemo big={gitBig} pushes={gitPushes} />
       </Spec>
     </Section>
   )

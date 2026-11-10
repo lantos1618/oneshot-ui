@@ -220,7 +220,7 @@ export function Globe({ hubs, routes, land: landProp, height = 440, className }:
   const [auto, setAuto] = useState(!reduce)
   const m = useMessages(GEO_MESSAGES), { fmt } = useLocale()
   const [hl, setHl] = useState(-1)
-  const cvRef = useRef<HTMLCanvasElement>(null)
+  const cvRef = useRef<HTMLCanvasElement>(null), bgRef = useRef<HTMLCanvasElement>(null)
   const visible = useInView(cvRef, { amount: 0.05 })
   const inView = useInView(cvRef, { once: true, amount: 0.3 })
   const pts = useMemo(() => { const out: GeoVec[] = []; for (let i = 0; i < land.length; i += 2) out.push(geoVec(land[i], land[i + 1])); return out }, [land])
@@ -236,9 +236,21 @@ export function Globe({ hubs, routes, land: landProp, height = 440, className }:
   useOutside([routesRef], () => setHl(-1), hl >= 0)
   const { tokens, dark } = useTheme()
 
+  // the shaded disc and its rim never move: they are drawn once (per size and theme) on a canvas underneath, so a frame
+  // paints only the dots, routes and hubs
+  const drawBg = () => {
+    const bg = bgRef.current, st = S.current; if (!bg || !st.col || !st.W) return
+    const g = bg.getContext('2d')!, C = st.col, W = st.W, H = st.H, R = Math.min(W, H) * 0.42, cx = W / 2, cy = H / 2
+    g.setTransform(st.dpr, 0, 0, st.dpr, 0, 0); g.clearRect(0, 0, W, H)
+    const grd = g.createRadialGradient(cx - R * 0.35, cy - R * 0.35, R * 0.1, cx, cy, R); grd.addColorStop(0, geoRgba(C('var(--card)'), 1)); grd.addColorStop(1, geoRgba(C('var(--line)'), 1))
+    g.fillStyle = grd; g.beginPath(); g.arc(cx, cy, R, 0, Math.PI * 2); g.fill(); g.strokeStyle = geoRgba(C('var(--fg3)'), 0.35); g.lineWidth = 1; g.stroke()
+  }
   useEffect(() => {
-    const cv = cvRef.current!, st = S.current
-    const size = () => { st.dpr = Math.min(2, devicePixelRatio || 1); st.W = cv.clientWidth; st.H = cv.clientHeight; cv.width = st.W * st.dpr; cv.height = st.H * st.dpr }
+    const cv = cvRef.current!, bg = bgRef.current!, st = S.current
+    const size = () => {
+      st.dpr = Math.min(2, devicePixelRatio || 1); st.W = cv.clientWidth; st.H = cv.clientHeight; cv.width = bg.width = st.W * st.dpr; cv.height = bg.height = st.H * st.dpr
+      drawBg(); if (!looping.current) draw(0, performance.now())
+    }
     size()
     const ro = new ResizeObserver(size); ro.observe(cv)
     return () => ro.disconnect()
@@ -248,19 +260,19 @@ export function Globe({ hubs, routes, land: landProp, height = 440, className }:
   useEffect(() => {
     const cv = cvRef.current!, st = S.current
     st.col = geoResolver(cv); st.font = getComputedStyle(cv).fontFamily
-    if (!visible) draw(0, performance.now()) // eslint-disable-line react-hooks/exhaustive-deps
+    drawBg(); if (!looping.current) draw(0, performance.now()) // eslint-disable-line react-hooks/exhaustive-deps
   }, [tokens, dark]) // eslint-disable-line react-hooks/exhaustive-deps
   const draw = (dt: number, now: number) => {
     const cv = cvRef.current, st = S.current; if (!cv || !st.col || !st.W) return
     const g = cv.getContext('2d')!, { auto: spin, hl: h, reduce: still } = live.current, C = st.col
-    if (!st.drag) { st.rotY += (st.vY + (spin ? 0.12 : 0)) * dt; st.rotX += st.vX * dt; st.vY *= 0.95; st.vX *= 0.9; st.rotX = clamp(st.rotX, -1.2, 1.2) }
+    // momentum decays per 60th of a second whatever the frame rate (0.95 and 0.9 per frame at 60 fps)
+    if (!st.drag) { st.rotY += (st.vY + (spin ? 0.12 : 0)) * dt; st.rotX += st.vX * dt; st.vY *= 0.95 ** (dt * 60); st.vX *= 0.9 ** (dt * 60); st.rotX = clamp(st.rotX, -1.2, 1.2) }
+    if (coasting.current && Math.abs(st.vY) + Math.abs(st.vX) < 0.002) { coasting.current = false; setCoast(false) }
     const W = st.W, H = st.H, R = Math.min(W, H) * 0.42, cx = W / 2, cy = H / 2
     const cY = Math.cos(st.rotY), sY = Math.sin(st.rotY), cX = Math.cos(st.rotX), sX = Math.sin(st.rotX)
     const proj = (v: GeoVec) => { const x1 = v[0] * cY + v[2] * sY, z1 = -v[0] * sY + v[2] * cY, y2 = v[1] * cX - z1 * sX, z2 = v[1] * sX + z1 * cX; return [cx + x1 * R, cy - y2 * R, z2] }
     g.setTransform(st.dpr, 0, 0, st.dpr, 0, 0); g.clearRect(0, 0, W, H)
-    const fg = C('var(--fg)'), card = C('var(--card)'), line = C('var(--line)'), fg3 = C('var(--fg3)'), hubC = C('var(--c3)')
-    const grd = g.createRadialGradient(cx - R * 0.35, cy - R * 0.35, R * 0.1, cx, cy, R); grd.addColorStop(0, geoRgba(card, 1)); grd.addColorStop(1, geoRgba(line, 1))
-    g.fillStyle = grd; g.beginPath(); g.arc(cx, cy, R, 0, Math.PI * 2); g.fill(); g.strokeStyle = geoRgba(fg3, 0.35); g.lineWidth = 1; g.stroke()
+    const fg = C('var(--fg)'), hubC = C('var(--c3)')
     // land dots, batched into alpha buckets so the fill style changes 9 times a frame, not once per dot
     const buckets: number[][] = Array.from({ length: 9 }, () => [])
     for (const v of pts) { const [x, y, z] = proj(v); if (z < -0.08) continue; buckets[z < 0 ? 0 : 1 + Math.min(7, Math.floor(z * 8))].push(x, y, 1.1 + Math.max(0, z) * 0.9) }
@@ -284,16 +296,21 @@ export function Globe({ hubs, routes, land: landProp, height = 440, className }:
       if (z > 0.35) { g.font = `500 11px ${st.font}`; g.textAlign = 'left'; g.fillStyle = geoRgba(fg, Math.min(1, (z - 0.35) * 3)); g.fillText(n, x + 7, y + 4) }
     })
   }
-  useFrameLoop(visible, draw)
+  // the loop runs only while something moves: auto-rotate, a drag or its momentum, or the route heads and hub pulses
+  // (which reduced motion turns off); 30 fps on touch screens. Otherwise the globe is redrawn when it changes.
+  const [coast, setCoast] = useState(false), coasting = useRef(false)
+  const loopOn = visible && (auto || grab || coast || !reduce), looping = useRef(loopOn); looping.current = loopOn
+  useFrameLoop(loopOn, draw, { coarseFps: 30 })
+  useEffect(() => { if (!loopOn) draw(0, performance.now()) }, [loopOn, hl, pts]) // eslint-disable-line react-hooks/exhaustive-deps
   const down = (e: ReactPointerEvent<HTMLCanvasElement>) => { const st = S.current; st.drag = { x: e.clientX, y: e.clientY, t: performance.now(), touch: isTouch(e) }; e.currentTarget.setPointerCapture(e.pointerId); st.vY = st.vX = 0; setGrab(true) }
   const move = (e: ReactPointerEvent<HTMLCanvasElement>) => {
     const st = S.current; if (!st.drag) return
     const R = Math.min(st.W, st.H) * 0.42, dx = e.clientX - st.drag.x, dy = st.drag.touch ? 0 : e.clientY - st.drag.y, dtm = Math.max(1, performance.now() - st.drag.t) / 1000
     st.rotY += dx / R; st.rotX = clamp(st.rotX + dy / R, -1.2, 1.2); st.vY = (dx / R / dtm) * 0.6; st.vX = (dy / R / dtm) * 0.6
     st.drag = { x: e.clientX, y: e.clientY, t: performance.now(), touch: st.drag.touch }
-    if (!visible) draw(0, performance.now())
+    if (!looping.current) draw(0, performance.now())
   }
-  const up = () => { S.current.drag = null; setGrab(false) }
+  const up = () => { const st = S.current; st.drag = null; setGrab(false); if (Math.abs(st.vY) + Math.abs(st.vX) >= 0.002) { coasting.current = true; setCoast(true) } }
   const row = (r: GlobeRoute, i: number): ReactNode => (
     <div key={i} className={cn('flex cursor-default items-center gap-2 rounded-[var(--r-md)] p-2 text-xs', TOUCH.tap36, hl === i && 'bg-[var(--muted)]')}
       onPointerEnter={e => { if (!isTouch(e)) setHl(i) }} onPointerDown={e => { if (isTouch(e)) setHl(h => (h === i ? -1 : i)) }}
@@ -306,10 +323,12 @@ export function Globe({ hubs, routes, land: landProp, height = 440, className }:
     <div className={cn('flex flex-col gap-3', className)}>
       <div className="flex justify-end"><Button size="sm" className={TOUCH.tap36} aria-pressed={auto} onClick={() => setAuto(a => !a)}>{auto ? m('autoOn') : m('autoOff')}</Button></div>
       <div className="grid items-center gap-5 md:grid-cols-[minmax(0,1fr)_230px]">
-        <motion.canvas ref={cvRef} role="img" aria-label={m('globe')} style={{ height: `min(${height}px, calc(100vw - 32px))` }}
-          className={cn('block w-full touch-pan-y', grab ? 'cursor-grabbing' : 'cursor-grab')}
-          initial={{ opacity: 0, scale: 0.92 }} animate={inView ? { opacity: 1, scale: 1 } : undefined} transition={{ duration: 0.8, ease: [0.22, 1, 0.36, 1] }}
-          onPointerDown={down} onPointerMove={move} onPointerUp={up} onPointerCancel={up} />
+        <motion.div className="relative" style={{ height: `min(${height}px, calc(100vw - 32px))` }}
+          initial={{ opacity: 0, scale: 0.92 }} animate={inView ? { opacity: 1, scale: 1 } : undefined} transition={{ duration: 0.8, ease: [0.22, 1, 0.36, 1] }}>
+          <canvas ref={bgRef} aria-hidden className="pointer-events-none absolute inset-0 block h-full w-full" />
+          <canvas ref={cvRef} role="img" aria-label={m('globe')} className={cn('relative block h-full w-full touch-pan-y', grab ? 'cursor-grabbing' : 'cursor-grab')}
+            onPointerDown={down} onPointerMove={move} onPointerUp={up} onPointerCancel={up} />
+        </motion.div>
         <div ref={routesRef} className="flex flex-col gap-0.5"><div className="mb-1.5 text-xs text-[var(--fg3)]">{m('routes')}<span className="hidden [@media(pointer:coarse)]:inline">{m('spinHint')}</span></div>{routes.map(row)}</div>
       </div>
     </div>

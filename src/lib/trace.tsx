@@ -1,4 +1,4 @@
-import { Fragment, useEffect, useLayoutEffect, useRef, useState, type PointerEvent as ReactPointerEvent, type ReactNode } from 'react'
+import { Fragment, memo, useEffect, useLayoutEffect, useRef, useState, type PointerEvent as ReactPointerEvent, type ReactNode } from 'react'
 import { motion, useInView, useReducedMotion } from 'motion/react'
 import { AnimatedNumber, Badge, Button, Icon, ScrollEdges, Spinner, TOUCH, cn, defineMessages, isTouch, onMouseLeave, surface, useLocale, useMessages, useScrollEdges, useWidth, type IconName } from './core'
 import { Collapse } from './feedback'
@@ -23,6 +23,28 @@ const TRACE_ICON = { llm: 'text-[var(--accent)]', tool: 'text-[color-mix(in_srgb
 /** Spawn connector colours: thin and quiet, brighter along the hovered span's chain. */
 const TRACE_WIRE = 'border-[color-mix(in_srgb,var(--fg3)_50%,transparent)]', TRACE_WIRE_ON = 'border-[color-mix(in_srgb,var(--accent)_75%,var(--fg2))]'
 type TraceWire = { c: TraceSpan; part: 'stub' | 'through' | 'elbow' }
+/** One waterfall line, re-rendered only when its signature (what it shows apart from the moving geometry) changes. */
+const TraceLine = memo(function TraceLine({ render }: { sig: string; render: () => ReactNode }) { return <>{render()}</> }, (a, b) => a.sig === b.sig)
+/**
+ * A bar's reveal: the bar has the span's full width and is cut back to `w` of its `du` seconds (at least 2px, the old
+ * min-width), with the bar's own rounded end. A clip-path repaints but never lays out, unlike a growing width. A
+ * running agent bar (`capped`) stops 16px short with a square end: its last 16px, outline included, are the cap.
+ */
+const traceClip = (w: number, du: number, capped = false) => {
+  const r = du > 0 ? ((1 - Math.min(1, w / du)) * 100).toFixed(3) : '0'
+  return capped ? `inset(0 calc(${r}% + 16px) 0 0 round var(--r-md) 0 0 var(--r-md))` : `inset(0 min(${r}%, calc(100% - 2px)) 0 0 round var(--r-md))`
+}
+/** The running bar's end highlight (40px, narrower while the bar is), moved to its visible end (`px` wide) by transform. */
+const traceEnd = (px: number) => { const h = Math.max(0, Math.min(40, px)); return `translateX(${(px - h).toFixed(2)}px) scaleX(${(h / 40).toFixed(3)})` }
+/**
+ * A running agent bar's last 16px (its fill and outline, open on the left), beside the bar (the bar's clip would cut
+ * it) and moved to the visible end; while the bar is shorter than that, its own clip trims it to the bar's length.
+ */
+const traceCap = (px: number, size = 16) => `translateX(${(Math.max(2, px) - size).toFixed(2)}px)`
+const traceCapClip = (px: number, size = 16) => { const l = Math.max(0, size - Math.max(2, px)); return l > 0 ? `inset(0 0 0 ${l.toFixed(2)}px round var(--r-md))` : 'inset(0 0 0 0 round 0 var(--r-md) var(--r-md) 0)' }
+/** A running agent bar's end highlight: beside the bar like its cap, rounded at the end, trimmed to the bar's length. */
+const TRACE_CAP_END = 'pointer-events-none absolute top-[13px] h-3.5 w-10 rounded-e-[var(--r-md)] bg-[linear-gradient(90deg,transparent,rgba(255,255,255,.55))]' // rtl-lint-ignore: LTR plot
+const TRACE_CAP = 'pointer-events-none absolute top-[13px] h-3.5 w-4 rounded-e-[var(--r-md)] border border-s-0 border-[color-mix(in_srgb,var(--fg3)_40%,transparent)] bg-[color-mix(in_srgb,var(--fg3)_16%,var(--card))]' // rtl-lint-ignore: LTR plot
 
 /** TraceWaterfall's UI strings (machine-drafted de/ar). */
 export const TRACE_MESSAGES = defineMessages('trace', {
@@ -83,12 +105,14 @@ export function TraceWaterfall({ spans, total, title, subtitle, failure, speed =
   /** Seconds on the plot's own scale: "1.5s" / "1,5 s" / "١٫٥ ث". */
   const secs = (v: number, d = 1) => fmt.number(v, { style: 'unit', unit: 'second', unitDisplay: 'narrow', minimumFractionDigits: d, maximumFractionDigits: d })
   // The playhead advances every frame, but React renders the waterfall at most 10 times a second: the exact time lives
-  // in a ref, and each frame writes only the moving geometry (bar widths, their labels' positions, the playhead line)
-  // straight into the DOM. Rendering the whole tree every frame cost a phone (4× CPU) ~40% of its main thread.
+  // in a ref, and each frame writes only the moving geometry (bar reveals, their labels' positions, the playhead line)
+  // straight into the DOM. Rendering the whole tree every frame cost a phone (4× CPU) ~40% of its main thread. None of
+  // it lays out: a bar has its full width from the start and is revealed by a clip-path, its end highlight, labels and
+  // the playhead move by transform.
   const clockRef = useRef(0), [, setClockTick] = useState(0), sinceRender = useRef(0)
   const setClock = (c: number) => { clockRef.current = c; setClockTick(x => x + 1) }
   const clock = clockRef.current // eslint-disable-line react-hooks/refs
-  const geo = useRef(new Map<string, HTMLElement>()), headEl = useRef<HTMLDivElement>(null), drawFrame = useRef((c: number) => { void c })
+  const geo = useRef(new Map<string, HTMLElement>()), written = useRef(new WeakMap<HTMLElement, Record<string, string>>()), headEl = useRef<HTMLDivElement>(null), drawFrame = useRef((c: number) => { void c })
   const geoRef = (key: string) => (el: HTMLElement | null) => { if (el) geo.current.set(key, el); else geo.current.delete(key) }
   const [playing, setPlaying] = useState(false)
   const [fail, setFail] = useState(false)
@@ -146,18 +170,25 @@ export function TraceWaterfall({ spans, total, title, subtitle, failure, speed =
     clockRef.current = n
     drawFrame.current(n)
     if (n >= total) { setClock(total); setPlaying(false) } else if ((sinceRender.current += dt) >= 0.1) { sinceRender.current = 0; setClock(n) }
-  }, 0.25)
+  }, { maxDt: 0.25, coarseFps: 30 })
   // the per-frame geometry, for the spans as rendered last (closes over the current failure mode and lane width)
   useLayoutEffect(() => {
     drawFrame.current = c => {
-      for (const s of spans) {
-        const bar = geo.current.get(s.id + ':bar'), label = geo.current.get(s.id + ':label')
-        if (!bar && !label) continue
-        const started = c >= s.start, w = started ? Math.min(c, s.start + D(s)) - s.start : 0, op = started ? '1' : '0'
-        if (bar) { bar.style.width = pct(w); bar.style.opacity = op }
-        if (label) { label.style.left = `calc(${pct(s.start + w)} + 10px)`; label.style.opacity = op } // rtl-lint-ignore: LTR plot
+      // only what changed is written (a style write costs a parse and a restyle even when the value is the same)
+      const put = (el: HTMLElement, prop: 'clipPath' | 'opacity' | 'transform' | 'left', v: string) => {
+        let m = written.current.get(el); if (!m) written.current.set(el, m = {})
+        if (m[prop] !== v) { m[prop] = v; el.style[prop] = v }
       }
-      if (headEl.current && laneW > 0) headEl.current.style.left = `calc(var(--split) + ${(laneW * Math.min(c, total)) / total}px)` // rtl-lint-ignore: LTR plot
+      for (const s of spans) {
+        const bar = geo.current.get(s.id + ':bar'), label = geo.current.get(s.id + ':label'), end = geo.current.get(s.id + ':end'), cap = geo.current.get(s.id + ':cap')
+        if (!bar && !label) continue
+        const started = c >= s.start, w = started ? Math.min(c, s.start + D(s)) - s.start : 0, op = started ? '1' : '0', px = laneW * w / total
+        if (bar) { put(bar, 'clipPath', traceClip(w, D(s), !!cap)); put(bar, 'opacity', op) }
+        if (end && cap) { put(end, 'transform', traceCap(px, 40)); put(end, 'clipPath', traceCapClip(px, 40)) } else if (end) put(end, 'transform', traceEnd(px))
+        if (cap) { put(cap, 'transform', traceCap(px)); put(cap, 'clipPath', traceCapClip(px)) }
+        if (label) { if (laneW > 0) put(label, 'transform', `translateX(${px.toFixed(2)}px)`); else put(label, 'left', `calc(${pct(s.start + w)} + 10px)`); put(label, 'opacity', op) } // rtl-lint-ignore: LTR plot
+      }
+      if (headEl.current && laneW > 0) put(headEl.current, 'transform', `translateX(${((laneW * Math.min(c, total)) / total).toFixed(2)}px)`)
     }
   })
 
@@ -201,11 +232,16 @@ export function TraceWaterfall({ spans, total, title, subtitle, failure, speed =
     const d = depth(s), ch = kids(s.id), isOpen = !closed.has(s.id)
     const du = D(s), started = clock >= s.start, end = s.start + du, fin = clock >= end, w = started ? Math.min(clock, end) - s.start : 0
     const failed = fail && s.id === failure?.span && fin, frac = started ? Math.min(1, w / s.duration) : 0
-    const live = started && !fin
-    const traceTip = (ev: ReactPointerEvent) => { setHot(s.id); if (!started) return hide(); const elapsed = secs(Math.min(clock, end) - s.start); show(ev, <><b className="font-semibold">{s.name}</b> <span className="text-[var(--fg3)]">{s.meta}</span><br /><span className="text-[var(--fg2)]">{m('tipStart', { start: secs(s.start), elapsed: fin ? elapsed : m('soFar', { elapsed }) })}{s.cost ? ` · ${fmt.usd(s.cost)}` : ''}{s.tokens ? ` · ${m('tokenCount', { n: fmt.compact(s.tokens) })}` : ''}</span></>) }
+    const live = started && !fin, capped = live && s.kind === 'agent'
+    // the line re-renders only when what it shows changes (the 10 Hz refresh mostly touches the running spans' labels),
+    // so its tooltip reads the clock when it opens
+    const labelText = failed ? '' : started ? `${secs(fin ? s.duration : w, s.duration >= 10 && fin ? 0 : 1)}${s.cost ? fmt.usd(s.cost * (fin ? 1 : frac)) : ''}` : ''
+    const myWires = wires.get(s.id) ?? []
+    const sig = [started, fin, failed, isOpen, labelText, laneW, d, ch.length, myWires.map(x => `${x.c.id}${x.part}${chain.has(x.c.id)}`).join(), s === slowest, dir, reduce, fail].join('|')
+    const traceTip = (ev: ReactPointerEvent) => { const clock = clockRef.current, started = clock >= s.start, fin = clock >= end; setHot(s.id); if (!started) return hide(); const elapsed = secs(Math.min(clock, end) - s.start); show(ev, <><b className="font-semibold">{s.name}</b> <span className="text-[var(--fg3)]">{s.meta}</span><br /><span className="text-[var(--fg2)]">{m('tipStart', { start: secs(s.start), elapsed: fin ? elapsed : m('soFar', { elapsed }) })}{s.cost ? ` · ${fmt.usd(s.cost)}` : ''}{s.tokens ? ` · ${m('tokenCount', { n: fmt.compact(s.tokens) })}` : ''}</span></>) }
     return (
       <Fragment key={s.id}>
-        <motion.div key={failed ? 'f' : 'n'} animate={failed && !reduce ? { x: [0, -4, 4, -2, 2, 0] } : undefined} transition={{ duration: 0.35 }}
+        <TraceLine sig={sig} render={() => <motion.div key={failed ? 'f' : 'n'} animate={failed && !reduce ? { x: [0, -4, 4, -2, 2, 0] } : undefined} transition={{ duration: 0.35 }}
           className={cn('relative grid h-10 grid-cols-[var(--split)_1fr] items-center', d === 0 ? 'bg-[color-mix(in_srgb,var(--muted)_55%,transparent)]' : '', failed ? 'bg-[color-mix(in_srgb,var(--bad)_7%,transparent)]' : 'hover:bg-[color-mix(in_srgb,var(--muted)_70%,transparent)]')}
           onPointerDown={e => { if (isTouch(e)) traceTip(e) }} onPointerMove={e => traceTip(e)}
           onPointerLeave={onMouseLeave(hide)}>
@@ -225,10 +261,14 @@ export function TraceWaterfall({ spans, total, title, subtitle, failure, speed =
                   part === 'elbow' ? 'top-0 h-5 w-[7px] rounded-es-[5px] border-b border-s' : 'w-0 border-s', part === 'stub' && 'top-[27px] bottom-0', part === 'through' && 'inset-y-0', part === 'stub' && !isOpen && 'opacity-0')} />
             ))}
             <div ref={geoRef(s.id + ':bar')} className={cn('absolute top-[13px] h-3.5 min-w-0.5 overflow-hidden rounded-[var(--r-md)]', failed ? 'bg-[color-mix(in_srgb,var(--bad)_72%,var(--card))]' : TRACE_BAR[s.kind])}
-              style={{ /* rtl-lint-ignore: LTR plot */ left: pct(s.start), width: pct(w), opacity: started ? 1 : 0 }}>
-              {live && <span className="absolute inset-y-0 end-0 w-10 max-w-full bg-[linear-gradient(90deg,transparent,rgba(255,255,255,.55))]" />}
+              style={{ /* rtl-lint-ignore: LTR plot */ left: pct(s.start), width: pct(du), clipPath: traceClip(w, du, capped), opacity: started ? 1 : 0 }}>
+              {live && !capped && <span ref={geoRef(s.id + ':end')} className="absolute inset-y-0 left-0 w-10 origin-left bg-[linear-gradient(90deg,transparent,rgba(255,255,255,.55))]" style={{ transform: traceEnd(laneW * w / total) }} /* rtl-lint-ignore: LTR plot */ />}
             </div>
-            <div ref={geoRef(s.id + ':label')} className="absolute top-[11px] flex items-center gap-2 text-xs whitespace-nowrap text-[var(--fg2)]" style={{ /* rtl-lint-ignore: LTR plot */ left: `calc(${pct(s.start + w)} + 10px)`, opacity: started ? 1 : 0 }}>
+            {/* a running agent bar's outlined end follows the reveal (the bar's clip cuts its own) */}
+            {capped && <span ref={geoRef(s.id + ':cap')} aria-hidden className={TRACE_CAP} style={{ /* rtl-lint-ignore: LTR plot */ left: pct(s.start), transform: traceCap(laneW * w / total), clipPath: traceCapClip(laneW * w / total) }} />}
+            {capped && <span ref={geoRef(s.id + ':end')} aria-hidden className={TRACE_CAP_END} style={{ /* rtl-lint-ignore: LTR plot */ left: pct(s.start), transform: traceCap(laneW * w / total, 40), clipPath: traceCapClip(laneW * w / total, 40) }} />}
+            <div ref={geoRef(s.id + ':label')} className="absolute top-[11px] flex items-center gap-2 text-xs whitespace-nowrap text-[var(--fg2)]"
+              style={laneW > 0 ? { /* rtl-lint-ignore: LTR plot */ left: `calc(${pct(s.start)} + 10px)`, transform: `translateX(${(laneW * w / total).toFixed(2)}px)`, opacity: started ? 1 : 0 } : { /* rtl-lint-ignore: LTR plot */ left: `calc(${pct(s.start + w)} + 10px)`, opacity: started ? 1 : 0 }}>
               {failed ? (
                 <span className="inline-flex items-center gap-1 font-medium text-[var(--bad)]"><Icon name="alertCircle" size={12} /><span dir={dir}>{m('failed', { time: secs(du), message: failure!.message })}</span></span>
               ) : started && (
@@ -239,7 +279,7 @@ export function TraceWaterfall({ spans, total, title, subtitle, failure, speed =
               )}
             </div>
           </div>
-        </motion.div>
+        </motion.div>} />
         {ch.length > 0 && <Collapse open={isOpen} className={DG_COLLAPSE_STICKY}>{ch.map(row)}</Collapse>}
       </Fragment>
     )
@@ -311,7 +351,7 @@ export function TraceWaterfall({ spans, total, title, subtitle, failure, speed =
               )}
               {root && row(root)}
               {laneW > 0 && (
-                <div ref={headEl} className="pointer-events-none absolute top-0 bottom-0 w-[1.5px] bg-[var(--accent)] opacity-80" style={{ /* rtl-lint-ignore: LTR plot */ left: `calc(var(--split) + ${(laneW * Math.min(clock, total)) / total}px)` }}>
+                <div ref={headEl} className="pointer-events-none absolute top-0 bottom-0 w-[1.5px] bg-[var(--accent)] opacity-80" style={{ /* rtl-lint-ignore: LTR plot */ left: 'var(--split)', transform: `translateX(${((laneW * Math.min(clock, total)) / total).toFixed(2)}px)` }}>
                   <i className="absolute -top-1 -start-[3.5px] h-2 w-2 rounded-full bg-[var(--accent)]" />
                 </div>
               )}

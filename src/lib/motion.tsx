@@ -1,6 +1,6 @@
 import { useEffect, useLayoutEffect, useRef, useState, type ReactNode, type RefObject } from 'react'
 import { type DOMKeyframesDefinition, type HTMLMotionProps, animate, motion, useInView, useReducedMotion, type Transition } from 'motion/react'
-import { prefersReducedMotion, spring } from './core'
+import { isCoarsePointer, prefersReducedMotion, spring } from './core'
 
 /* ════════════════════════════════════════════════════════════════════════════
  * Motion: scroll entrances, frame loops, tweens and one-shot animations
@@ -24,17 +24,43 @@ export function useViewport<T extends Element = HTMLDivElement>(target?: RefObje
   return { ref, seen: seen || visible, visible }
 }
 
-/** Runs `cb(dt, now)` every animation frame while `active` (dt in seconds, capped at `maxDt`, 50 ms by default). */
-export function useFrameLoop(active: boolean, cb: (dt: number, now: number) => void, maxDt = 0.05) {
+/** useFrameLoop options: `maxDt` caps dt (s, default 0.05); `fps` caps the rate; `coarseFps` caps it on touch screens (pointer: coarse). */
+export type FrameLoopOptions = { maxDt?: number; fps?: number; coarseFps?: number }
+/** The rate a frame loop runs at: `fps`, lowered to `coarseFps` on coarse pointers (phones, tablets); 0 means every frame. */
+export const frameLoopFps = ({ fps = 0, coarseFps = 0 }: FrameLoopOptions, coarse: boolean) => {
+  const c = coarse && coarseFps > 0 ? coarseFps : 0
+  return fps > 0 && c > 0 ? Math.min(fps, c) : fps || c
+}
+/**
+ * Runs `cb(dt, now)` every animation frame while `active` (dt in seconds, capped at `maxDt`, 50 ms by default). Pass
+ * `active = visible && running`, so the loop stops off screen and when there is nothing to animate. `{ fps }` caps the
+ * rate (frames are skipped; dt covers the time since the last run); `{ coarseFps: 30 }` caps it on touch screens only,
+ * where a busy canvas at 60 fps costs a phone twice the CPU for little visible gain. The third argument may also be
+ * `maxDt` as a number.
+ */
+export function useFrameLoop(active: boolean, cb: (dt: number, now: number) => void, options: number | FrameLoopOptions = {}) {
   const fn = useRef(cb)
   useLayoutEffect(() => { fn.current = cb })
+  const o = typeof options === 'number' ? { maxDt: options } : options
+  const maxDt = o.maxDt ?? 0.05, fps = o.fps ?? 0, coarseFps = o.coarseFps ?? 0
   useEffect(() => {
     if (!active) return
-    let raf = 0, last = performance.now()
-    const step = (now: number) => { const dt = Math.min(maxDt, (now - last) / 1000); last = now; fn.current(dt, now); raf = requestAnimationFrame(step) }
+    const rate = frameLoopFps({ fps, coarseFps }, isCoarsePointer())
+    // a little under the period, so 30 fps on a 60 Hz screen is every other frame, not drifting to every third
+    const gap = rate > 0 ? 1000 / rate - 4 : 0
+    let raf = 0, timer = 0, last = performance.now()
+    const step = (now: number) => {
+      if (now - last < gap) { raf = requestAnimationFrame(step); return }
+      const dt = Math.min(maxDt, (now - last) / 1000); last = now; fn.current(dt, now)
+      // capped: ask for the next frame only shortly before it is due, so the frames in between don't run the page's
+      // rendering steps for nothing (a pending requestAnimationFrame makes every frame a full one)
+      const wait = gap > 0 ? now + gap - 8 - performance.now() : 0
+      if (wait > 1) timer = window.setTimeout(() => { timer = 0; raf = requestAnimationFrame(step) }, wait)
+      else raf = requestAnimationFrame(step)
+    }
     raf = requestAnimationFrame(step)
-    return () => cancelAnimationFrame(raf)
-  }, [active, maxDt])
+    return () => { cancelAnimationFrame(raf); clearTimeout(timer) }
+  }, [active, maxDt, fps, coarseFps])
 }
 
 /** A number, or arrays/objects of numbers, that useTween can interpolate. */

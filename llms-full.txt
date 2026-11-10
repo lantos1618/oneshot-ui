@@ -4,7 +4,7 @@
 > CSS variables (seven palette families, light and dark). Forms, overlays, navigation, data grid, charts, diagrams, maps,
 > media, AI chat and agent UIs. Every component is also a self-contained .tsx drop-in file.
 
-Version 0.6.0. Source: https://github.com/lantos1618/oneshot-ui. Docs: https://lantos1618.github.io/oneshot-ui/. Licence: MIT with a revenue threshold (free up to USD 200k ARR).
+Version 0.7.0. Source: https://github.com/lantos1618/oneshot-ui. Docs: https://lantos1618.github.io/oneshot-ui/. Licence: MIT with a revenue threshold (free up to USD 200k ARR).
 
 ## Use it
 
@@ -22,8 +22,8 @@ and motion. Attach the ones you need plus ui-provider.tsx; they share one UIProv
 - CLI (offline, from the installed package): `npx @lyndon/ui add data-grid dialog --dir src/components/ui`, `npx @lyndon/ui list`, `npx @lyndon/ui info data-grid`
 - shadcn CLI: `npx shadcn add https://lantos1618.github.io/oneshot-ui/r/data-grid.json` (pulls in ui-provider)
 - Index with sizes, exports and embedded components: https://lantos1618.github.io/oneshot-ui/index.json
-- The same files from npm: https://unpkg.com/@lyndon/ui@0.6.0/dist-registry/files/<name>.tsx
-- Whole library in one file (dist-single/ui-all.tsx, ~589.9k tokens): only for tools with a very large context; prefer the drop-ins
+- The same files from npm: https://unpkg.com/@lyndon/ui@0.7.0/dist-registry/files/<name>.tsx
+- Whole library in one file (dist-single/ui-all.tsx, ~623.0k tokens): only for tools with a very large context; prefer the drop-ins
 
 ## Foundation
 
@@ -57,7 +57,7 @@ German strings for the built-in UI: <UIProvider locale="de-DE" messages={UI_MESS
 - File: https://lantos1618.github.io/oneshot-ui/files/messages-de.tsx
 - Exports: UI_MESSAGES_DE
 
-### Motion helpers (`motion`, ~2.1k tokens)
+### Motion helpers (`motion`, ~2.7k tokens)
 
 Reveal on scroll, useViewport (pause work off screen), frame loops, tweens, play/shake keyframes and motion presets.
 
@@ -1185,7 +1185,7 @@ Image that blurs up: a tiny placeholder shows blurred, then the full image cross
 - Embeds: Button, Icon, Slot, Spinner
 - npm: motion, react
 
-### Video player (`video-player`, ~32.2k tokens)
+### Video player (`video-player`, ~32.7k tokens)
 
 Video player with custom controls: big play button, title that fades while playing, seek bar with buffer, hover time and drag, back 5 s, mute + volume, time, speed cycle and fullscreen. Controls hide when idle. Keys (when the player itself is focused): Space / K play, ← / → seek 2 s, M mute, F fullscreen. Its controls keep their own keys (the seek bar: ← / → and Home / End), so nothing fires twice. Touch: tap shows or hides the controls (tap while paused plays), double-tap the left or right half to seek ∓5 s, and the seek bar and buttons grow to finger size. Clicking the picture toggles playback. While `preparing` (no `src` yet) the poster shows with Play enabled: pressing it shows "Starting…" and playback begins as soon as the source arrives (press again to cancel).
 
@@ -1241,7 +1241,7 @@ Threaded comments with inline reply boxes.
 - Embeds: AnimatedList, Avatar, Button, Collapse, FormFieldContext, Input, Slot, Spinner
 - npm: motion, react
 
-### Live presence (`live-presence`, ~8.5k tokens)
+### Live presence (`live-presence`, ~9.1k tokens)
 
 Live presence on a mock document: collaborators' cursors drift about with name labels, your own "You" cursor follows the pointer inside the canvas, and an avatar stack ringed in each person's colour counts who's here. Cursors pause while off screen and stay put under reduced motion.
 
@@ -1413,7 +1413,7 @@ Squarified treemap: area ∝ value. Tiles grow out of their centres when scrolle
 
 ## Diagrams
 
-### Data flow (`data-flow`, ~29.6k tokens)
+### Data flow (`data-flow`, ~30.3k tokens)
 
 Streaming pipeline: particles leave each source at its event rate, pass through the processing engine (its stage label cycles) and fan out to destinations by share. Hover, tap or focus a node to trace its path. Speed slider, Pause, and a live stat strip (throughput, processed, in flight, p95 latency). Below 560px the pipeline turns vertical (sources above the engine, destinations below) so labels stay full size on phones. Particles are drawn on one canvas from per-path lookup tables (no DOM reads or writes per frame), capped at 120 in flight, and everything pauses while the diagram is off screen.
 
@@ -1431,7 +1431,7 @@ Project plan. Phases collapse; drag a bar to move it, drag its right edge (or Sh
 - Embeds: Avatar, Button, Chip, Collapse, Icon, PointerTooltip, ScrollEdges, Slot, Spinner
 - npm: motion, react, react-dom
 
-### Network graph (`network-graph`, ~12.3k tokens)
+### Network graph (`network-graph`, ~12.9k tokens)
 
 Force-directed graph (repulsion, springs, centring) simulated in-file. Drag a node to pin it while you move it, hover, tap or focus a node to highlight its neighbours (tap it again or outside to clear), Shuffle to re-scatter. Nodes catch touches in a wider ring; swipes over empty canvas still scroll the page. Settles when scrolled into view. The simulation pauses while the graph is off screen or hidden (width 0) and resumes where it was when it comes back; it stops once it has cooled down, and while it runs it moves the nodes by writing their attributes directly (no re-render per frame).
 
@@ -1440,7 +1440,7 @@ Force-directed graph (repulsion, springs, centring) simulated in-file. Drag a no
 - Embeds: Button, Slot, Spinner
 - npm: motion, react
 
-### Process flow (`process-flow`, ~16.6k tokens)
+### Process flow (`process-flow`, ~17.3k tokens)
 
 Workflow canvas. Run executes `steps` in order: edges pulse, nodes spin then tick, counters roll and a status pill logs progress. Drag nodes by their header; drag the background to pan; Ctrl/⌘ + scroll zooms at the pointer; +, − and Fit buttons. On touch a vertical swipe scrolls the page, so pan with a sideways drag or two fingers (which also pinch-zoom). Reset cancels a run.
 
@@ -1458,7 +1458,7 @@ Two-column Sankey: source nodes on the left, targets on the right, ribbons sized
 - Embeds: PointerTooltip
 - npm: motion, react, react-dom
 
-### State diagram (`state-diagram`, ~16.5k tokens)
+### State diagram (`state-diagram`, ~17.1k tokens)
 
 Interactive UML state diagram. Fire the events available from the current state (buttons, or auto-play); a dot walks the transition, composites light while any substate is current, and a shallow history state returns to the substate you left. Shows the current state, its context and a history log. Reset restarts.
 
@@ -1467,7 +1467,7 @@ Interactive UML state diagram. Fire the events available from the current state 
 - Embeds: Button, Icon, ScrollEdges, Slot, Spinner, Statechart
 - npm: motion, react
 
-### State machine (`state-machine`, ~25.3k tokens)
+### State machine (`state-machine`, ~26.0k tokens)
 
 Live statechart of workflow machines, switchable with a segmented control. A shared WorkflowEngine runs while the chart is on screen: lit states hold jobs (with a count), dots travel each transition as it happens, guards and fork / join are labelled. Fire event queues the selected workflow's trigger; the log shows the latest decisions. Pass your `machines` (the agent-team sample is `AGENT_WORKFLOWS` in `@lyndon/ui/examples`); without any it shows an empty chart of the same size.
 
@@ -1476,7 +1476,7 @@ Live statechart of workflow machines, switchable with a segmented control. A sha
 - Embeds: ActiveIndicator, Badge, Button, FormFieldContext, Icon, ScrollEdges, SegmentedControl, Slot, Spinner, Statechart
 - npm: motion, react
 
-### Statechart (`statechart`, ~10.7k tokens)
+### Statechart (`statechart`, ~11.3k tokens)
 
 SVG statechart: composite states, states, pseudo states (initial, final, history), labelled transitions, and dots that travel along a transition (each dot calls onDone when it arrives). Pure renderer: pass the geometry and flags; StateDiagram and StateMachine drive it. It scales down to `minWidth` and scrolls sideways below that; on phones and touch screens it stays at full size (labels stay ≥ 11px) and shows a swipe hint.
 
@@ -1485,7 +1485,7 @@ SVG statechart: composite states, states, pseudo states (initial, final, history
 - Embeds: Icon, ScrollEdges
 - npm: motion, react
 
-### Trace waterfall (`trace-waterfall`, ~25.1k tokens)
+### Trace waterfall (`trace-waterfall`, ~27.1k tokens)
 
 Nested spans on one streaming timeline (agent runs, API requests, jobs). Plays when scrolled into view: bars grow with a cursor, the stat strip rolls (duration, cost, tokens, calls, errors) and a Live badge settles to Complete. Groups collapse. `failure` lets Simulate failure fail a span part-way and reveal its retry. Spawn connectors run from each parent bar, at the moment a child starts, down to that child's bar; hovering or tapping a span highlights its chain back to the root. Hover or tap a span for its numbers. On phones the timeline scrolls sideways with the span names pinned. `annotations` (deploys, approvals, retries; `at` in ms from the trace start) draw as dashed rules over the time grid with flags in a row of their own (reserved up front, so rows never move); flags that would overlap drop out to a dot on their rule, and `annotationStyle="rug"` shows icons instead, folding crowded ones into "+N". Hover, tap or focus a flag for its tooltip; the flag row is one Tab stop (←/→, Home/End, Escape).
 
@@ -1497,7 +1497,7 @@ Nested spans on one streaming timeline (agent runs, API requests, jobs). Plays w
 
 ## Maps
 
-### Globe (`globe`, ~19.2k tokens)
+### Globe (`globe`, ~20.3k tokens)
 
 3D dot globe on a canvas: land as dots, great-circle routes between hubs with travelling heads, pulsing hubs with labels. Drag to spin (it keeps its momentum), toggle auto-rotate, hover or tap a route in the side list to highlight it. On touch only sideways drags spin it, so vertical swipes keep scrolling the page; on phones the canvas is no taller than it is wide. Colours come from the theme tokens and are re-read when the theme changes. The land points load on first render (`loadGlobeLand`) unless you pass `land`; the canvas has its final size from the start.
 
@@ -1536,14 +1536,14 @@ Plan first, then live progress. Pass `steps` with statuses to drive it yourself,
 - Embeds: Button, Icon, Progress, Slot, Spinner, StatusIcon
 - npm: motion, react
 
-### Agent transit map (`agent-transit-map`, ~45.0k tokens)
+### Agent transit map (`agent-transit-map`, ~52.4k tokens)
 
-Live multi-agent "transit map", driven by the same WorkflowEngine as StateMachine. The Indexing loop and the Intake endpoint fire events into a queue (drawn on the map, under Intake); jobs start as slots free up and travel their state graph along the drawn lines, bends included. Agents take one job at a time: the others line up on the incoming line with a counter, and track segments warm up (grey, amber, red) as tokens pile onto them. Orchestrators route with guards, Product forks reviews and joins them, endpoints emit follow-up triggers. Human and Risk stations wait for approval when human-in-the-loop is on: the station gets a countdown ring and an approval card floats beside it, over the map, so nothing on the page moves. Pause, speed and max-jobs controls, fire-event chips, and a live trace table (time, tokens, USD) whose connectors link a follow-up job to the job that triggered it: hover a row, or press its job button, to follow that job on the map. Moving parts are drawn every frame without re-rendering; the panels refresh about 8 times a second. Reduced motion places tokens at their stations without travel. On phones the map keeps a readable size and scrolls sideways inside the card, as does the trace table. Pass `machines` whose stations are the map's (the sample is `AGENT_WORKFLOWS` / `AGENT_WORKFLOW_ORDER` in `@lyndon/ui/examples`); without any, the map is drawn with no traffic.
+Live multi-agent "transit map", driven by the same WorkflowEngine as StateMachine. The Indexing loop and the Intake endpoint fire events into a queue (drawn on the map, under Intake); jobs start as slots free up and travel their state graph along the drawn lines, bends included. Agents take one job at a time: the others line up on the incoming line with a counter, and track segments warm up (grey, amber, red) as tokens pile onto them. Orchestrators route with guards, Product forks reviews and joins them, endpoints emit follow-up triggers. Human and Risk stations wait for approval when human-in-the-loop is on: the station gets a countdown ring and an approval card floats beside it, over the map, so nothing on the page moves. Pause, speed and max-jobs controls, fire-event chips, and a live trace table (time, tokens, USD) whose connectors link a follow-up job to the job that triggered it: hover a row, or press its job button, to follow that job on the map. The still drawing renders once; tokens and the train are composited layers moved every frame without re-rendering (30 fps on touch screens); the panels refresh about 8 times a second, and only the parts that changed. Reduced motion places tokens at their stations without travel. On phones the map keeps a readable size and scrolls sideways inside the card, as does the trace table. Pass `machines` whose stations are the map's (the sample is `AGENT_WORKFLOWS` / `AGENT_WORKFLOW_ORDER` in `@lyndon/ui/examples`); without any, the map is drawn with no traffic.
 
 - File: https://lantos1618.github.io/oneshot-ui/files/agent-transit-map.tsx
 - Exports: AgentTransitMap
 - Embeds: Badge, Button, Chip, FormFieldContext, Icon, IconButton, MagnetBubble, MagnetMarks, ScrollEdges, Slider, Slot, Spinner, Switch, WorkflowEngine
-- npm: motion, react
+- npm: motion, react, react-dom
 
 ### AI canvas (`ai-canvas`, ~27.8k tokens)
 
@@ -1904,6 +1904,15 @@ A chart and its journal side by side (pattern H), linked both ways: hovering, fo
 - File: https://lantos1618.github.io/oneshot-ui/files/chart-with-journal.tsx
 - Exports: ChartWithJournal
 - Embeds: Button, Icon, IconButton, Slot, Spinner, TagGlyph, TagJournal, VirtualList
+- npm: motion, react, react-dom
+
+### Git graph (`git-graph`, ~80.7k tokens)
+
+Commit history graph (like VS Code's Git Graph or GitKraken): lanes and merge edges drawn per row, virtualised for 100k commits, with refs, author, relative date and hash columns. Click or Enter opens details (a side panel, a sheet on phones: message, parents, refs, files and diffs from `loadCommit`); Shift+click a second commit compares the range (`loadDiff`). Hover or focus lights the first-parent ancestry. Keys: ↑/↓ rows, ← parent, → child, Home/End, PageUp/Down, `/` search, n/N next/previous match, Enter open, Escape close; Shift+F10, right-click or long-press opens the actions menu. Search, branch filter, first-parent and hide-merged views in the toolbar. New commits on top keep the reader's place.
+
+- File: https://lantos1618.github.io/oneshot-ui/files/git-graph.tsx
+- Exports: GitGraph
+- Embeds: ActiveIndicator, Avatar, Badge, Button, Chip, ContextMenuContent, ContextMenuRoot, ContextMenuTrigger, CopyButton, DialogClose, DialogRoot, DialogTitle, Diff, DropdownMenuContent, DropdownMenuRoot, DropdownMenuTrigger, FloatingPanel, FormFieldContext, Icon, IconButton, InlineCode, Kbd, Markdown, MenuCheckboxItem, MenuItem, MenuLabel, MenuSeparator, ModalLayer, OverlayPortal, PopoverContent, PopoverRoot, PopoverTrigger, ScrollEdges, SegmentedControl, SheetContent, SheetHeader, Slot, Spinner
 - npm: motion, react, react-dom
 
 ### Magnet bubble (`magnet-bubble`, ~653 tokens)
