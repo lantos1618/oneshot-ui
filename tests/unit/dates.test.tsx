@@ -470,7 +470,7 @@ describe('async MultiSelect', () => {
     await user.click(screen.getByRole('option', { name: /Create “Grace”/ }))
     expect(onCreate).toHaveBeenCalledWith('Grace')
     expect(data().getAll('who')).toEqual(['new:Grace'])
-    expect(screen.getByText('Grace')).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: 'Remove Grace' })).toBeInTheDocument()
   })
 
   it('the static path keeps working: Backspace removes the last chip', async () => {

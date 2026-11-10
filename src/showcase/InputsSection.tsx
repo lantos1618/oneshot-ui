@@ -1,5 +1,6 @@
 import { useState, type ReactNode } from 'react'
 import { AnimatedNumber, Calendar, Checkbox, ColorPicker, Combobox, CurrencyInput, DateField, DatePicker, DateRangePicker, type DateRange, DateTimePicker, Field, FileUpload, Input, Label, type Magnet, type MagnetZonePull, MonthPicker, MultiSelect, NumberStepper, OTPInput, type Option, PasswordInput, PhoneInput, RadioGroup, RangeSlider, Rating, SegmentedControl, Select, Slider, Switch, TagInput, Textarea, TimeField, TimePicker, YearPicker, cn, formDate } from '../lib'
+import { fakeUpload } from '../examples/upload-sim'
 import { Row, Section, Spec } from './kit'
 
 const COUNTRIES: Option[] = ([['🇦🇺', 'Australia'], ['🇦🇹', 'Austria'], ['🇧🇪', 'Belgium'], ['🇨🇦', 'Canada'], ['🇩🇰', 'Denmark'], ['🇫🇮', 'Finland'], ['🇫🇷', 'France'], ['🇩🇪', 'Germany'], ['🇮🇪', 'Ireland'], ['🇮🇹', 'Italy'], ['🇯🇵', 'Japan'], ['🇳🇱', 'Netherlands'], ['🇳🇿', 'New Zealand'], ['🇳🇴', 'Norway'], ['🇵🇹', 'Portugal'], ['🇸🇬', 'Singapore'], ['🇪🇸', 'Spain'], ['🇸🇪', 'Sweden'], ['🇨🇭', 'Switzerland'], ['🇬🇧', 'United Kingdom'], ['🇺🇸', 'United States']] as const)
@@ -227,7 +228,7 @@ export function InputsSection() {
         <InStates><InGrid min={140}><Field label="Disabled"><PasswordInput defaultValue="hunter22" disabled /></Field><Field label="Invalid" error="Too short"><PasswordInput defaultValue="abc" /></Field></InGrid></InStates>
       </Spec>
       <Spec title="Colour picker" desc="Swatches, hue, and hex. The hue snaps to the primary and secondary hues (hold Alt to drag freely)"><ColorPicker hueMagnets /><InStates><Field label="Disabled"><ColorPicker defaultValue="#16A34A" disabled swatches={['#16A34A', '#2563EB']} /></Field></InStates></Spec>
-      <Spec title="File upload" desc="Drop or browse, per-file progress" span={2}><FileUpload accept="image/*,.pdf" hint="Images or PDF, up to 20 MB" defaultFiles={[{ name: 'brand-guidelines.pdf', size: 2_400_000 }]} /></Spec>
+      <Spec title="File upload" desc="Drop or browse, per-file progress" span={2}><FileUpload accept="image/*,.pdf" maxSize={20_000_000} hint="Images or PDF, up to 20 MB" upload={fakeUpload} defaultFiles={[{ name: 'brand-guidelines.pdf', size: 2_400_000 }]} /></Spec>
       <Spec title="Range slider" desc="Two handles, values roll">
         <RangeSlider label="Price" defaultValue={[200, 750]} min={0} max={1000} step={10} minGap={50}
           format={v => <AnimatedNumber value={v} format={eur} />} valueText={v => `€${v}`} />
