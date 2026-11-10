@@ -622,7 +622,7 @@ const HexRow = memo(function HexRow({ row, y, rowH, bpr, n, bytes, patch, label,
   return (
     // rtl-lint-ignore: rows sit in the editor's LTR island
     <div data-row={row} className="absolute left-0 flex w-max min-w-full items-center whitespace-nowrap" style={{ top: y, height: rowH }}>
-      <span className={cn(BIN_PIN, 'inline-block w-[13ch] flex-none bg-[var(--card)] ps-3 pe-[2ch] text-[var(--fg3)] select-none')}>{label}</span>
+      <span className={cn(BIN_PIN, 'inline-block w-[13ch] flex-none bg-[var(--card)] ps-3 pe-4 text-[var(--fg3)] select-none')}>{label}</span>
       <span className="flex-none">{hex}</span>
       {showText && <span className="ms-[2ch] flex-none pe-3" style={cols < bpr ? { paddingInlineEnd: `calc(${bpr - cols}ch + 12px)` } : undefined}>{txt}</span>}
     </div>

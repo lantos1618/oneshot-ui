@@ -34,9 +34,10 @@ const IMPORT = /^import\s+(type\s+)?(?:\{([^}]*)\}|(\*\s+as\s+\w+)|(\w+))\s*from
 const REEXPORT = /^export\s+(type\s+)?(\{[^}]*\}|\*)\s*from\s*'\.[^']*';?[ \t]*\n?/gm
 
 function load(file) {
-  // a lazily imported sibling (geo's map data) is concatenated into the same bundle: resolve it in place
-  const src = readFileSync(file, 'utf8').replace(/\bimport\('\.\/(\w+)'\)/g, (_, m) =>
-    `Promise.resolve({ ${[...readFileSync(libFile(m), 'utf8').matchAll(/^export const (\w+)/gm)].map(x => x[1]).join(', ')} })`)
+  // a lazily imported library module (geo's map data, the showcase's specLazy cards) is concatenated into the same
+  // bundle: resolve it in place
+  const src = readFileSync(file, 'utf8').replace(/\bimport\('(?:\.\/|\.\.\/lib\/)(\w+)'\)/g, (_, m) =>
+    `Promise.resolve({ ${[...readFileSync(libFile(m), 'utf8').matchAll(/^export (?:const|function) (\w+)/gm)].map(x => x[1]).join(', ')} })`)
   const imports = []
   // intra-library re-exports (`export { x } from './core'`, `export * from './y'`): in the concatenated
   // output those names already exist, so the line is dropped
@@ -85,7 +86,7 @@ const libFile = m => join(root, 'src/lib', `${m}.tsx`)
 const showcaseDir = join(root, 'src/showcase')
 // ui-with-examples: the sample data (src/examples) and copy-in blocks (src/blocks) the showcase imports, then the showcase
 const samples = ['examples', 'blocks'].flatMap(d => readdirSync(join(root, 'src', d)).filter(f => f.endsWith('.tsx')).sort().map(f => join(root, 'src', d, f)))
-const examples = [...samples, 'tags.ts', 'kit.tsx', ...readdirSync(showcaseDir).filter(f => f.endsWith('.tsx') && f !== 'index.tsx' && f !== 'kit.tsx').sort(), 'index.tsx'].map(f => f.startsWith('/') ? f : join(showcaseDir, f))
+const examples = [...samples, 'tags.ts', 'cardHeights.ts', 'kit.tsx', ...readdirSync(showcaseDir).filter(f => f.endsWith('.tsx') && f !== 'index.tsx' && f !== 'kit.tsx').sort(), 'index.tsx'].map(f => f.startsWith('/') ? f : join(showcaseDir, f))
 
 mkdirSync(join(root, 'dist-single'), { recursive: true })
 const sizes = [], sums = []

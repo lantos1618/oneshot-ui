@@ -645,7 +645,7 @@ export function PermissionRequest({ title, app = 'inbox', reason, recipients = A
         </div>
         <div className="mt-3 flex items-start gap-2 rounded-[var(--r-md)] bg-[var(--muted)] px-2.5 py-2 text-xs leading-snug text-[var(--fg2)]"><Icon name="info" size={14} className="mt-px text-[var(--fg3)]" /><span>{reason}</span></div>
         <button aria-expanded={preview} onClick={() => setPreview(!preview)}
-          className={cn(surface.md, 'mt-3 flex w-full cursor-pointer items-center gap-2.5 p-2 text-start text-[13px] hover:border-[var(--line2)]')}>
+          className={cn(surface.md, 'mt-3 flex min-h-10 w-full cursor-pointer items-center gap-2.5 px-2 py-1.5 text-start [@media(pointer:coarse)]:py-2 text-[13px] hover:border-[var(--line2)]')}>
           <span className="flex flex-none">{recipients.slice(0, 3).map((n, i) => <Avatar key={n} name={n} size={24} className={cn('[@media(pointer:coarse)]:!h-7 [@media(pointer:coarse)]:!w-7 [@media(pointer:coarse)]:!text-[11px]', i ? '-ms-2' : '')} />)}
             {total > 3 && <span className="-ms-2 grid h-6 w-6 place-items-center rounded-full border-2 border-[var(--card)] bg-[var(--muted)] text-[11px] font-semibold text-[var(--fg2)] [@media(pointer:coarse)]:h-7 [@media(pointer:coarse)]:w-7 [@media(pointer:coarse)]:text-[11px]">+{fmt.number(total - 3)}</span>}</span>
           <span className="min-w-0 flex-1 truncate max-sm:whitespace-normal"><b className="font-medium">{list}</b> <span dir="auto" className="text-xs text-[var(--fg3)]">· “{draft.subject}”</span></span>

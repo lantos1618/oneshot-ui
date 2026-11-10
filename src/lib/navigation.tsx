@@ -566,7 +566,9 @@ export function MegaMenu({ items, brand, actions, children, closeDelay = 160, de
         {actions && <span className="hidden flex-none items-center gap-2 sm:flex">{actions}</span>}
       </div>
       <motion.div ref={panel} id={pid} role="region" aria-label={cur >= 0 ? items[cur].label : undefined} aria-hidden={cur < 0}
-        className={cn('absolute top-16 z-[4] overflow-x-hidden overflow-y-auto overscroll-contain rounded-[var(--r-lg)] border border-[var(--line)] bg-[var(--card)] shadow-[var(--shadow)]', cur < 0 && 'pointer-events-none')}
+        // hidden once faded out: the first open then makes the panel appear at its size instead of resizing a box that
+        // was there all along (which counted as a layout shift)
+        className={cn('absolute top-16 z-[4] overflow-x-hidden overflow-y-auto overscroll-contain rounded-[var(--r-lg)] border border-[var(--line)] bg-[var(--card)] shadow-[var(--shadow)]', cur < 0 && 'pointer-events-none', shown < 0 && 'invisible')}
         initial={false}
         animate={cur >= 0 ? { opacity: 1, y: 0, scale: 1, left, width: size.w, height: hostH ? Math.min(size.h, hostH - 72) : size.h } : { opacity: 0, y: -4, scale: 0.98 }}
         onAnimationComplete={() => { if (cur < 0) setShown(-1) }}

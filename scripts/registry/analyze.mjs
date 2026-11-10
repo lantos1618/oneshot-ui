@@ -197,11 +197,15 @@ export function closure(graph, roots, moduleOrder) {
   const ext = []
   const seenParts = new Set()
   const dynImports = {}
+  const byOrder = new Map() // part order → the part, with the names it declares (`const a = 1, b = 2` is one part)
   for (const n of seen) {
     const d = decls.get(n)
     ext.push(...d.ext)
     Object.assign(dynImports, d.dynImports)
-    for (const p of d.parts) if (!seenParts.has(p.order)) { seenParts.add(p.order); parts.push(p) }
+    for (const p of d.parts) {
+      if (!seenParts.has(p.order)) { seenParts.add(p.order); const part = { ...p, names: [] }; byOrder.set(p.order, part); parts.push(part) }
+      byOrder.get(p.order).names.push(n)
+    }
   }
   for (const se of effects) { ext.push(...se.ext); Object.assign(dynImports, se.dynImports); parts.push({ order: se.order, text: se.text }) }
   parts.sort((a, b) => rank(a.order) - rank(b.order))

@@ -3,12 +3,12 @@ import { useInView } from 'motion/react'
 import {
   AudioPlayer, AvatarCropper, Button, Carousel, ImageCompare, MasonryGallery, MediaCard, MiniAudioPlayer, ProgressiveImage, Skeleton, VideoPlayer, VoiceNote, createAudioTrack, type GalleryItem, type MediaChapter,
 } from '../lib'
-import { mediaArt, mediaImage, mediaRecordVideo, mediaSynthTrackAsync, type MediaArtKind } from '../examples'
+import { mediaArt, mediaImage, mediaImageAsync, mediaRecordVideo, mediaSynthTrackAsync, type MediaArtKind } from '../examples'
 import { Section, Spec } from './kit'
 
 /* Everything below is generated in the page (canvas art, a synthesised WAV, a canvas recording), so it works offline.
    Canvas and blobs only exist in the browser, so each demo makes its media after mount; the server (and the first
-   client render) shows placeholders of the same size. */
+   client render) shows placeholders of the same size (skeleton heights match the loaded players on mouse and touch). */
 
 /** `make()` once, after mount, in a task of its own (cards that mount together don't add their canvases and WAVs up into
  * one long task); a promise is awaited. null until then (and on the server). */
@@ -26,11 +26,11 @@ function useClientValue<T>(make: () => T | Promise<T>): T | null {
 const demoOnce = <T,>(make: () => T) => { let v: T | undefined; return () => (v ??= make()) }
 /** demoOnce for a list of generated pictures: one item per task (a JPEG encode is tens of ms on a phone, and a card
  * of 16 in one go was a 250 ms task), resolved once all are made. */
-const demoEach = <A, T>(list: readonly A[], make: (a: A, i: number) => T) => {
+const demoEach = <A, T>(list: readonly A[], make: (a: A, i: number) => T | Promise<T>) => {
   let all: Promise<T[]> | undefined
   return () => (all ??= (async () => {
     const out: T[] = []
-    for (let i = 0; i < list.length; i++) { await new Promise(r => setTimeout(r)); out.push(make(list[i], i)) }
+    for (let i = 0; i < list.length; i++) { await new Promise(r => setTimeout(r)); out.push(await make(list[i], i)) }
     return out
   })())
 }
@@ -62,17 +62,23 @@ const AUTHORS = ['Alex Lee', 'Bea Kim', 'Chris Moe', 'Dana Ng', 'Eli Park']
 function makeGalleryItems(from: number, n: number): GalleryItem[] {
   return Array.from({ length: n }, (_, i) => galleryItem(from, i))
 }
-/** Item `i` of a batch of gallery items starting at `from`. */
-function galleryItem(from: number, i: number): GalleryItem {
+/** Item `i` of a batch of gallery items starting at `from`; `paint` false leaves the picture empty (made later). */
+function galleryItem(from: number, i: number, paint = true): GalleryItem {
   const k = from + i, kind = KINDS[k % 5], ratio = [1.25, 0.75, 1.5, 1, 1.35, 0.9, 1.6, 1.1][(from + i * 3) % 8], seed = k + 1, pal = (from + i * 5) % 8
   return {
     id: k, title: TITLES[kind][k % 5], category: CAT[kind], ratio, author: AUTHORS[k % 5], likes: 20 + (k * 37) % 400,
-    src: mediaImage(kind, 360, Math.round(360 * ratio), seed, pal, 0.8), full: () => mediaImage(kind, 1100, Math.round(1100 * ratio), seed, pal, 0.88),
+    src: paint ? mediaImage(kind, 360, Math.round(360 * ratio), seed, pal, 0.8) : '', full: () => mediaImage(kind, 1100, Math.round(1100 * ratio), seed, pal, 0.88),
   }
 }
-const galleryStart = demoEach(Array.from({ length: 16 }, (_, i) => i), i => galleryItem(0, i))
+const galleryStart = demoEach(Array.from({ length: 16 }, (_, i) => i), async i => {
+  const it = galleryItem(0, i, false) // the same picture galleryItem(0, i) paints, encoded off the main thread
+  return { ...it, src: await mediaImageAsync(KINDS[i % 5], 360, Math.round(360 * it.ratio), i + 1, (i * 5) % 8, 0.8) }
+})
+/** The first 16 tiles without pictures: their ratios are known up front, so the gallery has its final height from the
+ * first render and the pictures fill in without moving anything (it was 240px tall until all 16 were painted). */
+const galleryBlank = Array.from({ length: 16 }, (_, i) => galleryItem(0, i, false))
 function GalleryDemo() {
-  const [items, setItems] = useState<GalleryItem[]>([])
+  const [items, setItems] = useState<GalleryItem[]>(galleryBlank)
   useEffect(() => { let live = true; galleryStart().then(x => { if (live) setItems(x) }); return () => { live = false } }, [])
   return <MasonryGallery items={items} categories={['All', 'Nature', 'City', 'Travel', 'Abstract']} hasMore={items.length < 40} onLoadMore={() => setItems(x => [...x, ...makeGalleryItems(x.length, 8)])} />
 }
@@ -83,7 +89,7 @@ const CARDS: [MediaArtKind, string, string, string, number, number][] = [
   ['sea', 'The quiet harbour', 'Photo essay on slow mornings and working boats.', '05:02', 5, 1],
   ['abstract', 'Colour systems that scale', 'Tokens, contrast and why your palette needs fewer colours.', '18:30', 7, 7],
 ]
-const cardImages = demoEach(CARDS, ([k, , , , seed, pal]) => mediaImage(k, 480, 360, seed, pal))
+const cardImages = demoEach(CARDS, ([k, , , , seed, pal]) => mediaImageAsync(k, 480, 360, seed, pal))
 function CardsDemo() {
   const ref = useRef<HTMLDivElement>(null)
   const inView = useInView(ref, { once: true, amount: 0.2 })
@@ -103,7 +109,7 @@ function CardsDemo() {
 const SLIDES: [MediaArtKind, string, string, number, number][] = [['mountains', 'Swiss Alps', 'Hiking guide · 6 routes', 11, 0], ['sea', 'Atlantic coast', 'Road trip · 9 days', 4, 1], ['city', 'Tokyo at night', 'Photo walk · 12 spots', 8, 4], ['dunes', 'Wadi Rum', 'Desert camp · 3 nights', 6, 5], ['abstract', 'Colour study', 'Gallery · 24 works', 9, 2]]
 const demoImg = (src: string, alt: string) => <img src={src} alt={alt} draggable={false} className="block h-full w-full object-cover" />
 
-const slideItems = demoEach(SLIDES, ([k, title, caption, seed, pal]) => ({ content: demoImg(mediaImage(k, 900, 450, seed, pal, 0.85), title), title, caption }))
+const slideItems = demoEach(SLIDES, async ([k, title, caption, seed, pal]) => ({ content: demoImg(await mediaImageAsync(k, 900, 450, seed, pal, 0.85), title), title, caption }))
 
 function CompareDemo() {
   const imgs = useClientValue(compareImages)
@@ -152,7 +158,7 @@ export function MediaSection() {
       <Spec title="Video player" desc="Custom controls. Chapters cut the seek bar and pull the scrubber to their starts (hold Alt to scrub freely). On touch, tap shows the controls and double-tap seeks ±5 s." span={2}
         keys={[[['Space'], 'Play'], [['←', '→'], 'Seek'], [['PgUp', 'PgDn'], 'Next, previous chapter'], [['M'], 'Mute'], [['F'], 'Fullscreen']]}><VideoDemo /></Spec>
       <Spec title="Audio player" desc="Waveform you can click, tap or drag to seek. Scrubbing sticks to chapter starts; PgUp / PgDn jump between them">
-        <MediaDemoLazy make={mediaDemoShared}>{demo => demo ? <AudioPlayer track={demo.shared} title="Night Drive" meta="Synth demo · 0:24" cover={demo.cover} peaks={demo.track.peaks} duration={24} chapters={MEDIA_AUDIO_CHAPTERS} /> : <Skeleton className="h-[140px]" />}</MediaDemoLazy>
+        <MediaDemoLazy make={mediaDemoShared}>{demo => demo ? <AudioPlayer track={demo.shared} title="Night Drive" meta="Synth demo · 0:24" cover={demo.cover} peaks={demo.track.peaks} duration={24} chapters={MEDIA_AUDIO_CHAPTERS} /> : <Skeleton className="h-[171px] [@media(pointer:coarse)]:h-[179px]" />}</MediaDemoLazy>
       </Spec>
       <Spec title="Carousel" desc="Snap scrolling, arrows, dots, swipe on touch. Wraps around." span={2}><MediaDemoLazy make={slideItems}>{slides => <Carousel slides={slides ?? placeholderSlides} />}</MediaDemoLazy></Spec>
       <Spec title="Before / after" desc="Drag the handle, or use arrow keys"><CompareDemo /></Spec>
@@ -163,9 +169,9 @@ export function MediaSection() {
         <MediaDemoLazy make={mediaDemoShared}>{demo => demo ? <>
           <MiniAudioPlayer track={demo.shared} title="Night Drive" duration={24} />
           <VoiceNote src={demo.track.url} peaks={demo.track.peaks} duration={24} />
-        </> : <><Skeleton className="h-12 !rounded-full" /><Skeleton className="ms-auto h-11 w-full max-w-[280px] !rounded-[var(--r-lg)]" /></>}</MediaDemoLazy>
+        </> : <><Skeleton className="h-12 !rounded-full" /><Skeleton className="ms-auto h-[46px] w-full max-w-[280px] !rounded-[var(--r-lg)] [@media(pointer:coarse)]:h-[58px]" /></>}</MediaDemoLazy>
       </Spec>
-      <Spec title="Avatar upload" desc="Pick a photo, crop it to a circle, zoom with the slider or a pinch"><MediaDemoLazy make={mediaDemoAvatar}>{src => src ? <AvatarCropper src={src} /> : <Skeleton className="h-40" />}</MediaDemoLazy></Spec>
+      <Spec title="Avatar upload" desc="Pick a photo, crop it to a circle, zoom with the slider or a pinch"><MediaDemoLazy make={mediaDemoAvatar}>{src => src ? <AvatarCropper src={src} /> : <Skeleton className="h-[325px] [@media(pointer:coarse)]:h-[339px]" />}</MediaDemoLazy></Spec>
     </Section>
   )
 }

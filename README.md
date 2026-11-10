@@ -753,8 +753,9 @@ components from another, exactly as with the npm package.
 
 `ui-provider` holds only the theme engine, the locale engine with the English messages, `ThemeScript` and the host
 outlet. Optional items: `toast` (toasts; `useToast()` without a `ToastProvider` uses one page-wide queue), `icon`
-(the full icon set: each drop-in embeds only the icons it draws, and items that take icon names from props say so in
-their header and list `suggests: ['icon']` in `index.json`), `messages-de` and `messages-ar` (drafted catalogues).
+(the full icon set: each drop-in embeds only the icons it draws, and items that take icon names from props list
+`suggests: ['icon']` in `index.json`), `messages-de` and `messages-ar` (drafted catalogues). Embedded library helpers
+keep a one-sentence summary of their docs; each item's own exports keep their full JSDoc.
 
 ### Blocks
 
@@ -811,10 +812,11 @@ chats (`ui-all.tsx` is about 1.7 MB, ~490k tokens); prefer the drop-ins above.
 | `ui-ai.tsx` | AI message model and streams (`useAiChat`), chat parts, composer, agents | `ui.tsx`, `ui-content.tsx` |
 | `ui-all.tsx` | Everything in one file | |
 
-**Integrity.** Every drop-in and whole-library file starts with `'use client'` and a stamp line with the package
-version, the git commit it was built from and the sha256 of the rest of the file. `dist-single/SHA256SUMS` lists the
-sha256 of each whole-library file (`cd node_modules/@lyndon/ui/dist-single && sha256sum -c SHA256SUMS`) and
-`dist-registry/index.json` the sha256 of each drop-in. A copied file doesn't update itself: re-copy it whenever a
+**Integrity.** Every drop-in starts with `'use client'` and one short line naming the package version, the item and
+the git commit it was built from (`/* @lyndon/ui 0.9.0 · button · ac0fa81 */`); the whole-library files also carry the
+sha256 of the rest of the file in theirs. `dist-single/SHA256SUMS` lists the sha256 of each whole-library file
+(`cd node_modules/@lyndon/ui/dist-single && sha256sum -c SHA256SUMS`), and `dist-registry/SHA256SUMS` and
+`dist-registry/index.json` the sha256 of each drop-in (`cd node_modules/@lyndon/ui/dist-registry && sha256sum -c SHA256SUMS`). A copied file doesn't update itself: re-copy it whenever a
 release fixes a security issue (see [SECURITY.md](./SECURITY.md)).
 
 ## Docs site

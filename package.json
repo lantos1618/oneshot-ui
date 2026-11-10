@@ -289,6 +289,7 @@
     "dist-single/ui-all.tsx",
     "dist-single/SHA256SUMS",
     "dist-registry/index.json",
+    "dist-registry/SHA256SUMS",
     "dist-registry/files/*.tsx",
     "bin/lyndon-ui.mjs",
     "README.md",

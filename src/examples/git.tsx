@@ -181,8 +181,8 @@ export function gitHistory(n = 300, { seed = 7, now = GIT_SAMPLE_NOW }: { seed?:
   return result.reverse()
 }
 
-/** The default sample: ~300 commits. */
-export const GIT_SAMPLE: GitCommit[] = gitHistory(300)
+/** The default sample: ~300 commits (pure: a page that doesn't use it doesn't build it at import). */
+export const GIT_SAMPLE: GitCommit[] = /* @__PURE__ */ gitHistory(300)
 
 /** A new commit on top of `parent` (the showcase's "push" button), dated `at`. */
 export function gitSampleCommit(parent: GitCommit, at: number, n: number): GitCommit {

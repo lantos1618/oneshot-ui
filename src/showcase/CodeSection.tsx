@@ -1,8 +1,13 @@
 import { useEffect, useMemo, useState } from 'react'
 import { useReducedMotion } from 'motion/react'
-import { BinaryView, Citation, CodeBlock, CodeTabs, Diff, GitGraph, type GitCommit, InlineCode, InstallCommand, Kbd, Markdown, type Source, Switch, Tabs, Terminal, markdownCodeBlock, useToast, useViewport } from '../lib'
-import { AgentRunExample, AstGraphExample, BINARY_SAMPLE_SECTIONS, binarySample, binarySampleLarge, ChatBranchesExample, DependencyGraphExample, chatTreeHistory, GIT_SAMPLE, GIT_SAMPLE_NOW, gitHistory, gitSampleCommit, gitSampleLoadCommit, gitSampleLoadDiff } from '../examples'
-import { Section, Spec, SpecAction } from './kit'
+import { Citation, CodeBlock, CodeTabs, Diff, type GitCommit, InlineCode, InstallCommand, Kbd, Markdown, type Source, Switch, Tabs, Terminal, markdownCodeBlock, useToast, useViewport } from '../lib'
+import { AgentRunExample, AstGraphExample, BINARY_SAMPLE_SECTIONS, binarySample, binarySampleLarge, ChatBranchesExample, DependencyGraphExample, chatTreeHistory, GIT_SAMPLE_NOW, gitHistory, gitSampleCommit, gitSampleLoadCommit, gitSampleLoadDiff } from '../examples'
+import { Section, Spec, SpecAction, specLazy } from './kit'
+
+/* The binary explorer and the git graph (two of the library's largest modules) load when their cards first mount. */
+const LazyBinaryView = specLazy(() => import('../lib/binary').then(m => m.BinaryView))
+const LazyGitGraph = specLazy(() => import('../lib/gitgraph').then(m => m.GitGraph))
+
 
 const IMPORT_CODE = `import { createFlow } from './flow';
 import { notify } from './notify';
@@ -152,7 +157,7 @@ const dim = 'text-[var(--fg3)]', ok = 'text-[var(--ok)]', acc = 'text-[var(--acc
 /** The Git graph card: the sample history (or 50k commits), host callbacks as toasts, and "Push" prepending a commit on HEAD. */
 function GitGraphDemo({ big, pushes }: { big: boolean; pushes: number }) {
   const toast = useToast()
-  const base = useMemo(() => (big ? gitHistory(50_000, { seed: 11 }) : GIT_SAMPLE), [big])
+  const base = useMemo(() => (big ? gitHistory(50_000, { seed: 11 }) : gitHistory(300)), [big]) // the 300-commit sample (GIT_SAMPLE), built as the card mounts, not at import
   // each push adds a commit on top of HEAD's branch and moves HEAD to it
   const commits = useMemo(() => {
     let list: GitCommit[] = base
@@ -167,7 +172,7 @@ function GitGraphDemo({ big, pushes }: { big: boolean; pushes: number }) {
   }, [base, pushes])
   const say = (title: string) => (hash: string) => toast({ title, description: `${hash.slice(0, 7)} · demo: the host runs git` })
   return (
-    <GitGraph commits={commits} now={GIT_SAMPLE_NOW + pushes * 7 * 60e3} pin={['main', 'develop']} height={480}
+    <LazyGitGraph commits={commits} now={GIT_SAMPLE_NOW + pushes * 7 * 60e3} pin={['main', 'develop']} height={480}
       loadCommit={gitSampleLoadCommit} loadDiff={gitSampleLoadDiff}
       onCheckout={(hash, branch) => toast({ title: branch ? `Checked out ${branch}` : 'Checked out (detached HEAD)', description: hash.slice(0, 7) })}
       onCreateBranch={say('Create branch')} onCherryPick={say('Cherry-picked')} onRevert={say('Reverted')} onCopyHash={say('Copied hash')} />
@@ -196,7 +201,7 @@ function ChatBigDemo({ big }: { big: boolean }) {
 /** The Binary explorer card: the synthetic 44 KiB ELF-like sample, or 100 MiB of it repeated (built on first use). */
 function BinaryExplorerDemo({ big }: { big: boolean }) {
   const file = useMemo(() => (big ? binarySampleLarge(100) : { bytes: binarySample(), sections: BINARY_SAMPLE_SECTIONS }), [big])
-  return <BinaryView key={big ? 'big' : 'sample'} data={file.bytes} sections={file.sections} defaultCursor={big ? 0 : 0x4000} />
+  return <LazyBinaryView key={big ? 'big' : 'sample'} data={file.bytes} sections={file.sections} defaultCursor={big ? 0 : 0x4000} />
 }
 
 export function CodeSection() {

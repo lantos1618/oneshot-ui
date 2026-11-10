@@ -194,7 +194,7 @@ const ShellSideNav = memo(function ShellSideNav({ ordered, f, filterRef, goSpec,
   const sideRef = useRef<HTMLElement>(null), subRef = useRef<HTMLDivElement>(null)
   const group = useId(), subId = useId(), panelId = useId()
   useEffect(() => { // which card is on screen: one observer for all cards
-    if (!sideRef.current?.offsetParent) return // hidden on mobile: don't track
+    if (!matchMedia('(min-width: 900px)').matches) return // hidden on phones (min-[900px]:flex): don't track; a media query, not offsetParent, which forced a layout of the whole page before the first paint
     const io = new IntersectionObserver(es => es.forEach(e => e.isIntersecting && setActiveSpec(e.target.id)), { rootMargin: '-35% 0px -60% 0px' })
     ordered.forEach(s => { const el = document.getElementById(s.id); if (el) io.observe(el) })
     return () => io.disconnect()
@@ -277,11 +277,16 @@ const ShellChipNav = memo(function ShellChipNav({ f, searching, setSearching, fi
   const [sheet, setSheet] = useState(false)
   const q = query.trim(), filtering = searching || !!q || f.tags.length > 0
   useEffect(() => {
-    const row = chipsRef.current, chip = row?.querySelector<HTMLElement>(`[data-chip="${active}"]`)
-    if (!row || !chip || !row.offsetParent) return
-    // centre the chip; in RTL scrollLeft counts from the right edge (0 down to negative)
-    const left = chip.offsetLeft - row.clientWidth / 2 + chip.offsetWidth / 2
-    row.scrollTo({ left: getComputedStyle(row).direction === 'rtl' ? left - (row.scrollWidth - row.clientWidth) : left, behavior: shellReduce() ? 'auto' : 'smooth' })
+    // in the next frame, with the layout the browser makes for it anyway: measuring here, right after the first commit,
+    // forced an extra layout of the whole page before the first paint (a third of a second on a phone)
+    const raf = requestAnimationFrame(() => {
+      const row = chipsRef.current, chip = row?.querySelector<HTMLElement>(`[data-chip="${active}"]`)
+      if (!row || !chip || !row.offsetParent) return
+      // centre the chip; in RTL scrollLeft counts from the right edge (0 down to negative)
+      const left = chip.offsetLeft - row.clientWidth / 2 + chip.offsetWidth / 2
+      row.scrollTo({ left: getComputedStyle(row).direction === 'rtl' ? left - (row.scrollWidth - row.clientWidth) : left, behavior: shellReduce() ? 'auto' : 'smooth' })
+    })
+    return () => cancelAnimationFrame(raf)
   }, [active, filtering])
   const done = () => { f.clear(); setSearching(false) }
   const t = useMessages(SHOWCASE_MSG), { t: tc, fmt } = useLocale()

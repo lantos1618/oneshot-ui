@@ -18,7 +18,7 @@ const [info] = JSON.parse(out.slice(out.indexOf('[')))
 const files = info.files.map(f => f.path).sort()
 
 // 1. Required files: every export target, the CSS, the single-file bundles and their checksums
-const required = new Set(['package.json', 'README.md', 'LICENSE', 'SECURITY.md', 'dist-single/SHA256SUMS'])
+const required = new Set(['package.json', 'README.md', 'LICENSE', 'SECURITY.md', 'dist-single/SHA256SUMS', 'dist-registry/SHA256SUMS'])
 for (const target of Object.values(pkg.exports)) {
   for (const p of typeof target === 'string' ? [target] : Object.values(target)) required.add(p.replace(/^\.\//, ''))
 }
@@ -30,7 +30,7 @@ for (const e of registry.items) for (const f of [e.file, e.packageFile].filter(B
 for (const r of required) if (!files.includes(r)) problems.push(`missing from the package: ${r}`)
 
 // 2. Nothing that shouldn't ship
-const allowedFile = f => /^(dist\/[\w./-]+\.(js|d\.ts|css)|dist-single\/(ui|ui-content|ui-charts|ui-ai|ui-all)\.tsx|dist-single\/SHA256SUMS|dist-registry\/index\.json|dist-registry\/files\/[a-z0-9-]+(\.package)?\.tsx|bin\/lyndon-ui\.mjs|package\.json|README\.md|SECURITY\.md|LICENSE)$/.test(f)
+const allowedFile = f => /^(dist\/[\w./-]+\.(js|d\.ts|css)|dist-single\/(ui|ui-content|ui-charts|ui-ai|ui-all)\.tsx|dist-single\/SHA256SUMS|dist-registry\/index\.json|dist-registry\/SHA256SUMS|dist-registry\/files\/[a-z0-9-]+(\.package)?\.tsx|bin\/lyndon-ui\.mjs|package\.json|README\.md|SECURITY\.md|LICENSE)$/.test(f)
 for (const f of files) {
   if (f.endsWith('.map')) problems.push(`source map in the package: ${f}`)
   else if (!allowedFile(f)) problems.push(`unexpected file in the package: ${f}`)
@@ -57,6 +57,12 @@ for (const line of readFileSync(join(root, 'dist-single/SHA256SUMS'), 'utf8').tr
 for (const e of registry.items) {
   const actual = createHash('sha256').update(readFileSync(join(root, 'dist-registry', e.file))).digest('hex')
   if (actual !== e.sha256) problems.push(`dist-registry/index.json: ${e.file} does not match (rebuild with pnpm build:registry)`)
+}
+// and dist-registry/SHA256SUMS (`sha256sum -c` in node_modules) matches them too
+for (const line of readFileSync(join(root, 'dist-registry/SHA256SUMS'), 'utf8').trim().split('\n')) {
+  const [sum, name] = line.trim().split(/\s+/)
+  const actual = createHash('sha256').update(readFileSync(join(root, 'dist-registry', name))).digest('hex')
+  if (actual !== sum) problems.push(`dist-registry/SHA256SUMS: ${name} does not match (rebuild with pnpm build:registry)`)
 }
 if (registry.version !== pkg.version) problems.push(`dist-registry/index.json is for ${registry.version}, package.json is ${pkg.version}`)
 

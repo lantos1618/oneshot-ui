@@ -1,6 +1,11 @@
 import { useState } from 'react'
-import { AnchoredComments, ChatInbox, type InboxConversation, LivePresence, type Notification, NotificationBell } from '../lib'
-import { Section, Spec } from './kit'
+import { type InboxConversation, type Notification, NotificationBell } from '../lib'
+import { Section, Spec, specLazy } from './kit'
+
+/* The collaboration module loads when one of its cards first mounts. */
+const LazyAnchoredComments = specLazy(() => import('../lib/collab').then(m => m.AnchoredComments))
+const LazyChatInbox = specLazy(() => import('../lib/collab').then(m => m.ChatInbox))
+const LazyLivePresence = specLazy(() => import('../lib/collab').then(m => m.LivePresence))
 
 const COLLAB_INBOX: InboxConversation[] = [
   { id: 'bk', name: 'Bea Kim', role: 'Design lead', location: 'London', timeZone: 'Europe/London', online: true, last: '11:42', unread: 2,
@@ -26,7 +31,7 @@ export function CollabSection() {
   return (
     <Section id="collab" title="Collaboration" desc="Comments, presence and conversations: the pieces that make an app feel shared.">
       <Spec title="Comments and threads" desc="Anchored to highlighted text. Reply, react, resolve." span={2}>
-        <AnchoredComments
+        <LazyAnchoredComments
           doc={[
             ['The new onboarding flow cuts setup from ', { thread: 't0', text: 'eleven steps to four' }, ', mostly by importing settings from the workspace.'],
             ['We still need to decide whether ', { thread: 't1', text: 'the team invite step' }, ' is optional or required for paid plans.'],
@@ -40,10 +45,10 @@ export function CollabSection() {
       </Spec>
       <Spec title="Live presence" desc="Collaborators’ cursors with names. Move your mouse in the canvas (or tap it on a phone).">
 
-        <LivePresence className="flex-1" actions={<NotificationBell items={notes} onChange={setNotes} />} />
+        <LazyLivePresence className="flex-1" actions={<NotificationBell items={notes} onChange={setNotes} />} />
       </Spec>
       <Spec title="Chat inbox" desc="Three panes: conversations, thread, details. Unread counts, typing indicator, replies arrive." span={3}>
-        <ChatInbox conversations={COLLAB_INBOX} />
+        <LazyChatInbox conversations={COLLAB_INBOX} />
       </Spec>
     </Section>
   )

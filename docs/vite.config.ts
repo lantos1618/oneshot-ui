@@ -4,6 +4,7 @@ import react from '@vitejs/plugin-react'
 import tailwindcss from '@tailwindcss/vite'
 import { readFileSync } from 'node:fs'
 import { defineConfig, type Plugin } from 'vite'
+import { showcaseCode } from '../scripts/showcase-code.ts'
 
 const root = new URL('..', import.meta.url).pathname
 
@@ -19,7 +20,7 @@ const themeScript = (): Plugin => ({
 export default defineConfig({
   root: `${root}docs`,
   base: './',
-  plugins: [react(), tailwindcss(), themeScript()],
+  plugins: [react(), tailwindcss(), themeScript(), showcaseCode({ root })],
   server: { fs: { allow: [root] } },
   build: { outDir: `${root}docs-dist`, emptyOutDir: true, chunkSizeWarningLimit: 1500 },
 })

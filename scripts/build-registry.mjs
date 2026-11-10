@@ -19,13 +19,15 @@
 // ui-provider.tsx reaches the components in every other drop-in file. Other module state (toast queue, modal stack,
 // scroll lock, focus traps, icon registry) is shared in the source itself through uiShared() (src/lib/shared.tsx).
 // To keep the files small: ICONS keeps only the icons a file draws (the rest resolve through the page-wide icon
-// registry; icon.tsx has them all), and DROPIN_STUBS swaps out declarations only ui-provider.tsx needs (the locale
-// engine behind useLocale() outside a provider).
+// registry; icon.tsx has them all), DROPIN_STUBS swaps out declarations only ui-provider.tsx needs (the locale
+// engine behind useLocale() outside a provider), and embedded helpers keep only a one-sentence summary of their docs
+// (scripts/registry/diet.mjs; the item's own exports keep theirs).
 import { readFileSync, writeFileSync, mkdirSync, rmSync } from 'node:fs'
 import { join } from 'node:path'
 import { createHash } from 'node:crypto'
 import { execFileSync } from 'node:child_process'
 import { analyze, closure } from './registry/analyze.mjs'
+import { dietPart } from './registry/diet.mjs'
 import { FAMILIES, BLOCKS, EXCLUDE, kebab, humanize, isComponentName } from './registry/items.mjs'
 // the tag vocabulary shared with the showcase and the docs (a .ts file: Node strips its types)
 import { TAGS, TAG_FACETS, TAG_BY_ID, tagRegistryMeta } from '../src/showcase/tags.ts'
@@ -156,12 +158,14 @@ function build() {
     const first = decls.get(it.roots[0])
     const description = it.description ?? (first.doc || `${it.title} from @lyndon/ui.`)
     const embeds = [...c.names].filter(n => componentRoots.has(n) && !it.roots.includes(n) && decls.get(n).exported).sort()
+    // the item's own exports (and their props types) keep their docs; embedded helpers go on a comment diet (registry/diet.mjs)
+    const ownDocs = new Set(it.roots.flatMap(r => [r, `${r}Props`]))
+    c.parts = c.parts.map(p => (p.names?.length && !p.names.some(n => ownDocs.has(n)) ? { ...p, text: dietPart(p.text) } : p))
     const { body, deps, icons } = renderBody(c, { allIcons: it.roots.includes('ICONS') })
     // takes icon names from its props (IconButton icon="…", EmptyState icon=…): the names it doesn't draw itself need icon.tsx
     const iconProps = icons && icons.kept < icons.total && c.names.has('isIconName')
     const needsProvider = it.type !== 'registry:lib' && it.type !== 'registry:hook' && it.name !== 'ui-provider'
-    const header = docHeader(it, description, embeds, needsProvider, iconProps ? icons : null)
-    const text = stamp(`${it.name}.tsx`, header + body)
+    const text = stamp(it.name, body)
     writeFileSync(join(out, 'files', `${it.name}.tsx`), text)
     const bytes = Buffer.byteLength(text)
     const entry = {
@@ -178,7 +182,7 @@ function build() {
     if (it.type === 'registry:block' && first.dir === 'extra') {
       const mod = modules.find(m => m.name === first.module)
       const src = readFileSync(mod.file, 'utf8').replace(/(from\s+['"])\.\.\/lib(\/[\w-]+)?(['"])/g, (_, a, sub = '', z) => `${a}@lyndon/ui${sub}${z}`)
-      const ptext = stamp(`${it.name}.package.tsx`, src.replace(/^'use client'\n?/, ''))
+      const ptext = stamp(it.name, src.replace(/^'use client'\n?/, ''))
       writeFileSync(join(out, 'files', `${it.name}.package.tsx`), ptext)
       entry.packageFile = `files/${it.name}.package.tsx`
       entry.packageBytes = Buffer.byteLength(ptext)
@@ -236,6 +240,8 @@ function build() {
   const vocabulary = { source: 'src/showcase/tags.ts', facets: TAG_FACETS, tags: TAGS }
   const indexJson = { name: pkg.name, version: pkg.version, commit: commit ? commit + dirty : null, generated: 'scripts/build-registry.mjs', tokensPerByte: 1 / 3.6, vocabulary, items: index }
   writeFileSync(join(out, 'index.json'), JSON.stringify(indexJson, null, 2) + '\n')
+  // `cd dist-registry && sha256sum -c SHA256SUMS` checks every drop-in (the files carry no checksum themselves)
+  writeFileSync(join(out, 'SHA256SUMS'), index.flatMap(e => [`${e.sha256}  ${e.file}`, ...(e.packageFile ? [`${sha256(readFileSync(join(out, e.packageFile), 'utf8'))}  ${e.packageFile}`] : [])]).join('\n') + '\n')
   writeLlms(index)
 
   const total = index.reduce((a, e) => a + e.bytes, 0)
@@ -354,29 +360,9 @@ function uiSharedContext<T>(name: string, defaultValue: T): Context<T> {
   return store.get(key) as Context<T>
 }`
 
-function docHeader(it, description, embeds, needsProvider, icons) {
-  const wrap = (s, width = 116) => s.split(' ').reduce((lines, w) => {
-    if ((lines.at(-1) + ' ' + w).length > width) lines.push(w); else lines[lines.length - 1] = lines.at(-1) ? `${lines.at(-1)} ${w}` : w
-    return lines
-  }, ['']).map(l => ` * ${l}`).join('\n')
-  const parts = [
-    `${it.title}: ${description}`,
-    '',
-    `Drop-in file "${it.name}" from ${pkg.name} ${pkg.version} (${repo}). Self-contained: it imports only react, react-dom ` +
-    `and motion, and embeds the library helpers it needs. Main exports: ${it.roots.join(', ')}.` +
-    (embeds.length ? ` Also embeds (and exports): ${embeds.join(', ')}.` : ''),
-  ]
-  if (needsProvider) parts.push('', 'Needs Tailwind CSS (v4 scans this file; v3: add it to `content`) and the theme tokens: render it inside ' +
-    '<UIProvider> once (`npx @lyndon/ui add ui-provider`), or link @lyndon/ui/tokens.css and use <UIProvider injectStyles={false}>.')
-  if (icons) parts.push('', `Embeds only the ${icons.kept} of ${icons.total} icons it draws itself. To pass other icon names to its props (icon="trash"), ` +
-    'add icon.tsx (`npx @lyndon/ui add icon`), which registers every icon page-wide, or registerIcons({ name: path }).')
-  return `/**\n${parts.map(p => (p ? wrap(p) : ' *')).join('\n')}\n */\n`
-}
-
+/** 'use client' and one short provenance line. The checksums live in index.json and dist-registry/SHA256SUMS. */
 function stamp(name, body) {
-  const line = `/*! ${pkg.name} ${pkg.version} · ${name} · ${commit ? `commit ${commit}${dirty}` : 'commit unknown'} · sha256 of the text after this line: ${sha256(body)} · ` +
-    `re-copy this file on every security release: ${repo}/releases */\n`
-  return `'use client'\n` + line + body
+  return `'use client'\n/* ${pkg.name} ${pkg.version} · ${name}${commit ? ` · ${commit.slice(0, 7)}${dirty}` : ''} */\n` + body
 }
 
 /** A small CSS → nested object converter for the shadcn `css` field (rules, @media/@layer blocks, @keyframes). */

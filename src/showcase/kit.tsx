@@ -1,7 +1,7 @@
 import { flushSync } from 'react-dom'
-import { createContext, startTransition, useContext, useEffect, useId, useLayoutEffect, useRef, useState, useSyncExternalStore, type ReactNode } from 'react'
-import { motion, useReducedMotion } from 'motion/react'
-import { Badge, Button, type ButtonProps, Card, EASE_OUT, Icon, Kbd, cn, defineMessages, logicalArrow, useDir, useMessages } from '../lib'
+import { Suspense, createContext, lazy, startTransition, useContext, useEffect, useId, useLayoutEffect, useRef, useState, useSyncExternalStore, type ComponentType, type CSSProperties, type ReactNode } from 'react'
+import { Badge, Button, type ButtonProps, Card, Icon, Kbd, cn, defineMessages, logicalArrow, useDir, useMessages } from '../lib'
+import { CARD_HEIGHTS } from './cardHeights'
 import { openCodeDrawer } from './CodeDrawer'
 import { TAG_BY_ID, TAG_CARDS, type TagCard, type TagId, tagCardTags, tagChipOrder, tagMatches } from './tags'
 
@@ -140,7 +140,7 @@ const kitCards = new Map<Element, KitCard>()
 const kitNear = new Map<Element, number>()
 let kitNearIO: IntersectionObserver | null = null, kitViewIO: IntersectionObserver | null = null, kitFarIO: IntersectionObserver | null = null
 let kitPumpT = 0, kitDeepLinked = false
-/** On screen (and not hidden by the filter)? Reads layout: only for the first look and deep links. */
+/** On screen (and not hidden by the filter)? Reads layout: only for deep links. */
 const kitOnScreen = (el: Element) => { const r = el.getBoundingClientRect(); return r.height > 0 && r.bottom > 0 && r.top < innerHeight }
 const kitDone = (el: Element, c: KitCard) => { if (!c.mount && !c.seen) { kitCards.delete(el); kitViewIO?.unobserve(el) } }
 function kitMountNow(el: Element, urgent: boolean) {
@@ -158,13 +158,15 @@ function kitPump() {
   if (next) kitMountNow(next, false)
   if (kitNear.size) kitPumpT = window.setTimeout(kitPump, 50)
 }
-/** Cards registered in this commit, looked at once it's done: one layout for all of them (reading each card's box
- * in its own layout effect re-laid out the page ~180 times, as motion writes styles in between), and the ones on
- * screen or deep-linked mount synchronously, before the first paint. */
+/** Cards registered in this commit, looked at once it's done: a deep-linked card mounts synchronously, before the first
+ * paint, so the page can scroll to where it really ends up. The ones on screen mount from the observer's first report,
+ * right after the first paint: they are transparent until their demo is in anyway, their placeholders already have the
+ * demo's height (cardHeights.ts), and finding them here forced a layout of the whole page and mounted their demos
+ * before anything was painted (about half a second of a phone's first paint at 4× CPU). */
 const kitFresh = new Set<Element>()
 const kitIsHashTarget = (el: Element) => !!location.hash && decodeURIComponent(location.hash.slice(1)) === el.id
 function kitFirstLook() {
-  const now = [...kitFresh].filter(el => kitCards.get(el)?.mount && (kitOnScreen(el) || kitIsHashTarget(el)))
+  const now = [...kitFresh].filter(el => kitCards.get(el)?.mount && kitIsHashTarget(el))
   kitFresh.clear()
   if (now.length) flushSync(() => now.forEach(el => kitMountNow(el, true)))
 }
@@ -203,6 +205,16 @@ export function mountAllSpecs() {
 }
 /** Render card demos right away instead of as they near the viewport (server renders that should include them, tests). */
 export const SpecEagerContext = createContext(false)
+
+/**
+ * A library component whose module loads when a card first renders it, so the module stays out of the page's first
+ * script (less to parse and run before the first paint on a phone): `const BinaryView = specLazy(() =>
+ * import('../lib/binary').then(m => m.BinaryView))`. While it loads, the card keeps its placeholder (Spec's Suspense
+ * boundary). In the view-code drawer it reads as `import { BinaryView } from './ui'` (scripts/showcase-code.ts).
+ */
+export function specLazy<P extends object>(load: () => Promise<ComponentType<P>>): ComponentType<P> {
+  return lazy(() => load().then(c => ({ default: c })))
+}
 
 /* Layout pieces ─────────────────────────────────────────────────────────────── */
 
@@ -247,7 +259,7 @@ export function SpecPreview({ children, className, label }: { children: ReactNod
 
 /**
  * A component card: title, one-line description, key hints, use-case tag chips, then the demo. The demo mounts as the
- * card nears the viewport (see "Lazy card bodies" above; `SpecEagerContext` renders it at once) and the card fades up
+ * card nears the viewport (see "Lazy card bodies" above; `SpecEagerContext` renders it at once) and the card fades in
  * when scrolled into view. `actions` go in the header's top-right slot (one-shot demo actions, or a Switch for a live mode).
  * Keyboard: the code button is one Tab stop and the tag chips another (arrows move between chips). Demos with many
  * controls get a "Skip to next card" link right after the header, so Tab doesn't have to walk the whole demo.
@@ -272,12 +284,11 @@ export function Spec({ title, desc, children, span = 1, actions, keys, notes }:
     setId(kitRegister({ key, id: base, title, desc: desc ?? '', section, tags: tagCardTags(card), aka: card.aka ?? [], items: card.items, text }))
   }, [key, base, title, desc, section, card, text])
   useLayoutEffect(() => () => { kitSpecs.delete(key); kitNotify() }, [key])
-  // lazy demo: placeholders on the server and in the first client render; on screen (or the deep-link target) it
-  // mounts before the first paint, otherwise when it nears the viewport
+  // lazy demo: placeholders on the server and in the first client render; the deep-link target mounts before the first
+  // paint, one on screen right after it, the rest as they near the viewport
   const eager = useContext(SpecEagerContext)
   const [live, setLive] = useState(eager)
-  // the card stays transparent until its demo is in, then fades up once it's 15% on screen
-  const reduce = useReducedMotion()
+  // the card stays transparent until its demo is in, then fades in once it's 15% on screen
   const [seen, setSeen] = useState(false)
   useLayoutEffect(() => {
     const el = cardRef.current
@@ -315,6 +326,9 @@ export function Spec({ title, desc, children, span = 1, actions, keys, notes }:
     requestAnimationFrame(() => { if (!kitOnScreen(el)) el.scrollIntoView({ block: 'start' }) })
   }, [live, id])
   const shown = specMatches({ text, tags, aka: card.aka ?? [] }, query, picked)
+  const measured = CARD_HEIGHTS[base]
+  const placeholder = measured && ({ '--kit-ph': `${measured[0]}px`, '--kit-ph-md': `${measured[1]}px` } as CSSProperties)
+  const hold = <div aria-hidden data-spec-hold style={placeholder} className={cn('[overflow-anchor:none]', placeholder ? 'h-[var(--kit-ph)] md:h-[var(--kit-ph-md)]' : span === 3 ? 'h-[520px] md:h-[400px]' : span === 2 ? 'h-[320px] md:h-[300px]' : 'h-[220px] md:h-[260px]')} />
   const chips = tagChipOrder(card.tags).slice(0, 4)
   const onChip = (e: React.MouseEvent, id: TagId) => {
     if (!pickTag || e.metaKey || e.ctrlKey || e.shiftKey || e.button !== 0) return // a new tab gets the link
@@ -335,15 +349,13 @@ export function Spec({ title, desc, children, span = 1, actions, keys, notes }:
     setSkip(kitTabbables(bodyRef.current).length >= KIT_SKIP_AT && !!kitNextCard(cardRef.current))
   }
   return (
-    <motion.div id={id} data-spec={title} ref={cardRef} onFocus={onFocus}
-      // no transform while waiting: a translated card holding the scroll anchor stops the browser from keeping the view
-      // in place as demos above it mount, so the slide-up is a keyframe that exists only during the fade
-      initial={{ opacity: 0 }} animate={settled && seen ? (reduce ? { opacity: 1 } : { opacity: 1, y: [14, 0] }) : undefined}
-      transition={{ duration: reduce ? 0.2 : 0.45, ease: EASE_OUT }}
-      className={cn('group/spec min-w-0 scroll-mt-28 rounded-[var(--r-lg)] transition-shadow duration-500 [contain-intrinsic-size:auto_400px] data-[far]:[content-visibility:auto] data-[flash]:shadow-[0_0_0_2px_var(--accent),0_0_0_6px_var(--accent-soft)]',
-        // an unmounted card is never the scroll anchor: its placeholder is replaced on mount, which would leave the
-        // browser nothing to keep in place while demos above the viewport mount and change height
-        !live && '[overflow-anchor:none]', span === 2 && 'md:col-span-2', span === 3 && 'col-span-full', !shown && 'hidden')}>
+    <div id={id} data-spec={title} ref={cardRef} onFocus={onFocus}
+      // a CSS fade, opacity only: a plain element instead of a motion component per card (174 of them were a large share of
+      // the first render on a phone), and no slide-up, because a change to the transform (or translate) of the scroll
+      // anchor or any ancestor suppresses scroll anchoring for that frame; in a fast scroll on a phone some card on screen
+      // is nearly always mid-fade, so demos growing above the viewport pushed the page down (whole-page CLS 0.4)
+      className={cn('group/spec min-w-0 scroll-mt-28 rounded-[var(--r-lg)] transition-[opacity,box-shadow] duration-500 ease-[cubic-bezier(.22,1,.36,1)] motion-reduce:duration-200 [contain-intrinsic-size:auto_400px] data-[far]:[content-visibility:auto] data-[flash]:shadow-[0_0_0_2px_var(--accent),0_0_0_6px_var(--accent-soft)]',
+        settled && seen ? 'opacity-100' : 'opacity-0', span === 2 && 'md:col-span-2', span === 3 && 'col-span-full', !shown && 'hidden')}>
       <Card className="relative flex h-full flex-col">
         <div className="flex min-w-0 items-start gap-1.5">
           <h3 className="m-0 min-w-0 flex-1 text-sm leading-snug font-semibold">{title}</h3>
@@ -381,8 +393,13 @@ export function Spec({ title, desc, children, span = 1, actions, keys, notes }:
           {t('skipNext')} ↓
         </a>
         <div ref={bodyRef} data-spec-body className="flex flex-1 flex-col gap-3">
-          {/* reserves about the demo's height until it mounts (typical body heights per width, measured in the showcase) */}
-          {live ? children : <div aria-hidden className={span === 3 ? 'h-[520px] md:h-[400px]' : span === 2 ? 'h-[320px] md:h-[300px]' : 'h-[220px] md:h-[260px]'} />}
+          {/* reserves the demo's height until it mounts: measured per card on a phone and a desktop (cardHeights.ts, from
+              scripts/card-heights.mjs), else a typical height for the span. A card that mounts late (a fast scroll on a
+              slow phone) then doesn't move what's below it. The placeholder is never the scroll anchor (it's replaced on
+              mount, which would leave the browser nothing to keep in place), but the card around it still is: with the
+              whole card excluded, a screen of unmounted cards left no anchor at all, and a demo growing above the
+              viewport pushed the page down */}
+          {live ? <Suspense fallback={hold}>{children}</Suspense> : hold}
         </div>
         {notes && (
           <dl className="m-0 mt-4 grid gap-x-6 gap-y-3 border-t border-[var(--line)] pt-3 text-xs leading-relaxed sm:grid-cols-2">
@@ -391,7 +408,7 @@ export function Spec({ title, desc, children, span = 1, actions, keys, notes }:
           </dl>
         )}
       </Card>
-    </motion.div>
+    </div>
   )
 }
 

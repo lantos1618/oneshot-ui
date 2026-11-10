@@ -1,6 +1,10 @@
 import { Fragment, useMemo, useState, type ReactNode } from 'react'
-import { Kanban, type KanbanColumn, OrgChart, type OrgNode, highlightCode, Scheduler, type SchedulerEvent, SortableList, SplitPane, Switch, Timeline, type TimelineItem, type TreeNode, TreeView, useToast } from '../lib'
-import { Section, Spec, SpecAction } from './kit'
+import { Kanban, type KanbanColumn, type OrgNode, highlightCode, type SchedulerEvent, SortableList, SplitPane, Switch, Timeline, type TimelineItem, type TreeNode, TreeView, useToast } from '../lib'
+import { Section, Spec, SpecAction, specLazy } from './kit'
+
+/* The scheduler module (calendar and org chart) loads when one of their cards first mounts. */
+const LazyScheduler = specLazy(() => import('../lib/scheduler').then(m => m.Scheduler))
+const LazyOrgChart = specLazy(() => import('../lib/scheduler').then(m => m.OrgChart))
 
 const LAYOUT_PEOPLE: Record<string, string> = { AL: 'Alex Lee', BK: 'Bea Kim', CM: 'Chris Moe', DN: 'Dana Ng', EP: 'Eli Park' }
 const lp = (...k: string[]) => k.map(x => LAYOUT_PEOPLE[x])
@@ -190,10 +194,10 @@ export function LayoutSection() {
       </Spec>
       <Spec title="Calendar scheduler" desc="Day, week, month and year views. Drag on empty time to create, drag events to move or resize (15-minute snap), drag chips between days in month view, click any date to zoom in. Phones get a 3-day view and a swipeable week; press and hold to create or move." span={3}>
 
-        <Scheduler defaultEvents={events} />
+        <LazyScheduler defaultEvents={events} />
       </Spec>
       <Spec title="Org chart" desc="Hierarchy with collapsible branches. Click a node’s count to fold its team." span={3}>
-        <OrgChart root={LAYOUT_ORG} defaultCollapsed={['staff']} />
+        <LazyOrgChart root={LAYOUT_ORG} defaultCollapsed={['staff']} />
       </Spec>
     </Section>
   )

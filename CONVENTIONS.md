@@ -129,6 +129,12 @@ Test with Playwright device emulation: `devices['iPhone 13']` (390px, touch) and
   a new violation pass.
 - **Budgets:** `tests/e2e/budgets.ts`: the CLS budget (0.05 per section), per-section overrides with a reason, and
   tolerated console errors. Remove an override when the fix lands.
+- **Whole-page CLS** (`tests/e2e/page-cls.spec.ts`): the page is loaded and scrolled top to bottom without stopping on
+  desktop and on iPhone 13 at 4× CPU, where cards come on screen before their demos mount; total CLS must stay under
+  0.05. A card shows a placeholder of its demo's measured height until the demo mounts (`src/showcase/cardHeights.ts`):
+  after changing how tall a demo is, rerun `node scripts/card-heights.mjs [url]` against the dev server or a preview.
+  Demos that load something after mounting (generated images, a synthesised track) render a skeleton of the final
+  size, and card fades stay opacity-only (a transform on the scroll anchor's ancestors turns scroll anchoring off).
 - **Run Design QA before shipping a change** to a component or a showcase card. On the page: ⇧D (or the ruler button),
   then Run audit, on desktop and in the browser's iPhone emulation. Red groups (misalignment, clipped content, low
   contrast) are bugs; amber and orange ones (off-grid spacing, one-off sizes) are worth a look. As a test,

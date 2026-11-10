@@ -50,6 +50,19 @@ export function mediaImage(kind: MediaArtKind, w: number, h: number, seed: numbe
   if (!url) { url = mediaArt(kind, w, h, seed, pal).toDataURL('image/jpeg', quality); mediaImageCache.set(key, url) }
   return url
 }
+const mediaImageAsyncCache = new Map<string, Promise<string>>()
+/** mediaArt as a JPEG blob URL, encoded with canvas.toBlob: the browser encodes off the main thread or in idle slices,
+ * so a page of generated pictures doesn't add up to long tasks the way toDataURL (a synchronous encode) does. Memoised. */
+export function mediaImageAsync(kind: MediaArtKind, w: number, h: number, seed: number, pal: number, quality = 0.82): Promise<string> {
+  const key = `${kind}|${w}|${h}|${seed}|${pal}|${quality}`
+  let url = mediaImageAsyncCache.get(key)
+  if (!url) {
+    const c = mediaArt(kind, w, h, seed, pal)
+    url = new Promise<string>(done => c.toBlob(b => done(b ? URL.createObjectURL(b) : c.toDataURL('image/jpeg', quality)), 'image/jpeg', quality))
+    mediaImageAsyncCache.set(key, url)
+  }
+  return url
+}
 
 /** The synthesis as steps of roughly 15 ms each (desktop), so it can be spread over tasks (`mediaSynthTrackAsync`). */
 function* mediaSynthSteps(seconds: number, bpm: number, sr: number): Generator<void, { url: string; peaks: number[] }> {

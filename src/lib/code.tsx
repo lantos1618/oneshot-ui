@@ -398,6 +398,9 @@ export function CodeBlock({ code, filename, language, lineNumbers = true, highli
   const tokens = !!(onTokenHover || onTokenClick) && !(diffOn && diff)
   const collapsible = collapseAt !== false && full > collapseAt + 40
   const height = !collapsible ? 'auto' : open ? full + 48 : collapseAt
+  // the first measurement collapses a long block at once: animating it from full height shrank the page under the reader
+  const measured = useRef(false)
+  useEffect(() => { if (full > 0) measured.current = true }, [full])
   return (
     <div ref={box} className={cn(CODE_BOX, className)}>
       <div className={CODE_HEAD_WRAP}>
@@ -413,7 +416,7 @@ export function CodeBlock({ code, filename, language, lineNumbers = true, highli
         <Button size="sm" variant="ghost" className={CODE_TOOL} aria-pressed={wrap} onClick={() => setWrap(!wrap)} title={t('wrapLines')}><Icon name="wrap" size={13} className="ui-flip sm:hidden" /><span className="max-sm:hidden">{t('wrap')}</span><span className="sr-only sm:hidden">{t('wrapLines')}</span></Button>
         <CodeCopy text={() => code} />
       </div>
-      <motion.div className="relative overflow-hidden" initial={false} animate={{ height }} transition={spring(0.12, 0.45)}>
+      <motion.div className="relative overflow-hidden" initial={false} animate={{ height }} transition={measured.current ? spring(0.12, 0.45) : { duration: 0 }}>
         <div ref={inner}>
           <motion.div key={String(diffOn)} initial={{ opacity: 0.3 }} animate={{ opacity: 1 }} transition={{ duration: 0.2 }}>
             <CodeRows rows={rows} lang={lang} wrap={wrap} numbers={lineNumbers} label={filename ?? t('code')} className={cn(!wrap && 'overflow-y-hidden')} onToken={tokens ? onToken : undefined} />

@@ -1,7 +1,13 @@
 import { useMemo, useState } from 'react'
-import { DataFlow, type DiagramState, type DiagramTransition, Gantt, type GanttPhase, Globe, type GlobeHub, type GlobeRoute, NetworkGraph, ProcessFlow, Sankey, SegmentedControl, StateDiagram, StateMachine, TraceWaterfall, type TimeTag, type TimeTagKind, type TraceSpan, type WorldMapData, WorldMap, useLocale, useToast, useWorldMap, type LocaleFmt } from '../lib'
+import { type DiagramState, type DiagramTransition, Gantt, type GanttPhase, Globe, type GlobeHub, type GlobeRoute, SegmentedControl, StateDiagram, StateMachine, TraceWaterfall, type TimeTag, type TimeTagKind, type TraceSpan, type WorldMapData, WorldMap, useLocale, useToast, useWorldMap, type LocaleFmt } from '../lib'
 import { AGENT_WORKFLOWS, AGENT_WORKFLOW_ORDER, type TagsDayVariant } from '../examples'
-import { Section, Spec, type SpecNotes } from './kit'
+import { Section, Spec, type SpecNotes, specLazy } from './kit'
+
+/* The network diagrams module loads when one of its cards first mounts. */
+const LazyDataFlow = specLazy(() => import('../lib/network').then(m => m.DataFlow))
+const LazyNetworkGraph = specLazy(() => import('../lib/network').then(m => m.NetworkGraph))
+const LazyProcessFlow = specLazy(() => import('../lib/network').then(m => m.ProcessFlow))
+const LazySankey = specLazy(() => import('../lib/network').then(m => m.Sankey))
 
 /* Gantt: a six-week launch plan ─────────────────────────────────────────── */
 const GANTT_PHASES: GanttPhase[] = [
@@ -168,18 +174,18 @@ export function DiagramsSection() {
           annotations={TRACE_EVENTS[variant]} annotationKinds={TRACE_EVENT_KINDS} />
       </Spec>
       <Spec title="Sankey" desc="Flows between stages. Hover or tap a ribbon or a node to isolate it.">
-        <Sankey sources={[{ label: 'Organic', color: 'var(--c2)' }, { label: 'Paid', color: 'var(--c3)' }]} targets={[{ label: 'Signed up', color: 'var(--ok)' }, { label: 'Bounced', color: 'var(--fg3)' }, { label: 'Browsing', color: 'var(--warn)' }]}
+        <LazySankey sources={[{ label: 'Organic', color: 'var(--c2)' }, { label: 'Paid', color: 'var(--c3)' }]} targets={[{ label: 'Signed up', color: 'var(--ok)' }, { label: 'Bounced', color: 'var(--fg3)' }, { label: 'Browsing', color: 'var(--warn)' }]}
           links={[[0, 0, 30], [0, 1, 18], [0, 2, 12], [1, 0, 15], [1, 1, 17], [1, 2, 8]]} height={300} />
       </Spec>
       <Spec span={2} title="Network graph" desc="Force layout. Drag nodes, hover or tap one to see its connections.">
-        <NetworkGraph nodes={NET_NODES} links={NET_LINKS} groups={NET_GROUPS} />
+        <LazyNetworkGraph nodes={NET_NODES} links={NET_LINKS} groups={NET_GROUPS} />
       </Spec>
       <Spec span={3} title="Process flow" desc="Workflow canvas. Run it to watch each step execute. Drag nodes, drag the canvas to pan, Ctrl/⌘ + scroll or pinch to zoom.">
-        <ProcessFlow nodes={PF_NODES} edges={PF_EDGES} steps={PF_STEPS} done={s => `Completed in ${fmt.duration(s * 1000)} · ${fmt.number(1156)} imported · ${fmt.number(78)} to review`}
+        <LazyProcessFlow nodes={PF_NODES} edges={PF_EDGES} steps={PF_STEPS} done={s => `Completed in ${fmt.duration(s * 1000)} · ${fmt.number(1156)} imported · ${fmt.number(78)} to review`}
           onComplete={() => toast({ title: 'Workflow complete', description: '1,156 imported, 78 need review', tone: 'ok' })} />
       </Spec>
       <Spec span={3} title="Data flow" desc="Sources stream into a processing engine and out to destinations. Hover or tap any node to trace its path.">
-        <DataFlow sources={DF_SOURCES} targets={DF_TARGETS} />
+        <LazyDataFlow sources={DF_SOURCES} targets={DF_TARGETS} />
       </Spec>
       <Spec span={3} title="Map" desc="Choropleth by country, hubs pulse. Hover or tap a country, or a row in the list.">
         <DgWorldMapDemo metrics={metrics} hubs={MAP_HUBS} names={MAP_NAMES} />

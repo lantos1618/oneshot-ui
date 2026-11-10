@@ -125,7 +125,7 @@ function DataServerGrid() {
       <div className="flex flex-wrap items-center gap-x-4 gap-y-2 text-xs text-[var(--fg3)]">
         <SegmentedControl size="sm" aria-label="Loading mode" value={mode} onChange={m => { setMode(m as typeof mode); setPage(0) }} options={[{ value: 'pages', label: 'Pages' }, { value: 'infinite', label: 'Infinite scroll' }]} />
         <Switch label="Fail requests" checked={fail} onChange={setFail} />
-        <span className="ui-num" aria-live="polite">{trips} round trips · {res.total.toLocaleString('en-GB')} matching on the server{selection.mode === 'exclude' ? ` · selection: all except ${selection.keys.size} (${selected.toLocaleString('en-GB')})` : selected ? ` · ${selected} selected` : ''}</span>
+        <span className="ui-num max-sm:basis-full" aria-live="polite">{trips} round trips · {res.total.toLocaleString('en-GB')} matching on the server{selection.mode === 'exclude' ? ` · selection: all except ${selection.keys.size} (${selected.toLocaleString('en-GB')})` : selected ? ` · ${selected} selected` : ''}</span>
       </div>
       <DataGrid aria-label="Customers (server)" server columns={DATA_BIG_COLS} rows={res.rows} rowKey={r => r.id} rowLabel={r => r.name} rowCount={res.total}
         sort={sort} onSortChange={setSort} filter={filter} onFilterChange={setFilter} onSearchChange={setQ}
