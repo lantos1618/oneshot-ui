@@ -1,6 +1,6 @@
 // Interaction tests for a handful of components. They query by role and accessible name only (no class names), so
 // visual polish doesn't break them.
-import { act, render, screen, waitFor, within } from '@testing-library/react'
+import { render, screen, waitFor, within } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { useState } from 'react'
 import { describe, expect, it, vi } from 'vitest'
@@ -29,15 +29,6 @@ describe('Dialog (ModalLayer)', () => {
     )
   }
 
-  it('opens with a labelled modal dialog and moves focus inside', async () => {
-    const user = userEvent.setup()
-    render(<Harness />)
-    await user.click(screen.getByRole('button', { name: 'Open dialog' }))
-    const dialog = await screen.findByRole('dialog', { name: 'Delete project' })
-    expect(dialog).toHaveAttribute('aria-modal', 'true')
-    await waitFor(() => expect(dialog.contains(document.activeElement)).toBe(true))
-  })
-
   it('keeps Tab inside the dialog', async () => {
     const user = userEvent.setup()
     render(<Harness />)
@@ -65,14 +56,6 @@ describe('Dialog (ModalLayer)', () => {
     expect(onClose).toHaveBeenCalledTimes(1)
     await waitFor(() => expect(screen.queryByRole('dialog')).not.toBeInTheDocument())
     await waitFor(() => expect(document.activeElement).toBe(trigger))
-  })
-
-  it('closes from a footer button', async () => {
-    const user = userEvent.setup()
-    render(<Harness />)
-    await user.click(screen.getByRole('button', { name: 'Open dialog' }))
-    await user.click(await screen.findByRole('button', { name: 'Cancel' }))
-    await waitFor(() => expect(screen.queryByRole('dialog')).not.toBeInTheDocument())
   })
 })
 
@@ -209,23 +192,6 @@ describe('Toast', () => {
     await user.click(within(region).getByRole('button', { name: /dismiss/i }))
     await waitFor(() => expect(within(region).queryByText('Saved')).not.toBeInTheDocument())
   })
-
-  it('times out on its own', async () => {
-    const user = userEvent.setup()
-    render(<ToastProvider><Sender duration={150} /></ToastProvider>)
-    await user.click(screen.getByRole('button', { name: 'Save' }))
-    const region = screen.getByRole('region', { name: 'Notifications' })
-    expect(await within(region).findByText('Saved')).toBeInTheDocument()
-    await waitFor(() => expect(within(region).queryByText('Saved')).not.toBeInTheDocument(), { timeout: 3000 })
-  })
-
-  it('keeps at most `max` toasts', async () => {
-    const user = userEvent.setup()
-    render(<ToastProvider max={2}><Sender duration={60_000} /></ToastProvider>)
-    for (let i = 0; i < 4; i++) await user.click(screen.getByRole('button', { name: 'Save' }))
-    const region = screen.getByRole('region', { name: 'Notifications' })
-    await waitFor(() => expect(within(region).getAllByText('Saved')).toHaveLength(2))
-  })
 })
 
 describe('DataGrid', () => {
@@ -266,15 +232,6 @@ describe('DataGrid', () => {
     await waitFor(() => expect(names()).toHaveLength(3))
   })
 
-  it('rejects an oversized search instead of freezing', async () => {
-    render(<DataGrid aria-label="Customers" columns={columns} defaultRows={rows} rowKey={r => r.id} />)
-    const box = screen.getByRole('textbox', { name: /Search rows/ }) as HTMLInputElement
-    const user = userEvent.setup()
-    await user.click(box)
-    await user.paste('(a+)+$'.repeat(40))
-    await waitFor(() => expect(box).toHaveAttribute('aria-invalid', 'true'))
-  })
-
   it('selects rows with their checkboxes', async () => {
     const user = userEvent.setup()
     render(<DataGrid aria-label="Customers" columns={columns} defaultRows={rows} rowKey={r => r.id} rowLabel={r => r.name} />)
@@ -294,8 +251,7 @@ describe('RichTextEditor', () => {
     const { container } = render(<RichTextEditor aria-label="Notes"
       defaultValue={'<p>Hello <b>world</b><img src=x onerror="window.__xss()"></p><script>window.__xss()</script><a href="javascript:window.__xss()">link</a><iframe src="https://evil.test"></iframe><p style="position:fixed">x</p>'} />)
     const editor = await screen.findByRole('textbox', { name: 'Notes' })
-    await act(async () => { await new Promise(r => setTimeout(r, 50)) })
-    expect(editor).toHaveTextContent('Hello world')
+    await waitFor(() => expect(editor).toHaveTextContent('Hello world'))
     expect(within(editor).getByText('world').tagName).toBe('B')
     expect(container.querySelector('img, script, iframe, [onerror], [style*="fixed"]')).toBeNull()
     expect(container.querySelector('a[href^="javascript"]')).toBeNull()

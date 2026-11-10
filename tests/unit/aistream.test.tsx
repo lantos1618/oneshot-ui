@@ -10,6 +10,7 @@ import {
 import { AssistantChat, Conversation, Message, MessageParts, Suggestions, aiNearBottom } from '../../src/lib/aichat'
 import { PromptInput, StreamingText } from '../../src/lib/ai'
 import { useStreamedText } from '../../src/lib/ai'
+import { fakeScroller, fakeTimersUser, mockObjectUrls, withMotion } from '../helpers'
 
 const run = (chunks: (AiChunk | string)[], start: AiMessage[] = []) => chunks.reduce(applyAiChunk, start)
 const last = (ms: AiMessage[]) => ms[ms.length - 1]
@@ -304,8 +305,7 @@ describe('useAiChat', () => {
   })
 
   it('creates object URLs for attachments and revokes them when the messages go away', async () => {
-    const create = vi.fn(() => 'blob:mock/1'), revoke = vi.fn()
-    Object.assign(URL, { createObjectURL: create, revokeObjectURL: revoke })
+    const { revoke } = mockObjectUrls('blob:mock/1')
     async function* send() { yield 'ok' }
     const { result, unmount } = renderHook(() => useAiChat({ send }))
     act(() => { result.current.submit('see file', [new File(['x'], 'a.png', { type: 'image/png' })]) })
@@ -320,38 +320,32 @@ describe('useAiChat', () => {
 describe('useStreamedText / StreamingText', () => {
   it('replays a finished string, and continues an appended one without restarting', () => {
     vi.useFakeTimers()
-    const mm = window.matchMedia
-    window.matchMedia = ((q: string) => ({ ...mm(q), matches: false })) as typeof window.matchMedia // motion on
-    try {
-      const { result, rerender } = renderHook(({ t, live }) => useStreamedText(t, { cps: 600, live }), { initialProps: { t: 'Hello world', live: true } })
-      expect(result.current.text).toBe('')
-      act(() => { vi.advanceTimersByTime(40) })
-      const before = result.current.shown
-      expect(before).toBeGreaterThan(0)
-      rerender({ t: 'Hello world, and more', live: true }) // append-only: keeps its place
-      expect(result.current.shown).toBe(before)
-      for (let i = 0; i < 200; i++) act(() => { vi.advanceTimersByTime(10) })
-      expect(result.current.text).toBe('Hello world, and more')
-      expect(result.current.done).toBe(false) // live: not done until live is false
-      rerender({ t: 'Hello world, and more', live: false })
-      expect(result.current.done).toBe(true)
-      rerender({ t: 'Something else', live: false }) // not an append: replays from the start
-      expect(result.current.shown).toBe(0)
-    } finally { window.matchMedia = mm }
+    withMotion()
+    const { result, rerender } = renderHook(({ t, live }) => useStreamedText(t, { cps: 600, live }), { initialProps: { t: 'Hello world', live: true } })
+    expect(result.current.text).toBe('')
+    act(() => { vi.advanceTimersByTime(40) })
+    const before = result.current.shown
+    expect(before).toBeGreaterThan(0)
+    rerender({ t: 'Hello world, and more', live: true }) // append-only: keeps its place
+    expect(result.current.shown).toBe(before)
+    for (let i = 0; i < 200; i++) act(() => { vi.advanceTimersByTime(10) })
+    expect(result.current.text).toBe('Hello world, and more')
+    expect(result.current.done).toBe(false) // live: not done until live is false
+    rerender({ t: 'Hello world, and more', live: false })
+    expect(result.current.done).toBe(true)
+    rerender({ t: 'Something else', live: false }) // not an append: replays from the start
+    expect(result.current.shown).toBe(0)
   })
 
   it('word mode keeps going when a tick is skipped (the uneven rhythm never stalls it)', () => {
     vi.useFakeTimers()
-    const mm = window.matchMedia
-    window.matchMedia = ((q: string) => ({ ...mm(q), matches: false })) as typeof window.matchMedia
+    withMotion()
     let k = 0
     vi.spyOn(Math, 'random').mockImplementation(() => (k++ % 2 ? 0.9 : 0.1)) // every other tick is a skip
-    try {
-      const done = vi.fn()
-      render(<StreamingText text="one two three four" wordDelay={10} onDone={done} />)
-      for (let i = 0; i < 40; i++) act(() => { vi.advanceTimersByTime(10) })
-      expect(done).toHaveBeenCalledWith('one two three four')
-    } finally { window.matchMedia = mm }
+    const done = vi.fn()
+    render(<StreamingText text="one two three four" wordDelay={10} onDone={done} />)
+    for (let i = 0; i < 40; i++) act(() => { vi.advanceTimersByTime(10) })
+    expect(done).toHaveBeenCalledWith('one two three four')
   })
 
   it('StreamingText shows everything at once under reduced motion and reports it', () => {
@@ -362,16 +356,6 @@ describe('useStreamedText / StreamingText', () => {
   })
 })
 
-/** Gives a scroller fake layout numbers (jsdom has none). */
-function fakeScroll(el: HTMLElement, { height = 100, content = 1000 } = {}) {
-  let top = 0
-  Object.defineProperty(el, 'clientHeight', { configurable: true, get: () => height })
-  Object.defineProperty(el, 'scrollHeight', { configurable: true, get: () => content })
-  Object.defineProperty(el, 'scrollTop', { configurable: true, get: () => top, set: v => { top = Math.max(0, Math.min(content - height, v)) } })
-  el.scrollTo = ((o: ScrollToOptions) => { top = Math.max(0, Math.min(content - height, o.top ?? 0)); el.dispatchEvent(new Event('scroll')) }) as typeof el.scrollTo
-  return { setContent: (c: number) => { content = c }, get top() { return top } }
-}
-
 describe('Conversation (stays pinned to the bottom)', () => {
   it('aiNearBottom', () => {
     expect(aiNearBottom({ scrollTop: 900, scrollHeight: 1000, clientHeight: 100 })).toBe(true)
@@ -381,7 +365,7 @@ describe('Conversation (stays pinned to the bottom)', () => {
   it('follows new content, stops when scrolled up, and Jump to latest pins it again', async () => {
     const { rerender } = render(<Conversation><p>one</p></Conversation>)
     const log = screen.getByRole('log', { name: 'Conversation' })
-    const s = fakeScroll(log)
+    const s = fakeScroller(log)
     rerender(<Conversation><p>one</p><p>two</p></Conversation>)
     expect(s.top).toBe(900) // pinned: scrolled to the end after the render
     expect(screen.queryByRole('button', { name: 'Jump to latest' })).toBeNull()
@@ -410,7 +394,7 @@ describe('parts and inputs', () => {
   })
 
   it('MessageParts renders text, a tool card with approval, sources and an error with Retry', async () => {
-    const decide = vi.fn(), retry = vi.fn()
+    const decide = vi.fn(), retry = vi.fn(), user = fakeTimersUser()
     const m: AiMessage = { id: 'a', role: 'assistant', status: 'done', parts: [
       { type: 'text', text: 'Answer text' },
       { type: 'tool', id: 't1', name: 'calendar.create', state: 'awaiting-approval', args: { title: '<b>Review</b>' }, approval: { summary: 'Create the event' } },
@@ -425,11 +409,14 @@ describe('parts and inputs', () => {
     expect(document.querySelector('b')?.textContent).not.toBe('Review')
     expect(screen.getByRole('link', { name: /Sneaky/ })).toHaveAttribute('href', '#') // unsafe source URL neutralised
     expect(within(card).getByRole('button', { name: 'Approve' })).toBeDisabled() // armed after 500 ms
-    await waitFor(() => expect(within(card).getByRole('button', { name: 'Approve' })).toBeEnabled(), { timeout: 2000 })
-    await userEvent.click(within(card).getByRole('button', { name: 'Approve' }))
+    act(() => { vi.advanceTimersByTime(450) })
+    expect(within(card).getByRole('button', { name: 'Approve' })).toBeDisabled()
+    act(() => { vi.advanceTimersByTime(100) })
+    expect(within(card).getByRole('button', { name: 'Approve' })).toBeEnabled()
+    await user.click(within(card).getByRole('button', { name: 'Approve' }))
     expect(decide).toHaveBeenCalledWith('t1', true)
     expect(screen.getByRole('alert')).toHaveTextContent('Rate limited')
-    await userEvent.click(screen.getByRole('button', { name: 'Retry' }))
+    await user.click(screen.getByRole('button', { name: 'Retry' }))
     expect(retry).toHaveBeenCalled()
   })
 
@@ -440,8 +427,7 @@ describe('parts and inputs', () => {
   })
 
   it('PromptInput: Enter sends text and files, Shift+Enter does not, Stop while streaming', async () => {
-    const create = vi.fn(() => 'blob:mock/p'), revoke = vi.fn()
-    Object.assign(URL, { createObjectURL: create, revokeObjectURL: revoke })
+    const { revoke } = mockObjectUrls('blob:mock/p')
     const submit = vi.fn(), stop = vi.fn()
     const { rerender, container } = render(<PromptInput onSubmit={submit} onStop={stop} />)
     const box = screen.getByRole('textbox', { name: 'Message' })

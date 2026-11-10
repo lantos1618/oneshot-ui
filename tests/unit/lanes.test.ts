@@ -7,6 +7,7 @@ import { describe, expect, it, vi } from 'vitest'
 import { LaneGraph, LaneGutter, laneAncestry, laneColor, layoutLanes, type LaneLayout, type LaneNode } from '../../src/lib/lanes'
 import { GIT_SAMPLE, gitHistory } from '../../src/examples/git'
 import { AGENT_RUN_SAMPLE, CHAT_TREE_SAMPLE, DEPENDENCY_SAMPLE, agentRunNodes, astLaneNodes, chatBranchGraph, dependencyNodes, parseAst, AST_SAMPLE } from '../../src/examples/graphs'
+import { expectLinear } from '../helpers'
 
 /** A node: `id`, its parents, a time in days. */
 const n = (id: string, parents: string[], time: number, extra: Partial<LaneNode> = {}): LaneNode => ({ id, parents, time, ...extra })
@@ -162,12 +163,11 @@ describe('layoutLanes', () => {
     expect(L.rows.filter(r => laneAncestry(L, L.rowOf('m'))[r.index]).map(r => r.node.id).sort()).toEqual(['a', 'b', 'm'])
   })
 
-  it('lays out 50k nodes quickly', () => {
-    const nodes = gitHistory(50_000).map(c => ({ id: c.hash, parents: c.parents, time: +c.date }))
-    const t = performance.now()
-    const L = layoutLanes(nodes, { order: 'time' })
-    expect(L.rows.length).toBe(nodes.length)
-    expect(performance.now() - t).toBeLessThan(2000) // ~50 ms in Node; jsdom and CI machines are slower
+  it('lays out 50k nodes, in time that grows linearly', () => {
+    const nodes = (n: number) => gitHistory(n).map(c => ({ id: c.hash, parents: c.parents, time: +c.date }))
+    expectLinear(n => { const ns = nodes(n); return () => layoutLanes(ns, { order: 'time' }) }, 5000)
+    const all = nodes(50_000), L = layoutLanes(all, { order: 'time' })
+    expect(L.rows.length).toBe(all.length)
     expectTopological(L)
   })
 })

@@ -2,7 +2,6 @@
 // drawing split from its moving layers, the trace waterfall's bars revealed by clip-path instead of a growing width.
 import { act, fireEvent, render, screen } from '@testing-library/react'
 import { afterEach, describe, expect, it, vi } from 'vitest'
-import { useState } from 'react'
 import { UIProvider } from '../../src/lib/provider'
 import { frameLoopFps, useFrameLoop } from '../../src/lib/motion'
 import { AgentTransitMap } from '../../src/lib/aiagent'
@@ -97,9 +96,6 @@ describe('AgentTransitMap layers', () => {
     const hubs = container.querySelector('circle[r="10"][stroke="var(--fg)"]')!
     expect(train.compareDocumentPosition(hubs) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy()
   })
-  it('renders without machines', () => {
-    expect(() => render(<AgentTransitMap />)).not.toThrow()
-  })
 })
 
 describe('TraceWaterfall bars', () => {
@@ -121,15 +117,15 @@ describe('TraceWaterfall bars', () => {
 describe('Globe', () => {
   it('draws the disc on its own canvas, and stays still (no frame loop) under reduced motion until it is spun', () => {
     vi.stubGlobal('IntersectionObserver', SeenObserver)
+    vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout', 'requestAnimationFrame', 'cancelAnimationFrame', 'performance'] })
     const raf = vi.spyOn(window, 'requestAnimationFrame')
-    function Host() { const [n] = useState(0); return <UIProvider persist={false}><Globe key={n} hubs={[['A', 0, 0], ['B', 10, 10]]} routes={[{ from: 0, to: 1, color: 'var(--c2)' }]} land={[0, 0, 10, 10]} /></UIProvider> }
-    const { container } = render(<Host />)
+    const framesIn = (ms: number) => { const n = raf.mock.calls.length; act(() => { vi.advanceTimersByTime(ms) }); return raf.mock.calls.length - n }
+    const { container } = render(<UIProvider persist={false}><Globe hubs={[['A', 0, 0], ['B', 10, 10]]} routes={[{ from: 0, to: 1, color: 'var(--c2)' }]} land={[0, 0, 10, 10]} /></UIProvider>)
     expect(container.querySelectorAll('canvas')).toHaveLength(2)
     expect(screen.getAllByRole('img', { name: 'Rotating globe with routes between cities' })).toHaveLength(1)
-    const before = raf.mock.calls.length
-    expect(raf.mock.calls.length).toBe(before) // nothing moves: no frame loop
+    framesIn(100) // let mount-time one-off draws settle
+    expect(framesIn(1000)).toBe(0)
     fireEvent.click(screen.getByRole('button', { name: 'Auto-rotate off' }))
-    expect(raf.mock.calls.length).toBeGreaterThan(before)
-    raf.mockRestore()
+    expect(framesIn(1000)).toBeGreaterThan(20)
   })
 })

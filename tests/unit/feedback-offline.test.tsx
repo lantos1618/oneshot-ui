@@ -1,7 +1,7 @@
 // OfflineIndicator (0.5): one persistent bar whose content cross-fades in place, a live region that speaks only on
-// state changes (never the countdown), a calm "Retrying…" at each retry, `paused` (e.g. off screen), Arabic digits.
+// state changes (never the countdown), a calm "Retrying…" at each retry, `paused` (e.g. off screen).
 import { act, fireEvent, render, screen } from '@testing-library/react'
-import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
+import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { OfflineIndicator } from '../../src/lib'
 
 const live = () => screen.getAllByRole('status').find(el => el.classList.contains('sr-only'))!
@@ -9,7 +9,6 @@ const tick = (ms: number) => act(() => { vi.advanceTimersByTime(ms) })
 
 describe('OfflineIndicator', () => {
   beforeEach(() => { vi.useFakeTimers() })
-  afterEach(() => { vi.useRealTimers() })
 
   it('shows the offline bar without announcing on mount, counts down, retries and shows "Retrying…" in place', () => {
     const onRetry = vi.fn()

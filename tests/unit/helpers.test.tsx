@@ -1,9 +1,11 @@
-// Pure helpers: the code highlighter's ReDoS and size caps, line/word diff caps, number and date formatting.
+// Pure helpers: the code highlighter's ReDoS and size caps, line/word diff caps, array extremes and day arithmetic.
+// Formatting is in fmt.test.ts; daylight-saving changes in dst.test.ts.
 import { render } from '@testing-library/react'
 import { describe, expect, it } from 'vitest'
 import { CODE_HIGHLIGHT_MAX, LCS_MAX_CELLS, codeLanguageOf, codeLineDiff, highlightCode, lcsDiff, type CodeLanguage } from '../../src/lib/code'
 import { wordDiff } from '../../src/lib/ai'
-import { addDays, addMonths, dayKey, extent, fmt, fmtDate, maxOf, minOf, sameDay, startOfDay, startOfWeek } from '../../src/lib/core'
+import { addDays, addMonths, dayKey, extent, maxOf, minOf, sameDay, startOfDay, startOfWeek } from '../../src/lib/core'
+import { HANG_MS, expectLinear, timed } from '../helpers'
 
 const LANGS: CodeLanguage[] = ['ts', 'js', 'py', 'sh', 'json']
 /** The text a highlighted line renders to. */
@@ -11,7 +13,6 @@ const textOf = (line: string, lang: CodeLanguage) => {
   const { container, unmount } = render(<pre>{highlightCode(line, lang)}</pre>)
   const t = container.textContent; unmount(); return t
 }
-const timed = (fn: () => void) => { const t0 = performance.now(); fn(); return performance.now() - t0 }
 
 describe('highlightCode', () => {
   it.each(LANGS)('is lossless for %s', lang => {
@@ -29,18 +30,17 @@ describe('highlightCode', () => {
   // review/security-content.md #3: 48 backslashes took 55 s with the old pattern.
   it.each(LANGS)('has no catastrophic backtracking on unterminated strings (%s)', lang => {
     for (const q of ['"', "'", '`']) {
-      for (const n of [44, 1000]) {
-        const line = q + '\\'.repeat(n) + 'x'
-        const ms = timed(() => highlightCode(line, lang))
-        expect(ms, `${lang} ${q} ×${n}`).toBeLessThan(250)
-      }
+      expect(timed(() => highlightCode(q + '\\'.repeat(44) + 'x', lang)), `${lang} ${q}`).toBeLessThan(HANG_MS)
+      expectLinear(n => { const line = q + '\\'.repeat(n) + 'x'; return () => highlightCode(line, lang) }, 250, `${lang} ${q}`)
     }
   })
 
-  it.each(LANGS)('stays linear on long adversarial lines (%s)', lang => {
-    const line = ('"\\' + "'\\" + '`\\').repeat(Math.floor((CODE_HIGHLIGHT_MAX - 10) / 6))
-    expect(line.length).toBeLessThanOrEqual(CODE_HIGHLIGHT_MAX)
-    expect(timed(() => highlightCode(line, lang))).toBeLessThan(500)
+  // Each unterminated string scans to the end of the line, so this input grows quadratically up to CODE_HIGHLIGHT_MAX;
+  // the cap keeps a line at about a millisecond.
+  it.each(LANGS)('stays fast on long adversarial lines up to the cap (%s)', lang => {
+    const unit = '"\\' + "'\\" + '`\\', most = Math.floor((CODE_HIGHLIGHT_MAX - 10) / unit.length)
+    expect((unit.repeat(most)).length).toBeLessThanOrEqual(CODE_HIGHLIGHT_MAX)
+    expectLinear(n => { const line = unit.repeat(n); return () => highlightCode(line, lang) }, Math.floor(most / 4), lang)
   })
 
   it('returns lines over the cap as plain text', () => {
@@ -50,7 +50,8 @@ describe('highlightCode', () => {
   })
 
   it('falls back to TypeScript for an unknown language', () => {
-    expect(() => highlightCode('const x = 1', 'cobol' as CodeLanguage)).not.toThrow()
+    const html = (lang: CodeLanguage) => { const { container, unmount } = render(<pre>{highlightCode('const x = "a" // b', lang)}</pre>); const h = container.innerHTML; unmount(); return h }
+    expect(html('cobol' as CodeLanguage)).toBe(html('ts'))
   })
 
   it('guesses languages from file names', () => {
@@ -89,12 +90,14 @@ describe('codeLineDiff / lcsDiff', () => {
   })
 
   // review/security-content.md #8: a 10k × 10k diff exhausted the tab.
-  it('caps memory: a huge changed middle comes back as one removed and one added block, fast', () => {
+  it('caps memory: a huge changed middle comes back as one removed and one added block, without a full table', () => {
     const n = 10_000
     const before = Array.from({ length: n }, (_, i) => `before ${i}`), after = Array.from({ length: n }, (_, i) => `after ${i}`)
     expect((n + 1) * (n + 1)).toBeGreaterThan(LCS_MAX_CELLS)
-    let rows: ReturnType<typeof codeLineDiff> = []
-    expect(timed(() => { rows = codeLineDiff(['head', ...before, 'tail'], ['head', ...after, 'tail']) })).toBeLessThan(1000)
+    let compared = 0
+    lcsDiff(before, after, { equal: (x, y) => { compared++; return x === y } })
+    expect(compared).toBeLessThan(10) // only the common head and tail are compared, not n × n cells
+    const rows = codeLineDiff(['head', ...before, 'tail'], ['head', ...after, 'tail'])
     expect(rows).toHaveLength(2 * n + 2)
     expect(rows[0]).toMatchObject({ type: '=', text: 'head' })
     expect(rows.slice(1, n + 1).every(r => r.type === '-')).toBe(true)
@@ -127,38 +130,12 @@ describe('wordDiff', () => {
     expect(rebuild(wordDiff('', 'new text'))).toBe('new text')
   })
 
-  it('stays fast and bounded on huge inputs', () => {
-    const a = Array.from({ length: 6000 }, (_, i) => `alpha${i}`).join(' '), b = Array.from({ length: 6000 }, (_, i) => `beta${i}`).join(' ')
+  it('stays bounded on huge inputs (the diff table is capped, see lcsDiff)', () => {
+    const words = (w: string) => Array.from({ length: 6000 }, (_, i) => `${w}${i}`).join(' ')
+    const b = words('beta')
     let segs: ReturnType<typeof wordDiff> = []
-    expect(timed(() => { segs = wordDiff(a, b) })).toBeLessThan(1500)
+    expect(timed(() => { segs = wordDiff(words('alpha'), b) })).toBeLessThan(HANG_MS)
     expect(rebuild(segs)).toBe(b)
-  })
-})
-
-describe('fmt', () => {
-  it('formats numbers as documented', () => {
-    expect(fmt.compact(12400)).toMatch(/^12\.4K$/i) // the case depends on the ICU/CLDR version (Node 22 gives 12.4k)
-    expect(fmt.bytes(512)).toBe('512 B')
-    expect(fmt.bytes(-5)).toBe('0 B')
-    expect(fmt.bytes(2.4e6)).toBe('2.4 MB')
-    expect(fmt.bytes(3.2e9)).toBe('3.2 GB')
-    expect(fmt.usd(0.0042)).toBe('$0.0042')
-    expect(fmt.usd(0.042)).toBe('$0.042')
-    expect(fmt.usd(12)).toBe('$12.00')
-    expect(fmt.usd(-1.5)).toBe('-$1.50')
-    expect(fmt.money(1234.5, 'EUR')).toBe('€1,234.50')
-    expect(fmt.money(1234.5)).toBe('US$1,234.50')
-  })
-  it('formats durations and clocks', () => {
-    expect(fmt.duration(420)).toBe('420 ms')
-    expect(fmt.duration(1530)).toBe('1.5 s')
-    expect(fmt.duration(42_000)).toBe('42 s')
-    expect(fmt.duration(120_000)).toBe('2 min')
-    expect(fmt.duration(125_000)).toBe('2 min 5 s')
-    expect(fmt.clock(75)).toBe('1:15')
-    expect(fmt.clock(3725)).toBe('1:02:05')
-    expect(fmt.clock(-3)).toBe('0:00')
-    expect(fmt.clock(NaN)).toBe('0:00')
   })
 })
 
@@ -176,11 +153,6 @@ describe('array helpers', () => {
 
 describe('dates', () => {
   const d = new Date(2026, 10, 8, 15, 30) // Sunday 8 Nov 2026, 15:30 local
-  it('formats in en-GB', () => {
-    expect(fmtDate(d)).toBe('8 Nov 2026')
-    expect(fmtDate(null)).toBe('')
-    expect(fmtDate(d, { weekday: 'short' })).toBe('Sun')
-  })
   it('does day arithmetic at midnight', () => {
     expect(startOfDay(d).getHours()).toBe(0)
     expect(dayKey(addDays(d, 1))).toBe('2026-11-09')
@@ -199,11 +171,5 @@ describe('dates', () => {
     expect(sameDay(d, addDays(d, 1))).toBe(false)
     expect(sameDay(d, null)).toBe(false)
     expect(sameDay(undefined, undefined)).toBe(false)
-  })
-  it('keeps calendar days across a daylight-saving change', () => {
-    let day = new Date(2026, 2, 27) // the UK clocks change on 29 Mar 2026
-    const keys: string[] = []
-    for (let i = 0; i < 5; i++) { keys.push(dayKey(day)); day = addDays(day, 1) }
-    expect(keys).toEqual(['2026-03-27', '2026-03-28', '2026-03-29', '2026-03-30', '2026-03-31'])
   })
 })

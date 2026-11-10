@@ -1,29 +1,20 @@
-// Prints the measured CLS and axe counts per section, and with AXE_BASELINE=update rewrites axe-baseline.json.
-import { BASELINE_FILE, UPDATE, mergeBaseline, readBaseline, readParts, writeBaseline } from './baseline'
-import { QA_BASELINE_FILE, mergeQaBaseline, readQaBaseline, readQaParts, writeQaBaseline } from './design-qa-baseline'
+// Prints what each section run measured, and with E2E_BASELINE=update merges it into the baseline files.
+import { axeBaseline } from './baseline'
+import { qaBaseline } from './design-qa-baseline'
+import { UPDATE, countAll, type Counts, type JsonBaseline, type PartBase } from './json-baseline'
 
-export default function globalTeardown() {
-  designQaTeardown()
-  const parts = readParts().sort((a, b) => a.profile.localeCompare(b.profile) || a.section.localeCompare(b.section))
+const sum = (c: Counts) => Object.values(c).reduce((a, n) => a + n, 0)
+const list = (c: Counts) => Object.entries(c).map(([k, n]) => `${k} ${n}`).join(', ') || '-'
+const name = (p: PartBase) => `${p.profile.padEnd(14)} ${p.section.padEnd(12)}`
+
+function report<P extends PartBase>(title: string, baseline: JsonBaseline<P>, row: (p: P) => string) {
+  const parts = baseline.readParts()
   if (!parts.length) return
-  const rows = parts.map(p => `${p.profile.padEnd(14)} ${p.section.padEnd(12)} cls ${p.cls == null ? '  -   ' : p.cls.toFixed(4)}  axe ${p.axe ? Object.values(p.axe).reduce((a, n) => a + n, 0) : '-'}`)
-  console.log(`\nShowcase metrics (${parts.length} section runs)\n` + rows.join('\n'))
-  if (UPDATE) {
-    const next = mergeBaseline(readBaseline(), parts)
-    writeBaseline(next)
-    const total = Object.values(next).flatMap(s => Object.values(s)).flatMap(c => Object.values(c)).reduce((a, n) => a + n, 0)
-    console.log(`\nWrote ${BASELINE_FILE}: ${total} known violation nodes`)
-  }
+  console.log(`\n${title} (${parts.length} section runs)\n` + parts.map(p => `${name(p)} ${row(p)}`).join('\n'))
+  if (UPDATE) console.log(`Wrote ${baseline.file}: ${countAll(baseline.update(parts))} known findings`)
 }
 
-/** Design QA (design-qa.spec.ts): findings per section, and with AXE_BASELINE=update a rewritten design-qa-baseline.json. */
-function designQaTeardown() {
-  const parts = readQaParts().sort((a, b) => a.profile.localeCompare(b.profile) || a.section.localeCompare(b.section))
-  if (!parts.length) return
-  const fmt = (c: Record<string, number>) => Object.entries(c).map(([k, n]) => `${k} ${n}`).join(', ') || '-'
-  console.log(`\nDesign QA (${parts.length} section runs): red | all findings | CLS\n` + parts.map(p => `${p.profile.padEnd(14)} ${p.section.padEnd(12)} ${fmt(p.red).padEnd(24)} | ${fmt(p.all).padEnd(48)} | ${p.cls.toFixed(3)}`).join('\n'))
-  if (UPDATE) {
-    writeQaBaseline(mergeQaBaseline(readQaBaseline(), parts))
-    console.log(`\nWrote ${QA_BASELINE_FILE}`)
-  }
+export default function globalTeardown() {
+  report('Design QA: red | all findings | CLS', qaBaseline, p => `${list(p.red).padEnd(24)} | ${list(p.all).padEnd(48)} | ${p.cls.toFixed(3)}`)
+  report('Showcase metrics', axeBaseline, p => `cls ${p.cls == null ? '  -   ' : p.cls.toFixed(4)}  axe ${p.axe ? sum(p.axe) : '-'}`)
 }

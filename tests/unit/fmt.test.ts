@@ -1,26 +1,41 @@
-// Formatting: the fixed English formatters and the plural/rangeStr text helpers.
+// Formatting: the fixed English (en-GB) formatters, and the plural/rangeStr text helpers.
 import { describe, expect, it } from 'vitest'
 import { fmt, plural, rangeStr } from '../../src/lib'
 
 const NOV8 = new Date(2026, 10, 8, 14, 5)
 
 describe('fmt', () => {
-  it('formats numbers, money, bytes, durations and clocks', () => {
+  it('formats numbers, money and bytes', () => {
     expect(fmt.number(1234.5)).toBe('1,234.5')
-    expect(fmt.compact(12400)).toBe('12.4k')
-    expect(fmt.money(1234.5, 'EUR')).toBe('€1,234.50')
-    expect(fmt.usd(0.0042)).toBe('$0.0042')
+    expect(fmt.compact(12400)).toMatch(/^12\.4K$/i) // the case depends on the ICU/CLDR version (Node 22 gives 12.4k)
     expect(fmt.percent(0.125)).toBe('12.5%')
+    expect(fmt.usd(0.0042)).toBe('$0.0042')
+    expect(fmt.usd(0.042)).toBe('$0.042')
+    expect(fmt.usd(12)).toBe('$12.00')
+    expect(fmt.usd(-1.5)).toBe('-$1.50')
+    expect(fmt.money(1234.5, 'EUR')).toBe('€1,234.50')
+    expect(fmt.money(1234.5)).toBe('US$1,234.50')
+    expect(fmt.bytes(512)).toBe('512 B')
+    expect(fmt.bytes(-5)).toBe('0 B')
     expect(fmt.bytes(2.4e6)).toBe('2.4 MB')
+    expect(fmt.bytes(3.2e9)).toBe('3.2 GB')
+  })
+  it('formats durations and clocks', () => {
+    expect(fmt.duration(420)).toBe('420 ms')
     expect(fmt.duration(1530)).toBe('1.5 s')
-    expect(fmt.duration(125000)).toBe('2 min 5 s')
+    expect(fmt.duration(42_000)).toBe('42 s')
+    expect(fmt.duration(120_000)).toBe('2 min')
+    expect(fmt.duration(125_000)).toBe('2 min 5 s')
     expect(fmt.clock(75)).toBe('1:15')
     expect(fmt.clock(3725)).toBe('1:02:05')
+    expect(fmt.clock(-3)).toBe('0:00')
+    expect(fmt.clock(NaN)).toBe('0:00')
   })
   it('formats dates, times, lists and relative times', () => {
     expect(fmt.date(NOV8)).toBe('8 Nov 2026')
     expect(fmt.time(NOV8)).toBe('14:05')
     expect(fmt.date(null)).toBe('')
+    expect(fmt.date(NOV8, { weekday: 'short' })).toBe('Sun')
     expect(fmt.list(['a', 'b', 'c'])).toBe('a, b and c')
     const now = NOV8.getTime()
     expect(fmt.relative(now - 3 * 864e5, now)).toBe('3 days ago')

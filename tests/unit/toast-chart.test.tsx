@@ -2,8 +2,9 @@
 // the chart kit's data-table fallback and export (exportChart: CSV, SVG with inlined colours, PNG through a mocked canvas).
 import { act, fireEvent, render, screen, within } from '@testing-library/react'
 import { useRef, type ReactNode, type RefObject } from 'react'
-import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
+import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { BarList, Chart, DonutChart, ScatterChart, ToastProvider, UIProvider, exportChart, toast, useToast, type ToastApi } from '../../src/lib/all'
+import { mockObjectUrls } from '../helpers'
 
 /* ── Toasts ─────────────────────────────────────────────────────────────── */
 
@@ -227,10 +228,7 @@ function Donut(p: { exportable?: boolean }) {
 }
 
 describe('exportChart', () => {
-  beforeEach(() => {
-    Object.assign(URL, { createObjectURL: vi.fn(() => 'blob:chart'), revokeObjectURL: vi.fn() })
-  })
-  afterEach(() => { vi.restoreAllMocks() })
+  beforeEach(() => { mockObjectUrls('blob:chart') })
 
   it('CSV: header and raw rows from the data table, quoted, formula-safe, with a BOM', async () => {
     render(<Donut />)

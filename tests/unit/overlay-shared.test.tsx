@@ -1,8 +1,8 @@
 // Modal state shared across drop-in copies of the library.
-import { act, fireEvent, render, screen, waitFor } from '@testing-library/react'
+import { fireEvent, render, screen, waitFor } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { useState } from 'react'
-import { describe, expect, it, vi } from 'vitest'
+import { describe, expect, it, onTestFinished, vi } from 'vitest'
 import { Dialog } from '../../src/lib/overlay'
 
 /** Inside an inert subtree? (jsdom keeps `inert` as a property only.) */
@@ -15,6 +15,7 @@ describe('modal state shared by drop-in copies', () => {
     const copy = await import('../../src/lib/overlay?copy=2' as string) as typeof import('../../src/lib/overlay')
     expect(copy.Dialog).not.toBe(Dialog)
     document.documentElement.style.overflow = 'clip' // a host style the lock must put back
+    onTestFinished(() => { document.documentElement.style.overflow = '' })
     function Page() {
       const [outer, setOuter] = useState(false), [inner, setInner] = useState(false)
       return (
@@ -54,8 +55,6 @@ describe('modal state shared by drop-in copies', () => {
     await waitFor(() => expect(screen.queryByRole('dialog', { name: 'Outer' })).toBeNull())
     await waitFor(() => expect(pageInert()).toBe(false))
     expect(document.documentElement.style.overflow).toBe('clip') // the host's own style is restored
-    document.documentElement.style.overflow = ''
   })
 })
 
-void act

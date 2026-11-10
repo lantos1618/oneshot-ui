@@ -64,7 +64,6 @@ describe('Markdown', () => {
 })
 
 describe('Composer pieces', () => {
-
   it('AgentComposer: advanced settings inline in the model panel (no dialog)', () => {
     render(<AgentComposer onSend={() => 'ok'} />)
     fireEvent.click(screen.getByRole('button', { name: 'Model settings' }))

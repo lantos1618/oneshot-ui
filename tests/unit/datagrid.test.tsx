@@ -13,7 +13,12 @@ const makeRows = (n: number): Row[] => Array.from({ length: n }, (_, i) => ({ id
 const columns: GridColumn<Row>[] = [{ key: 'name', label: 'Name' }, { key: 'region', label: 'Region' }, { key: 'amount', label: 'Amount', type: 'number' }]
 const grid = () => screen.getByRole('grid')
 const bodyRows = () => within(grid()).getAllByRole('row').filter(r => r.closest('tbody'))
-const focusedRow = () => (document.activeElement as HTMLElement).getAttribute('data-gr')
+/** The focused cell's row number (aria-rowindex less the header row) and its column header. */
+const focusedRow = () => String(Number(document.activeElement!.closest('tr')!.getAttribute('aria-rowindex')) - 1)
+const focusedColumn = () => {
+  const cell = document.activeElement!.closest('td, th')!
+  return within(grid()).getAllByRole('columnheader')[[...cell.parentElement!.children].indexOf(cell)].textContent
+}
 const scroller = () => grid().parentElement as HTMLElement
 
 describe('DataGrid: virtual rows', () => {
@@ -44,7 +49,7 @@ describe('DataGrid: virtual rows', () => {
     expect(focusedRow()).toBe('1')
     await user.keyboard('{Control>}{End}{/Control}')
     expect(focusedRow()).toBe('5000')
-    expect((document.activeElement as HTMLElement).getAttribute('data-gk')).toBe('amount')
+    expect(focusedColumn()).toMatch(/^Amount/)
     expect(document.activeElement!.closest('tr')).toHaveAttribute('aria-rowindex', '5001')
     await user.keyboard('{ArrowUp}{ArrowUp}')
     expect(focusedRow()).toBe('4998')

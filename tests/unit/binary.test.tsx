@@ -8,6 +8,7 @@ import {
   hilbertD2XY, hilbertXY2D, parseByteOffset, parseHexPattern, readVarint, searchBytes, sectionAt, shannonEntropy, type ByteRange, type HexEdit,
 } from '../../src/lib/binary'
 import { BINARY_SAMPLE_SECTIONS, binarySample } from '../../src/examples/binary'
+import { expectLinear } from '../helpers'
 
 /** Deterministic noise (xorshift32). */
 function noise(n: number, seed = 7) {
@@ -48,11 +49,9 @@ describe('entropy', () => {
       })
     }
   })
-  it('is fast: 8 MB in well under a second', () => {
-    const big = noise(8 << 20)
-    const t = performance.now(); const w = entropyWindows(big, 512); const ms = performance.now() - t
-    expect(w.length).toBe((8 << 20) / 512)
-    expect(ms).toBeLessThan(1000)
+  it('scales linearly with the input (8 MB in one pass)', () => {
+    expectLinear(n => { const b = noise(n); return () => entropyWindows(b, 512) }, 1 << 19)
+    expect(entropyWindows(noise(8 << 20), 512).length).toBe((8 << 20) / 512)
   })
 })
 

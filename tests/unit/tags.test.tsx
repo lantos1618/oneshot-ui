@@ -212,9 +212,10 @@ describe('registry items', () => {
     expect(tagRegistryMeta({ name: 'gauge', type: 'registry:ui', module: 'charts' }).kind).toBe('chart')
   })
 
-  it('carry them in dist-registry/index.json and the shadcn items', () => {
-    const dir = join(ROOT, 'dist-registry')
-    if (!existsSync(join(dir, 'index.json'))) return
+  // reads the built registry: reported as skipped, not passed, until `pnpm build` has made one
+  const REGISTRY = join(ROOT, 'dist-registry')
+  it.skipIf(!existsSync(join(REGISTRY, 'index.json')))('carry them in dist-registry/index.json and the shadcn items', () => {
+    const dir = REGISTRY
     const index = JSON.parse(readFileSync(join(dir, 'index.json'), 'utf8')) as { vocabulary: { tags: { id: string }[] }; items: { name: string; kind: string; area: string; tags: string[] }[] }
     expect(index.vocabulary.tags.map(t => t.id)).toEqual(TAGS.map(t => t.id))
     for (const e of index.items) {

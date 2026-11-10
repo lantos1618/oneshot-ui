@@ -1,5 +1,5 @@
 import { act, render, screen, waitFor } from '@testing-library/react'
-import { describe, expect, it } from 'vitest'
+import { describe, expect, it, vi } from 'vitest'
 import {
   AgentTransitMap, TraceWaterfall, aiSdkRunMapper, applyRunEvent, fromAiSdkResult, fromAiSdkUIStream, fromLangGraphEvents, fromOtel,
   langGraphRunMapper, otelToRunEvents, replayRun, runFromEvents, runLaneNodes, runToEvents, runTotals, transitRunStation, useAgentRun,
@@ -8,6 +8,7 @@ import {
 import {
   AGENT_PRICING_SAMPLE, AGENT_RUN_FIXTURES, AI_SDK_RESULT_ENDED, AI_SDK_RESULT_SAMPLE, AI_SDK_STREAM_SAMPLE, AgentRunLanes, LANGGRAPH_EVENTS_SAMPLE, OTEL_TRACE_SAMPLE,
 } from '../../src/examples'
+import { fakeTimers, tick } from '../helpers'
 
 const byName = (r: AgentRun, name: string) => r.spans.filter(s => s.name === name)
 const rel = (r: AgentRun, ms: number) => Math.round(ms - r.startedAt)
@@ -235,11 +236,19 @@ describe('useAgentRun', () => {
     const { unmount } = render(<Mapped />)
     await waitFor(() => expect(screen.getByTestId('m').textContent).toBe('done:21'))
     unmount()
+    fakeTimers()
     const final = AGENT_RUN_FIXTURES[0].run()
     let n = 0
-    const poll = { intervalMs: 100, fetchRun: async () => ++n < 2 ? { ...final, status: 'running' as const } : final }
+    const poll = { intervalMs: 100, fetchRun: vi.fn(async () => ++n < 2 ? { ...final, status: 'running' as const } : final) }
     render(<Probe source={poll} />)
-    await waitFor(() => expect(screen.getByTestId('probe').textContent).toBe('done:12:ok'), { timeout: 3000 })
+    await tick(0)
+    expect(poll.fetchRun).toHaveBeenCalledTimes(1)
+    expect(screen.getByTestId('probe').textContent).not.toMatch(/^done/)
+    await tick(150) // the second poll ends the run; its spans commit on the next frame
+    expect(poll.fetchRun).toHaveBeenCalledTimes(2)
+    expect(screen.getByTestId('probe').textContent).toBe('done:12:ok')
+    await tick(1000)
+    expect(poll.fetchRun).toHaveBeenCalledTimes(2) // stops polling once the run ends
   })
 })
 

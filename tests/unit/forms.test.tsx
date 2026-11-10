@@ -2,21 +2,16 @@
 // wiring, the dependency-free Form, the async Combobox and the virtualised option list.
 import { act, fireEvent, render, screen, waitFor, within } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
-import { createRef, useState, type ReactNode } from 'react'
+import { createRef, useState } from 'react'
 import { describe, expect, it, vi } from 'vitest'
 import {
   Checkbox, ColorPicker, Combobox, CurrencyInput, DatePicker, DateRangePicker, Field, FileUpload, Form, FormField, Input, MultiSelect, NumberStepper, OTPInput,
   type Option, PasswordInput, PhoneInput, RadioGroup, RangeSlider, Rating, SegmentedControl, Select, Slider, Switch, TagInput, Textarea, TimePicker,
 } from '../../src/lib/forms'
+import { fakeTimersUser, inForm, tick } from '../helpers'
 
 const PRIORITY: Option[] = [{ value: 'low', label: 'Low' }, { value: 'medium', label: 'Medium' }, { value: 'high', label: 'High' }]
 const COUNTRIES: Option[] = [{ value: 'gb', label: 'United Kingdom' }, { value: 'us', label: 'United States' }, { value: 'de', label: 'Germany' }]
-
-function inForm(children: ReactNode) {
-  const r = render(<form data-testid="f">{children}</form>)
-  const form = screen.getByTestId('f') as HTMLFormElement
-  return { ...r, form, data: () => new FormData(form) }
-}
 
 describe('FormData from every control', () => {
   it('serialises each control as documented', () => {
@@ -354,11 +349,14 @@ describe('FormField wiring', () => {
 
 describe('async Combobox', () => {
   it('debounces typing into one request', async () => {
-    const user = userEvent.setup()
+    const user = fakeTimersUser({ shouldAdvanceTime: false })
     const load = vi.fn(async (q: string) => COUNTRIES.filter(o => o.label.toLowerCase().includes(q)))
     render(<Combobox aria-label="Country" loadOptions={load} debounce={60} />)
     await user.type(screen.getByRole('combobox'), 'unit')
-    await waitFor(() => expect(screen.getAllByRole('option')).toHaveLength(2))
+    await tick(59)
+    expect(load.mock.calls.filter(c => c[0] !== '')).toEqual([])
+    await tick(1)
+    expect(screen.getAllByRole('option')).toHaveLength(2)
     expect(load.mock.calls.filter(c => c[0] !== '').map(c => c[0])).toEqual(['unit'])
   })
 
@@ -395,12 +393,15 @@ describe('async Combobox', () => {
   })
 
   it('waits for minChars', async () => {
-    const user = userEvent.setup(), load = vi.fn(async () => COUNTRIES)
+    const user = fakeTimersUser({ shouldAdvanceTime: false }), load = vi.fn(async () => COUNTRIES)
     render(<Combobox aria-label="Country" loadOptions={load} debounce={5} minChars={2} />)
     await user.type(screen.getByRole('combobox'), 'g')
-    expect(await screen.findByText(/Type at least 2 characters/)).toBeInTheDocument()
-    await new Promise(r => setTimeout(r, 30))
+    await tick(1000)
+    expect(screen.getByText(/Type at least 2 characters/)).toBeInTheDocument()
     expect(load).not.toHaveBeenCalled()
+    await user.type(screen.getByRole('combobox'), 'e')
+    await tick(5)
+    expect(load).toHaveBeenCalledWith('ge', expect.anything())
   })
 
   it('creates a new option', async () => {
@@ -452,11 +453,17 @@ describe('virtualised OptionList', () => {
 
   it('works in Select and MultiSelect too', async () => {
     const user = userEvent.setup()
-    render(<Select aria-label="Pick" options={many} defaultValue="v2500" />)
+    const select = render(<Select aria-label="Pick" options={many} defaultValue="v2500" />)
     await user.click(screen.getByRole('combobox', { name: 'Pick' }))
     const id = screen.getByRole('combobox', { name: 'Pick' }).getAttribute('aria-activedescendant')!
     expect(document.getElementById(id)).toHaveTextContent('Option 2500')
     expect(screen.getAllByRole('option').length).toBeLessThan(100)
+    select.unmount()
+    render(<MultiSelect aria-label="Pick many" options={many} />)
+    await user.click(screen.getByRole('combobox', { name: 'Pick many' }))
+    const rendered = within(screen.getByRole('listbox')).getAllByRole('option')
+    expect(rendered.length).toBeLessThan(100)
+    expect(rendered[0]).toHaveAttribute('aria-setsize', '5000')
   })
 })
 

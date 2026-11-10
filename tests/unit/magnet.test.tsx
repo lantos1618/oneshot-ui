@@ -120,7 +120,7 @@ describe('keyboard jumps', () => {
     expect(nextMagnet(40, marks, -1, { min: 0, max: 100 })).toBe(25)
     expect(nextMagnet(100, marks, 1, { min: 0, max: 100 })).toBeNull()
   })
-  it('PageUp / PageDown and Ctrl or ⌘ + arrows; plain arrows are not jumps; ← and → swap in RTL', () => {
+  it('PageUp / PageDown and Ctrl or ⌘ + arrows; plain arrows are not jumps', () => {
     expect(magnetKeyDirection({ key: 'PageUp' })).toBe(1)
     expect(magnetKeyDirection({ key: 'PageDown' })).toBe(-1)
     expect(magnetKeyDirection({ key: 'ArrowRight' })).toBe(0)

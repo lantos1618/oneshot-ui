@@ -35,7 +35,7 @@ describe('A-H2: rangeStr on large series', () => {
   it('renders a Chart of 130k points without maxPoints', () => {
     const data = Array.from({ length: 130_000 }, (_, i) => ({ x: i, y: i % 100 }))
     expect(() => render(<Chart data={data} x="x" series={[{ key: 'y' }]} legend={false} label="Big" />)).not.toThrow()
-  })
+  }, 60_000) // jsdom renders every point (about 9 s alone, far more beside other files)
 })
 
 describe('A-H3: fmt.relative on invalid input', () => {

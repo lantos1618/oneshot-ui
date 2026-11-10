@@ -1,10 +1,11 @@
 // Timeline annotations (0.5): layoutTimeTags (stacking, rug overflow, flags, rollup bins, auto thresholds), timeTicks,
 // the useTagFocus keyboard model and tags on a Chart. Queried by role and accessible name.
-import { act, fireEvent, render, screen, waitFor } from '@testing-library/react'
+import { act, fireEvent, render, screen } from '@testing-library/react'
 import { useState, type ReactNode } from 'react'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { Chart, layoutTimeTags, timeTicks, type TimeTag } from '../../src/lib/all'
 import { TAGS_BUSY_DAY, TAGS_LIGHT_DAY, POSTURE_STATES_DAY, tagsDay } from '../../src/examples'
+import { fakeTimers } from '../helpers'
 
 const at = (h: number, m = 0) => new Date(2026, 10, 9, h, m).getTime()
 const T0 = at(9)
@@ -197,8 +198,10 @@ describe('Chart annotations', () => {
     expect(box().style.height).toBe(`${220 + 3 * 23 + 6}px`) // rollups: same height
     rerender(chart({ style: 'rug', spans: 'none' }))
     expect(box().style.height).toBe(`${220 + 2 * 23 + 6}px`) // current (default): the two rug rows 10:40 and 10:50 need
+    fakeTimers()
     rerender(chart({ spans: 'none' }))
-    await waitFor(() => expect(box().style.height).toBe('220px'), { timeout: 4000 }) // auto resolved to pins: no band (eased over 250 ms)
+    act(() => { vi.advanceTimersByTime(400) })
+    expect(box().style.height).toBe('220px') // auto resolved to pins: no band (eased over 250 ms)
   })
   it('rollups keep one option per tag', () => {
     en(chart({ style: 'rollup', spans: 'none' }))
