@@ -1,21 +1,20 @@
 import { useEffect, useRef, useState, type ReactNode } from 'react'
 import { AnimatePresence, motion } from 'motion/react'
-import { AnimatedNumber, Button, Icon, TOUCH, cn, spring, surface, useWidth, shake, Field, Input, NumberStepper, Select, Steps, Collapse, confetti, fmt } from '../lib'
+import { AnimatedNumber, Button, Icon, TOUCH, cn, spring, surface, useWidth, shake, Field, Input, NumberStepper, Select, Steps, Collapse, confetti, fmt, slideVariants } from '../lib'
 
 /* Checkout: cart, details and payment steps with an order summary.
    Copy-in block (registry: `registry:block`), not part of the npm API: copy it into your app and edit freely. It builds
    on the library through `../lib` (in your app: `@lyndon/ui`). */
 
-const pagesSlide = {
-  enter: (d: number) => ({ opacity: 0, x: 20 * d }),
-  center: { opacity: 1, x: 0 },
-  exit: (d: number) => ({ opacity: 0, x: -20 * d, transition: { duration: 0.14 } }),
-}
+const checkoutSlide = slideVariants(20)
 
 /* ── Checkout ──────────────────────────────────────────────────────────── */
 
 export type CheckoutItem = { id: string; name: string; detail: string; price: number; qty: number; /** CSS background for the thumbnail */ swatch?: string }
 export type CheckoutDetails = { name: string; email: string; address: string; vat: string; country: string }
+export type CheckoutOrder = { items: CheckoutItem[]; details: CheckoutDetails; total: number; promo?: string }
+/** What the buyer typed, digits only. Send it straight to your payment provider; don't store it. */
+export type CheckoutCard = { number: string; expMonth: number; expYear: number; cvc: string; brand?: string }
 
 const CO_STEPS = ['Cart', 'Details', 'Payment']
 const coDigits = (v: string) => v.replace(/\D/g, '')
@@ -23,8 +22,9 @@ const coIsAmex = (d: string) => /^3[47]/.test(d)
 const coBrand = (d: string) => /^4/.test(d) ? { name: 'VISA', bg: '#1A1F71' } : /^(5[1-5]|2[2-7])/.test(d) ? { name: 'Mastercard', bg: '#EB001B' } : coIsAmex(d) ? { name: 'Amex', bg: '#2E77BC' } : null
 const coFormatCard = (d: string) => coIsAmex(d) ? [d.slice(0, 4), d.slice(4, 10), d.slice(10, 15)].filter(Boolean).join(' ') : d.replace(/(.{4})/g, '$1 ').trim()
 const coFormatExp = (raw: string) => { let d = coDigits(raw).slice(0, 4); if (/^[2-9]$/.test(d)) d = '0' + d; return d.length > 2 ? `${d.slice(0, 2)} / ${d.slice(2)}` : d }
+const coErrorText = (e: unknown, fallback: string) => e instanceof Error && e.message ? e.message : typeof e === 'string' && e ? e : fallback
 
-function CheckoutDone({ email, total, currency, onRestart }: { email: string; total: number; currency: string; onRestart: () => void }) {
+function CheckoutDone({ total, currency, onRestart }: { total: number; currency: string; onRestart: () => void }) {
   const ring = useRef<HTMLSpanElement>(null)
   useEffect(() => {
     const t = setTimeout(() => { const r = ring.current?.getBoundingClientRect(); if (r) confetti({ x: r.left + r.width / 2, y: r.top + r.height / 2, count: 90 }) }, 120)
@@ -36,7 +36,7 @@ function CheckoutDone({ email, total, currency, onRestart }: { email: string; to
         <Icon name="check" size={30} strokeWidth={2.6} />
       </motion.span>
       <b className="text-base">{'Payment successful'}</b>
-      <span className="text-[13px] text-[var(--fg2)]">{`${fmt.money(total, currency)} paid · receipt sent to ${email}`}</span>
+      <span className="text-[13px] text-[var(--fg2)]">{`${fmt.money(total, currency)} paid`}</span>
       <Button size="sm" onClick={onRestart}><Icon name="refresh" size={13} />{'Start over'}</Button>
     </div>
   )
@@ -44,14 +44,22 @@ function CheckoutDone({ email, total, currency, onRestart }: { email: string; to
 
 /**
  * Checkout: Cart → Details → Payment with slide transitions, quantity steppers and an order summary
- * whose subtotal, promo, VAT and total all roll. Promo codes come from `promoCodes` (wrong code shakes),
- * the email is validated, the card number is grouped as you type with a VISA / Mastercard / Amex badge,
- * expiry is masked MM / YY, and paying shows Processing then a success screen with confetti.
+ * whose subtotal, promo, VAT and total all roll. The email is validated, the card number is grouped as you type with a
+ * VISA / Mastercard / Amex badge, and expiry is masked MM / YY.
+ *
+ * Paying calls `onPay`, which charges the card through your provider: the success screen (and `onComplete`) come only
+ * once it resolves; if it rejects, its error message is shown and the buyer can try again. Promo codes are checked by
+ * `validatePromo` (no promo field without it); a wrong code shakes.
  */
-export function Checkout({ items: initialItems, currency = 'EUR', vatRate = 0.081, promoCodes = { SAVE10: 0.1 }, defaultDetails, countries = ['Switzerland', 'United Kingdom', 'Germany'], onComplete, className }:
-  { items: CheckoutItem[]; currency?: string; vatRate?: number; promoCodes?: Record<string, number>; defaultDetails?: Partial<CheckoutDetails>; countries?: string[]
-    onComplete?: (o: { items: CheckoutItem[]; details: CheckoutDetails; total: number; promo?: string }) => void; className?: string }) {
-  const blankDetails: CheckoutDetails = { name: 'Alex Lee', email: 'alex@northwind.io', address: 'Bahnhofstrasse 21, 8001 Zürich', vat: '', country: countries[0], ...defaultDetails }
+export function Checkout({ items: initialItems, currency = 'EUR', vatRate = 0.081, validatePromo, defaultDetails, countries = ['Switzerland', 'United Kingdom', 'Germany'], onPay, onComplete, className }:
+  { items: CheckoutItem[]; currency?: string; vatRate?: number; defaultDetails?: Partial<CheckoutDetails>; countries?: string[]
+    /** Resolve to the discount for a code (0.1 = 10% off), or null when it isn't valid. */
+    validatePromo?: (code: string) => number | null | Promise<number | null>
+    /** Charge the card. Resolve once the payment is confirmed; reject with an Error whose message the buyer should see. */
+    onPay: (order: CheckoutOrder, card: CheckoutCard) => Promise<void>
+    /** Called after `onPay` resolved. */
+    onComplete?: (order: CheckoutOrder) => void; className?: string }) {
+  const blankDetails: CheckoutDetails = { name: '', email: '', address: '', vat: '', country: countries[0] ?? '', ...defaultDetails }
   const [items, setItems] = useState(initialItems)
   const [step, setStep] = useState(0)
   const [dir, setDir] = useState(1)
@@ -63,6 +71,8 @@ export function Checkout({ items: initialItems, currency = 'EUR', vatRate = 0.08
   const [card, setCard] = useState(''), [exp, setExp] = useState(''), [cvc, setCvc] = useState('')
   const [payErr, setPayErr] = useState<{ card?: string; exp?: string; cvc?: string }>({})
   const [paying, setPaying] = useState(false)
+  const [payFail, setPayFail] = useState<string | null>(null)
+  const [checking, setChecking] = useState(false)
   const root = useRef<HTMLDivElement>(null)
   const [wrap, w] = useWidth<HTMLDivElement>()
   const wide = w === 0 || w >= 720
@@ -70,16 +80,24 @@ export function Checkout({ items: initialItems, currency = 'EUR', vatRate = 0.08
   const money = { style: 'currency', currency } as const
   const q = (sel: string) => root.current?.querySelector(sel)
   const go = (n: number) => { setDir(Math.sign(n - step) || 1); setStep(n) }
-  const apply = () => {
-    const v = code.trim().toUpperCase(), r = promoCodes[v]
-    if (r) { setPromo({ code: v, rate: r }); setPromoMsg({ ok: true, text: `${fmt.percent(r, 0)} off applied` }) }
-    else { setPromoMsg({ ok: false, text: v ? 'That code isn’t valid' : 'Enter a promo code' }); shake(q('[data-co-promo]'), 5) }
+  const promoFail = (text: string) => { setPromoMsg({ ok: false, text }); shake(q('[data-co-promo]'), 5) }
+  const apply = async () => {
+    const v = code.trim().toUpperCase()
+    if (!validatePromo || checking) return
+    if (!v) return promoFail('Enter a promo code')
+    setChecking(true)
+    let r: number | null
+    try { r = await validatePromo(v) } catch (e) { setChecking(false); return promoFail(coErrorText(e, 'Couldn’t check that code. Try again.')) }
+    setChecking(false)
+    if (r != null && r > 0) { const rate = Math.min(r, 1); setPromo({ code: v, rate }); setPromoMsg({ ok: true, text: `${fmt.percent(rate, 0)} off applied` }) }
+    else promoFail('That code isn’t valid')
   }
   const toPayment = () => {
     if (!/^\S+@\S+\.\S+$/.test(det.email)) { setEmailErr(true); shake(q('#co-email'), 5); (q('#co-email') as HTMLInputElement | null)?.focus(); return }
     go(2)
   }
-  const pay = () => {
+  const pay = async () => {
+    if (paying) return
     const d = coDigits(card), e = coDigits(exp), mm = +e.slice(0, 2), yy = +e.slice(2), now = new Date(), err: typeof payErr = {}
     if (d.length < (coIsAmex(d) ? 15 : 16)) err.card = 'Enter the full card number'
     if (e.length < 4 || mm < 1 || mm > 12) err.exp = 'Use MM / YY'
@@ -88,11 +106,16 @@ export function Checkout({ items: initialItems, currency = 'EUR', vatRate = 0.08
     setPayErr(err)
     const first = err.card ? '#co-card' : err.exp ? '#co-exp' : err.cvc ? '#co-cvc' : null
     if (first) { shake(q(first), 5); return }
-    setPaying(true)
-    setTimeout(() => { setPaying(false); setDir(1); setStep(3); onComplete?.({ items, details: det, total, promo: promo?.code }) }, 1100)
+    const order: CheckoutOrder = { items, details: det, total, promo: promo?.code }
+    setPaying(true); setPayFail(null)
+    try { await onPay(order, { number: d, expMonth: mm, expYear: 2000 + yy, cvc, brand: coBrand(d)?.name }) } catch (e) {
+      setPaying(false); setPayFail(coErrorText(e, 'The payment didn’t go through. Check the card details and try again.'))
+      return
+    }
+    setPaying(false); setDir(1); setStep(3); onComplete?.(order)
   }
   const restart = () => {
-    setItems(initialItems); setPromo(null); setCode(''); setPromoMsg(null); setDet(blankDetails); setCard(''); setExp(''); setCvc(''); setPayErr({}); setEmailErr(false)
+    setItems(initialItems); setPromo(null); setCode(''); setPromoMsg(null); setDet(blankDetails); setCard(''); setExp(''); setCvc(''); setPayErr({}); setPayFail(null); setEmailErr(false)
     setDir(-1); setStep(0)
   }
   const brand = coBrand(coDigits(card))
@@ -135,7 +158,7 @@ export function Checkout({ items: initialItems, currency = 'EUR', vatRate = 0.08
       <Field label={'Card number'} htmlFor="co-card" error={payErr.card}>
         <div className="relative">
           <Input id="co-card" inputMode="numeric" autoComplete="off" placeholder="1234 1234 1234 1234" value={card} aria-invalid={!!payErr.card || undefined}
-            onChange={e => { const d = coDigits(e.target.value); setCard(coFormatCard(d.slice(0, coIsAmex(d) ? 15 : 16))); setPayErr(p => ({ ...p, card: undefined })) }}
+            onChange={e => { const d = coDigits(e.target.value); setCard(coFormatCard(d.slice(0, coIsAmex(d) ? 15 : 16))); setPayErr(p => ({ ...p, card: undefined })); setPayFail(null) }}
             className="pe-24 font-[family-name:var(--mono)] tracking-wide" />
           <AnimatePresence>
             {brand && (
@@ -157,10 +180,10 @@ export function Checkout({ items: initialItems, currency = 'EUR', vatRate = 0.08
             onChange={e => { setCvc(coDigits(e.target.value).slice(0, 4)); setPayErr(p => ({ ...p, cvc: undefined })) }} />
         </Field>
       </div>
-      <p className="m-0 text-xs text-[var(--fg3)]">{'Demo only: nothing is charged and nothing leaves the page.'}</p>
-      {nav(true, <Button variant="primary" loading={paying} onClick={pay}>{paying ? 'Processing' : <>{'Pay'} <AnimatedNumber value={total} format={money} /></>}</Button>)}
+      {payFail && <p role="alert" className="m-0 text-[13px] text-[var(--bad)]">{payFail}</p>}
+      {nav(true, <Button variant="primary" loading={paying} onClick={() => void pay()}>{paying ? 'Processing' : <>{'Pay'} <AnimatedNumber value={total} format={money} /></>}</Button>)}
     </div>,
-    <CheckoutDone email={det.email} total={total} currency={currency} onRestart={restart} />,
+    <CheckoutDone total={total} currency={currency} onRestart={restart} />,
   ]
 
   return (
@@ -170,7 +193,7 @@ export function Checkout({ items: initialItems, currency = 'EUR', vatRate = 0.08
         <div className="relative min-h-[250px] overflow-clip [overflow-clip-margin:8px]">
           {/* the next step slides in from the inline end */}
           <AnimatePresence mode="wait" initial={false} custom={dir}>
-            <motion.div key={step} custom={dir} variants={pagesSlide} initial="enter" animate="center" exit="exit" transition={spring(0.2, 0.35)}>{panes[step]}</motion.div>
+            <motion.div key={step} custom={dir} variants={checkoutSlide} initial="enter" animate="center" exit="exit" transition={spring(0.2, 0.35)}>{panes[step]}</motion.div>
           </AnimatePresence>
         </div>
       </div>
@@ -180,12 +203,11 @@ export function Checkout({ items: initialItems, currency = 'EUR', vatRate = 0.08
         <Collapse open={!!promo}><div className={cn(row, '!text-[var(--ok)]')}><span>{`Promo ${promo?.code ?? ''}`}</span><AnimatedNumber value={-disc} format={money} /></div></Collapse>
         <div className={row}><span>{`VAT ${fmt.percent(vatRate, 2)}`}</span><AnimatedNumber value={tax} format={money} /></div>
         <div className="flex justify-between border-t border-[var(--line)] pt-2.5 text-sm font-semibold"><span>{'Total'}</span><AnimatedNumber value={total} format={money} className="font-[family-name:var(--font)] tabular-nums" /></div>
-        <form className="flex gap-1.5" data-co-promo onSubmit={e => { e.preventDefault(); apply() }}>
-          <Input value={code} onChange={e => { setCode(e.target.value); if (promoMsg && !promoMsg.ok) setPromoMsg(null) }} placeholder={'Promo code'} aria-label={'Promo code'}
+        {validatePromo && <form className="flex gap-1.5" data-co-promo onSubmit={e => { e.preventDefault(); void apply() }}>
+          <Input value={code} onChange={e => { setCode(e.target.value); if (promoMsg && !promoMsg.ok) setPromoMsg(null) }} placeholder="Promo code" aria-label="Promo code"
             aria-invalid={promoMsg?.ok === false || undefined} disabled={step === 3} className={cn('!h-8 uppercase placeholder:normal-case', TOUCH.row)} />
-          <Button size="sm" type="submit" disabled={step === 3} className={cn('!h-8 flex-none', TOUCH.row)}>{'Apply'}</Button>
-
-        </form>
+          <Button size="sm" type="submit" loading={checking} disabled={step === 3} className={cn('!h-8 flex-none', TOUCH.row)}>Apply</Button>
+        </form>}
         <AnimatePresence mode="wait" initial={false}>
           {promoMsg && <motion.p key={promoMsg.text} initial={{ opacity: 0, y: -3 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0 }} transition={{ duration: 0.15 }} aria-live="polite"
             className={cn('m-0 text-xs', promoMsg.ok ? 'text-[var(--ok)]' : 'text-[var(--bad)]')}>{promoMsg.text}</motion.p>}

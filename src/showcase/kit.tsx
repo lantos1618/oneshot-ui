@@ -157,6 +157,13 @@ function kitObservers() {
     for (const e of es) e.target.toggleAttribute('data-far', !e.isIntersecting)
   }, { rootMargin: '250% 0px' })
 }
+/** Mount the demo of the card titled `title` now, if it is still waiting. False when no such card is on the page. */
+export function mountSpec(title: string): boolean {
+  const el = [...document.querySelectorAll<HTMLElement>('[data-spec]')].find(e => e.dataset.spec === title)
+  if (!el) return false
+  if (kitCards.get(el)?.mount) flushSync(() => kitMountNow(el, true))
+  return true
+}
 /** Mount every card's demo now (the Design QA audit scans them all). */
 export function mountAllSpecs() {
   for (const el of [...kitCards.keys()]) kitMountNow(el, true)

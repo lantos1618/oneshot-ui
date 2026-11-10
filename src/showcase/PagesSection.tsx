@@ -1,8 +1,14 @@
-import { Badge, useTheme, useToast } from '../lib'
-import { Checkout, OnboardingChecklist, PricingTable, ProfileCard, SettingsPage, type SettingsSection } from '../blocks'
+import { Badge, THEME_MODES, type ThemeMode, useTheme, useToast } from '../lib'
+import { Checkout, type CheckoutDetails, OnboardingChecklist, PricingTable, ProfileCard, SettingsPage, type SettingsSection, type SettingsValue } from '../blocks'
+import { CHECKOUT_DEMO_DECLINED, CHECKOUT_DEMO_ITEMS, CHECKOUT_DEMO_PROMO, checkoutDemoPay, checkoutDemoPromo } from '../examples/checkout'
+import { fakeLatency } from '../examples/latency'
+import { DEMO_COMPANIES, DEMO_PEOPLE } from '../examples/people'
 import { Section, Spec } from './kit'
 
 const PAGES_POSTS: [string, string, string][] = [['Designing calm dashboards', '2 days ago', 'var(--accent)'], ['Motion as feedback, not decoration', '1 week ago', 'var(--c3)']]
+/** The demo buyer the Checkout card starts with (the block itself prefills nothing). */
+const PAGES_BUYER: Partial<CheckoutDetails> = { name: DEMO_PEOPLE[0], email: `alex@${DEMO_COMPANIES[0].toLowerCase()}.example`, address: 'Bahnhofstrasse 21, 8001 Zürich' }
+const isThemeMode = (v: SettingsValue): v is ThemeMode => (THEME_MODES as readonly unknown[]).includes(v)
 
 export function PagesSection() {
   const toast = useToast()
@@ -10,7 +16,7 @@ export function PagesSection() {
   const soon = (title: string) => () => toast({ title, description: 'Demo only: this would open a dialog', tone: 'info' })
   const sections: SettingsSection[] = [
     { id: 'profile', label: 'Profile', icon: 'user', description: 'How you appear to your team', rows: [
-      { id: 'name', type: 'text', label: 'Display name', description: 'Shown on comments and mentions', value: 'Alex Lee' },
+      { id: 'name', type: 'text', label: 'Display name', description: 'Shown on comments and mentions. Clear it to see a failed save.', value: DEMO_PEOPLE[0] },
       { id: 'pronouns', type: 'text', label: 'Pronouns', description: 'Optional', value: '', placeholder: 'e.g. they/them' },
       { id: 'online', type: 'toggle', label: 'Show online status', description: 'Others see when you are active', value: true }] },
     { id: 'notifications', label: 'Notifications', icon: 'bell', description: 'Choose what reaches you, and where', rows: [
@@ -25,12 +31,15 @@ export function PagesSection() {
       { id: 'plan', type: 'action', label: 'Plan', description: 'Pro · 5 seats · renews 1 Dec', action: 'Change plan', onClick: soon('Change plan') },
       { id: 'card', type: 'action', label: 'Payment method', description: 'Visa ending 4242', action: 'Update', onClick: soon('Update payment method') },
       { id: 'invoices', type: 'action', label: 'Invoices', description: '12 available', action: 'View all', onClick: soon('Invoices') }] },
-    { id: 'appearance', label: 'Appearance', icon: 'sun', description: 'Theme, density and motion', rows: [
+    { id: 'appearance', label: 'Appearance', icon: 'sun', description: 'Light or dark', rows: [
       { id: 'theme', type: 'select', label: 'Theme', description: 'Applies to the whole library right away', value: settings.mode,
-        options: [{ value: 'system', label: 'Match system' }, { value: 'light', label: 'Light' }, { value: 'dark', label: 'Dark' }] },
-      { id: 'compact', type: 'toggle', label: 'Compact mode', description: 'Denser tables and lists', value: false },
-      { id: 'motion', type: 'toggle', label: 'Reduce motion', description: 'Follows your system by default', value: false }] },
+        options: [{ value: 'system', label: 'Match system' }, { value: 'light', label: 'Light' }, { value: 'dark', label: 'Dark' }] }] },
   ]
+  // a pretend backend: a short wait, and an empty display name is refused
+  const saveSetting = (id: string, v: SettingsValue) => fakeLatency(undefined, 250, () => {
+    if (id === 'name' && !String(v).trim()) throw new Error('a display name is required')
+    if (id === 'theme' && isThemeMode(v)) set({ mode: v })
+  })
   return (
     <Section id="pages" title="Pages" desc="Full page patterns you can drop into a product: pricing, checkout, settings, profile and onboarding.">
       <Spec title="Pricing table" desc="Toggle the period; prices roll" span={3}>
@@ -40,17 +49,14 @@ export function PagesSection() {
           { name: 'Enterprise', monthly: 79, blurb: 'Security, scale and support', features: ['Everything in Pro', 'SSO and SCIM', 'Audit logs', 'Dedicated manager', 'SLA 99.99%'], cta: 'Contact sales' },
         ]} />
       </Spec>
-      <Spec title="Checkout" desc="Steps with an order summary. Try the promo code SAVE10, and a card number to see the brand detected." span={3}>
-        <Checkout items={[
-          { id: 'pro', name: 'Pro plan', detail: 'Annual · 5 seats', price: 1152, qty: 1, swatch: 'linear-gradient(135deg,var(--accent),var(--c4))' },
-          { id: 'storage', name: 'Extra storage', detail: '100 GB add-on', price: 48, qty: 1, swatch: 'linear-gradient(135deg,var(--c3),var(--warn))' },
-        ]} />
+      <Spec title="Checkout" desc={`Steps with an order summary. Demo only: nothing is charged. Try the promo code ${CHECKOUT_DEMO_PROMO}, a card number to see the brand detected, and ${CHECKOUT_DEMO_DECLINED} for a declined payment.`} span={3}>
+        <Checkout items={CHECKOUT_DEMO_ITEMS} defaultDetails={PAGES_BUYER} validatePromo={checkoutDemoPromo} onPay={checkoutDemoPay} />
       </Spec>
-      <Spec title="Settings page" desc="Section nav at the start, panels swap with a slide. Changes save automatically." span={3}>
-        <SettingsPage sections={sections} onSave={(id, v) => { if (id === 'theme') set({ mode: v as 'system' | 'light' | 'dark' }) }} />
+      <Spec title="Settings page" desc="Section nav at the start, panels swap with a slide. Changes save automatically, and a failed save rolls back." span={3}>
+        <SettingsPage sections={sections} onSave={saveSetting} />
       </Spec>
       <Spec title="Profile" desc="Cover, avatar, stats and tabs. Follow toggles and the count rolls." span={2}>
-        <ProfileCard name="Alex Lee" pro followers={12849} following={312} projects={48}
+        <ProfileCard name={DEMO_PEOPLE[0]} pro followers={12849} following={312} projects={48}
           bio="Design engineer at Northwind. Calm interfaces, fast feedback. Zürich."
           onMessage={() => toast({ title: 'Message Alex', description: 'Opens a conversation in the inbox', tone: 'info' })}
           tabs={[

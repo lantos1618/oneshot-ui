@@ -2,6 +2,9 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { motion } from 'motion/react'
 import { Accordion, Avatar, AvatarStack, Badge, DataTable, Icon, SegmentedControl, Switch, InlineDatePicker, JsonViewer, Kbd, type ShortcutGroup, ShortcutSheet, StatCard, TaskList, type Tone, StatGrid, useToast } from '../lib'
 import { DataGrid, type GridColumn, type GridFilterNode, type GridGroup, type GridSelection, type GridSort, GRID_NO_SELECTION, gridSelectedCount, gridFilter } from '../lib/datagrid'
+import { seeded } from '../examples/random'
+import { fakeLatency } from '../examples/latency'
+import { DEMO_COMPANIES, DEMO_PEOPLE } from '../examples/people'
 import { Row, Section, Spec, SpecAction } from './kit'
 
 type DataInvoice = { id: string; customer: string; status: string; amount: number }
@@ -19,7 +22,7 @@ const DATA_KPIS: { label: string; value: number; format?: Intl.NumberFormatOptio
   { label: 'Churn', value: 0.018, format: { style: 'percent', maximumFractionDigits: 1 }, color: 'var(--bad)', lowerIsBetter: true },
 ]
 function dataSeries() {
-  let sd = 5; const R = () => (sd = (sd * 9301 + 49297) % 233280) / 233280
+  const R = seeded(5)
   return DATA_KPIS.map(k => { const a: number[] = []; let x = k.value * 0.82; for (let i = 0; i < 20; i++) { x *= 1 + (R() - 0.42) * 0.06; a.push(x) } a[19] = k.value; return a })
 }
 
@@ -28,9 +31,8 @@ type DataCustomer = { id: number; name: string; company: string; plan: string; s
 const DATA_ST = ['Active', 'Trial', 'Churned', 'Paused'], DATA_PL = ['Free', 'Pro', 'Team', 'Enterprise']
 const DATA_ST_TONE: Record<string, Tone> = { Active: 'ok', Trial: 'accent', Churned: 'bad', Paused: 'warn' }
 const DATA_CUSTOMERS: DataCustomer[] = (() => {
-  const NAMES = ['Alex Lee', 'Bea Kim', 'Chris Moe', 'Dana Ng', 'Eli Park', 'Fay Ito', 'Gus Roy', 'Hana Ali', 'Ivo Berg', 'Jo Marsh', 'Kai Sun', 'Lea Brun']
-  const COS = ['Northwind', 'Quill Labs', 'Arcwise', 'Meridian', 'Helix Bio', 'Lumen', 'Vertex', 'Orbital'], CC = ['CH', 'GB', 'DE', 'US', 'FR', 'NL', 'SE', 'AU']
-  let s0 = 11; const R = () => (s0 = (s0 * 9301 + 49297) % 233280) / 233280
+  const NAMES = DEMO_PEOPLE, COS = DEMO_COMPANIES, CC = ['CH', 'GB', 'DE', 'US', 'FR', 'NL', 'SE', 'AU']
+  const R = seeded(11)
   return Array.from({ length: 36 }, (_, i) => ({
     id: i + 1, name: NAMES[i % 12], company: COS[Math.floor(R() * 8)], plan: DATA_PL[Math.floor(R() * 4)], status: DATA_ST[Math.floor(R() * 4)],
     country: CC[Math.floor(R() * 8)], mrr: Math.round(R() * 4000 + 20), seats: Math.floor(R() * 80) + 1, joined: new Date(2025, Math.floor(R() * 22), Math.floor(R() * 27) + 1),
@@ -54,8 +56,7 @@ const DATA_LAST = ['Lee', 'Kim', 'Moe', 'Ng', 'Park', 'Ito', 'Roy', 'Ali', 'Berg
 const DATA_COS = ['Northwind', 'Quill Labs', 'Arcwise', 'Meridian', 'Helix Bio', 'Lumen', 'Vertex', 'Orbital', 'Acme', 'Globex', 'Initech', 'Umbrella', 'Stark', 'Wayne', 'Tyrell', 'Cyberdyne']
 const DATA_CC = ['CH', 'GB', 'DE', 'US', 'FR', 'NL', 'SE', 'AU', 'JP', 'CA', 'ES', 'IT']
 function dataBigRows(n: number): DataCustomer[] {
-  let s0 = 20251109 // mulberry32: integer maths only, so the sequence never degenerates
-  const R = () => { s0 = (s0 + 0x6D2B79F5) | 0; let t = Math.imul(s0 ^ (s0 >>> 15), 1 | s0); t = (t + Math.imul(t ^ (t >>> 7), 61 | t)) ^ t; return ((t ^ (t >>> 14)) >>> 0) / 4294967296 }
+  const R = seeded(20251109)
   const out: DataCustomer[] = new Array(n)
   for (let i = 0; i < n; i++) {
     out[i] = { id: i + 1, name: `${DATA_FIRST[Math.floor(R() * 20)]} ${DATA_LAST[Math.floor(R() * 20)]}`, company: DATA_COS[Math.floor(R() * 16)], plan: DATA_PL[Math.floor(R() * 4)],
@@ -81,15 +82,12 @@ function dataSrvTest(r: DataCustomer, n: GridFilterNode): boolean {
 }
 /** "GET /customers": filters, searches (plain substring, the server's own rules), sorts and slices after 250–650 ms. */
 function dataSrvFetch(all: DataCustomer[], query: DataSrvQuery, signal: AbortSignal, fail: boolean): Promise<{ rows: DataCustomer[]; total: number }> {
-  return new Promise((resolve, reject) => {
-    const t = setTimeout(() => {
-      if (fail) return reject(new Error('503 Service Unavailable: the customers API timed out.'))
-      const q = query.q.trim().toLowerCase()
-      let rows = all.filter(r => dataSrvTest(r, query.filter) && (!q || DATA_BIG_COLS.some(c => dataSrvText(r, c.key).toLowerCase().includes(q))))
-      if (query.sort) { const { key, dir } = query.sort; rows = rows.slice().sort((a, b) => (a[key] < b[key] ? -1 : a[key] > b[key] ? 1 : 0) * dir) }
-      resolve({ rows: rows.slice(query.offset, query.offset + query.limit), total: rows.length })
-    }, 250 + ((query.offset / 50 + query.q.length * 7) % 9) * 50)
-    signal.addEventListener('abort', () => { clearTimeout(t); reject(new DOMException('Aborted', 'AbortError')) })
+  return fakeLatency(signal, 250 + ((query.offset / 50 + query.q.length * 7) % 9) * 50, () => {
+    if (fail) throw new Error('503 Service Unavailable: the customers API timed out.')
+    const q = query.q.trim().toLowerCase()
+    let rows = all.filter(r => dataSrvTest(r, query.filter) && (!q || DATA_BIG_COLS.some(c => dataSrvText(r, c.key).toLowerCase().includes(q))))
+    if (query.sort) { const { key, dir } = query.sort; rows = rows.slice().sort((a, b) => (a[key] < b[key] ? -1 : a[key] > b[key] ? 1 : 0) * dir) }
+    return { rows: rows.slice(query.offset, query.offset + query.limit), total: rows.length }
   })
 }
 function DataServerGrid() {
