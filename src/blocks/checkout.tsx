@@ -1,42 +1,10 @@
 import { useEffect, useRef, useState, type ReactNode } from 'react'
 import { AnimatePresence, motion } from 'motion/react'
-import { AnimatedNumber, Button, Icon, TOUCH, cn, defineMessages, dirX, spring, surface, useLocale, useMessages, useWidth, shake, Field, Input, NumberStepper, Select, Steps, Collapse, confetti } from '../lib'
+import { AnimatedNumber, Button, Icon, TOUCH, cn, spring, surface, useWidth, shake, Field, Input, NumberStepper, Select, Steps, Collapse, confetti, fmt } from '../lib'
 
 /* Checkout: cart, details and payment steps with an order summary.
    Copy-in block (registry: `registry:block`), not part of the npm API: copy it into your app and edit freely. It builds
    on the library through `../lib` (in your app: `@lyndon/ui`). */
-
-/* Strings: English plus machine-drafted German and Arabic (have them reviewed). Edit them here, or override any key with
-   `<UIProvider messages={{ 'checkout.pay': … }}>`. */
-const CO_MSG = defineMessages('checkout', {
-  en: {
-    stepCart: 'Cart', stepDetails: 'Details', stepPayment: 'Payment', paid: 'Payment successful', receipt: '{amount} paid · receipt sent to {email}', startOver: 'Start over',
-    promoApplied: '{percent} off applied', promoInvalid: 'That code isn’t valid', promoEmpty: 'Enter a promo code',
-    cardFull: 'Enter the full card number', expFormat: 'Use MM / YY', expired: 'This card has expired', cvcFront: '4 digits on the front', cvcBack: '3 digits on the back',
-    qty: '{name} quantity', toDetails: 'Continue to details', fullName: 'Full name', email: 'Email', emailErr: 'Enter a valid email, like name@company.com',
-    address: 'Company address', vat: 'VAT number', country: 'Country', toPayment: 'Continue to payment', cardNumber: 'Card number', expiry: 'Expiry', expiryMask: 'MM / YY', cvc: 'CVC',
-    demo: 'Demo only: nothing is charged and nothing leaves the page.', processing: 'Processing', pay: 'Pay', summary: 'Order summary', subtotal: 'Subtotal',
-    promo: 'Promo {code}', vatLine: 'VAT {rate}', total: 'Total', promoCode: 'Promo code', apply: 'Apply',
-  },
-  de: {
-    stepCart: 'Warenkorb', stepDetails: 'Angaben', stepPayment: 'Zahlung', paid: 'Zahlung erfolgreich', receipt: '{amount} bezahlt · Beleg an {email} gesendet', startOver: 'Von vorn beginnen',
-    promoApplied: '{percent} Rabatt angewendet', promoInvalid: 'Dieser Code ist ungültig', promoEmpty: 'Gutscheincode eingeben',
-    cardFull: 'Vollständige Kartennummer eingeben', expFormat: 'Format MM / JJ', expired: 'Diese Karte ist abgelaufen', cvcFront: '4 Ziffern auf der Vorderseite', cvcBack: '3 Ziffern auf der Rückseite',
-    qty: 'Menge {name}', toDetails: 'Weiter zu den Angaben', fullName: 'Vollständiger Name', email: 'E-Mail', emailErr: 'Gültige E-Mail eingeben, z. B. name@firma.de',
-    address: 'Firmenadresse', vat: 'USt-IdNr.', country: 'Land', toPayment: 'Weiter zur Zahlung', cardNumber: 'Kartennummer', expiry: 'Ablaufdatum', expiryMask: 'MM / JJ', cvc: 'Prüfnummer',
-    demo: 'Nur eine Demo: Es wird nichts belastet und nichts verlässt die Seite.', processing: 'Wird verarbeitet', pay: 'Bezahlen', summary: 'Bestellübersicht', subtotal: 'Zwischensumme',
-    promo: 'Gutschein {code}', vatLine: 'MwSt. {rate}', total: 'Gesamt', promoCode: 'Gutscheincode', apply: 'Anwenden',
-  },
-  ar: {
-    stepCart: 'السلة', stepDetails: 'التفاصيل', stepPayment: 'الدفع', paid: 'تم الدفع بنجاح', receipt: 'تم دفع {amount} · أُرسل الإيصال إلى {email}', startOver: 'البدء من جديد',
-    promoApplied: 'تم تطبيق خصم {percent}', promoInvalid: 'هذا الرمز غير صالح', promoEmpty: 'أدخل رمزًا ترويجيًا',
-    cardFull: 'أدخل رقم البطاقة كاملًا', expFormat: 'استخدم الشكل MM / YY', expired: 'انتهت صلاحية هذه البطاقة', cvcFront: '٤ أرقام على الوجه', cvcBack: '٣ أرقام على الظهر',
-    qty: 'كمية {name}', toDetails: 'المتابعة إلى التفاصيل', fullName: 'الاسم الكامل', email: 'البريد الإلكتروني', emailErr: 'أدخل بريدًا إلكترونيًا صالحًا، مثل name@company.com',
-    address: 'عنوان الشركة', vat: 'رقم ضريبة القيمة المضافة', country: 'الدولة', toPayment: 'المتابعة إلى الدفع', cardNumber: 'رقم البطاقة', expiry: 'تاريخ الانتهاء', expiryMask: 'MM / YY', cvc: 'رمز التحقق',
-    demo: 'عرض تجريبي فقط: لا يُخصم أي مبلغ ولا يغادر شيء الصفحة.', processing: 'جارٍ المعالجة', pay: 'ادفع', summary: 'ملخص الطلب', subtotal: 'المجموع الفرعي',
-    promo: 'رمز ترويجي {code}', vatLine: 'ضريبة القيمة المضافة {rate}', total: 'الإجمالي', promoCode: 'الرمز الترويجي', apply: 'تطبيق',
-  },
-})
 
 const pagesSlide = {
   enter: (d: number) => ({ opacity: 0, x: 20 * d }),
@@ -49,7 +17,7 @@ const pagesSlide = {
 export type CheckoutItem = { id: string; name: string; detail: string; price: number; qty: number; /** CSS background for the thumbnail */ swatch?: string }
 export type CheckoutDetails = { name: string; email: string; address: string; vat: string; country: string }
 
-const CO_STEPS = ['stepCart', 'stepDetails', 'stepPayment'] as const
+const CO_STEPS = ['Cart', 'Details', 'Payment']
 const coDigits = (v: string) => v.replace(/\D/g, '')
 const coIsAmex = (d: string) => /^3[47]/.test(d)
 const coBrand = (d: string) => /^4/.test(d) ? { name: 'VISA', bg: '#1A1F71' } : /^(5[1-5]|2[2-7])/.test(d) ? { name: 'Mastercard', bg: '#EB001B' } : coIsAmex(d) ? { name: 'Amex', bg: '#2E77BC' } : null
@@ -57,7 +25,7 @@ const coFormatCard = (d: string) => coIsAmex(d) ? [d.slice(0, 4), d.slice(4, 10)
 const coFormatExp = (raw: string) => { let d = coDigits(raw).slice(0, 4); if (/^[2-9]$/.test(d)) d = '0' + d; return d.length > 2 ? `${d.slice(0, 2)} / ${d.slice(2)}` : d }
 
 function CheckoutDone({ email, total, currency, onRestart }: { email: string; total: number; currency: string; onRestart: () => void }) {
-  const ring = useRef<HTMLSpanElement>(null), tm = useMessages(CO_MSG), { fmt } = useLocale()
+  const ring = useRef<HTMLSpanElement>(null)
   useEffect(() => {
     const t = setTimeout(() => { const r = ring.current?.getBoundingClientRect(); if (r) confetti({ x: r.left + r.width / 2, y: r.top + r.height / 2, count: 90 }) }, 120)
     return () => clearTimeout(t)
@@ -67,9 +35,9 @@ function CheckoutDone({ email, total, currency, onRestart }: { email: string; to
       <motion.span ref={ring} initial={{ scale: 0.4 }} animate={{ scale: 1 }} transition={spring(0.5, 0.5)} className="grid h-16 w-16 place-items-center rounded-full bg-[var(--ok-soft)] text-[var(--ok)]">
         <Icon name="check" size={30} strokeWidth={2.6} />
       </motion.span>
-      <b className="text-base">{tm('paid')}</b>
-      <span className="text-[13px] text-[var(--fg2)]">{tm('receipt', { amount: fmt.money(total, currency), email })}</span>
-      <Button size="sm" onClick={onRestart}><Icon name="refresh" size={13} />{tm('startOver')}</Button>
+      <b className="text-base">{'Payment successful'}</b>
+      <span className="text-[13px] text-[var(--fg2)]">{`${fmt.money(total, currency)} paid · receipt sent to ${email}`}</span>
+      <Button size="sm" onClick={onRestart}><Icon name="refresh" size={13} />{'Start over'}</Button>
     </div>
   )
 }
@@ -84,7 +52,6 @@ export function Checkout({ items: initialItems, currency = 'EUR', vatRate = 0.08
   { items: CheckoutItem[]; currency?: string; vatRate?: number; promoCodes?: Record<string, number>; defaultDetails?: Partial<CheckoutDetails>; countries?: string[]
     onComplete?: (o: { items: CheckoutItem[]; details: CheckoutDetails; total: number; promo?: string }) => void; className?: string }) {
   const blankDetails: CheckoutDetails = { name: 'Alex Lee', email: 'alex@northwind.io', address: 'Bahnhofstrasse 21, 8001 Zürich', vat: '', country: countries[0], ...defaultDetails }
-  const tm = useMessages(CO_MSG), { t, fmt, dir: textDir } = useLocale()
   const [items, setItems] = useState(initialItems)
   const [step, setStep] = useState(0)
   const [dir, setDir] = useState(1)
@@ -105,8 +72,8 @@ export function Checkout({ items: initialItems, currency = 'EUR', vatRate = 0.08
   const go = (n: number) => { setDir(Math.sign(n - step) || 1); setStep(n) }
   const apply = () => {
     const v = code.trim().toUpperCase(), r = promoCodes[v]
-    if (r) { setPromo({ code: v, rate: r }); setPromoMsg({ ok: true, text: tm('promoApplied', { percent: fmt.percent(r, 0) }) }) }
-    else { setPromoMsg({ ok: false, text: v ? tm('promoInvalid') : tm('promoEmpty') }); shake(q('[data-co-promo]'), 5) }
+    if (r) { setPromo({ code: v, rate: r }); setPromoMsg({ ok: true, text: `${fmt.percent(r, 0)} off applied` }) }
+    else { setPromoMsg({ ok: false, text: v ? 'That code isn’t valid' : 'Enter a promo code' }); shake(q('[data-co-promo]'), 5) }
   }
   const toPayment = () => {
     if (!/^\S+@\S+\.\S+$/.test(det.email)) { setEmailErr(true); shake(q('#co-email'), 5); (q('#co-email') as HTMLInputElement | null)?.focus(); return }
@@ -114,10 +81,10 @@ export function Checkout({ items: initialItems, currency = 'EUR', vatRate = 0.08
   }
   const pay = () => {
     const d = coDigits(card), e = coDigits(exp), mm = +e.slice(0, 2), yy = +e.slice(2), now = new Date(), err: typeof payErr = {}
-    if (d.length < (coIsAmex(d) ? 15 : 16)) err.card = tm('cardFull')
-    if (e.length < 4 || mm < 1 || mm > 12) err.exp = tm('expFormat')
-    else if (2000 + yy < now.getFullYear() || (2000 + yy === now.getFullYear() && mm < now.getMonth() + 1)) err.exp = tm('expired')
-    if (cvc.length < (coIsAmex(d) ? 4 : 3)) err.cvc = coIsAmex(d) ? tm('cvcFront') : tm('cvcBack')
+    if (d.length < (coIsAmex(d) ? 15 : 16)) err.card = 'Enter the full card number'
+    if (e.length < 4 || mm < 1 || mm > 12) err.exp = 'Use MM / YY'
+    else if (2000 + yy < now.getFullYear() || (2000 + yy === now.getFullYear() && mm < now.getMonth() + 1)) err.exp = 'This card has expired'
+    if (cvc.length < (coIsAmex(d) ? 4 : 3)) err.cvc = coIsAmex(d) ? '4 digits on the front' : '3 digits on the back'
     setPayErr(err)
     const first = err.card ? '#co-card' : err.exp ? '#co-exp' : err.cvc ? '#co-cvc' : null
     if (first) { shake(q(first), 5); return }
@@ -134,7 +101,7 @@ export function Checkout({ items: initialItems, currency = 'EUR', vatRate = 0.08
   const nav = (back: boolean, next: ReactNode) => (
     <div className={cn('flex gap-2', back ? 'justify-between' : 'justify-end',
       !wide && 'sticky bottom-0 z-[2] -mx-4 border-t border-[var(--line)] bg-[var(--card)] px-4 pt-3 pb-[max(12px,env(safe-area-inset-bottom))] [&>button]:h-11 [&>button:last-child]:flex-1')}>
-      {back && <Button onClick={() => go(step - 1)}>{t('common.back')}</Button>}{next}
+      {back && <Button onClick={() => go(step - 1)}>{'Back'}</Button>}{next}
     </div>
   )
 
@@ -145,27 +112,27 @@ export function Checkout({ items: initialItems, currency = 'EUR', vatRate = 0.08
           <li key={it.id} className="flex flex-wrap items-center gap-3 border-b border-[var(--line)] py-2.5 text-[13px]">
             <i className="h-11 w-11 flex-none rounded-[var(--r-md)]" style={{ background: it.swatch ?? 'var(--muted)' }} />
             <div className="min-w-[120px] flex-1"><b className="block font-medium">{it.name}</b><span className="text-xs text-[var(--fg3)]">{it.detail}</span></div>
-            <NumberStepper value={it.qty} min={1} max={20} label={tm('qty', { name: it.name })} onChange={n => setItems(l => l.map(x => x.id === it.id ? { ...x, qty: n } : x))} />
+            <NumberStepper value={it.qty} min={1} max={20} label={`${it.name} quantity`} onChange={n => setItems(l => l.map(x => x.id === it.id ? { ...x, qty: n } : x))} />
             <AnimatedNumber value={it.price * it.qty} format={{ ...money, maximumFractionDigits: 0 }} className="min-w-[80px] justify-end font-medium" />
           </li>
         ))}
       </ul>
-      {nav(false, <Button variant="primary" onClick={() => go(1)}>{tm('toDetails')}</Button>)}
+      {nav(false, <Button variant="primary" onClick={() => go(1)}>{'Continue to details'}</Button>)}
     </div>,
     <div className="flex flex-col gap-3">
       <div className={cn('grid gap-2.5', wide ? 'grid-cols-2' : 'grid-cols-1')}>
-        <Field label={tm('fullName')} htmlFor="co-name"><Input id="co-name" value={det.name} onChange={e => setDet({ ...det, name: e.target.value })} autoComplete="name" /></Field>
-        <Field label={tm('email')} htmlFor="co-email" error={emailErr ? tm('emailErr') : undefined}>
+        <Field label={'Full name'} htmlFor="co-name"><Input id="co-name" value={det.name} onChange={e => setDet({ ...det, name: e.target.value })} autoComplete="name" /></Field>
+        <Field label={'Email'} htmlFor="co-email" error={emailErr ? 'Enter a valid email, like name@company.com' : undefined}>
           <Input id="co-email" type="email" value={det.email} aria-invalid={emailErr || undefined} onChange={e => { setDet({ ...det, email: e.target.value }); setEmailErr(false) }} autoComplete="email" />
         </Field>
-        <Field label={tm('address')} htmlFor="co-addr" className="col-span-full"><Input id="co-addr" value={det.address} onChange={e => setDet({ ...det, address: e.target.value })} /></Field>
-        <Field label={tm('vat')} htmlFor="co-vat" hint={t('common.optional')}><Input id="co-vat" value={det.vat} placeholder="CHE-123.456.789" /* i18n-ignore: a sample number */ onChange={e => setDet({ ...det, vat: e.target.value })} /></Field>
-        <Field label={tm('country')}><Select aria-label={tm('country')} value={det.country} onChange={v => setDet({ ...det, country: v })} options={countries.map(c => ({ value: c, label: c }))} /></Field>
+        <Field label={'Company address'} htmlFor="co-addr" className="col-span-full"><Input id="co-addr" value={det.address} onChange={e => setDet({ ...det, address: e.target.value })} /></Field>
+        <Field label={'VAT number'} htmlFor="co-vat" hint={'Optional'}><Input id="co-vat" value={det.vat} placeholder="CHE-123.456.789" onChange={e => setDet({ ...det, vat: e.target.value })} /></Field>
+        <Field label={'Country'}><Select aria-label={'Country'} value={det.country} onChange={v => setDet({ ...det, country: v })} options={countries.map(c => ({ value: c, label: c }))} /></Field>
       </div>
-      {nav(true, <Button variant="primary" onClick={toPayment}>{tm('toPayment')}</Button>)}
+      {nav(true, <Button variant="primary" onClick={toPayment}>{'Continue to payment'}</Button>)}
     </div>,
     <div className="flex flex-col gap-3">
-      <Field label={tm('cardNumber')} htmlFor="co-card" error={payErr.card}>
+      <Field label={'Card number'} htmlFor="co-card" error={payErr.card}>
         <div className="relative">
           <Input id="co-card" inputMode="numeric" autoComplete="off" placeholder="1234 1234 1234 1234" value={card} aria-invalid={!!payErr.card || undefined}
             onChange={e => { const d = coDigits(e.target.value); setCard(coFormatCard(d.slice(0, coIsAmex(d) ? 15 : 16))); setPayErr(p => ({ ...p, card: undefined })) }}
@@ -181,17 +148,17 @@ export function Checkout({ items: initialItems, currency = 'EUR', vatRate = 0.08
         </div>
       </Field>
       <div className="grid grid-cols-2 gap-2.5">
-        <Field label={tm('expiry')} htmlFor="co-exp" error={payErr.exp}>
-          <Input id="co-exp" inputMode="numeric" placeholder={tm('expiryMask')} value={exp} aria-invalid={!!payErr.exp || undefined} className="font-[family-name:var(--mono)]"
+        <Field label={'Expiry'} htmlFor="co-exp" error={payErr.exp}>
+          <Input id="co-exp" inputMode="numeric" placeholder={'MM / YY'} value={exp} aria-invalid={!!payErr.exp || undefined} className="font-[family-name:var(--mono)]"
             onChange={e => { const v = e.target.value; setExp(v.length < exp.length && exp.endsWith(' / ') ? v : coFormatExp(v)); setPayErr(p => ({ ...p, exp: undefined })) }} />
         </Field>
-        <Field label={tm('cvc')} htmlFor="co-cvc" error={payErr.cvc}>
+        <Field label={'CVC'} htmlFor="co-cvc" error={payErr.cvc}>
           <Input id="co-cvc" inputMode="numeric" placeholder="123" value={cvc} aria-invalid={!!payErr.cvc || undefined} className="font-[family-name:var(--mono)]"
             onChange={e => { setCvc(coDigits(e.target.value).slice(0, 4)); setPayErr(p => ({ ...p, cvc: undefined })) }} />
         </Field>
       </div>
-      <p className="m-0 text-xs text-[var(--fg3)]">{tm('demo')}</p>
-      {nav(true, <Button variant="primary" loading={paying} onClick={pay}>{paying ? tm('processing') : <>{tm('pay')} <AnimatedNumber value={total} format={money} /></>}</Button>)}
+      <p className="m-0 text-xs text-[var(--fg3)]">{'Demo only: nothing is charged and nothing leaves the page.'}</p>
+      {nav(true, <Button variant="primary" loading={paying} onClick={pay}>{paying ? 'Processing' : <>{'Pay'} <AnimatedNumber value={total} format={money} /></>}</Button>)}
     </div>,
     <CheckoutDone email={det.email} total={total} currency={currency} onRestart={restart} />,
   ]
@@ -199,24 +166,24 @@ export function Checkout({ items: initialItems, currency = 'EUR', vatRate = 0.08
   return (
     <div ref={el => { wrap.current = el; root.current = el }} className={cn('grid gap-4', wide ? 'grid-cols-[minmax(0,1fr)_300px]' : 'grid-cols-1', className)}>
       <div className={cn(surface.card, 'flex min-w-0 flex-col gap-4 p-4')}>
-        <Steps steps={CO_STEPS.map(k => tm(k))} current={step} />
+        <Steps steps={CO_STEPS} current={step} />
         <div className="relative min-h-[250px] overflow-clip [overflow-clip-margin:8px]">
-          {/* the next step slides in from the inline end (the left in RTL) */}
-          <AnimatePresence mode="wait" initial={false} custom={dirX(dir, textDir)}>
-            <motion.div key={step} custom={dirX(dir, textDir)} variants={pagesSlide} initial="enter" animate="center" exit="exit" transition={spring(0.2, 0.35)}>{panes[step]}</motion.div>
+          {/* the next step slides in from the inline end */}
+          <AnimatePresence mode="wait" initial={false} custom={dir}>
+            <motion.div key={step} custom={dir} variants={pagesSlide} initial="enter" animate="center" exit="exit" transition={spring(0.2, 0.35)}>{panes[step]}</motion.div>
           </AnimatePresence>
         </div>
       </div>
-      <aside aria-label={tm('summary')} className={cn(surface.card, 'flex flex-col gap-2.5 self-start !bg-[color-mix(in_srgb,var(--muted)_40%,var(--card))] p-4')}>
-        <h4 className="m-0 text-sm font-semibold">{tm('summary')}</h4>
-        <div className={row}><span>{tm('subtotal')}</span><AnimatedNumber value={sub} format={money} /></div>
-        <Collapse open={!!promo}><div className={cn(row, '!text-[var(--ok)]')}><span>{tm('promo', { code: promo?.code ?? '' })}</span><AnimatedNumber value={-disc} format={money} /></div></Collapse>
-        <div className={row}><span>{tm('vatLine', { rate: fmt.percent(vatRate, 2) })}</span><AnimatedNumber value={tax} format={money} /></div>
-        <div className="flex justify-between border-t border-[var(--line)] pt-2.5 text-sm font-semibold"><span>{tm('total')}</span><AnimatedNumber value={total} format={money} className="font-[family-name:var(--font)] tabular-nums" /></div>
+      <aside aria-label={'Order summary'} className={cn(surface.card, 'flex flex-col gap-2.5 self-start !bg-[color-mix(in_srgb,var(--muted)_40%,var(--card))] p-4')}>
+        <h4 className="m-0 text-sm font-semibold">{'Order summary'}</h4>
+        <div className={row}><span>{'Subtotal'}</span><AnimatedNumber value={sub} format={money} /></div>
+        <Collapse open={!!promo}><div className={cn(row, '!text-[var(--ok)]')}><span>{`Promo ${promo?.code ?? ''}`}</span><AnimatedNumber value={-disc} format={money} /></div></Collapse>
+        <div className={row}><span>{`VAT ${fmt.percent(vatRate, 2)}`}</span><AnimatedNumber value={tax} format={money} /></div>
+        <div className="flex justify-between border-t border-[var(--line)] pt-2.5 text-sm font-semibold"><span>{'Total'}</span><AnimatedNumber value={total} format={money} className="font-[family-name:var(--font)] tabular-nums" /></div>
         <form className="flex gap-1.5" data-co-promo onSubmit={e => { e.preventDefault(); apply() }}>
-          <Input value={code} onChange={e => { setCode(e.target.value); if (promoMsg && !promoMsg.ok) setPromoMsg(null) }} placeholder={tm('promoCode')} aria-label={tm('promoCode')}
+          <Input value={code} onChange={e => { setCode(e.target.value); if (promoMsg && !promoMsg.ok) setPromoMsg(null) }} placeholder={'Promo code'} aria-label={'Promo code'}
             aria-invalid={promoMsg?.ok === false || undefined} disabled={step === 3} className={cn('!h-8 uppercase placeholder:normal-case', TOUCH.row)} />
-          <Button size="sm" type="submit" disabled={step === 3} className={cn('!h-8 flex-none', TOUCH.row)}>{tm('apply')}</Button>
+          <Button size="sm" type="submit" disabled={step === 3} className={cn('!h-8 flex-none', TOUCH.row)}>{'Apply'}</Button>
 
         </form>
         <AnimatePresence mode="wait" initial={false}>

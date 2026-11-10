@@ -1,7 +1,6 @@
 import { useRef, useState, type AnchorHTMLAttributes, type Ref } from 'react'
 import { AnimatePresence, motion, useInView } from 'motion/react'
-import { Badge, Breadcrumbs, Button, CollapsibleSidebar, ContextMenu, type ContextMenuEntry, DropdownMenu, Icon, IconButton, type IconName, MegaMenu, type MegaMenuItem, MobileTabBar, Pagination,
-  type SidebarEntry, Switch, type TabBarItem, Tabs, Toggle, ToggleGroup, Toolbar, Wizard, cn, spring, useDir, useToast } from '../lib'
+import { Badge, Breadcrumbs, Button, CollapsibleSidebar, ContextMenu, type ContextMenuEntry, DropdownMenu, Icon, IconButton, type IconName, MegaMenu, type MegaMenuItem, MobileTabBar, Pagination, type SidebarEntry, Switch, type TabBarItem, Tabs, Toggle, ToggleGroup, Toolbar, Wizard, cn, spring, useToast } from '../lib'
 import { PhoneFrame } from '../examples'
 import { Section, Spec } from './kit'
 
@@ -191,9 +190,8 @@ function NavToolbarDemo() {
   const [marks, setMarks] = useState<string[]>(['bold'])
   const [align, setAlign] = useState('start')
   const [pinned, setPinned] = useState(true)
-  const rtl = useDir() === 'rtl' // start/end alignment: the icons point at the edge that is, the left one in LTR
   const alignCls = { start: 'text-start', center: 'text-center', end: 'text-end' }[align]
-  const alignIcon = { start: rtl ? 'alignRight' : 'alignLeft', center: 'alignCenter', end: rtl ? 'alignLeft' : 'alignRight' } as const
+  const alignIcon = { start: 'alignLeft', center: 'alignCenter', end: 'alignRight' } as const
   return (
     <>
       <Toolbar aria-label="Formatting">

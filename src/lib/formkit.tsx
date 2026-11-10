@@ -1,6 +1,6 @@
 /* Shared pieces of the form modules (fields, inputs, select, pickers, upload): not part of the public API. */
 
-import { Fragment, useEffect, useLayoutEffect, useRef, type ReactNode, type Ref } from 'react'
+import { useEffect, useLayoutEffect, useRef, type Ref } from 'react'
 import { formDisabledClass, cn, inputClass } from './core'
 import { type Placement } from './overlay'
 
@@ -20,10 +20,6 @@ export function useFormsAfterReset(ref: { current: HTMLInputElement | HTMLTextAr
 /** Hand `el` to a callback or object ref. */
 export function formsAssignRef<T>(r: Ref<T> | undefined, el: T | null) { if (typeof r === 'function') r(el); else if (r) (r as { current: T | null }).current = el }
 
-/** Give one element to several refs (yours and the caller's). */
-export function formsMergeRefs<T>(...refs: (Ref<T> | undefined)[]) {
-  return (el: T | null) => { for (const r of refs) { if (typeof r === 'function') r(el); else if (r) (r as { current: T | null }).current = el } }
-}
 
 /** Open a list upward when there isn't room below the trigger. */
 export const formsPlacement = (el: HTMLElement | null, room = 270): Placement => {
@@ -46,13 +42,3 @@ export function formsScrollIntoList(el: HTMLElement, center = false) {
   else if (er.bottom > pr.bottom) p.scrollTop += er.bottom - pr.bottom + 4
 }
 
-/**
- * A translated message with React nodes in its placeholders: formsInterleave(t('range'), { from: <b>2</b>, to: <b>8</b> })
- * for "{from} to {to}". Call t() without vars, so the placeholders come back as written.
- */
-export function formsInterleave(message: string, parts: Record<string, ReactNode>): ReactNode {
-  return message.split(/(\{\w+\})/).map((s, i) => {
-    const k = /^\{(\w+)\}$/.exec(s)?.[1]
-    return k && k in parts ? <Fragment key={i}>{parts[k]}</Fragment> : s
-  })
-}

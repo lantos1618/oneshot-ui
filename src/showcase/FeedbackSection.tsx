@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState, type ReactNode } from 'react'
 import { AnimatePresence, animate, motion, useInView } from 'motion/react'
-import { Alert, Avatar, Badge, Button, EmptyState, Icon, IconButton, OfflineIndicator, Progress, ProgressRing, Skeleton, Spinner, Switch, type ToastPosition, cn, confetti, floatingSurface, sleep, spring, useToast } from '../lib'
+import { Alert, Avatar, Badge, Button, EmptyState, Icon, IconButton, OfflineIndicator, Progress, ProgressRing, Skeleton, Spinner, Switch, type ToastPosition, cn, confetti, sleep, spring, useToast, surface } from '../lib'
 import { CookieConsent } from '../blocks'
 import { Row, Section, Spec, SpecPreview } from './kit'
 
@@ -144,7 +144,7 @@ function FbUpgradeDemo() {
   const tone = card === 'pro' ? 'ok' : used >= LIM ? 'bad' : used >= 8 ? 'warn' : 'primary'
   return (
     <>
-      <Row className="justify-between"><span className="text-[13px] text-[var(--fg2)]">Projects</span><span dir="ltr" className="ui-num text-xs text-[var(--fg3)]">{used} / {card === 'pro' ? '∞' : LIM}</span></Row>
+      <Row className="justify-between"><span className="text-[13px] text-[var(--fg2)]">Projects</span><span className="ui-num text-xs text-[var(--fg3)]">{used} / {card === 'pro' ? '∞' : LIM}</span></Row>
       <div ref={barRef}><Progress value={card === 'pro' ? LIM : used} max={LIM} tone={tone} label="Projects used" /></div>
       <Button size="sm" className="self-start" onClick={add}><Icon name="plus" size={13} />New project</Button>
       <AnimatePresence mode="wait">
@@ -230,7 +230,7 @@ function FbToastDemo() {
         {/* a little screen: each button sits where its toasts will appear (its name says top or bottom, the text says where along the edge) */}
         {FB_POSITIONS.map(([pos, label, short]) => (
           <Button key={pos} size="xs" aria-label={label} className={cn('relative', pos.endsWith('start') ? 'justify-self-start' : pos.endsWith('end') ? 'justify-self-end' : 'justify-self-center', pos.startsWith('top') ? 'self-start' : 'self-end')}
-            onClick={() => toast({ id: `fb-pos-${pos}`, title: label, description: 'Start and end swap in right-to-left languages', tone: 'info', position: pos })}>{short}</Button>
+            onClick={() => toast({ id: `fb-pos-${pos}`, title: label, description: 'Toasts stack at this corner', tone: 'info', position: pos })}>{short}</Button>
         ))}
       </div>
     </div>
@@ -257,7 +257,7 @@ export function FeedbackSection() {
         <FbToastDemo />
         <SpecPreview label="A stack of toasts" className="flex flex-col items-end gap-1.5">
           {([['Message archived', 'Undo', 'check'], ['Changes saved', 'Just now', 'check']] as const).map(([t, d], i) => (
-            <div key={t} className={cn(floatingSurface, 'flex w-full max-w-[250px] items-center gap-2 px-3 py-2 text-xs', i === 1 && 'scale-[0.96]')}>
+            <div key={t} className={cn(surface.floating, 'flex w-full max-w-[250px] items-center gap-2 px-3 py-2 text-xs', i === 1 && 'scale-[0.96]')}>
               <Icon name="check" size={13} className="text-[var(--ok)]" /><b className="flex-1 font-medium">{t}</b>
               {i === 0 ? <span className="font-semibold text-[var(--accent)]">{d}</span> : <span className="text-[var(--fg3)]">{d}</span>}
             </div>

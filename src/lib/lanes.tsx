@@ -1,34 +1,7 @@
 import { memo, useCallback, useEffect, useImperativeHandle, useLayoutEffect, useMemo, useRef, useState, type HTMLAttributes, type KeyboardEvent as RKeyboardEvent, type MouseEvent as RMouseEvent, type ReactElement, type ReactNode, type Ref } from 'react'
 import { motion } from 'motion/react'
-import { cn, defineMessages, useCoarsePointer, useControllable, useMessages } from './core'
+import { cn, useCoarsePointer, useControllable } from './core'
 import { useVirtual } from './virtual'
-
-/* ════════════════════════════════════════════════════════════════════════════
- * LANES: graphs as rows. Any directed acyclic graph (git history, branching chats, syntax trees, agent runs, package
- * dependencies) drawn as a list: one row per node, with the edges between rows drawn in a narrow gutter of vertical
- * lanes, like `git log --graph`. Three layers, each usable on its own:
- *
- *   layoutLanes(nodes, options)   pure, no React: row order, a lane and a colour per node, and each row's edges
- *   <LaneGutter row … />          one row's SVG slice of the graph; stretches to the row's real height
- *   <LaneGraph nodes renderRow />  a virtualised list of gutter + your row content, with selection, hover/focus
- *                                 ancestry, keyboard moves along edges and live inserts that keep the reader's place
- *                                 (useLaneGraph gives the same layout and state for your own markup)
- *
- * How the layout works, in plain words (layoutLanes):
- *
- *   1. Order. Children come before parents (Kahn's algorithm): `order: 'time'` takes the newest ready node next,
- *      'topo' the one readied last (keeps a branch together), 'input' keeps your order wherever it is already valid.
- *   2. Walk the rows top to bottom with a list of open lanes, each heading for the parent it waits for.
- *   3. A node takes the lane waiting for it (several waiting: the one that came through a first parent, so a branch's
- *      own line stays straight; the others end here as forks). Nobody waiting: it is a tip and takes the leftmost free lane.
- *   4. Its first parent continues in its lane; every further parent (a merge) joins the lane already heading there or
- *      opens the leftmost free lane. Parents that aren't in the list end in a short fading stub.
- *   5. Each row records its own strokes (lanes passing by, edges into the node from above, edges out of it below), so
- *      no row needs another's geometry: the list virtualises and rows can be any height. `direction: 'up'` (oldest
- *      first, like a chat) runs the same pass and flips the result.
- * ══════════════════════════════════════════════════════════════════════════ */
-
-/* ── types ─────────────────────────────────────────────────────────────────── */
 
 /**
  * A node: a unique `id`, the ids of its `parents` (first parent first: the line it continues), an optional `time` (for
@@ -115,8 +88,6 @@ export function laneColor(group: string, pinned: readonly string[], paletteSize:
   return paletteSize - free + (laneHash(group) % free)
 }
 
-/* ── a small heap (for the 'time' and 'input' orders) ──────────────────────── */
-
 /** A binary min-heap of numbers ordered by `before(a, b)` (true when a comes out first). */
 class MinHeap {
   private items: number[] = []
@@ -151,8 +122,6 @@ class MinHeap {
   }
   private swap(a: number, b: number) { const h = this.items, t = h[a]; h[a] = h[b]; h[b] = t }
 }
-
-/* ── step 1: order ─────────────────────────────────────────────────────────── */
 
 /** A parent that is not in the list. */
 const NOT_LOADED = -1
@@ -205,8 +174,6 @@ function laneOrder(parents: readonly number[][], order: 'time' | 'topo' | 'input
   }
   return out
 }
-
-/* ── steps 2–5: lanes ──────────────────────────────────────────────────────── */
 
 /** A lane that isn't heading anywhere. */
 const FREE = -1
@@ -451,8 +418,6 @@ export function laneAncestry(layout: { rows: readonly { parents: readonly number
   return marks
 }
 
-/* ── drawing: one row's slice ──────────────────────────────────────────────── */
-
 /** Corner radius of edge elbows (the same rounded elbow as TraceWaterfall's connectors). */
 const LANE_ELBOW = 6
 
@@ -506,7 +471,7 @@ export function LaneGutter({ row, laneWidth: lw = 14, rowHeight, nodeY, cap = In
   const c = row.lane >= cap ? 'var(--c-neutral)' : stroke(row.color)
   // a tail is the part of a stroke that runs down to the row's bottom edge: a number for fixed rows, 100% otherwise
   const bottom = rowHeight ?? '100%'
-  const pinned = !rowHeight && 'absolute inset-y-0 left-0' // rtl-lint-ignore: the gutter is an LTR island, its geometry physical
+  const pinned = !rowHeight && 'absolute inset-y-0 left-0'
   const svg = (
     <svg width={width} height={rowHeight ?? '100%'} className={cn('block overflow-visible', pinned, rowHeight && className)} aria-hidden focusable="false">
       {strokes.map(s => (
@@ -544,15 +509,6 @@ function laneStrokePath(e: LaneEdge, a: number, b: number, m: number, lw: number
   if (a === b) return { d: '', tail: { x: a, y: m } }
   return { d: `M${a} ${m}H${b - s * r}Q${b} ${m} ${b} ${m + r}`, tail: { x: b, y: m + r } }
 }
-
-/* ── interaction state (useLaneGraph) ──────────────────────────────────────── */
-
-/** LaneGraph's strings (de/ar machine-drafted). */
-export const LANE_MESSAGES = defineMessages('lanes', {
-  en: { label: 'Graph', newRows: '{count, plural, one {# new row} other {# new rows}}' },
-  de: { label: 'Graph', newRows: '{count, plural, one {# neue Zeile} other {# neue Zeilen}}' },
-  ar: { label: 'المخطط', newRows: '{count, plural, zero {لا صفوف جديدة} one {صف جديد} two {صفان جديدان} few {# صفوف جديدة} many {# صفًا جديدًا} other {# صف جديد}}' },
-})
 
 /** What useLaneGraph needs besides the nodes: the layout options plus selection, the active row and highlighting. */
 export type LaneGraphOptions<N extends LaneNode = LaneNode> = LaneLayoutOptions<N> & {
@@ -625,11 +581,11 @@ export function useLaneGraph<N extends LaneNode>(source: readonly N[] | LaneLayo
       case 'End': return count - 1
       case 'PageDown': return clamp(active + page)
       case 'PageUp': return clamp(active - page)
-      case 'ArrowLeft': { // rtl-lint-ignore: a plot key (← back along the graph, to a parent), not mapped through logicalArrow
+      case 'ArrowLeft': {
         const ps = row.parents.filter(p => p >= 0)
         return (shift ? ps[1] ?? ps[0] : ps[0]) ?? null
       }
-      case 'ArrowRight': { // rtl-lint-ignore: a plot key (→ forward, to a child)
+      case 'ArrowRight': {
         const kids = row.children, rows = layout.rows
         // prefer the child that continues this node's lane (its first parent is us), then any first-parent child
         const k = kids.find(c => rows[c].parents[0] === row.index && rows[c].lane === row.lane) ?? kids.find(c => rows[c].parents[0] === row.index) ?? kids[kids.length - 1]
@@ -640,8 +596,6 @@ export function useLaneGraph<N extends LaneNode>(source: readonly N[] | LaneLayo
   }, [layout, active, count])
   return { layout, active, setActive, selected, select, hover, setHover, focused, setFocused, highlight, target }
 }
-
-/* ── LaneGraph ─────────────────────────────────────────────────────────────── */
 
 /** What a row knows about itself while rendering. */
 export type LaneRowState = { active: boolean; selected: boolean; /** on the lit line */ lit: boolean; /** the line is lit and this row is not on it */ dimmed: boolean }
@@ -685,7 +639,7 @@ export type LaneGraphProps<N extends LaneNode = LaneNode> = LaneGraphOptions<N> 
   className?: string; 'aria-label'?: string; ref?: Ref<LaneGraphHandle>
 } & Pick<HTMLAttributes<HTMLDivElement>, 'aria-colcount' | 'aria-describedby'>
 
-const LANE_NAV_KEYS = new Set(['ArrowLeft', 'ArrowRight', 'ArrowUp', 'ArrowDown', 'Home', 'End', 'PageUp', 'PageDown']) // rtl-lint-ignore: plot keys
+const LANE_NAV_KEYS = new Set(['ArrowLeft', 'ArrowRight', 'ArrowUp', 'ArrowDown', 'Home', 'End', 'PageUp', 'PageDown'])
 const laneEditable = (t: EventTarget | null) => t instanceof Element && !!t.closest('input,textarea,select,[contenteditable="true"],[contenteditable=""]')
 /** A control inside a row (its own button, link or field): clicking it doesn't also activate the row. */
 const laneControl = (target: EventTarget | null, row: Element) => {
@@ -714,7 +668,7 @@ const LaneRowView = memo(function LaneRowView({ row, start, height, columns, gut
   const content = renderRow(row, state)
   const inner = (
     <>
-      <div role="gridcell" dir="ltr" className="self-stretch overflow-hidden">
+      <div role="gridcell" className="self-stretch overflow-hidden">
         <LaneGutter row={row} laneWidth={laneWidth} rowHeight={height} nodeY={nodeY} cap={cap} laneCount={laneCount} highlight={highlight} emphasis={emphasis} palette={palette} />
       </div>
       {cells ? content : <div role="gridcell" className="min-w-0">{content}</div>}
@@ -737,8 +691,7 @@ const LaneRowView = memo(function LaneRowView({ row, start, height, columns, gut
  * their content (chat messages, cards), measured as they render. Click or Enter selects (`onActivate` to do more);
  * hover or focus lights the row's first-parent line and dims the rest (`hovered` + `onHoverChange` drive the hover from
  * outside, e.g. code that points at a node). Keys: ↑/↓, Home/End, PageUp/Down; ← goes to
- * the parent (Shift: the second parent), → to the child (Shift: another child); the graph is an LTR island, so these
- * don't mirror in RTL. Right-click, long-press, Shift+F10 or the Menu key call `onContextMenu`. Rows inserted above
+ * the parent (Shift: the second parent), → to the child (Shift: another child). Right-click, long-press, Shift+F10 or the Menu key call `onContextMenu`. Rows inserted above
  * keep the reader's place and fade in; `anchor="end"` keeps a chat-like list at its bottom.
  *
  *   <LaneGraph nodes={tasks} order="topo" rowHeight="auto" renderRow={row => <TaskCard task={row.node} />} />
@@ -748,7 +701,6 @@ export function LaneGraph<N extends LaneNode>(props: LaneGraphProps<N>) {
     height = 420, fit = true, header, headerHeight = 0, columns = 'minmax(0,1fr)', cells = false, rowLabel, rowClassName, rowAttrs, emphasis, empty, contentMinWidth, fresh: freshProp, wrapScroller,
     className, 'aria-label': ariaLabel, ref, ...rest } = props
   const { 'aria-colcount': colCount, 'aria-describedby': describedBy } = rest
-  const t = useMessages(LANE_MESSAGES)
   const g = useLaneGraph(nodes, props)
   const { layout, active, setActive, selected, select, highlight, target, setHover, setFocused } = g
   const { rows } = layout, count = rows.length
@@ -832,7 +784,7 @@ export function LaneGraph<N extends LaneNode>(props: LaneGraphProps<N>) {
     if (e.key === 'Escape') { if (selected.size) { stop(); select(null) } return }
     const page = Math.max(1, Math.floor((v.viewportSize - headerHeight) / (fixedH ?? (typeof estimateRowHeight === 'number' ? estimateRowHeight : 72))) - 1)
     const to = target(e.key, e.shiftKey, page)
-    // a navigation key with nowhere to go (← on a root) is still consumed; the graph is an LTR plot, so ←/→ don't mirror
+    // a navigation key with nowhere to go (← on a root) is still consumed
     if (to == null && !LANE_NAV_KEYS.has(e.key)) return
     stop()
     if (to != null) goTo(to)
@@ -841,7 +793,7 @@ export function LaneGraph<N extends LaneNode>(props: LaneGraphProps<N>) {
   // a short list ends at its last row instead of leaving a blank box below it (with an empty list, room for `empty`)
   const boxHeight = fit && typeof height === 'number' ? Math.min(height, Math.max(v.totalSize + (contentMinWidth ? 12 : 0), count ? 0 : 96)) : height
   const scroller = (
-    <div ref={scrollRef} role="grid" tabIndex={-1} aria-label={ariaLabel ?? t('label')} aria-rowcount={count + (header ? 1 : 0)} aria-colcount={colCount} aria-describedby={describedBy} aria-multiselectable={false}
+    <div ref={scrollRef} role="grid" tabIndex={-1} aria-label={ariaLabel ?? 'Graph'} aria-rowcount={count + (header ? 1 : 0)} aria-colcount={colCount} aria-describedby={describedBy} aria-multiselectable={false}
       className="relative min-w-0 flex-1 overflow-auto overscroll-contain outline-none [contain:strict] [scrollbar-width:thin]" style={{ height: boxHeight }}
       onKeyDown={handleKey}
       onFocus={e => { setFocused(true); if (e.target === e.currentTarget) goTo(active); else { const i = laneRowFrom(e.target); if (i >= 0 && i !== active) setActive(i) } }}

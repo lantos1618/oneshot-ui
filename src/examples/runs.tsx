@@ -1,5 +1,5 @@
 import { useCallback, useMemo } from 'react'
-import { Badge, StatusIcon, cn, useLocale, type StatusIconStatus } from '../lib/core'
+import { Badge, StatusIcon, cn, fmt, type StatusIconStatus } from '../lib/core'
 import { LaneGraph, type LaneRow } from '../lib/lanes'
 import {
   fromAiSdkResult, fromLangGraphEvents, fromOtel, runLaneNodes,
@@ -253,14 +253,13 @@ export const AGENT_RUN_FIXTURES: AgentRunFixture[] = [
 const RUN_LANE_STATUS: Record<AgentSpanStatus, StatusIconStatus> = { running: 'active', ok: 'done', error: 'failed', cancelled: 'pending' }
 /** A run's steps as a lane graph (runLaneNodes): what each step waited for, its agent's lane colour, status, model or tool, tokens and time. */
 export function AgentRunLanes({ run, height = 420, className }: { run: AgentRun; height?: number; className?: string }) {
-  const { fmt } = useLocale()
   const nodes = useMemo(() => runLaneNodes(run), [run])
   const renderRow = useCallback((row: LaneRow<(typeof nodes)[number]>) => {
     const s = row.node.span, tok = s.tokens ? s.tokens.input + s.tokens.output : 0
     return (
       <div className="flex h-full min-w-0 items-center gap-2 pe-3 text-[13px]">
         <StatusIcon status={RUN_LANE_STATUS[s.status]} size={16} className="flex-none" />
-        <span dir="auto" className={cn('min-w-[9ch] truncate', s.status === 'error' ? 'text-[var(--bad)]' : 'text-[var(--fg)]')}>{s.name}</span>
+        <span className={cn('min-w-[9ch] truncate', s.status === 'error' ? 'text-[var(--bad)]' : 'text-[var(--fg)]')}>{s.name}</span>
         {row.parents.length > 1 && <Badge size="sm" className="flex-none max-sm:hidden">waits for {row.parents.length}</Badge>}
         <Badge size="sm" tone={s.kind === 'llm' ? 'accent' : s.kind === 'human' ? 'warn' : 'neutral'} className="flex-none font-[family-name:var(--mono)] max-sm:hidden">{s.model ?? s.kind}</Badge>
         {s.status === 'error' && s.error && <Badge size="sm" tone="bad" className="min-w-0 truncate"><span className="truncate">{s.error}</span></Badge>}

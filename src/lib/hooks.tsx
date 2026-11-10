@@ -1,18 +1,17 @@
-/** State and DOM hooks: controllable state, outside clicks, sizes, media queries, touch, pointer drag, long press, hotkeys, focus trap, roving focus, streamed text, scroll edges. Part of @lyndon/ui/core. */
-import { type PointerEvent as ReactPointerEvent, type RefObject, type KeyboardEvent as RKeyboardEvent, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, useSyncExternalStore } from 'react'
+/** State and DOM hooks: controllable state, outside clicks, an active index, status flashes, a live region, sizes, media queries, touch, pointer drag, long press, hotkeys, focus trap, roving focus, streamed text, scroll edges. Part of @lyndon/ui/core. */
+import { type ReactNode, type PointerEvent as ReactPointerEvent, type RefObject, type KeyboardEvent as RKeyboardEvent, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, useSyncExternalStore } from 'react'
 import { focusables } from './helpers'
-import { logicalArrow, useDir } from './locale'
 import { uiShared } from './shared'
 
-/* State and DOM hooks ─────────────────────────────────────────────────────── */
-
-/** Controlled-or-uncontrolled state, the pattern every input here uses. */
+/** Controlled-or-uncontrolled state, the pattern every input here uses: `[value, set, reset]` (reset returns to the latest `defaultValue`, e.g. on a form reset). */
 export function useControllable<T>(value: T | undefined, defaultValue: T, onChange?: (v: T) => void) {
   const [inner, setInner] = useState(defaultValue)
   const controlled = value !== undefined
-  const current = controlled ? value : inner
+  const def = useRef(defaultValue)
+  useLayoutEffect(() => { def.current = defaultValue })
   const set = useCallback((v: T) => { if (!controlled) setInner(v); onChange?.(v) }, [controlled, onChange])
-  return [current, set] as const
+  const reset = useCallback(() => setInner(def.current), [])
+  return [controlled ? value : inner, set, reset] as const
 }
 
 /**
@@ -94,13 +93,54 @@ export const prefersReducedMotion = () => mqNow('(prefers-reduced-motion: reduce
 /** Is the primary pointer coarse (touch)? A plain call for event handlers and effects; in render use useCoarsePointer. */
 export const isCoarsePointer = () => mqNow('(pointer: coarse)')
 
-/* Touch helpers: a finger fires pointerenter → down → up → leave on every tap ──── */
-
 /** True when a pointer event came from a finger. */
 export const isTouch = (e: { pointerType?: string }) => e.pointerType === 'touch'
 
 /** A pointerleave handler that ignores touch, so the leave a lifted finger fires doesn't undo what the tap showed. */
 export const onMouseLeave = (fn: (e: ReactPointerEvent) => void) => (e: ReactPointerEvent) => { if (!isTouch(e)) fn(e) }
+
+/** Call `onResize(el)` now and whenever the element of `ref` changes size (a layout effect; `deps` re-subscribe it). */
+export function useResizeObserver<T extends Element>(ref: RefObject<T | null>, onResize: (el: T) => void, deps: readonly unknown[] = []) {
+  const cb = useRef(onResize)
+  useLayoutEffect(() => { cb.current = onResize })
+  useLayoutEffect(() => {
+    const el = ref.current; if (!el || typeof ResizeObserver === 'undefined') return
+    const run = () => cb.current(el)
+    run()
+    const ro = new ResizeObserver(run); ro.observe(el)
+    return () => ro.disconnect()
+  }, deps) // eslint-disable-line react-hooks/exhaustive-deps
+}
+
+/**
+ * The active item of a widget with `count` items (a chart point, a hovered row): `[index | null, set, leave]`. The index
+ * is null when out of range (the data shrank); Escape, a tap outside `ref` and the mouse leaving (spread `leave` on the
+ * box) clear it. Pass a predicate instead of a count for other shapes (`([r, c]) => r < rows && c < cols`).
+ */
+export function useActiveIndex<T = number>(count: number | ((v: T) => boolean), ref: RefObject<Element | null>) {
+  const [raw, set] = useState<T | null>(null)
+  const ok = typeof count === 'number' ? (v: T) => (v as number) >= 0 && (v as number) < count : count
+  const active = raw !== null && ok(raw) ? raw : null
+  useOutside([ref], () => set(null), active !== null, { escape: true })
+  const leave = { onPointerLeave: onMouseLeave(() => set(null)) }
+  return [active, set, leave] as const
+}
+
+/** A short-lived result for feedback on a button (Copied / Couldn’t copy): `flash(ok)` shows 'ok' or 'fail' for `ms`, then ''. */
+export function useStatusFlash(ms = 1500) {
+  const [status, setStatus] = useState<'' | 'ok' | 'fail'>('')
+  const t = useRef<ReturnType<typeof setTimeout>>(undefined)
+  useEffect(() => () => clearTimeout(t.current), [])
+  const flash = useCallback((ok: boolean) => { clearTimeout(t.current); setStatus(ok ? 'ok' : 'fail'); t.current = setTimeout(() => setStatus(''), ms) }, [ms])
+  return [status, flash] as const
+}
+
+/** A polite live region: `const [say, live] = useLive()`; render `live` once and call `say(text)` to announce. */
+export function useLive() {
+  const [text, setText] = useState('')
+  const live: ReactNode = <span className="sr-only" aria-live="polite">{text}</span>
+  return [setText, live] as const
+}
 
 /** On touch, drop the implicit pointer capture so a finger sliding across items enters each one, like a mouse. */
 export const releaseTouchCapture = (e: ReactPointerEvent) => {
@@ -267,8 +307,8 @@ export type RovingOptions = {
 }
 
 /**
- * Arrow-key roving index for lists, menus, tablists and toolbars: arrows move (skipping disabled items; ← and → swap in
- * * RTL, so the arrow pointing along the reading direction moves to the next item), Home/End jump, Enter calls `onEnter`. Third argument: `loop` (boolean) or RovingOptions. Safe with zero items.
+ * Arrow-key roving index for lists, menus, tablists and toolbars: arrows move (skipping disabled items, along
+ * the arrow keys of its orientation), Home/End jump, Enter calls `onEnter`. Third argument: `loop` (boolean) or RovingOptions. Safe with zero items.
  */
 export function useRoving(count: number, onEnter: (i: number) => void, options: boolean | RovingOptions = true) {
   const { loop = true, orientation = 'vertical', isDisabled, homeEnd = true, index, onMove } = typeof options === 'boolean' ? { loop: options } as RovingOptions : options
@@ -284,12 +324,10 @@ export function useRoving(count: number, onEnter: (i: number) => void, options: 
     }
     return -1
   }
-  const dir = useDir()
   const go = (n: number) => { if (n < 0) return; if (index === undefined) setActive(n); onMove?.(n) }
   const onKeyDown = (e: RKeyboardEvent) => {
     if (!count) return
-    const v = orientation !== 'horizontal', hz = orientation !== 'vertical', key = logicalArrow(e.key, dir) // ← is "next" in RTL
-    // rtl-lint-ignore: `key` is logicalArrow-mapped above
+    const v = orientation !== 'horizontal', hz = orientation !== 'vertical', key = e.key
     const d = (v && key === 'ArrowDown') || (hz && key === 'ArrowRight') ? 1 : (v && key === 'ArrowUp') || (hz && key === 'ArrowLeft') ? -1 : 0
     if (d) { e.preventDefault(); go(step(Math.min(active, count - 1), d)) }
     else if (homeEnd && (e.key === 'Home' || e.key === 'End')) { e.preventDefault(); go(e.key === 'Home' ? step(-1, 1) : step(count, -1)) }
@@ -350,8 +388,8 @@ export function useStreamedText(text: string, { cps = 60, start = true, unit = '
 }
 
 /**
- * Watches a horizontal scroller: `left` / `right` say whether more content is hidden on that (physical) side, in LTR
- * and RTL alike, `touched` turns true once it has been scrolled away from its start. Pair with `ScrollEdges` for fades and a "scroll for more" hint.
+ * Watches a horizontal scroller: `left` / `right` say whether more content is hidden on that side;
+ * `touched` turns true once it has been scrolled away from its start. Pair with `ScrollEdges` for fades and a "scroll for more" hint.
  */
 export function useScrollEdges<T extends HTMLElement>() {
   const [el, ref] = useState<T | null>(null) // callback ref, so a remounted scroller is picked up
@@ -359,10 +397,8 @@ export function useScrollEdges<T extends HTMLElement>() {
   useEffect(() => {
     if (!el) return
     const upd = () => setEdges(e => {
-      // physical sides; in RTL scrollLeft runs from 0 (start, at the right) down to -(scrollWidth - clientWidth)
-      const rtl = getComputedStyle(el).direction === 'rtl', max = el.scrollWidth - el.clientWidth, x = rtl ? -el.scrollLeft : el.scrollLeft
-      const scrolled = x > 2, rest = x < max - 2
-      const left = rtl ? rest : scrolled, right = rtl ? scrolled : rest, touched = e.touched || scrolled
+      const max = el.scrollWidth - el.clientWidth, x = el.scrollLeft
+      const left = x > 2, right = x < max - 2, touched = e.touched || left
       return e.left === left && e.right === right && e.touched === touched ? e : { left, right, touched }
     })
     upd()

@@ -1,13 +1,12 @@
 import { useEffect, useId, useLayoutEffect, useMemo, useRef, useState, useSyncExternalStore, type ReactNode, type Ref, type KeyboardEvent as RKeyboardEvent } from 'react'
 import { AnimatePresence, motion } from 'motion/react'
-import { FormFieldContext, LOCALE, type FormControlProps, formDate, formDisabledClass, formReadOnlyClass, useFormControl, Badge, Button, type HourCycle, type MessageDefs, type MessageKeyOf, type ModuleTranslate, type WeekDay, createMessagesTranslator, dateFormat, defineMessages, dirX, inputClass, localeHourCycle, localeWeekStart, logicalArrow, numberFormat, useLocale, addDays, addMonths, cn, fmtDate, isTouch, menuItemClass, sameDay, spring, startOfDay, useControllable, useDir, useDisclosure, usePointerDrag, useRoving } from './core'
+import { FormFieldContext, LOCALE, type FormControlProps, formDate, formDisabledClass, formReadOnlyClass, useFormControl, Badge, Button, type HourCycle, type WeekDay, dateFormat, inputClass, numberFormat, addDays, addMonths, cn, fmtDate, isTouch, menuItemClass, sameDay, spring, startOfDay, useControllable, useDisclosure, usePointerDrag, useRoving, plural, composeRefs, memoOnce } from './core'
 import { play } from './motion'
 import { FloatingPanel, Popover, PopoverContent, type Placement, usePopover } from './overlay'
-import { formsAssignRef, formsMergeRefs, formsPlacement, formsScrollIntoList, formsTriggerClass } from './formkit'
+import { formsAssignRef, formsPlacement, formsScrollIntoList, formsTriggerClass } from './formkit'
 import { SegmentedControl, inputShellClass } from './fields'
 import { Combobox } from './select'
 
-/* Dates ─────────────────────────────────────────────────────────────────────── */
 //
 // Values (README "Forms" has the FormData table):
 //   Calendar, DatePicker, DateField  a local Date at midnight; submitted as "2026-11-08" (like <input type="date">)
@@ -16,10 +15,10 @@ import { Combobox } from './select'
 //   DateTimeField, DateTimePicker    ISO 8601 with the offset of `timeZone` at that instant: "2026-11-08T09:30:00+01:00"
 //                                    (new Date(value) is the instant); null while empty, submitted as '' then
 //   MonthPicker "2026-11" · YearPicker "2026" · TimeZonePicker "Europe/Zurich"
-// Locale, week start, hour cycle and time zone default to useLocale() (UIProvider); props win.
+// Formats are en-GB with weeks starting on Monday; `hourCycle` and `timeZone` props set the clock and zone.
 
-/** Format a date ("8 Nov 2026" in en-GB); same as core `fmtDate`. Pass `locale` for another language. */
-export const formatDate = (d?: Date | null, opts?: Intl.DateTimeFormatOptions, locale?: string) => fmtDate(d, opts, locale)
+/** Format a date ("8 Nov 2026"); same as core `fmtDate`. */
+export const formatDate = (d?: Date | null, opts?: Intl.DateTimeFormatOptions) => fmtDate(d, opts)
 
 /** A date range [start, end]; either side may be null while it is being picked. */
 export type DateRange = [Date | null, Date | null]
@@ -42,14 +41,7 @@ const datesLocal = (y: number, m: number, d: number) => { const t = new Date(200
 /** Milliseconds of a wall time read as if it were UTC. */
 const datesUTC = (w: ZonedParts) => { const t = new Date(Date.UTC(2000, 0, 1, w.hour, w.minute, w.second)); t.setUTCFullYear(w.year, w.month - 1, w.day); return +t }
 const datesSafeZone = (tz: string) => { try { dateFormat('en-US', { timeZone: tz }); return tz } catch { return 'UTC' } }
-const datesSafeLocale = (l: string) => { try { return Intl.getCanonicalLocales(l)[0] ?? LOCALE } catch { return LOCALE } }
 const datesIs12 = (hc: string | number | undefined) => hc === 12 || hc === 'h11' || hc === 'h12'
-
-const datesCache = new Map<string, unknown>()
-function datesMemo<T>(k: string, make: () => T): T {
-  if (!datesCache.has(k)) datesCache.set(k, make())
-  return datesCache.get(k) as T
-}
 
 /** Wall-clock fields of the instant `at` in the IANA `timeZone`: zonedParts(Date.UTC(2026, 6, 1, 8), 'Europe/London').hour → 9. */
 export function zonedParts(at: Date | number, timeZone: string): ZonedParts {
@@ -99,32 +91,32 @@ function datesParseISO(s: string): { wall: ZonedParts; time: boolean; at?: numbe
 
 /** A Gregorian Intl.DateTimeFormat (cached), whatever calendar the locale uses by default. */
 const datesDF = (locale: string, o: Intl.DateTimeFormatOptions) => dateFormat(locale, { calendar: 'gregory', ...o })
-/** `n` in the locale's digits, zero-padded to `width` (ar-EG: ٠٨). */
+/** `n` in the locale's digits, zero-padded to `width`. */
 const datesNum = (locale: string, n: number, width = 1) => numberFormat(locale, { useGrouping: false, minimumIntegerDigits: width }).format(n)
 /** Arabic-Indic, Persian and full-width digits to ASCII, for typing and pasting. */
 const datesAscii = (s: string) => s.replace(/[٠-٩۰-۹０-９]/g, c => {
   const k = c.charCodeAt(0)
   return String(k - (k >= 0xff10 ? 0xff10 : k >= 0x06f0 ? 0x06f0 : 0x0660))
 })
-/** Weekday names, Sunday first: short (narrow where short names run long, as in Arabic) and long. */
-const datesWeekdays = (locale: string) => datesMemo(`wd${locale}`, () => {
+/** Weekday names, Sunday first: short (narrow where short names run long) and long. */
+const datesWeekdays = (locale: string) => memoOnce(`wd${locale}`, () => {
   const names = (weekday: 'short' | 'narrow' | 'long') => Array.from({ length: 7 }, (_, i) => datesDF(locale, { weekday, timeZone: 'UTC' }).format(Date.UTC(2024, 0, 7 + i)))
   const short = names('short')
   return { short: short.some(s => s.length > 4) ? names('narrow') : short, long: names('long') }
 })
-const datesMonthNames = (locale: string, month: 'short' | 'long') => datesMemo(`mo${locale}${month}`, () =>
+const datesMonthNames = (locale: string, month: 'short' | 'long') => memoOnce(`mo${locale}${month}`, () =>
   Array.from({ length: 12 }, (_, i) => datesDF(locale, { month, timeZone: 'UTC' }).format(Date.UTC(2024, i, 15))))
 /** The locale's am/pm words: ["AM", "PM"], ["午前", "午後"], ["ص", "م"]. */
-const datesPeriods = (locale: string) => datesMemo(`dp${locale}`, () => [1, 13].map(h =>
+const datesPeriods = (locale: string) => memoOnce(`dp${locale}`, () => [1, 13].map(h =>
   datesDF(locale, { hour: 'numeric', hourCycle: 'h12', timeZone: 'UTC' }).formatToParts(Date.UTC(2024, 0, 1, h)).find(p => p.type === 'dayPeriod')?.value ?? (h < 12 ? 'AM' : 'PM')))
 const DATES_FIELD_EN: Record<DatesSegType, string> = { year: 'Year', month: 'Month', day: 'Day', hour: 'Hour', minute: 'Minute', second: 'Second', dayPeriod: 'AM/PM' }
 /** A segment's localised name ("Day", "Tag", "日"), its accessible name. */
-const datesFieldName = (locale: string, t: DatesSegType) => datesMemo(`fn${locale}${t}`, () => {
+const datesFieldName = (locale: string, t: DatesSegType) => memoOnce(`fn${locale}${t}`, () => {
   try { const s = new Intl.DisplayNames(locale, { type: 'dateTimeField' }).of(t); if (s) return s[0].toLocaleUpperCase(locale) + s.slice(1) } catch { /* old engine */ }
   return DATES_FIELD_EN[t]
 })
 /** An empty segment's placeholder: "dd", "mm", "yyyy" (de-DE "tt.mm.jjjj"); dashes where the field name isn't Latin, and for the time. */
-const datesPlaceholder = (locale: string, t: DatesSegType) => datesMemo(`ph${locale}${t}`, () => {
+const datesPlaceholder = (locale: string, t: DatesSegType) => memoOnce(`ph${locale}${t}`, () => {
   const n = t === 'year' ? 4 : 2, c = datesFieldName(locale, t)[0].toLowerCase()
   return (t === 'year' || t === 'month' || t === 'day') && /[a-z]/.test(c) ? c.repeat(n) : '–'.repeat(n)
 })
@@ -160,7 +152,7 @@ function datesTemplate(locale: string, date: boolean, gran: DateGranularity | nu
     if (gran !== 'hour') o.minute = '2-digit'
     if (gran === 'second') o.second = '2-digit'
   }
-  return datesMemo(`tp${locale}${JSON.stringify(o)}`, () => {
+  return memoOnce(`tp${locale}${JSON.stringify(o)}`, () => {
     const out: DatesPart[] = []
     for (const p of datesDF(locale, o).formatToParts(Date.UTC(2026, 10, 8, 21, 5, 7))) {
       if (DATES_SEGS.includes(p.type)) { out.push({ type: p.type as DatesSegType }); continue }
@@ -231,83 +223,12 @@ function datesParseText(text: string, tpl: DatesPart[], locale: string, h12: boo
   return v
 }
 
-/**
- * The typed date and time fields' strings (DateField, TimeField, DateTimeField; machine-drafted de/ar). Keys sit under
- * `date.`: override one with `<UIProvider messages={{ 'date.incomplete': … }}>`.
- */
-export const DATE_FIELD_MESSAGES = defineMessages('date', {
-  en: {
-    blank: 'Empty', incomplete: 'Enter a complete date', incompleteTime: 'Enter a complete time',
-    tooEarly: 'Choose {date} or later', tooLate: 'Choose {date} or earlier', unavailable: 'That date isn’t available',
-    timeTooEarly: 'Choose {time} or later', timeTooLate: 'Choose {time} or earlier', showTimes: 'Show times', suggestedTimes: 'Suggested times',
-  },
-  de: {
-    blank: 'Leer', incomplete: 'Gib ein vollständiges Datum ein', incompleteTime: 'Gib eine vollständige Uhrzeit ein',
-    tooEarly: 'Wähle {date} oder später', tooLate: 'Wähle {date} oder früher', unavailable: 'Dieses Datum ist nicht verfügbar',
-    timeTooEarly: 'Wähle {time} oder später', timeTooLate: 'Wähle {time} oder früher', showTimes: 'Uhrzeiten anzeigen', suggestedTimes: 'Vorgeschlagene Uhrzeiten',
-  },
-  ar: {
-    blank: 'فارغ', incomplete: 'أدخل تاريخًا كاملًا', incompleteTime: 'أدخل وقتًا كاملًا',
-    tooEarly: 'اختر {date} أو بعده', tooLate: 'اختر {date} أو قبله', unavailable: 'هذا التاريخ غير متاح',
-    timeTooEarly: 'اختر {time} أو بعده', timeTooLate: 'اختر {time} أو قبله', showTimes: 'عرض الأوقات', suggestedTimes: 'أوقات مقترحة',
-  },
-})
-
-/**
- * The calendar's and the date pickers' strings (machine-drafted de/ar), also under `date.` (`date.today`,
- * `date.previousMonth`, `date.nextMonth` and `date.chooseDate` are the built-in catalog's keys, with the same values).
- */
-export const DATE_PICKER_MESSAGES = defineMessages('date', {
-  en: {
-    today: 'Today', yesterday: 'Yesterday', last7: 'Last 7 days', last30: 'Last 30 days', thisMonth: 'This month', lastMonth: 'Last month',
-    clear: 'Clear', done: 'Done', pickDate: 'Pick a date', chooseDate: 'Choose a date', pickDates: 'Pick dates', chooseDates: 'Choose dates',
-    dayCount: '{count, plural, one {# day} other {# days}}', rangeHintStart: 'Tap or drag to choose dates', rangeHintEnd: 'Choose an end date',
-    rangeHintDone: '{count} · drag either end to adjust', chooseDateTime: 'Choose date and time', time: 'Time', timeZone: 'Time zone',
-    searchTimeZones: 'Search time zones', noTimeZones: 'No matching time zones', pickMonth: 'Pick a month', chooseMonth: 'Choose a month',
-    pickYear: 'Pick a year', chooseYearTitle: 'Choose a year', previousMonth: 'Previous month', nextMonth: 'Next month',
-    chooseMonthYear: '{month}, choose month and year', chooseYear: '{year}, choose year', previousYear: 'Previous year', nextYear: 'Next year',
-    previousYears: 'Earlier years', nextYears: 'Later years', modeDate: 'Date', modeRange: 'Date range', mode: 'Pick one date or a range',
-    from: 'From date', to: 'To date', noDate: 'No date selected', range: '{from} to {to}', singleDay: 'Single day',
-  },
-  de: {
-    today: 'Heute', yesterday: 'Gestern', last7: 'Letzte 7 Tage', last30: 'Letzte 30 Tage', thisMonth: 'Dieser Monat', lastMonth: 'Letzter Monat',
-    clear: 'Leeren', done: 'Fertig', pickDate: 'Datum auswählen', chooseDate: 'Datum wählen', pickDates: 'Zeitraum auswählen', chooseDates: 'Zeitraum wählen',
-    dayCount: '{count, plural, one {# Tag} other {# Tage}}', rangeHintStart: 'Tippe oder ziehe, um Tage zu wählen', rangeHintEnd: 'Wähle ein Enddatum',
-    rangeHintDone: '{count} · ziehe an einem Ende, um anzupassen', chooseDateTime: 'Datum und Uhrzeit wählen', time: 'Uhrzeit', timeZone: 'Zeitzone',
-    searchTimeZones: 'Zeitzonen suchen', noTimeZones: 'Keine passende Zeitzone', pickMonth: 'Monat auswählen', chooseMonth: 'Monat wählen',
-    pickYear: 'Jahr auswählen', chooseYearTitle: 'Jahr wählen', previousMonth: 'Vorheriger Monat', nextMonth: 'Nächster Monat',
-    chooseMonthYear: '{month}, Monat und Jahr wählen', chooseYear: '{year}, Jahr wählen', previousYear: 'Vorheriges Jahr', nextYear: 'Nächstes Jahr',
-    previousYears: 'Frühere Jahre', nextYears: 'Spätere Jahre', modeDate: 'Datum', modeRange: 'Zeitraum', mode: 'Ein Datum oder einen Zeitraum wählen',
-    from: 'Von', to: 'Bis', noDate: 'Kein Datum ausgewählt', range: '{from} bis {to}', singleDay: 'Ein Tag',
-  },
-  ar: {
-    today: 'اليوم', yesterday: 'أمس', last7: 'آخر 7 أيام', last30: 'آخر 30 يومًا', thisMonth: 'هذا الشهر', lastMonth: 'الشهر الماضي',
-    clear: 'مسح', done: 'تم', pickDate: 'اختر تاريخًا', chooseDate: 'اختر تاريخًا', pickDates: 'اختر التواريخ', chooseDates: 'اختر التواريخ',
-    dayCount: '{count, plural, zero {# يوم} one {يوم واحد} two {يومان} few {# أيام} many {# يومًا} other {# يوم}}',
-    rangeHintStart: 'انقر أو اسحب لاختيار التواريخ', rangeHintEnd: 'اختر تاريخ الانتهاء', rangeHintDone: '{count} · اسحب أيًّا من الطرفين للتعديل',
-    chooseDateTime: 'اختر التاريخ والوقت', time: 'الوقت', timeZone: 'المنطقة الزمنية', searchTimeZones: 'ابحث في المناطق الزمنية',
-    noTimeZones: 'لا توجد منطقة زمنية مطابقة', pickMonth: 'اختر شهرًا', chooseMonth: 'اختر شهرًا', pickYear: 'اختر سنة', chooseYearTitle: 'اختر سنة',
-    previousMonth: 'الشهر السابق', nextMonth: 'الشهر التالي', chooseMonthYear: '{month}، اختر الشهر والسنة', chooseYear: '{year}، اختر السنة',
-    previousYear: 'السنة السابقة', nextYear: 'السنة التالية', previousYears: 'سنوات سابقة', nextYears: 'سنوات لاحقة',
-    modeDate: 'تاريخ', modeRange: 'نطاق تواريخ', mode: 'اختر تاريخًا واحدًا أو نطاقًا', from: 'من تاريخ', to: 'إلى تاريخ',
-    noDate: 'لم يُحدَّد تاريخ', range: '{from} إلى {to}', singleDay: 'يوم واحد',
-  },
-})
-type DatesPickerT = ModuleTranslate<MessageKeyOf<typeof DATE_PICKER_MESSAGES>>
-
-/** Locale, week start, clock and zone for the date controls: props first, then useLocale() (UIProvider), then the runtime's zone. */
-function useDatesLocale(p: { locale?: string; weekStartsOn?: number; timeZone?: string; hourCycle?: 12 | 24 | HourCycle }) {
-  const ctx = useLocale()
-  const locale = datesSafeLocale(p.locale ?? ctx.locale)
-  const weekStartsOn = ((p.weekStartsOn ?? (p.locale ? localeWeekStart(locale) : ctx.weekStartsOn)) % 7) as WeekDay
-  const h12 = datesIs12(p.hourCycle ?? (p.locale ? localeHourCycle(locale) : ctx.hourCycle))
+/** Locale, week start (Monday), clock and zone for the date controls: the `hourCycle` and `timeZone` props, else 24-hour and the runtime's zone. */
+function useDatesLocale(p: { timeZone?: string; hourCycle?: 12 | 24 | HourCycle } = {}) {
   // the runtime's zone after hydration (the server renders UTC), so server and client markup match
   const runtimeZone = useSyncExternalStore(datesNoSubscribe, datesRuntimeZone, () => 'UTC')
-  const timeZone = datesSafeZone(p.timeZone ?? ctx.timeZone ?? runtimeZone)
-  return { locale, weekStartsOn, h12, timeZone, messages: ctx.messages, dir: ctx.dir }
+  return { locale: LOCALE, weekStartsOn: 1 as WeekDay, h12: datesIs12(p.hourCycle ?? 'h23'), timeZone: datesSafeZone(p.timeZone ?? runtimeZone) }
 }
-/** t() for one of the date catalogs, in the control's locale (a `locale` prop wins over the provider's). */
-const datesT = <K extends string>(defs: MessageDefs<K>, L: { locale: string; messages: Partial<Record<string, string>> }) => createMessagesTranslator(defs, L.locale, L.messages)
 type DatesL = ReturnType<typeof useDatesLocale>
 const datesNoSubscribe = () => () => {}
 const datesRuntimeZone = () => { try { return Intl.DateTimeFormat().resolvedOptions().timeZone || 'UTC' } catch { return 'UTC' } }
@@ -321,11 +242,10 @@ function useDatesToday() {
 /** Why a picked day isn't allowed (outside min/max, or unavailable), as a message; null when it's fine. */
 function datesDayProblem(d: Date | null | undefined, c: { min?: Date | null; max?: Date | null; isDateUnavailable?: (d: Date) => boolean }, L: DatesL): string | null {
   if (!d) return null
-  const tf = datesT(DATE_FIELD_MESSAGES, L)
   const f = (x: Date) => datesDF(L.locale, { day: 'numeric', month: 'long', year: 'numeric' }).format(x)
-  if (c.min && d < startOfDay(c.min)) return tf('tooEarly', { date: f(c.min) })
-  if (c.max && d > startOfDay(c.max)) return tf('tooLate', { date: f(c.max) })
-  if (c.isDateUnavailable?.(d)) return tf('unavailable')
+  if (c.min && d < startOfDay(c.min)) return `Choose ${f(c.min)} or later`
+  if (c.max && d > startOfDay(c.max)) return `Choose ${f(c.max)} or earlier`
+  if (c.isDateUnavailable?.(d)) return 'That date isn’t available'
   return null
 }
 
@@ -355,7 +275,7 @@ type DatesSegmentsProps = {
 /**
  * The segment row behind DateField, TimeField and DateTimeField: one spinbutton input per segment, in the locale's
  * order, with its separators. Digits fill a segment and move on once it can't take another; ↑/↓ step it (wrapping),
- * PageUp/PageDown in bigger steps, Home/End to its ends; ←/→ (mirrored in RTL) and separator keys move between segments;
+ * PageUp/PageDown in bigger steps, Home/End to its ends; ←/→ and separator keys move between segments;
  * Backspace clears digit by digit, then moves back. Paste fills every segment. Typed digits may be Arabic-Indic or full-width.
  */
 function DatesSegments(p: DatesSegmentsProps) {
@@ -412,10 +332,9 @@ function DatesSegments(p: DatesSegmentsProps) {
   const onKey = (e: RKeyboardEvent<HTMLInputElement>, i: number, t: DatesSegType) => {
     if (e.ctrlKey || e.metaKey || e.altKey) return
     const k = e.key
-    if (k === 'ArrowLeft' || k === 'ArrowRight') { // k is the key through logicalArrow
+    if (k === 'ArrowLeft' || k === 'ArrowRight') {
       e.preventDefault()
-      const rtl = getComputedStyle(e.currentTarget).direction === 'rtl'
-      focusAt(i + (logicalArrow(k, rtl ? 'rtl' : 'ltr') === 'ArrowRight' ? 1 : -1))
+      focusAt(i + (k === 'ArrowRight' ? 1 : -1))
       return
     }
     if (['ArrowUp', 'ArrowDown', 'PageUp', 'PageDown', 'Home', 'End'].includes(k)) { e.preventDefault(); if (!locked) step(t, k); return }
@@ -528,17 +447,15 @@ const DATES_DAY_CONV: DatesConv<Date | null> = {
   fromWall: w => datesLocal(w.year, w.month, w.day), key: d => (d ? formDate(d) : ''), empty: null,
 }
 
-/* Calendar ───────────────────────────────────────────────────────────────────── */
-
 /** Prev/next arrows plus a title (a button when it opens the next level up), shared by the month and year grids. */
 function DatesNavHeader({ title, onTitle, titleLabel, onPrev, onNext, prevLabel, nextLabel, prevDisabled, nextDisabled }: {
   title: string; onTitle?: () => void; titleLabel?: string; onPrev: () => void; onNext: () => void; prevLabel: string; nextLabel: string; prevDisabled?: boolean; nextDisabled?: boolean }) {
   return (
     <div className="mb-2 flex h-7 flex-none items-center justify-between [@media(pointer:coarse)]:h-9">
-      <button type="button" aria-label={prevLabel} title={prevLabel} onClick={onPrev} disabled={prevDisabled} className={DATES_ICON_BTN}><DatesGlyph name="chevronLeft" className="ui-flip" /></button>
+      <button type="button" aria-label={prevLabel} title={prevLabel} onClick={onPrev} disabled={prevDisabled} className={DATES_ICON_BTN}><DatesGlyph name="chevronLeft" /></button>
       {onTitle ? <button type="button" onClick={onTitle} aria-label={titleLabel} className={DATES_CAPTION}>{title}<DatesGlyph name="chevronDown" size={13} className="text-[var(--fg3)]" /></button>
         : <span className="text-[13px] font-semibold">{title}</span>}
-      <button type="button" aria-label={nextLabel} title={nextLabel} onClick={onNext} disabled={nextDisabled} className={DATES_ICON_BTN}><DatesGlyph name="chevronRight" className="ui-flip" /></button>
+      <button type="button" aria-label={nextLabel} title={nextLabel} onClick={onNext} disabled={nextDisabled} className={DATES_ICON_BTN}><DatesGlyph name="chevronRight" /></button>
     </div>
   )
 }
@@ -546,19 +463,19 @@ const DATES_CAPTION = 'inline-flex h-7 cursor-pointer items-center gap-1 rounded
 const DATES_TILE = 'cursor-pointer rounded-[var(--r-md)] border-0 bg-transparent text-[13px] text-[var(--fg)] transition-colors hover:bg-[var(--muted)] aria-pressed:bg-[var(--primary)] aria-pressed:font-semibold aria-pressed:text-[var(--on-primary)] ' +
   'aria-disabled:cursor-default aria-disabled:text-[var(--fg3)] aria-disabled:line-through aria-disabled:hover:bg-transparent [@media(pointer:coarse)]:text-sm'
 
-/** Arrow-key moves in a 3-column grid of 12 tiles: ←/→ (mirrored in RTL) by one, ↑/↓ by a row, Home/End to the ends. */
+/** Arrow-key moves in a 3-column grid of 12 tiles: ←/→ by one, ↑/↓ by a row, Home/End to the ends. */
 const datesTileMove = (e: RKeyboardEvent, i: number) => {
-  const rtl = getComputedStyle(e.currentTarget).direction === 'rtl', k = logicalArrow(e.key, rtl ? 'rtl' : 'ltr')
-  return k === 'ArrowLeft' ? i - 1 : k === 'ArrowRight' ? i + 1 : k === 'ArrowUp' ? i - 3 : k === 'ArrowDown' ? i + 3 : k === 'Home' ? 0 : k === 'End' ? 11 : null // k: logicalArrow(e.key)
+  const k = e.key
+  return k === 'ArrowLeft' ? i - 1 : k === 'ArrowRight' ? i + 1 : k === 'ArrowUp' ? i - 3 : k === 'ArrowDown' ? i + 3 : k === 'Home' ? 0 : k === 'End' ? 11 : null
 }
 
 /**
  * Twelve months of `year` to pick from (the calendar's quick picker, and MonthPicker). The title opens the year grid;
  * arrows move, PageUp/PageDown change the year, Enter picks, Escape goes back. Months wholly outside min/max are disabled.
  */
-function DatesMonthGrid({ locale, year, onYear, selected, onPick, min, max, onTitle, onEscape, t }: {
+function DatesMonthGrid({ locale, year, onYear, selected, onPick, min, max, onTitle, onEscape }: {
   locale: string; year: number; onYear: (y: number) => void; selected?: { year: number; month: number } | null; onPick: (month: number) => void
-  min?: Date | null; max?: Date | null; onTitle?: () => void; onEscape?: () => void; t: DatesPickerT }) {
+  min?: Date | null; max?: Date | null; onTitle?: () => void; onEscape?: () => void }) {
   const names = datesMonthNames(locale, 'short'), long = datesMonthNames(locale, 'long')
   const off = (m: number) => !!((min && new Date(year, m + 1, 0) < startOfDay(min)) || (max && new Date(year, m, 1) > max))
   const [active, setActive] = useState(() => selected && selected.year === year ? selected.month : 0)
@@ -573,8 +490,8 @@ function DatesMonthGrid({ locale, year, onYear, selected, onPick, min, max, onTi
       const n = datesTileMove(e, active)
       if (n !== null) { e.preventDefault(); go(n) }
     }}>
-      <DatesNavHeader title={datesNum(locale, year)} onTitle={onTitle} titleLabel={t('chooseYear', { year: datesNum(locale, year) })}
-        onPrev={() => onYear(year - 1)} onNext={() => onYear(year + 1)} prevLabel={t('previousYear')} nextLabel={t('nextYear')}
+      <DatesNavHeader title={datesNum(locale, year)} onTitle={onTitle} titleLabel={`${datesNum(locale, year)}, choose year`}
+        onPrev={() => onYear(year - 1)} onNext={() => onYear(year + 1)} prevLabel={'Previous year'} nextLabel={'Next year'}
         prevDisabled={!!min && year <= min.getFullYear()} nextDisabled={!!max && year >= max.getFullYear()} />
       <div role="group" aria-label={datesNum(locale, year)} className="grid flex-1 grid-cols-3 grid-rows-4 gap-1">
         {names.map((n, m) => (
@@ -589,8 +506,8 @@ function DatesMonthGrid({ locale, year, onYear, selected, onPick, min, max, onTi
 }
 
 /** Twelve years per page to pick from (the calendar's quick picker, and YearPicker). Arrows move (paging at the edges), PageUp/PageDown page, Escape goes back. */
-function DatesYearGrid({ locale, year, selected, onPick, min, max, onEscape, t }: {
-  locale: string; year: number; selected?: number | null; onPick: (y: number) => void; min?: Date | null; max?: Date | null; onEscape?: () => void; t: DatesPickerT }) {
+function DatesYearGrid({ locale, year, selected, onPick, min, max, onEscape }: {
+  locale: string; year: number; selected?: number | null; onPick: (y: number) => void; min?: Date | null; max?: Date | null; onEscape?: () => void }) {
   const [start, setStart] = useState(() => year - (((year % 12) + 12) % 12))
   const [active, setActive] = useState(year)
   const refs = useRef(new Map<number, HTMLButtonElement | null>())
@@ -608,7 +525,7 @@ function DatesYearGrid({ locale, year, selected, onPick, min, max, onEscape, t }
       if (n !== null) { e.preventDefault(); go(start + n) }
     }}>
       <DatesNavHeader title={`${datesNum(locale, start)}–${datesNum(locale, start + 11)}`}
-        onPrev={() => setStart(s => s - 12)} onNext={() => setStart(s => s + 12)} prevLabel={t('previousYears')} nextLabel={t('nextYears')}
+        onPrev={() => setStart(s => s - 12)} onNext={() => setStart(s => s + 12)} prevLabel={'Earlier years'} nextLabel={'Later years'}
         prevDisabled={!!min && start <= min.getFullYear()} nextDisabled={!!max && start + 11 >= max.getFullYear()} />
       <div role="group" aria-label={`${datesNum(locale, start)}–${datesNum(locale, start + 11)}`} className="grid flex-1 grid-cols-3 grid-rows-4 gap-1">
         {years.map(y => (
@@ -629,8 +546,6 @@ export type CalendarProps = {
   /** focus the selected (or today's) day on mount, e.g. inside a popover */ autoFocus?: boolean
   /** first and last selectable days; days outside are disabled and navigation stops at them */ min?: Date | null; max?: Date | null
   /** days that can't be picked (weekends, holidays, booked days); they stay focusable and are announced as unavailable */ isDateUnavailable?: (d: Date) => boolean
-  /** 0 Sunday … 6 Saturday (default: the locale's, from useLocale()) */ weekStartsOn?: WeekDay
-  /** month and weekday names, digits (default: useLocale()) */ locale?: string
   /** months side by side, 1–3 (stacked on phones) */ numberOfMonths?: 1 | 2 | 3
   className?: string
 }
@@ -642,17 +557,16 @@ export type CalendarProps = {
  * UIProvider's). `min`, `max` and `isDateUnavailable(date)` disable days (they stay focusable and are announced as
  * unavailable; a range can't start or end on one). `numberOfMonths` shows up to 3 months (stacked on phones).
  * Click the month caption for a month grid, and its year for a year grid, to jump far.
- * Keyboard (ARIA APG date grid): arrows move by day/week across months (mirrored in RTL), Home/End go to the start/end of
+ * Keyboard (ARIA APG date grid): arrows move by day/week across months, Home/End go to the start/end of
  * the week, PageUp/PageDown change month (with Shift, year), Enter or Space picks. In range mode Shift+arrow or
  * Shift+click extends the range from its anchor; you can also click start then end, drag across days, or drag either
  * end of an existing range. On touch, drag an end of the range, or long-press a day and then drag to draw a new one, so a
  * swipe over the grid still scrolls the page. Months slide in the direction you move; the picked day pops.
  */
 export function Calendar({ selected, onSelect, range, onRangeChange, month: initialMonth, onMonthChange, today: todayProp, className, autoFocus,
-  min, max, isDateUnavailable, weekStartsOn: wsProp, locale: locProp, numberOfMonths = 1 }: CalendarProps) {
-  const L = useDatesLocale({ locale: locProp, weekStartsOn: wsProp })
+  min, max, isDateUnavailable, numberOfMonths = 1 }: CalendarProps) {
+  const L = useDatesLocale()
   const { locale, weekStartsOn } = L
-  const tp = datesT(DATE_PICKER_MESSAGES, L)
   const n = Math.max(1, Math.min(3, Math.round(numberOfMonths)))
   const lo = min ? startOfDay(min) : null, hi = max ? startOfDay(max) : null
   const clampDay = (d: Date) => (lo && d < lo ? lo : hi && d > hi ? hi : d)
@@ -712,11 +626,11 @@ export function Calendar({ selected, onSelect, range, onRangeChange, month: init
   }
   const onKey = (e: RKeyboardEvent) => {
     if (!(e.target as HTMLElement).dataset.day) return
-    const cur = tabDay, rtl = getComputedStyle(e.currentTarget).direction === 'rtl', k = logicalArrow(e.key, rtl ? 'rtl' : 'ltr')
+    const cur = tabDay, k = e.key
     const wd = (cur.getDay() - weekStartsOn + 7) % 7
     let next: Date | null = null
-    if (k === 'ArrowLeft') next = addDays(cur, -1) // k: logicalArrow(e.key)
-    else if (k === 'ArrowRight') next = addDays(cur, 1) // k: logicalArrow(e.key)
+    if (k === 'ArrowLeft') next = addDays(cur, -1)
+    else if (k === 'ArrowRight') next = addDays(cur, 1)
     else if (k === 'ArrowUp') next = addDays(cur, -7)
     else if (k === 'ArrowDown') next = addDays(cur, 7)
     else if (k === 'Home') next = addDays(cur, -wd)
@@ -833,7 +747,7 @@ export function Calendar({ selected, onSelect, range, onRangeChange, month: init
       <div key={pi} data-grid={+m} className={n === 1 ? 'w-full' : 'w-[252px] max-w-full max-sm:!w-full [@media(pointer:coarse)]:w-[280px]'}>
         <div className="mb-2 flex h-7 items-center justify-center [@media(pointer:coarse)]:h-9">
           <button type="button" onClick={() => openPicker(m, pi)}
-            aria-label={tp('chooseMonthYear', { month: caption(m) })} className={DATES_CAPTION}>
+            aria-label={`${caption(m)}, choose month and year`} className={DATES_CAPTION}>
             {caption(m)}<DatesGlyph name="chevronDown" size={13} className="text-[var(--fg3)]" />
           </button>
         </div>
@@ -855,7 +769,7 @@ export function Calendar({ selected, onSelect, range, onRangeChange, month: init
           <div className="relative overflow-hidden">
             <AnimatePresence initial={false} mode="popLayout" custom={dir}>
               <motion.div key={+month} data-cal={+month} custom={dir} className={cn('flex gap-x-5 gap-y-4', n > 1 && 'flex-col sm:flex-row', onRangeChange && 'touch-pan-y [-webkit-touch-callout:none]')}
-                variants={{ in: (d: number) => ({ x: dirX(d * 40, L.dir), opacity: 0 }), c: { x: 0, opacity: 1 }, out: (d: number) => ({ x: dirX(d * -40, L.dir), opacity: 0 }) }}
+                variants={{ in: (d: number) => ({ x: (d * 40), opacity: 0 }), c: { x: 0, opacity: 1 }, out: (d: number) => ({ x: (d * -40), opacity: 0 }) }}
                 initial="in" animate="c" exit="out" transition={spring(0.1, 0.3)} onKeyDown={onKey}
                 onPointerLeave={() => setHover(null)} onPointerMove={onMove} onPointerUp={cancelHold} onPointerCancel={cancelHold}
                 onContextMenu={onRangeChange ? e => e.preventDefault() : undefined}>
@@ -863,18 +777,18 @@ export function Calendar({ selected, onSelect, range, onRangeChange, month: init
               </motion.div>
             </AnimatePresence>
           </div>
-          <button type="button" aria-label={tp('previousMonth')} title={tp('previousMonth')} onClick={() => go(-1)} disabled={!!lo && lo >= month} className={cn(navCls, 'start-0')}><DatesGlyph name="chevronLeft" className="ui-flip" /></button>
-          <button type="button" aria-label={tp('nextMonth')} title={tp('nextMonth')} onClick={() => go(1)} disabled={!!hi && hi < end0} className={cn(navCls, 'end-0')}><DatesGlyph name="chevronRight" className="ui-flip" /></button>
+          <button type="button" aria-label={'Previous month'} title={'Previous month'} onClick={() => go(-1)} disabled={!!lo && lo >= month} className={cn(navCls, 'start-0')}><DatesGlyph name="chevronLeft" /></button>
+          <button type="button" aria-label={'Next month'} title={'Next month'} onClick={() => go(1)} disabled={!!hi && hi < end0} className={cn(navCls, 'end-0')}><DatesGlyph name="chevronRight" /></button>
           <span className="sr-only" aria-live="polite" id={uid}>{months.map(caption).join(', ')}</span>
         </div>
         {view !== 'days' && (
           <div className="absolute inset-0 z-10 flex justify-center">
             <div className="flex h-full w-full max-w-[280px] flex-col">
               {view === 'months'
-                ? <DatesMonthGrid key={pick.year} locale={locale} year={pick.year} onYear={y => setPick(p => ({ ...p, year: y }))} t={tp}
+                ? <DatesMonthGrid key={pick.year} locale={locale} year={pick.year} onYear={y => setPick(p => ({ ...p, year: y }))}
                   selected={{ year: addMonths(month, pick.panel).getFullYear(), month: addMonths(month, pick.panel).getMonth() }} onPick={pickMonth} min={lo} max={hi}
                   onTitle={() => setView('years')} onEscape={() => { wantFocus.current = true; setView('days') }} />
-                : <DatesYearGrid locale={locale} year={pick.year} selected={addMonths(month, pick.panel).getFullYear()} min={lo} max={hi} t={tp}
+                : <DatesYearGrid locale={locale} year={pick.year} selected={addMonths(month, pick.panel).getFullYear()} min={lo} max={hi}
                   onPick={y => { setPick(p => ({ ...p, year: y })); setView('months') }} onEscape={() => setView('months')} />}
             </div>
           </div>
@@ -889,7 +803,7 @@ function FormsTrigger({ icon, children, fc, ref }: { icon: DatesGlyphName; child
   fc: { control: { id?: string; 'aria-invalid'?: true; 'aria-describedby'?: string }; disabled: boolean; readOnly: boolean } }) {
   const { open, setOpen, triggerRef, id: pid } = usePopover()
   return (
-    <button type="button" ref={formsMergeRefs(triggerRef, ref)} {...fc.control} disabled={fc.disabled} className={cn(formsTriggerClass, fc.readOnly ? 'cursor-default bg-[var(--muted)] hover:!border-[var(--line)]' : 'cursor-pointer')}
+    <button type="button" ref={composeRefs(triggerRef, ref)} {...fc.control} disabled={fc.disabled} className={cn(formsTriggerClass, fc.readOnly ? 'cursor-default bg-[var(--muted)] hover:!border-[var(--line)]' : 'cursor-pointer')}
       aria-haspopup="dialog" aria-expanded={open} aria-controls={pid} onClick={() => { if (!fc.readOnly) setOpen(!open) }}>
       <DatesGlyph name={icon} className="text-[var(--fg3)]" />{children}
     </button>
@@ -897,7 +811,7 @@ function FormsTrigger({ icon, children, fc, ref }: { icon: DatesGlyphName; child
 }
 
 /** The date constraints DatePicker, DateRangePicker and DateField share with Calendar. */
-type DatesConstraints = { min?: Date | null; max?: Date | null; isDateUnavailable?: (d: Date) => boolean; weekStartsOn?: WeekDay; locale?: string }
+type DatesConstraints = { min?: Date | null; max?: Date | null; isDateUnavailable?: (d: Date) => boolean }
 
 /**
  * Date field: the calendar pops from the field (keyboard ready), the picked day pops, Today and Clear sit under the grid.
@@ -906,10 +820,9 @@ type DatesConstraints = { min?: Date | null; max?: Date | null; isDateUnavailabl
  * submits the local date as "2026-11-08" (like <input type="date">; '' when empty), `required`, `disabled`, `readOnly`
  * (doesn't open), `invalid`, `onBlur`, `form`, and `ref` on the trigger. For typing a date, use DateField.
  */
-export function DatePicker({ value, defaultValue = null, onChange, placeholder, min, max, isDateUnavailable, weekStartsOn, locale, numberOfMonths, className, ref, ...fp }: FormControlProps & DatesConstraints &
+export function DatePicker({ value, defaultValue = null, onChange, placeholder, min, max, isDateUnavailable, numberOfMonths, className, ref, ...fp }: FormControlProps & DatesConstraints &
   { value?: Date | null; defaultValue?: Date | null; onChange?: (d: Date | null) => void; placeholder?: string; numberOfMonths?: 1 | 2 | 3; className?: string; ref?: Ref<HTMLButtonElement> }) {
-  const L = useDatesLocale({ locale })
-  const tp = datesT(DATE_PICKER_MESSAGES, L)
+  const L = useDatesLocale()
   const btn = useRef<HTMLButtonElement>(null)
   const fc = useFormControl<Date | null>({ ...fp, value, defaultValue, onChange, serialize: formDate, focus: () => btn.current?.focus() })
   const d = fc.value, set = fc.set
@@ -924,16 +837,16 @@ export function DatePicker({ value, defaultValue = null, onChange, placeholder, 
   return (
     <span className={cn('relative block', className)} onBlur={fc.onBlur}>
       <Popover open={open && !fc.disabled && !fc.readOnly} onOpenChange={setOpen} className="!block">
-        <FormsTrigger icon="calendar" fc={{ ...fc, control: { ...fc.control, 'aria-invalid': invalid || undefined } }} ref={formsMergeRefs(btn, ref)}>
+        <FormsTrigger icon="calendar" fc={{ ...fc, control: { ...fc.control, 'aria-invalid': invalid || undefined } }} ref={composeRefs(btn, ref)}>
           <motion.span key={d ? +d : 0} initial={{ opacity: 0, y: 4 }} animate={{ opacity: 1, y: 0 }} transition={spring(0.3, 0.3)} className={cn('truncate', !d && 'text-[var(--fg3)]')}>
-            {d ? datesDF(L.locale, { weekday: 'short', day: 'numeric', month: 'short', year: 'numeric' }).format(d) : placeholder ?? tp('pickDate')}
+            {d ? datesDF(L.locale, { weekday: 'short', day: 'numeric', month: 'short', year: 'numeric' }).format(d) : placeholder ?? 'Pick a date'}
           </motion.span>
         </FormsTrigger>
-        <PopoverContent className="p-3" aria-label={tp('chooseDate')}>
-          <Calendar selected={d} onSelect={x => pick(x)} autoFocus {...c} weekStartsOn={weekStartsOn} locale={locale} numberOfMonths={numberOfMonths} />
+        <PopoverContent className="p-3" aria-label={'Choose a date'}>
+          <Calendar selected={d} onSelect={x => pick(x)} autoFocus {...c} numberOfMonths={numberOfMonths} />
           <div className="mt-2 flex justify-between border-t border-[var(--line)] pt-2">
-            <Button size="sm" variant="ghost" disabled={!!datesDayProblem(today, c, L)} onClick={() => pick(today)}>{tp('today')}</Button>
-            <Button size="sm" variant="ghost" disabled={!d} onClick={() => pick(null, false)}>{tp('clear')}</Button>
+            <Button size="sm" variant="ghost" disabled={!!datesDayProblem(today, c, L)} onClick={() => pick(today)}>{'Today'}</Button>
+            <Button size="sm" variant="ghost" disabled={!d} onClick={() => pick(null, false)}>{'Clear'}</Button>
           </div>
         </PopoverContent>
       </Popover>
@@ -943,19 +856,15 @@ export function DatePicker({ value, defaultValue = null, onChange, placeholder, 
   )
 }
 
-const DATES_PRESETS: ['today' | 'yesterday' | 'last7' | 'last30' | 'thisMonth' | 'lastMonth', () => DateRange][] = [
-  ['today', () => [startOfDay(new Date()), startOfDay(new Date())]],
-  ['yesterday', () => [addDays(new Date(), -1), addDays(new Date(), -1)]],
-  ['last7', () => [addDays(new Date(), -6), startOfDay(new Date())]],
-  ['last30', () => [addDays(new Date(), -29), startOfDay(new Date())]],
-  ['thisMonth', () => { const n = new Date(); return [new Date(n.getFullYear(), n.getMonth(), 1), new Date(n.getFullYear(), n.getMonth() + 1, 0)] }],
-  ['lastMonth', () => { const n = new Date(); return [new Date(n.getFullYear(), n.getMonth() - 1, 1), new Date(n.getFullYear(), n.getMonth(), 0)] }],
+/** Quick ranges shown beside the range calendar: [label, () => range]. Pass your own list to DateRangePicker to change them. */
+export const RANGE_PRESETS: [string, () => DateRange][] = [
+  ['Today', () => [startOfDay(new Date()), startOfDay(new Date())]],
+  ['Yesterday', () => [addDays(new Date(), -1), addDays(new Date(), -1)]],
+  ['Last 7 days', () => [addDays(new Date(), -6), startOfDay(new Date())]],
+  ['Last 30 days', () => [addDays(new Date(), -29), startOfDay(new Date())]],
+  ['This month', () => { const n = new Date(); return [new Date(n.getFullYear(), n.getMonth(), 1), new Date(n.getFullYear(), n.getMonth() + 1, 0)] }],
+  ['Last month', () => { const n = new Date(); return [new Date(n.getFullYear(), n.getMonth() - 1, 1), new Date(n.getFullYear(), n.getMonth(), 0)] }],
 ]
-/**
- * Quick ranges shown beside the range calendar, in English: [label, () => range]. DateRangePicker's default presets are
- * the same ranges in the locale's language; pass your own list to change them.
- */
-export const RANGE_PRESETS: [string, () => DateRange][] = DATES_PRESETS.map(([k, get]) => [DATE_PICKER_MESSAGES.en[k], get])
 
 /**
  * Range picker with presets (the matching preset stays highlighted; presets that fall outside `min`/`max` or start or end
@@ -964,11 +873,10 @@ export const RANGE_PRESETS: [string, () => DateRange][] = DATES_PRESETS.map(([k,
  * phones stack them). Form-native: `name` submits two fields, start then end ("2026-11-01", "2026-11-07"; '' for a missing
  * side; read with formData.getAll), `required` (both ends), `disabled`, `readOnly`, `invalid`, `onBlur`, `form`, `ref`.
  */
-export function DateRangePicker({ value, defaultValue = [null, null], onChange, placeholder, presets: presetsProp, min, max, isDateUnavailable, weekStartsOn, locale, numberOfMonths, className, ref, ...fp }: FormControlProps & DatesConstraints &
+export function DateRangePicker({ value, defaultValue = [null, null], onChange, placeholder, presets: presetsProp, min, max, isDateUnavailable, numberOfMonths, className, ref, ...fp }: FormControlProps & DatesConstraints &
   { value?: DateRange; defaultValue?: DateRange; onChange?: (r: DateRange) => void; placeholder?: string; presets?: [string, () => DateRange][]; numberOfMonths?: 1 | 2 | 3; className?: string; ref?: Ref<HTMLButtonElement> }) {
-  const L = useDatesLocale({ locale })
-  const tp = datesT(DATE_PICKER_MESSAGES, L)
-  const presets = presetsProp ?? DATES_PRESETS.map(([k, get]): [string, () => DateRange] => [tp(k), get])
+  const L = useDatesLocale()
+  const presets = presetsProp ?? RANGE_PRESETS
   const btn = useRef<HTMLButtonElement>(null)
   const fc = useFormControl<DateRange>({ ...fp, value, defaultValue, onChange, serialize: r => [formDate(r[0]), formDate(r[1])], filled: r => !!r[0] && !!r[1], focus: () => btn.current?.focus() })
   const r = fc.value, set = fc.set
@@ -983,15 +891,15 @@ export function DateRangePicker({ value, defaultValue = [null, null], onChange, 
   const presetOff = (get: () => DateRange) => { const [x, y] = get(); return !!(datesDayProblem(x, c, L) || datesDayProblem(y, c, L)) }
   const problem = datesDayProblem(r[0], c, L) ?? datesDayProblem(r[1], c, L)
   const invalid = fc.invalid || flagged || !!problem
-  const count = tp('dayCount', { count: days })
+  const count = plural(days, 'day')
   return (
     <span className={cn('relative block', className)} onBlur={fc.onBlur}>
       <Popover open={open && !fc.disabled && !fc.readOnly} onOpenChange={setOpen} className="!block">
-        <FormsTrigger icon="calendar" fc={{ ...fc, control: { ...fc.control, 'aria-invalid': invalid || undefined } }} ref={formsMergeRefs(btn, ref)}>
-          <span className={cn('flex-1 truncate', !r[0] && 'text-[var(--fg3)]')}>{r[0] ? (r[1] ? f.formatRange(r[0], r[1]) : `${f.format(r[0])} – …`) : placeholder ?? tp('pickDates')}</span>
+        <FormsTrigger icon="calendar" fc={{ ...fc, control: { ...fc.control, 'aria-invalid': invalid || undefined } }} ref={composeRefs(btn, ref)}>
+          <span className={cn('flex-1 truncate', !r[0] && 'text-[var(--fg3)]')}>{r[0] ? (r[1] ? f.formatRange(r[0], r[1]) : `${f.format(r[0])} – …`) : placeholder ?? 'Pick dates'}</span>
           {days > 0 && <Badge>{count}</Badge>}
         </FormsTrigger>
-        <PopoverContent className="p-3" aria-label={tp('chooseDates')}>
+        <PopoverContent className="p-3" aria-label={'Choose dates'}>
           <div className="flex flex-col gap-3 sm:flex-row">
             {presets.length > 0 && (
               <div className="-mx-3 flex gap-0.5 overflow-x-auto border-[var(--line)] px-3 pb-2 [scrollbar-width:none] max-sm:w-0 max-sm:min-w-[calc(100%+24px)] sm:mx-0 sm:w-[112px] sm:flex-col sm:overflow-visible sm:border-e sm:px-0 sm:pe-2 sm:pb-0">
@@ -1003,12 +911,12 @@ export function DateRangePicker({ value, defaultValue = [null, null], onChange, 
                 ))}
               </div>
             )}
-            <Calendar key={month} range={r} onRangeChange={set} {...c} weekStartsOn={weekStartsOn} locale={locale} numberOfMonths={numberOfMonths} />
+            <Calendar key={month} range={r} onRangeChange={set} {...c} numberOfMonths={numberOfMonths} />
           </div>
           <div className="mt-3 flex items-center gap-2 border-t border-[var(--line)] pt-3">
-            <span className="min-w-0 flex-1 text-xs text-[var(--fg3)]">{!r[0] ? tp('rangeHintStart') : !r[1] ? tp('rangeHintEnd') : tp('rangeHintDone', { count })}</span>
-            <Button size="sm" variant="ghost" disabled={!r[0]} onClick={() => set([null, null])}>{tp('clear')}</Button>
-            <Button size="sm" variant="primary" onClick={() => setOpen(false)}>{tp('done')}</Button>
+            <span className="min-w-0 flex-1 text-xs text-[var(--fg3)]">{!r[0] ? 'Tap or drag to choose dates' : !r[1] ? 'Choose an end date' : `${count} · drag either end to adjust`}</span>
+            <Button size="sm" variant="ghost" disabled={!r[0]} onClick={() => set([null, null])}>{'Clear'}</Button>
+            <Button size="sm" variant="primary" onClick={() => setOpen(false)}>{'Done'}</Button>
           </div>
         </PopoverContent>
       </Popover>
@@ -1017,8 +925,6 @@ export function DateRangePicker({ value, defaultValue = [null, null], onChange, 
     </span>
   )
 }
-
-/* Typed fields ───────────────────────────────────────────────────────────────── */
 
 /**
  * Typed date entry: day, month and year segments in the locale's order, separators and digits (en-GB dd/mm/yyyy, en-US
@@ -1029,10 +935,9 @@ export function DateRangePicker({ value, defaultValue = [null, null], onChange, 
  * while empty or incomplete. Form-native: `name` submits "2026-11-08" ('' when empty), `required`, `disabled`,
  * `readOnly`, `invalid`, `onBlur`, `form`, and `ref` on the first segment.
  */
-export function DateField({ value, defaultValue = null, onChange, min, max, isDateUnavailable, locale, className, 'aria-label': ariaLabel, ref, ...fp }: FormControlProps & Omit<DatesConstraints, 'weekStartsOn'> &
+export function DateField({ value, defaultValue = null, onChange, min, max, isDateUnavailable, className, 'aria-label': ariaLabel, ref, ...fp }: FormControlProps & DatesConstraints &
   { value?: Date | null; defaultValue?: Date | null; onChange?: (d: Date | null) => void; 'aria-label'?: string; className?: string; ref?: Ref<HTMLInputElement> }) {
-  const L = useDatesLocale({ locale })
-  const tf = datesT(DATE_FIELD_MESSAGES, L)
+  const L = useDatesLocale()
   const first = useRef<HTMLInputElement>(null), onReset = useRef(() => {})
   const fc = useFormControl<Date | null>({ ...fp, value, defaultValue, onChange, serialize: formDate, focus: () => first.current?.focus(), onReset: () => onReset.current() })
   const tpl = datesTemplate(L.locale, true, null, false)
@@ -1041,12 +946,12 @@ export function DateField({ value, defaultValue = null, onChange, min, max, isDa
   const [editing, setEditing] = useState(false), [flagged, setFlagged] = useState(false)
   useEffect(() => setFlagged(false), [formDate(fc.value), seg.partial])
   const range = datesDayProblem(fc.value, { min, max, isDateUnavailable }, L)
-  const problem = range ?? (seg.partial ? tf('incomplete') : null)
+  const problem = range ?? (seg.partial ? 'Enter a complete date' : null)
   return (
     <div className={cn('relative', className)} onBlur={fc.onBlur}>
-      <DatesSegments tpl={tpl} vals={seg.vals} onVals={seg.onVals} locale={L.locale} h12={false} seed={datesSeed(false)} emptyText={tf('blank')} icon="calendar"
+      <DatesSegments tpl={tpl} vals={seg.vals} onVals={seg.onVals} locale={L.locale} h12={false} seed={datesSeed(false)} emptyText={'Empty'} icon="calendar"
         disabled={fc.disabled} readOnly={fc.readOnly} invalid={fc.invalid || flagged || (!!range && !editing)} required={fc.required}
-        id={fc.control.id} labelledBy={fc.labelledBy} aria-label={ariaLabel} describedBy={fc.control['aria-describedby']} inputRef={formsMergeRefs(first, ref)} onFocusChange={setEditing} />
+        id={fc.control.id} labelledBy={fc.labelledBy} aria-label={ariaLabel} describedBy={fc.control['aria-describedby']} inputRef={composeRefs(first, ref)} onFocusChange={setEditing} />
       {!fc.disabled && <DatesValidity message={problem} name={fc.name} form={fp.form} focus={() => first.current?.focus()} onInvalid={() => setFlagged(true)} />}
       {fc.inputs}
     </div>
@@ -1065,7 +970,7 @@ const datesSecs = (s?: string | null) => { const m = DATES_ISO_TIME.exec(s ?? ''
 export type TimeFieldProps = FormControlProps & {
   /** "09:30" (24-hour); '' when empty */ value?: string; defaultValue?: string; onChange?: (v: string) => void
   /** 'hour' | 'minute' (default) | 'second' */ granularity?: Exclude<DateGranularity, 'day'>
-  /** 12 or 24-hour clock (default: the locale's) */ hourCycle?: 12 | 24 | HourCycle; locale?: string
+  /** 12 or 24-hour clock (default 24) */ hourCycle?: 12 | 24 | HourCycle
   /** earliest and latest allowed time, "08:00" and "18:30" */ min?: string; max?: string
   /** an IANA zone the time is in: shown after it ("CET"); the value stays the wall time */ timeZone?: string
   /** minutes between suggested times; shows a list of them behind a clock button */ step?: number
@@ -1082,9 +987,8 @@ export type TimeFieldProps = FormControlProps & {
  * "09:30:15" with granularity="second"), '' while empty or incomplete. Form-native: `name` submits it, `required`,
  * `disabled`, `readOnly`, `invalid`, `onBlur`, `form`, and `ref` on the first segment.
  */
-export function TimeField({ value, defaultValue = '', onChange, granularity = 'minute', hourCycle, locale, min, max, timeZone, step, from = 0, to = 24 * 60, className, 'aria-label': ariaLabel, ref, ...fp }: TimeFieldProps) {
-  const L = useDatesLocale({ locale, hourCycle, timeZone })
-  const tf = datesT(DATE_FIELD_MESSAGES, L)
+export function TimeField({ value, defaultValue = '', onChange, granularity = 'minute', hourCycle, min, max, timeZone, step, from = 0, to = 24 * 60, className, 'aria-label': ariaLabel, ref, ...fp }: TimeFieldProps) {
+  const L = useDatesLocale({ hourCycle, timeZone })
   const first = useRef<HTMLInputElement>(null), onReset = useRef(() => {})
   const fc = useFormControl<string>({ ...fp, value, defaultValue, onChange, serialize: x => x, focus: () => first.current?.focus(), onReset: () => onReset.current() })
   const h12 = L.h12
@@ -1096,8 +1000,8 @@ export function TimeField({ value, defaultValue = '', onChange, granularity = 'm
   useEffect(() => setFlagged(false), [fc.value, seg.partial])
   const v = datesSecs(fc.value), lo = datesSecs(min), hi = datesSecs(max)
   const fmtT = (s: number) => datesDF(L.locale, { hour: h12 ? 'numeric' : '2-digit', minute: '2-digit', hourCycle: h12 ? 'h12' : 'h23', timeZone: 'UTC' }).format(s * 1000)
-  const range = v === null ? null : lo !== null && v < lo ? tf('timeTooEarly', { time: fmtT(lo) }) : hi !== null && v > hi ? tf('timeTooLate', { time: fmtT(hi) }) : null
-  const problem = range ?? (seg.partial ? tf('incompleteTime') : null)
+  const range = v === null ? null : lo !== null && v < lo ? `Choose ${fmtT(lo)} or later` : hi !== null && v > hi ? `Choose ${fmtT(hi)} or earlier` : null
+  const problem = range ?? (seg.partial ? 'Enter a complete time' : null)
   // suggestions
   const { open, setOpen, ref: wrap } = useDisclosure(), lid = useId()
   const [place, setPlace] = useState<Placement>('bottom-start')
@@ -1120,13 +1024,13 @@ export function TimeField({ value, defaultValue = '', onChange, granularity = 'm
   const zone = timeZone ? datesZoneName(L.locale, L.timeZone, Date.now()) : null
   return (
     <div ref={wrap} className={cn('relative', className)} onBlur={fc.onBlur}>
-      <DatesSegments tpl={tpl} vals={seg.vals} onVals={seg.onVals} locale={L.locale} h12={h12} seed={datesSeed(h12)} emptyText={tf('blank')} icon={step ? undefined : 'clock'}
+      <DatesSegments tpl={tpl} vals={seg.vals} onVals={seg.onVals} locale={L.locale} h12={h12} seed={datesSeed(h12)} emptyText={'Empty'} icon={step ? undefined : 'clock'}
         disabled={fc.disabled} readOnly={fc.readOnly} invalid={fc.invalid || flagged || (!!range && !editing)} required={fc.required}
-        id={fc.control.id} labelledBy={fc.labelledBy} aria-label={ariaLabel} describedBy={fc.control['aria-describedby']} inputRef={formsMergeRefs(first, ref as Ref<HTMLInputElement>)}
+        id={fc.control.id} labelledBy={fc.labelledBy} aria-label={ariaLabel} describedBy={fc.control['aria-describedby']} inputRef={composeRefs(first, ref as Ref<HTMLInputElement>)}
         onFocusChange={setEditing} onKeyDown={e => { if (step && e.altKey && e.key === 'ArrowDown') { e.preventDefault(); show(true); setTimeout(() => wrap.current?.querySelector<HTMLElement>('[data-times]')?.focus()) } }}
         suffix={zone && <span className="flex-none text-xs text-[var(--fg3)]">{zone}</span>}>
         {step ? (
-          <button type="button" data-times role="combobox" aria-label={tf('showTimes')} aria-haspopup="listbox" aria-expanded={open} aria-controls={lid} aria-activedescendant={open ? `${lid}-${active}` : undefined}
+          <button type="button" data-times role="combobox" aria-label={'Show times'} aria-haspopup="listbox" aria-expanded={open} aria-controls={lid} aria-activedescendant={open ? `${lid}-${active}` : undefined}
             disabled={fc.disabled} onClick={() => show(!open)}
             onKeyDown={e => {
               if (!open) { if (['ArrowDown', 'ArrowUp', 'Enter', ' '].includes(e.key)) { e.preventDefault(); show(true) } return }
@@ -1142,7 +1046,7 @@ export function TimeField({ value, defaultValue = '', onChange, granularity = 'm
       </DatesSegments>
       {step ? (
         <FloatingPanel open={open} matchWidth placement={place} className="max-h-64 overflow-auto tabular-nums" role="presentation">
-          <DatesTimeList id={lid} options={opts} active={active} selected={fc.value.slice(0, 5)} onPick={pick} onHover={setActive} label={tf('suggestedTimes')} />
+          <DatesTimeList id={lid} options={opts} active={active} selected={fc.value.slice(0, 5)} onPick={pick} onHover={setActive} label={'Suggested times'} />
         </FloatingPanel>
       ) : null}
       {!fc.disabled && <DatesValidity message={problem} name={fc.name} form={fp.form} focus={() => first.current?.focus()} onInvalid={() => setFlagged(true)} />}
@@ -1188,7 +1092,7 @@ export const timeOptions = (stepMinutes = 30, from = 0, to = 24 * 60): TimeOptio
 
 /**
  * Time picker: a TimeField (type the time, or step it with ↑/↓) plus a clock button listing times every `step` minutes
- * (15) between `from` and `to` (07:00 to 21:00), opening scrolled to the current one. The 0.3 props still work
+ * (15) between `from` and `to` (07:00 to 21:00), opening scrolled to the current one
  * (`value`, `defaultValue` "09:00", `onChange`, `step`, `from`, `to`); it also takes TimeField's `hourCycle`, `locale`,
  * `granularity`, `min`, `max` and `timeZone`. `name` submits "HH:MM" (24-hour, like <input type="time">).
  */
@@ -1217,7 +1121,7 @@ export type DateTimeFieldProps = FormControlProps & {
   onChange?: (iso: string | null, detail: { date: Date | null; timeZone: string }) => void
   /** IANA zone the wall time is in (default: UIProvider's, else the browser's) */ timeZone?: string
   /** 'day' | 'hour' | 'minute' (default) | 'second' */ granularity?: DateGranularity
-  hourCycle?: 12 | 24 | HourCycle; locale?: string
+  hourCycle?: 12 | 24 | HourCycle
   /** earliest and latest instant (ISO or Date) */ min?: string | Date | null; max?: string | Date | null
   /** calendar days (in the zone) that can't be picked */ isDateUnavailable?: (d: Date) => boolean
   /** show the zone's short name after the time (default: when `timeZone` is set) */ showTimeZone?: boolean
@@ -1240,11 +1144,10 @@ type DatesDTPicker = (c: DatesDTCtx) => { wrap: (field: ReactNode) => ReactNode;
  * picker (DateTimeField passes none, so a copied-in DateTimeField carries no calendar, popover or zone list).
  */
 function DatesDateTime({ picker, defaultTimeZone, onTimeZoneChange, value, defaultValue = null, onChange, timeZone: tzProp,
-  granularity = 'minute', hourCycle, locale, min, max, isDateUnavailable, showTimeZone, timeZoneName, className, 'aria-label': ariaLabel, ref, ...fp }: DateTimeFieldProps & {
+  granularity = 'minute', hourCycle, min, max, isDateUnavailable, showTimeZone, timeZoneName, className, 'aria-label': ariaLabel, ref, ...fp }: DateTimeFieldProps & {
     picker?: DatesDTPicker; defaultTimeZone?: string; onTimeZoneChange?: (tz: string) => void }) {
   const [zoneInner, setZoneInner] = useState(defaultTimeZone)
-  const L = useDatesLocale({ locale, hourCycle, timeZone: tzProp ?? zoneInner })
-  const tf = datesT(DATE_FIELD_MESSAGES, L)
+  const L = useDatesLocale({ hourCycle, timeZone: tzProp ?? zoneInner })
   const zone = L.timeZone, h12 = granularity !== 'day' && L.h12
   const norm = (v: string | Date | null | undefined) => v === undefined ? undefined : !v ? null : v instanceof Date ? toZonedISO(v, zone) : v
   const first = useRef<HTMLInputElement>(null), onReset = useRef(() => {})
@@ -1264,9 +1167,9 @@ function DatesDateTime({ picker, defaultTimeZone, onTimeZoneChange, value, defau
   const at = datesInstant(fc.value, zone), lo = datesInstant(min, zone), hi = datesInstant(max, zone)
   const fmtAt = (t: number) => datesDF(L.locale, { timeZone: zone, day: 'numeric', month: 'short', year: 'numeric', ...(granularity !== 'day' && { hour: 'numeric', minute: '2-digit', hourCycle: h12 ? 'h12' : 'h23' }) }).format(t)
   const wallDay = seg.wall ? datesLocal(seg.wall.year, seg.wall.month, seg.wall.day) : null
-  const range = at === null ? null : lo !== null && at < lo ? tf('tooEarly', { date: fmtAt(lo) }) : hi !== null && at > hi ? tf('tooLate', { date: fmtAt(hi) })
-    : wallDay && isDateUnavailable?.(wallDay) ? tf('unavailable') : null
-  const problem = range ?? (seg.partial ? tf('incomplete') : null)
+  const range = at === null ? null : lo !== null && at < lo ? `Choose ${fmtAt(lo)} or later` : hi !== null && at > hi ? `Choose ${fmtAt(hi)} or earlier`
+    : wallDay && isDateUnavailable?.(wallDay) ? 'That date isn’t available' : null
+  const problem = range ?? (seg.partial ? 'Enter a complete date' : null)
   const ext = picker?.({
     L, zone, h12, granularity, locked, disabled: fc.disabled, readOnly: fc.readOnly, open, setOpen, at, lo, hi, wallDay, isDateUnavailable,
     pickDay: d => {
@@ -1277,7 +1180,7 @@ function DatesDateTime({ picker, defaultTimeZone, onTimeZoneChange, value, defau
     timeRow: label => {
       const tpl2 = datesTemplate(L.locale, false, granularity, h12)
       return (
-        <DatesSegments tpl={tpl2} vals={seg.vals} locale={L.locale} h12={h12} seed={datesSeed(h12)} emptyText={tf('blank')} aria-label={label} icon="clock"
+        <DatesSegments tpl={tpl2} vals={seg.vals} locale={L.locale} h12={h12} seed={datesSeed(h12)} emptyText={'Empty'} aria-label={label} icon="clock"
           disabled={fc.disabled} readOnly={fc.readOnly} invalid={false} required={false} className="min-w-0 flex-1"
           onVals={v => {
             const today = !datesFromVals(v, tpl, h12) && datesFromVals(v, tpl2, h12) ? zonedParts(Date.now(), zone) : null
@@ -1294,9 +1197,9 @@ function DatesDateTime({ picker, defaultTimeZone, onTimeZoneChange, value, defau
   })
   const zoneLabel = (showTimeZone ?? (!!tzProp || !!ext?.showZone)) && granularity !== 'day' ? datesZoneName(L.locale, zone, at ?? Date.now()) : null
   const field = (
-    <DatesSegments tpl={tpl} vals={seg.vals} onVals={seg.onVals} locale={L.locale} h12={h12} seed={datesSeed(h12)} emptyText={tf('blank')} parse={parse} icon={ext ? undefined : 'calendar'}
+    <DatesSegments tpl={tpl} vals={seg.vals} onVals={seg.onVals} locale={L.locale} h12={h12} seed={datesSeed(h12)} emptyText={'Empty'} parse={parse} icon={ext ? undefined : 'calendar'}
       disabled={fc.disabled} readOnly={fc.readOnly} invalid={fc.invalid || flagged || (!!range && !editing)} required={fc.required}
-      id={fc.control.id} labelledBy={fc.labelledBy} aria-label={ariaLabel} describedBy={fc.control['aria-describedby']} inputRef={formsMergeRefs(first, ref)} onFocusChange={setEditing}
+      id={fc.control.id} labelledBy={fc.labelledBy} aria-label={ariaLabel} describedBy={fc.control['aria-describedby']} inputRef={composeRefs(first, ref)} onFocusChange={setEditing}
       onKeyDown={e => { if (ext && e.altKey && e.key === 'ArrowDown' && !locked) { e.preventDefault(); setOpen(true) } }}
       suffix={zoneLabel && <span className="flex-none text-xs text-[var(--fg3)]">{zoneLabel}</span>}>
       {ext?.button}
@@ -1348,32 +1251,31 @@ export function DateTimeField(props: DateTimeFieldProps) {
  * changes) and calls `onTimeZoneChange`; `timeZone` controls the zone, `defaultTimeZone` seeds it. Picking a day with no
  * time yet sets midnight. Takes the Calendar's `weekStartsOn` and `numberOfMonths`. Form-native like DateTimeField.
  */
-export function DateTimePicker({ timeZonePicker, weekStartsOn, numberOfMonths, ...props }: DateTimeFieldProps & {
+export function DateTimePicker({ timeZonePicker, numberOfMonths, ...props }: DateTimeFieldProps & {
   /** show a time-zone picker next to the field */ timeZonePicker?: boolean; /** the zone at first (uncontrolled) */ defaultTimeZone?: string
-  onTimeZoneChange?: (tz: string) => void; weekStartsOn?: WeekDay; numberOfMonths?: 1 | 2 | 3 }) {
+  onTimeZoneChange?: (tz: string) => void; numberOfMonths?: 1 | 2 | 3 }) {
   return <DatesDateTime {...props} picker={c => {
-    const tp = datesT(DATE_PICKER_MESSAGES, c.L)
     const zp = (t: number | null) => { if (t === null) return null; const p = zonedParts(t, c.zone); return datesLocal(p.year, p.month, p.day) }
     return {
       showZone: timeZonePicker,
-      button: <DatesCalendarButton label={tp('chooseDate')} disabled={c.disabled} readOnly={c.readOnly} />,
+      button: <DatesCalendarButton label={'Choose a date'} disabled={c.disabled} readOnly={c.readOnly} />,
       wrap: field => (
         <Popover open={c.open && !c.locked} onOpenChange={c.setOpen} className="!block">
           {field}
-          <PopoverContent className="p-3" aria-label={tp('chooseDateTime')}>
+          <PopoverContent className="p-3" aria-label={'Choose date and time'}>
             {/* the popover's own controls are not the form field: keep FormField's name and id from reaching them */}
             <FormFieldContext.Provider value={null}>
-              <Calendar selected={c.wallDay} onSelect={c.pickDay} autoFocus min={zp(c.lo)} max={zp(c.hi)} isDateUnavailable={c.isDateUnavailable} weekStartsOn={weekStartsOn} locale={c.L.locale} numberOfMonths={numberOfMonths} />
+              <Calendar selected={c.wallDay} onSelect={c.pickDay} autoFocus min={zp(c.lo)} max={zp(c.hi)} isDateUnavailable={c.isDateUnavailable} numberOfMonths={numberOfMonths} />
               <div className="mt-2 flex items-center gap-2 border-t border-[var(--line)] pt-2">
-                {c.granularity !== 'day' && c.timeRow(tp('time'))}
-                <Button size="sm" variant="primary" className="ms-auto" onClick={() => c.setOpen(false)}>{tp('done')}</Button>
+                {c.granularity !== 'day' && c.timeRow('Time')}
+                <Button size="sm" variant="primary" className="ms-auto" onClick={() => c.setOpen(false)}>{'Done'}</Button>
               </div>
             </FormFieldContext.Provider>
           </PopoverContent>
         </Popover>
       ),
       aside: timeZonePicker && (
-        <DatesZoneField label={tp('timeZone')} placeholder={tp('searchTimeZones')} empty={tp('noTimeZones')} value={c.zone} onChange={c.changeZone}
+        <DatesZoneField label={'Time zone'} placeholder={'Search time zones'} empty={'No matching time zones'} value={c.zone} onChange={c.changeZone}
           disabled={c.disabled} readOnly={c.readOnly} at={c.at} className="sm:w-[250px]" />
       ),
     }
@@ -1392,8 +1294,8 @@ function DatesZoneField({ value, onChange, at, label, placeholder, empty, disabl
   const hour = Math.floor((at ?? Date.now()) / 36e5) // offsets only change on the hour
   const label0 = (z: string) => `(GMT${datesOffsetText(zoneOffset(z, hour * 36e5))}) ${z.replace(/_/g, ' ')}`
   const [q, setQ] = useState<string | null>(null) // null: not typing, the field shows the zone
-  // the label is Latin text: in RTL a leading LRM keeps "(GMT+01:00)" from mirroring its parentheses
-  const rtl = useDir() === 'rtl', shown = (rtl ? '\u200e' : '') + label0(value)
+  // the label is Latin text:)" from mirroring its parentheses
+  const shown = ('') + label0(value)
   const all = useMemo(() => (open ? timeZoneOptions(hour * 36e5) : []), [open, hour])
   const query = (q ?? '').trim().toLowerCase()
   const list = query ? all.filter(o => o.label.toLowerCase().includes(query)) : all
@@ -1440,7 +1342,7 @@ function DatesZoneField({ value, onChange, at, label, placeholder, empty, disabl
 export function timeZoneOptions(at: Date | number = Date.now(), zones?: string[]): TimeOption[] {
   let list = zones ?? (typeof Intl.supportedValuesOf === 'function' ? Intl.supportedValuesOf('timeZone') : ['UTC', 'Europe/London', 'Europe/Zurich', 'America/New_York', 'Asia/Tokyo'])
   if (!list.includes('UTC')) list = ['UTC', ...list]
-  return list.map(z => ({ z, off: zoneOffset(z, at) })).sort((x, y) => x.off - y.off || x.z.localeCompare(y.z)) // i18n-ignore: offset + IANA name
+  return list.map(z => ({ z, off: zoneOffset(z, at) })).sort((x, y) => x.off - y.off || x.z.localeCompare(y.z))
     .map(({ z, off }) => ({ value: z, label: `(GMT${datesOffsetText(off)}) ${z.replace(/_/g, ' ')}` }))
 }
 
@@ -1453,10 +1355,7 @@ export function TimeZonePicker({ zones, at, placeholder, ...p }: Omit<Parameters
   const t = at === undefined ? undefined : +at
   const hour = Math.floor((t ?? Date.now()) / 36e5) // offsets only change on the hour
   const options = useMemo(() => timeZoneOptions(t ?? hour * 36e5, zones), [hour, zones]) // eslint-disable-line react-hooks/exhaustive-deps
-  const L = useDatesLocale({})
-  // Latin labels in an RTL field: a leading LRM keeps "(GMT+01:00)" from mirroring its parentheses
-  const shown = useMemo(() => (L.dir === 'rtl' ? options.map(o => ({ ...o, label: '\u200e' + o.label })) : options), [options, L.dir])
-  return <Combobox options={shown} placeholder={placeholder ?? datesT(DATE_PICKER_MESSAGES, L)('searchTimeZones')} {...p} />
+  return <Combobox options={options} placeholder={placeholder ?? 'Search time zones'} {...p} />
 }
 
 /**
@@ -1464,10 +1363,9 @@ export function TimeZonePicker({ zones, at, placeholder, ...p }: Omit<Parameters
  * `min`/`max` disable months outside them. Value: a Date on the first of the month (null when empty). Form-native:
  * `name` submits "2026-11" (like <input type="month">), `required`, `disabled`, `readOnly`, `invalid`, `onBlur`, `form`, `ref`.
  */
-export function MonthPicker({ value, defaultValue = null, onChange, min, max, locale, placeholder, className, ref, ...fp }: FormControlProps &
-  { value?: Date | null; defaultValue?: Date | null; onChange?: (d: Date | null) => void; min?: Date | null; max?: Date | null; locale?: string; placeholder?: string; className?: string; ref?: Ref<HTMLButtonElement> }) {
-  const L = useDatesLocale({ locale })
-  const tp = datesT(DATE_PICKER_MESSAGES, L)
+export function MonthPicker({ value, defaultValue = null, onChange, min, max, placeholder, className, ref, ...fp }: FormControlProps &
+  { value?: Date | null; defaultValue?: Date | null; onChange?: (d: Date | null) => void; min?: Date | null; max?: Date | null; placeholder?: string; className?: string; ref?: Ref<HTMLButtonElement> }) {
+  const L = useDatesLocale()
   const btn = useRef<HTMLButtonElement>(null)
   const fc = useFormControl<Date | null>({ ...fp, value, defaultValue, onChange, serialize: d => (d ? `${datesPad(d.getFullYear(), 4)}-${datesPad(d.getMonth() + 1)}` : ''), focus: () => btn.current?.focus() })
   const d = fc.value
@@ -1478,15 +1376,15 @@ export function MonthPicker({ value, defaultValue = null, onChange, min, max, lo
   return (
     <span className={cn('relative block', className)} onBlur={fc.onBlur}>
       <Popover open={open && !fc.disabled && !fc.readOnly} onOpenChange={show} className="!block">
-        <FormsTrigger icon="calendar" fc={fc} ref={formsMergeRefs(btn, ref)}>
-          <span className={cn('truncate', !d && 'text-[var(--fg3)]')}>{d ? datesDF(L.locale, { month: 'long', year: 'numeric' }).format(d) : placeholder ?? tp('pickMonth')}</span>
+        <FormsTrigger icon="calendar" fc={fc} ref={composeRefs(btn, ref)}>
+          <span className={cn('truncate', !d && 'text-[var(--fg3)]')}>{d ? datesDF(L.locale, { month: 'long', year: 'numeric' }).format(d) : placeholder ?? 'Pick a month'}</span>
         </FormsTrigger>
-        <PopoverContent className="p-3" aria-label={tp('chooseMonth')}>
+        <PopoverContent className="p-3" aria-label={'Choose a month'}>
           <div className="h-[232px] w-[252px] max-w-full [@media(pointer:coarse)]:h-[280px] [@media(pointer:coarse)]:w-[280px]">
             {view === 'months'
-              ? <DatesMonthGrid key={year} locale={L.locale} year={year} onYear={setYear} selected={d && { year: d.getFullYear(), month: d.getMonth() }} min={min} max={max} t={tp}
+              ? <DatesMonthGrid key={year} locale={L.locale} year={year} onYear={setYear} selected={d && { year: d.getFullYear(), month: d.getMonth() }} min={min} max={max}
                 onTitle={() => setView('years')} onPick={m => { fc.set(new Date(year, m, 1)); setOpen(false) }} />
-              : <DatesYearGrid locale={L.locale} year={year} selected={d?.getFullYear()} min={min} max={max} t={tp} onPick={y => { setYear(y); setView('months') }} onEscape={() => setView('months')} />}
+              : <DatesYearGrid locale={L.locale} year={year} selected={d?.getFullYear()} min={min} max={max} onPick={y => { setYear(y); setView('months') }} onEscape={() => setView('months')} />}
           </div>
         </PopoverContent>
       </Popover>
@@ -1500,10 +1398,9 @@ export function MonthPicker({ value, defaultValue = null, onChange, min, max, lo
  * them. Value: the year as a number (null when empty). Form-native: `name` submits "2026", `required`, `disabled`,
  * `readOnly`, `invalid`, `onBlur`, `form`, `ref`.
  */
-export function YearPicker({ value, defaultValue = null, onChange, min, max, locale, placeholder, className, ref, ...fp }: FormControlProps &
-  { value?: number | null; defaultValue?: number | null; onChange?: (y: number | null) => void; min?: Date | null; max?: Date | null; locale?: string; placeholder?: string; className?: string; ref?: Ref<HTMLButtonElement> }) {
-  const L = useDatesLocale({ locale })
-  const tp = datesT(DATE_PICKER_MESSAGES, L)
+export function YearPicker({ value, defaultValue = null, onChange, min, max, placeholder, className, ref, ...fp }: FormControlProps &
+  { value?: number | null; defaultValue?: number | null; onChange?: (y: number | null) => void; min?: Date | null; max?: Date | null; placeholder?: string; className?: string; ref?: Ref<HTMLButtonElement> }) {
+  const L = useDatesLocale()
   const btn = useRef<HTMLButtonElement>(null)
   const fc = useFormControl<number | null>({ ...fp, value, defaultValue, onChange, serialize: y => (y == null ? '' : String(y)), focus: () => btn.current?.focus() })
   const y = fc.value
@@ -1511,12 +1408,12 @@ export function YearPicker({ value, defaultValue = null, onChange, min, max, loc
   return (
     <span className={cn('relative block', className)} onBlur={fc.onBlur}>
       <Popover open={open && !fc.disabled && !fc.readOnly} onOpenChange={setOpen} className="!block">
-        <FormsTrigger icon="calendar" fc={fc} ref={formsMergeRefs(btn, ref)}>
-          <span className={cn('truncate', y == null && 'text-[var(--fg3)]')}>{y != null ? datesNum(L.locale, y) : placeholder ?? tp('pickYear')}</span>
+        <FormsTrigger icon="calendar" fc={fc} ref={composeRefs(btn, ref)}>
+          <span className={cn('truncate', y == null && 'text-[var(--fg3)]')}>{y != null ? datesNum(L.locale, y) : placeholder ?? 'Pick a year'}</span>
         </FormsTrigger>
-        <PopoverContent className="p-3" aria-label={tp('chooseYearTitle')}>
+        <PopoverContent className="p-3" aria-label={'Choose a year'}>
           <div className="h-[232px] w-[252px] max-w-full [@media(pointer:coarse)]:h-[280px] [@media(pointer:coarse)]:w-[280px]">
-            <DatesYearGrid locale={L.locale} year={y ?? new Date().getFullYear()} selected={y} min={min} max={max} t={tp} onPick={n => { fc.set(n); setOpen(false) }} />
+            <DatesYearGrid locale={L.locale} year={y ?? new Date().getFullYear()} selected={y} min={min} max={max} onPick={n => { fc.set(n); setOpen(false) }} />
           </div>
         </PopoverContent>
       </Popover>
@@ -1525,39 +1422,36 @@ export function YearPicker({ value, defaultValue = null, onChange, min, max, loc
   )
 }
 
-/* Inline date picker ─────────────────────────────────────────────────────────── */
-
 /**
  * Inline date picker card with two modes: one date, or a range. Type into the date fields (DateField: the locale's
  * order and digits; the calendar jumps to the typed month) or pick on the calendar (drag across days in range mode).
  * The footer spells out the choice, counts the days, and Clear resets it. Composes `DateField` and `Calendar`; takes
  * the Calendar's `min`, `max`, `isDateUnavailable`, `weekStartsOn` and `locale`.
  */
-export function InlineDatePicker({ value, defaultValue = [null, null], onChange, defaultMode = 'date', min, max, isDateUnavailable, weekStartsOn, locale, className }: DatesConstraints &
+export function InlineDatePicker({ value, defaultValue = [null, null], onChange, defaultMode = 'date', min, max, isDateUnavailable, className }: DatesConstraints &
   { value?: DateRange; defaultValue?: DateRange; onChange?: (r: DateRange) => void; defaultMode?: 'date' | 'range'; className?: string }) {
-  const L = useDatesLocale({ locale })
-  const tp = datesT(DATE_PICKER_MESSAGES, L)
+  const L = useDatesLocale()
   const [[a, b], set] = useControllable<DateRange>(value, defaultValue, onChange)
   const [mode, setMode] = useState(defaultMode)
   const [jump, setJump] = useState<Date | null>(null)
   const lo = a && b ? (a < b ? a : b) : a ?? b, hi = a && b ? (a < b ? b : a) : a ?? b
   const days = lo && hi ? Math.round((+hi - +lo) / 864e5) + 1 : 0
   const f = datesDF(L.locale, { day: 'numeric', month: 'short', year: 'numeric' })
-  const c = { min, max, isDateUnavailable, weekStartsOn, locale }
+  const c = { min, max, isDateUnavailable }
   const commitFrom = (d: Date | null) => { if (!d) return; set([d, mode === 'date' || !hi || hi < d ? d : hi]); setJump(d) }
   const commitTo = (d: Date | null) => { if (!d) return; const s = lo ?? d; set(d < s ? [d, s] : [s, d]); setJump(d) }
   return (
     <div className={cn('flex flex-col gap-3', className)}>
-      <SegmentedControl size="sm" aria-label={tp('mode')} className="self-start [@media(pointer:coarse)]:[&>button]:h-9" value={mode} onChange={m => { setMode(m as 'date' | 'range'); if (m === 'date' && lo) set([lo, lo]) }}
-        options={[{ value: 'date', label: tp('modeDate') }, { value: 'range', label: tp('modeRange') }]} />
+      <SegmentedControl size="sm" aria-label={'Pick one date or a range'} className="self-start [@media(pointer:coarse)]:[&>button]:h-9" value={mode} onChange={m => { setMode(m as 'date' | 'range'); if (m === 'date' && lo) set([lo, lo]) }}
+        options={[{ value: 'date', label: 'Date' }, { value: 'range', label: 'Date range' }]} />
       <div className="flex flex-wrap items-center gap-2">
-        <DateField aria-label={mode === 'range' ? tp('from') : tp('modeDate')} value={lo} onChange={commitFrom} {...c} className="min-w-[150px] flex-1" />
+        <DateField aria-label={mode === 'range' ? 'From date' : 'Date'} value={lo} onChange={commitFrom} {...c} className="min-w-[150px] flex-1" />
         <AnimatePresence initial={false}>
           {mode === 'range' && (
-            <motion.div key="to" className="flex min-w-[150px] flex-1 items-center gap-2" initial={{ opacity: 0, x: dirX(-8, L.dir) }} animate={{ opacity: 1, x: 0 }}
-              exit={{ opacity: 0, x: dirX(-8, L.dir), transition: { duration: 0.12 } }} transition={spring(0.25, 0.35)}>
-              <DatesGlyph name="chevronRight" size={14} className="ui-flip text-[var(--fg3)]" />
-              <DateField aria-label={tp('to')} value={hi && lo && +hi !== +lo ? hi : null} onChange={commitTo} {...c} className="min-w-0 flex-1" />
+            <motion.div key="to" className="flex min-w-[150px] flex-1 items-center gap-2" initial={{ opacity: 0, x: -8 }} animate={{ opacity: 1, x: 0 }}
+              exit={{ opacity: 0, x: -8, transition: { duration: 0.12 } }} transition={spring(0.25, 0.35)}>
+              <DatesGlyph name="chevronRight" size={14} className="text-[var(--fg3)]" />
+              <DateField aria-label={'To date'} value={hi && lo && +hi !== +lo ? hi : null} onChange={commitTo} {...c} className="min-w-0 flex-1" />
             </motion.div>
           )}
         </AnimatePresence>
@@ -1566,10 +1460,10 @@ export function InlineDatePicker({ value, defaultValue = [null, null], onChange,
         className="!w-full [@media(pointer:coarse)]:[&_button[aria-label$=month]]:!h-9 [@media(pointer:coarse)]:[&_button[aria-label$=month]]:!w-9"
         {...(mode === 'range' ? { range: [lo, a && b && +a === +b ? null : hi] as DateRange, onRangeChange: (r: DateRange) => set(r[1] ? r : [r[0], r[0]]) } : { selected: lo, onSelect: (d: Date) => set([d, d]) })} />
       <div className="flex min-h-5 flex-wrap items-center justify-between gap-x-2.5 gap-y-1 text-[13px]" aria-live="polite">
-        <span className="font-medium">{!lo || !hi ? tp('noDate') : days === 1 ? f.format(lo) : f.formatRange(lo, hi)}</span>
+        <span className="font-medium">{!lo || !hi ? 'No date selected' : days === 1 ? f.format(lo) : f.formatRange(lo, hi)}</span>
         <span className="ms-auto flex items-center gap-2">
-          {lo && <span className="text-xs text-[var(--fg3)]">{days === 1 ? tp('singleDay') : tp('dayCount', { count: days })}</span>}
-          <Button size="sm" variant="ghost" onClick={() => set([null, null])} disabled={!lo} className="[@media(pointer:coarse)]:min-h-9">{tp('clear')}</Button>
+          {lo && <span className="text-xs text-[var(--fg3)]">{days === 1 ? 'Single day' : plural(days, 'day')}</span>}
+          <Button size="sm" variant="ghost" onClick={() => set([null, null])} disabled={!lo} className="[@media(pointer:coarse)]:min-h-9">{'Clear'}</Button>
         </span>
       </div>
     </div>

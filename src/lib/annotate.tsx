@@ -1,10 +1,10 @@
 /**
- * Timeline annotations (0.5): events and spans placed on a time axis, shared by Chart annotations, Swimlanes,
+ * Timeline annotations: events and spans placed on a time axis, shared by Chart annotations, Swimlanes,
  * StateRibbon and linked lists. Plain layout maths (`layoutTimeTags`, `timeTicks`), one keyboard model
  * (`useTagFocus`) and the two visual atoms (`TagGlyph`, `TagTooltip`); the Chart draws them (`annotations` prop).
  */
 import { useId, useRef, type CSSProperties, type FocusEvent as ReactFocusEvent, type HTMLAttributes, type KeyboardEvent as ReactKeyboardEvent, type ReactNode } from 'react'
-import { cn, defineMessages, safeColor, useLocale, useMessages } from './core'
+import { cn, safeColor, fmt } from './core'
 
 /** One tag on a timeline: a point event (`at`) or a span (`at` → `end`). Times are epoch ms or Date. */
 export type TimeTag = {
@@ -26,24 +26,6 @@ export type TimeTagKind = { kind: string; label: string; icon?: ReactNode; color
 
 /** Epoch ms for a tag time. */
 export const timeTagMs = (t: number | Date) => (typeof t === 'number' ? t : t.getTime())
-
-/** Annotation strings (namespace 'annotate'; de/ar machine-drafted). Tag labels and kind names are data: pass them translated. */
-export const ANNOTATE_MESSAGES = defineMessages('annotate', {
-  en: {
-    tags: 'Tags', at: '{label} at {time}', span: '{label}, {from} to {to}',
-    bin: '{label} × {n}, {from} to {to}', others: 'Others',
-  },
-  de: {
-    tags: 'Markierungen', at: '{label} um {time}', span: '{label}, {from} bis {to}',
-    bin: '{label} × {n}, {from} bis {to}', others: 'Andere',
-  },
-  ar: {
-    tags: 'الوسوم', at: '{label} عند {time}', span: '{label}، من {from} إلى {to}',
-    bin: '{label} × {n}، من {from} إلى {to}', others: 'أخرى',
-  },
-})
-
-/* ── Layout ──────────────────────────────────────────────────────────────────── */
 
 /** How tags sit on a chart: pins on the line, an icon rug under the axis, flagged rules, rollup chips, dots, or auto. */
 export type TimeTagStyle = 'auto' | 'pins' | 'rug' | 'flags' | 'rollup' | 'dots'
@@ -161,8 +143,6 @@ export function timeTicks(startMs: number, endMs: number, widthPx: number, fmt: 
   return out
 }
 
-/* ── Look ────────────────────────────────────────────────────────────────────── */
-
 /** A tag's icon, colour and kind label (the tag's own, then its kind's). */
 export function timeTagLook(tag: TimeTag, kinds?: TimeTagKind[]) {
   const k = kinds?.find(q => q.kind === tag.kind)
@@ -186,7 +166,6 @@ export function TagGlyph({ icon, color = 'var(--accent)', size = 20, active, mor
 
 /** Tooltip body for a tag: icon and label, the time (or from–to for a span) and the detail. Put it in any tooltip surface. */
 export function TagTooltip({ tag, kinds, extra }: { tag: TimeTag; kinds?: TimeTagKind[]; /** a line under the rest, e.g. a rollup count */ extra?: ReactNode }) {
-  const { fmt } = useLocale()
   const { icon, color } = timeTagLook(tag, kinds)
   return (
     <div className="flex flex-col gap-0.5">
@@ -198,33 +177,31 @@ export function TagTooltip({ tag, kinds, extra }: { tag: TimeTag; kinds?: TimeTa
   )
 }
 
-/* ── Keyboard ────────────────────────────────────────────────────────────────── */
-
 /** Options of useTagFocus: `onSelect` runs on Enter/Space; `label` names the list ("Tags"); `describe` names an option. */
 export type TagFocusOptions = {
   tags: TimeTag[]; activeId: string | null; onActive: (id: string | null) => void; onSelect?: (tag: TimeTag) => void
   label?: string; describe?: (tag: TimeTag) => string
 }
 /**
- * Keyboard model for tags, like useChartFocus: one Tab stop (a horizontal listbox), ←/→ through the tags in time order
- * (→ is later, also in RTL), Home/End, Enter/Space selects, Escape clears; the active tag is the aria-activedescendant
+ * Keyboard model for tags, like a chart (useChartShell): one Tab stop (a horizontal listbox), ←/→ through the tags in time order
+ *, Home/End, Enter/Space selects, Escape clears; the active tag is the aria-activedescendant
  * ("Water at 10:40"). Spread `props` on the box and `option(tag)` on every tag (folded ones with TAG_SR_ONLY). Handled
  * keys don't bubble; a tag the keyboard activated clears on blur.
  */
 export function useTagFocus({ tags, activeId, onActive, onSelect, label, describe }: TagFocusOptions) {
-  const id = useId(), m = useMessages(ANNOTATE_MESSAGES), { fmt } = useLocale()
+  const id = useId()
   const byKeyboard = useRef(false)
   const order = [...tags].sort((a, b) => timeTagMs(a.at) - timeTagMs(b.at))
   const name = describe ?? ((t: TimeTag) => t.end !== undefined
-    ? m('span', { label: t.label, from: fmt.time(timeTagMs(t.at)), to: fmt.time(timeTagMs(t.end)) })
-    : m('at', { label: t.label, time: fmt.time(timeTagMs(t.at)) }))
+    ? `${t.label}, ${fmt.time(timeTagMs(t.at))} to ${fmt.time(timeTagMs(t.end))}`
+    : `${t.label} at ${fmt.time(timeTagMs(t.at))}`)
   const optId = (t: TimeTag) => `${id}-t-${t.id.replace(/[^\w-]/g, '_')}`
   const cur = order.findIndex(t => t.id === activeId)
   const go = (i: number) => { byKeyboard.current = true; onActive(order[Math.max(0, Math.min(order.length - 1, i))].id) }
   const onKeyDown = (e: ReactKeyboardEvent<HTMLElement>) => {
     if (!order.length || e.altKey || e.ctrlKey || e.metaKey) return
     switch (e.key) {
-      case 'ArrowRight': case 'ArrowDown': go(cur < 0 ? 0 : cur + 1); break // rtl-lint-ignore: LTR plot, → is later
+      case 'ArrowRight': case 'ArrowDown': go(cur < 0 ? 0 : cur + 1); break
       case 'ArrowLeft': case 'ArrowUp': go(cur < 0 ? 0 : cur - 1); break
       case 'Home': go(0); break
       case 'End': go(order.length - 1); break
@@ -235,7 +212,7 @@ export function useTagFocus({ tags, activeId, onActive, onSelect, label, describ
     e.preventDefault(); e.stopPropagation()
   }
   const props = {
-    tabIndex: 0, role: 'listbox', 'aria-orientation': 'horizontal' as const, 'aria-label': label ?? m('tags'),
+    tabIndex: 0, role: 'listbox', 'aria-orientation': 'horizontal' as const, 'aria-label': label ?? 'Tags',
     'aria-activedescendant': cur >= 0 ? optId(order[cur]) : undefined, onKeyDown,
     onFocus: (e: ReactFocusEvent<HTMLElement>) => { if (e.target === e.currentTarget && cur < 0 && order.length && e.currentTarget.matches(':focus-visible')) go(0) },
     onBlur: (e: ReactFocusEvent<HTMLElement>) => { if (byKeyboard.current && !e.currentTarget.contains(e.relatedTarget as Node | null)) { byKeyboard.current = false; onActive(null) } },

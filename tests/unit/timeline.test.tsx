@@ -2,14 +2,8 @@
 // (merging dense dots, ribbon slivers), lane grouping and order, the empty-lane hint, linking hover and focus between
 // a chart and its journal, the keyboard model, and flags that never move the trace's rows. Queried by role and name.
 import { act, fireEvent, render, screen, within } from '@testing-library/react'
-import type { ReactNode } from 'react'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
-import { LocaleProvider } from '../../src/lib/core'
-import { UI_MESSAGES_AR } from '../../src/lib/provider'
-import {
-  ChartWithJournal, StateRibbon, Swimlanes, TIMELINE_MESSAGES, TagJournal, TraceWaterfall, clusterTimeMarks, ribbonSegments,
-  type TimeTag, type TimeTagKind, type TraceSpan,
-} from '../../src/lib'
+import { ChartWithJournal, StateRibbon, Swimlanes, TagJournal, TraceWaterfall, clusterTimeMarks, ribbonSegments, type TimeTag, type TimeTagKind, type TraceSpan } from '../../src/lib'
 
 const at = (h: number, m = 0) => new Date(2026, 10, 9, h, m).getTime()
 const START = at(9), END = at(17, 30)
@@ -136,12 +130,6 @@ describe('Swimlanes', () => {
     expect(scroller.style.maxHeight).toBe(`${5 * 26 + 4}px`)
     expect(scroller.className).toMatch(/overflow-y-auto/)
   })
-  it('is a left-to-right plot in RTL, with lane labels and hints in the locale', () => {
-    render(<LocaleProvider locale="ar-EG" messages={UI_MESSAGES_AR}><Swimlanes tags={TAGS} kinds={KINDS} start={START} end={END} /></LocaleProvider>)
-    const group = screen.getByRole('group', { name: 'الوسوم حسب النوع' })
-    expect(group.closest('[dir]')).toHaveAttribute('dir', 'ltr')
-    expect(screen.getByText('لا شيء').getAttribute('dir')).toBe('rtl')
-  })
 })
 
 describe('StateRibbon', () => {
@@ -266,7 +254,7 @@ describe('TraceWaterfall flags', () => {
     { id: 'b', parent: 'root', name: 'Search', kind: 'tool', start: 4, duration: 5 },
   ]
   const events = (n: number): TimeTag[] => Array.from({ length: n }, (_, i) => ({ id: `e${i}`, at: 500 + i * 700, kind: 'deploy', label: `Deploy ${i + 1}` }))
-  const plot = (container: HTMLElement) => container.querySelector('[dir="ltr"] .min-w-\\[560px\\]')!
+  const plot = (container: HTMLElement) => container.querySelector('.min-w-\\[560px\\]')!
   it('reserves the flag row, so switching from a few events to many never moves the rows', () => {
     const { container, rerender } = render(<TraceWaterfall spans={spans} total={10} annotations={[]} />)
     expect(screen.getByRole('listbox', { name: 'Events' })).toBeInTheDocument()
@@ -291,17 +279,3 @@ describe('TraceWaterfall flags', () => {
   })
 })
 
-describe('TIMELINE_MESSAGES', () => {
-  it('de and ar translate every key', () => {
-    for (const lang of ['de', 'ar']) {
-      const cat = TIMELINE_MESSAGES.catalogs[lang] as Record<string, string>
-      expect(Object.keys(cat).sort(), lang).toEqual(Object.keys(TIMELINE_MESSAGES.en).sort())
-    }
-  })
-  it('renders German strings', () => {
-    const de = (ui: ReactNode) => render(<LocaleProvider locale="de-DE">{ui}</LocaleProvider>)
-    de(<Swimlanes tags={TAGS} kinds={KINDS} start={START} end={END} />)
-    expect(screen.getByRole('group', { name: 'Tags nach Art' })).toBeInTheDocument()
-    expect(screen.getByText('Keine')).toBeInTheDocument()
-  })
-})

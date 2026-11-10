@@ -6,10 +6,6 @@ import { uiShared } from './shared'
 import { useMediaQuery } from './hooks'
 import { safeCssValue } from './safe'
 
-/* ════════════════════════════════════════════════════════════════════════════
- * 1. TOKENS AND PROVIDER
- * ══════════════════════════════════════════════════════════════════════════ */
-
 const LIGHT = `--bg:#FAFAFA;--card:#FFFFFF;--muted:#F4F4F5;--line:#E4E4E7;--line2:#D4D4D8;--fg:#09090B;--fg2:#52525B;--fg3:#68686F;
 --primary:#18181B;--on-primary:#FAFAFA;--accent:#2563EB;--accent-soft:#EFF4FF;--ok:#15803D;--ok-soft:#ECFDF3;--warn:#B45309;--warn-soft:#FFF7E6;
 --bad:#DC2626;--bad-soft:#FEF2F2;--c1:#18181B;--c2:#2563EB;--c3:#F97316;--c4:#16A34A;--c-neutral:#6B6B6D;--band:rgba(37,99,235,.12);
@@ -52,11 +48,10 @@ html.ui-theming *,html.ui-theming *::before,html.ui-theming *::after{transition:
 .ui-target{position:relative}.ui-target::after{content:"";position:absolute;left:50%;top:50%;width:max(100%,24px);height:max(100%,24px);transform:translate(-50%,-50%)}
 @media (pointer:coarse){.ui-target::after{width:max(100%,var(--hit,36px));height:max(100%,var(--hit,36px))}}}`
 
-
 /** The Google Fonts import for Geist and Geist Mono. UIProvider adds it unless `fonts={false}`. */
 export const FONT_CSS = "@import url('https://fonts.googleapis.com/css2?family=Geist:wght@400;500;600&family=Geist+Mono:wght@400;500&display=swap');"
 
-/* Themes ─────────────────────────────────────────────────────────────────────
+/*
  * A theme is two palettes of 15 base colours (light and dark). derive() fills in the rest:
  * soft tints, chart colours (c1–c4 plus c-neutral, a mid-grey series colour that reads at 4.5:1 on cards in light and
  * dark), band and shadow, and nudges secondary text until it reads at 4.5:1. */
@@ -193,7 +188,7 @@ export const THEME_STORAGE_KEY = 'ui-theme:v1'
 /** The original unversioned key, read once and migrated to THEME_STORAGE_KEY. */
 export const THEME_LEGACY_KEY = 'ui-theme'
 
-/* Theme validation ───────────────────────────────────────────────────────────
+/*
  * Saved settings are same-origin state that anything on the origin (another app, an extension, an old version) can
  * write. Every field is checked against what the library itself produces; anything else falls back to the default. */
 
@@ -256,7 +251,7 @@ export function themeLoad(raw: unknown, base: ThemeSettings = DEFAULT_THEME): Th
 
 /** The palette a set of settings resolves to, with its display name ("Ayu Mirage", "Custom"). Never throws. */
 export function themePalette(s: ThemeSettings, dark: boolean): { v: Palette; dark: boolean; label: string } {
-  // i18n-ignore: palette names are proper nouns and this is a pure function; the appearance panel shows t('theme.custom')
+
   if (s?.useCustom && s.custom && typeof s.custom === 'object') return { v: themeCleanPalette(s.custom.v, THEMES[0].light[0][1]), dark: s.custom.dark === true, label: 'Custom' }
   const t = THEMES.find(x => x.id === s?.theme) ?? THEMES[0], list = dark ? t.dark : t.light
   const i = s?.variant && typeof s.variant === 'object' ? s.variant[t.id] : 0
@@ -324,7 +319,7 @@ export function editPalette(base: Palette, baseDark: boolean, key: keyof Palette
   return { dark, v }
 }
 
-/* Share codes ────────────────────────────────────────────────────────────────
+/*
  * A theme in a URL: `#theme=<code>`, where the code is base64url of a few bytes. Byte 0 is the format version (1);
  * then flags (mode in bits 0–1: system/light/dark, bit 2 a Custom palette follows, bit 3 it leans dark), radius × 4,
  * font index (FONTS), family index (THEMES), that family's variant, and with a Custom palette its 15 colours as RGB
@@ -444,8 +439,8 @@ export function revealTheme(update: () => void, from?: RevealOrigin) {
   }
   const box = from instanceof Element ? from.getBoundingClientRect() : null
   const recent = Date.now() - lastPress.at < 1500
-  // no origin: the end corner of the top bar, where theme toggles usually sit (top left in RTL)
-  const x = box ? box.left + box.width / 2 : from && 'x' in from ? from.x : recent ? lastPress.x : root.dir === 'rtl' ? 40 : innerWidth - 40
+  // no origin: the end corner of the top bar, where theme toggles usually sit
+  const x = box ? box.left + box.width / 2 : from && 'x' in from ? from.x : recent ? lastPress.x : (innerWidth - 40)
   const y = box ? box.top + box.height / 2 : from && 'y' in from ? from.y : recent ? lastPress.y : 28
   const r = Math.hypot(Math.max(x, innerWidth - x), Math.max(y, innerHeight - y))
   const vt = doc.startViewTransition(() => flushSync(update))

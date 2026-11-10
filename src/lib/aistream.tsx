@@ -1,34 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
 import { uiShared } from './core'
 
-/* ════════════════════════════════════════════════════════════════════════════
- * 11a. AI STREAM: the message model (parts), a chunk reducer, stream parsers and useAiChat
- *
- * Headless: no UI here (the parts renderer lives in aichat.tsx, PromptInput in ai.tsx), and it imports only React.
- *
- * Chunk protocol (AiChunk). One JSON object per chunk; the names on the right are the AI SDK UI message stream
- * events (`result.toUIMessageStreamResponse()`, SSE `data: {…}`) that `toAiChunk` maps onto them:
- *
- *   start            { messageId? }                       ← start
- *   text-delta       { delta, id? }                       ← text-delta { id, delta }   (text-start: ignored)
- *   text-end         { id? }                              ← text-end
- *   reasoning-delta  { delta, id? }                       ← reasoning-delta            (reasoning-start: ignored)
- *   reasoning-end    { id? }                              ← reasoning-end
- *   tool-start       { id, name, args?, needsApproval? }  ← tool-input-start { toolCallId, toolName }
- *   tool-args-delta  { id, delta }                        ← tool-input-delta { toolCallId, inputTextDelta }
- *   tool-args        { id, args, name? }                  ← tool-input-available { toolCallId, toolName, input }
- *   tool-approval    { id, summary? }                     ← tool-approval-request { toolCallId, approvalId }
- *   tool-result      { id, result }                       ← tool-output-available { toolCallId, output }
- *   tool-error       { id, error }                        ← tool-output-error / tool-input-error { toolCallId, errorText }
- *   source           { url, title?, snippet?, id? }       ← source-url { sourceId, url, title }
- *   file             { url, mediaType, name? }            ← file { url, mediaType }
- *   data             { name, data, id? }                  ← data-<name> { id?, data }  (same id replaces)
- *   finish           { }                                  ← finish, abort              (start-step/finish-step: ignored)
- *   error            { message }                          ← error { errorText }
- *
- * A bare string is shorthand for a text-delta, so `send` can be an async generator of plain text.
- * ══════════════════════════════════════════════════════════════════════════ */
-
 /** Version of the chunk protocol above. */
 export const AI_STREAM_VERSION = 1
 

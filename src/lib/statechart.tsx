@@ -1,15 +1,11 @@
 import { useEffect, useId, useLayoutEffect, useMemo, useReducer, useRef, useState, type CSSProperties, type ReactNode } from 'react'
 import { AnimatePresence, motion, useInView, useReducedMotion } from 'motion/react'
-import { Badge, Button, Icon, ScrollEdges, TOUCH, clamp, cn, defineMessages, maxOf, spring, surface, useLocale, useMessages, useScrollEdges } from './core'
+import { Badge, Button, Icon, ScrollEdges, TOUCH, clamp, cn, maxOf, spring, surface, useScrollEdges, fmt } from './core'
 import { SegmentedControl } from './forms'
 import { play, useFrameLoop } from './motion'
 import { DG_DOTS, DgDot, dgBez, dgSafeId } from './diagramkit'
 
 /* DIAGRAMS · Statecharts: one SVG renderer (Statechart), the UML StateDiagram, and the WorkflowEngine with its live StateMachine. */
-
-/* ════════════════════════════════════════════════════════════════════════════
- * Statechart renderer (shared by StateDiagram and StateMachine)
- * ══════════════════════════════════════════════════════════════════════════ */
 
 export type StatechartNode = {
   id: string
@@ -25,41 +21,6 @@ export type StatechartNode = {
 }
 export type StatechartEdge = { id: string; d: string; label?: string; lx?: number; ly?: number; anchor?: 'start' | 'middle' | 'end'; dashed?: boolean; live?: boolean }
 export type StatechartDot = { key: string; edge: string; ms: number; ease?: 'linear' | 'inOut'; onDone?: () => void }
-
-/** Statechart, StateDiagram and StateMachine strings (machine-drafted de/ar). */
-export const STATECHART_MESSAGES = defineMessages('statechart', {
-  en: {
-    scrolls: '{label}, scrolls sideways', autoPlay: 'Auto-play', stateDiagram: 'State diagram', current: 'Current state', canFire: 'Events you can fire',
-    noEvents: 'No events from here', history: 'History', fireToStart: 'Fire an event to start', final: 'Final', start: 'Start',
-    inside: 'inside {name}', remembers: 'history remembers {name}', terminated: 'terminated · press Reset', step: '{from} → {to}',
-    waiting: 'waiting for <b>human approval</b>', human: 'human:', emits: 'emits', queued: '→ queued', reviews: 'reviews', joined: 'joined', started: '→ started', done: 'done',
-    fire: 'Fire event', machineLabel: '{name} statechart', noMachines: 'Workflow statechart (no workflows)', queue: 'Queue',
-    queueEmpty: 'empty · jobs start as soon as one of {n} slots is free', idle: 'Live engine. Fire an event to start a {name} job, or wait for the next trigger.',
-    none: 'No workflows yet: pass `machines` to run them here.',
-    subHuman: 'human approval', subAgent: 'agent · {time}', subDecision: 'decision', subFork: 'fork → join', subOrch: 'orchestrator', subTrigger: 'trigger',
-  },
-  de: {
-    scrolls: '{label}, seitlich scrollbar', autoPlay: 'Automatisch abspielen', stateDiagram: 'Zustandsdiagramm', current: 'Aktueller Zustand', canFire: 'Mögliche Ereignisse',
-    noEvents: 'Keine Ereignisse von hier', history: 'Verlauf', fireToStart: 'Löse ein Ereignis aus, um zu starten', final: 'Ende', start: 'Start',
-    inside: 'in {name}', remembers: 'Verlauf merkt sich {name}', terminated: 'beendet · Zurücksetzen drücken', step: '{from} → {to}',
-    waiting: 'wartet auf <b>menschliche Freigabe</b>', human: 'Mensch:', emits: 'sendet', queued: '→ eingereiht', reviews: 'Prüfungen', joined: 'zusammengeführt', started: '→ gestartet', done: 'fertig',
-    fire: 'Ereignis auslösen', machineLabel: 'Zustandsdiagramm {name}', noMachines: 'Workflow-Zustandsdiagramm (keine Workflows)', queue: 'Warteschlange',
-    queueEmpty: 'leer · Jobs starten, sobald einer von {n} Plätzen frei ist', idle: 'Live-Engine. Löse ein Ereignis aus, um einen Job „{name}“ zu starten, oder warte auf den nächsten Auslöser.',
-    none: 'Noch keine Workflows: Übergib `machines`, um sie hier auszuführen.',
-    subHuman: 'menschliche Freigabe', subAgent: 'Agent · {time}', subDecision: 'Entscheidung', subFork: 'Verzweigung → Zusammenführung', subOrch: 'Orchestrator', subTrigger: 'Auslöser',
-  },
-  ar: {
-    scrolls: '{label}، قابل للتمرير أفقيًا', autoPlay: 'تشغيل تلقائي', stateDiagram: 'مخطط الحالات', current: 'الحالة الحالية', canFire: 'الأحداث المتاحة',
-    noEvents: 'لا أحداث من هنا', history: 'السجل', fireToStart: 'أطلق حدثًا للبدء', final: 'النهاية', start: 'البداية',
-    inside: 'داخل {name}', remembers: 'السجل يتذكر {name}', terminated: 'انتهى، اضغط إعادة الضبط', step: '{from} ← {to}',
-    waiting: 'بانتظار <b>موافقة بشرية</b>', human: 'المراجع:', emits: 'يُطلق', queued: '← في الانتظار', reviews: 'المراجعات', joined: 'اندمجت', started: '← بدأ', done: 'تم',
-    fire: 'إطلاق حدث', machineLabel: 'مخطط حالات {name}', noMachines: 'مخطط حالات سير العمل (لا توجد مسارات)', queue: 'قائمة الانتظار',
-    queueEmpty: 'فارغة، تبدأ المهام فور توفر خانة من {n}', idle: 'محرك مباشر. أطلق حدثًا لبدء مهمة {name}، أو انتظر المشغّل التالي.',
-    none: 'لا توجد مسارات عمل بعد: مرّر `machines` لتشغيلها هنا.',
-    subHuman: 'موافقة بشرية', subAgent: 'وكيل، {time}', subDecision: 'قرار', subFork: 'تفرّع ← دمج', subOrch: 'منسّق', subTrigger: 'مشغّل',
-  },
-})
-
 
 function DgStateNode({ n, reduce, index }: { n: StatechartNode; reduce: boolean; index: number }) {
   const ref = useRef<SVGGElement>(null)
@@ -118,11 +79,10 @@ export function Statechart({ width, height, nodes, edges, dots = [], label, minW
   const uid = dgSafeId(useId())
   const reduce = !!useReducedMotion()
   const [scrollRef, scroll] = useScrollEdges<HTMLDivElement>()
-  const m = useMessages(STATECHART_MESSAGES)
   // the diagram keeps its authored geometry in every locale (dir="ltr"), like charts; labels are the caller's text
   return (
-    <div dir="ltr" className="relative min-w-0 overflow-hidden rounded-[var(--r-lg)]">
-    <div ref={scrollRef} tabIndex={scroll.left || scroll.right ? 0 : undefined} role={scroll.left || scroll.right ? 'region' : undefined} aria-label={scroll.left || scroll.right ? m('scrolls', { label }) : undefined}
+    <div className="relative min-w-0 overflow-hidden rounded-[var(--r-lg)]">
+    <div ref={scrollRef} tabIndex={scroll.left || scroll.right ? 0 : undefined} role={scroll.left || scroll.right ? 'region' : undefined} aria-label={scroll.left || scroll.right ? `${label}, scrolls sideways` : undefined}
       className={cn('overflow-x-auto overscroll-x-contain rounded-[var(--r-lg)] border border-[var(--line)] outline-none focus-visible:shadow-[0_0_0_2px_var(--accent)]', DG_DOTS, className)}>
       <svg viewBox={`0 0 ${width} ${height}`} role="img" aria-label={label} className="block h-auto w-full max-sm:!min-w-[var(--sc-phone)] [@media(pointer:coarse)]:!min-w-[var(--sc-phone)]" style={{ minWidth, '--sc-phone': `${width}px` } as CSSProperties}>
         <defs>
@@ -181,8 +141,7 @@ export function useStatechart<T extends HTMLElement = HTMLDivElement>({ amount =
 }
 
 function DgPlayButton({ playing, onClick, label }: { playing: boolean; onClick: () => void; label?: string }) {
-  const auto = useMessages(STATECHART_MESSAGES)('autoPlay')
-  label ??= auto
+  label ??= 'Auto-play'
   return (
     <Button size="icon-sm" aria-label={label} title={label} aria-pressed={playing} onClick={onClick} className={cn('!h-[30px] !w-[30px]', TOUCH.tap36)}>
       <Icon name={playing ? 'pause' : 'play'} size={13} filled />
@@ -190,10 +149,6 @@ function DgPlayButton({ playing, onClick, label }: { playing: boolean; onClick: 
   )
 }
 const dgSideLabel = 'text-xs text-[var(--fg3)]'
-
-/* ════════════════════════════════════════════════════════════════════════════
- * State diagram (UML)
- * ══════════════════════════════════════════════════════════════════════════ */
 
 export type DiagramState = {
   label?: string
@@ -238,8 +193,7 @@ export function StateDiagram({ states, transitions, initial, history, width = 94
   const busy = useRef(false)
   const { cur, hist, log } = M.current
   const within = (s: string, anc: string) => s === anc || states[s]?.parent === anc
-  const msg = useMessages(STATECHART_MESSAGES), { t } = useLocale()
-  const nice = (s: string) => states[s]?.label ?? (states[s]?.kind === 'final' ? msg('final') : states[s]?.kind === 'initial' ? msg('start') : s)
+  const nice = (s: string) => states[s]?.label ?? (states[s]?.kind === 'final' ? 'Final' : states[s]?.kind === 'initial' ? 'Start' : s)
   const available = transitions.map((t, i) => [t, i] as const).filter(([t]) => within(cur, t.from))
   const resumable = transitions.some(t => t.to === 'H' && within(cur, t.from))
   const fire = async (i: number) => {
@@ -289,32 +243,32 @@ export function StateDiagram({ states, transitions, initial, history, width = 94
     ...(history ? [{ id: 'hdef', d: history.d, dashed: true, live: hLive }] : []),
     ...transitions.map((t, i) => ({ id: `t${i}`, d: t.d, label: t.label[2], lx: t.label[0], ly: t.label[1], anchor: t.label[3], live: live === i })),
   ]
-  const where = states[cur]?.parent ? msg('inside', { name: nice(states[cur].parent!) }) : resumable ? msg('remembers', { name: nice(hist) }) : states[cur]?.kind === 'final' ? msg('terminated') : ''
+  const where = states[cur]?.parent ? `inside ${nice(states[cur].parent!)}` : resumable ? `history remembers ${nice(hist)}` : states[cur]?.kind === 'final' ? 'terminated · press Reset' : ''
   return (
     <div ref={box} className={cn('flex flex-col gap-3', className)}>
       <div className="flex justify-end gap-1.5">
         <DgPlayButton playing={auto} onClick={() => setAuto(a => !a)} />
-        <Button size="sm" className={TOUCH.tap36} onClick={reset}>{t('common.reset')}</Button>
+        <Button size="sm" className={TOUCH.tap36} onClick={reset}>{'Reset'}</Button>
       </div>
       <div className="grid gap-4 min-[900px]:grid-cols-[minmax(0,1fr)_240px]">
-        <Statechart width={width} height={height} nodes={nodes} edges={edges} dots={dots} label={msg('stateDiagram')} />
+        <Statechart width={width} height={height} nodes={nodes} edges={edges} dots={dots} label={'State diagram'} />
         <aside className="flex flex-col gap-4">
           <div className={cn('flex flex-col gap-0.5 p-3', surface.md)} aria-live="polite">
-            <span className={dgSideLabel}>{msg('current')}</span>
+            <span className={dgSideLabel}>{'Current state'}</span>
             <AnimatePresence mode="popLayout" initial={false}>
               <motion.b key={cur} initial={{ opacity: 0, y: 6 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0, y: -6 }} transition={spring(0.2, 0.3)} className="text-lg font-semibold tracking-tight">{nice(cur)}</motion.b>
             </AnimatePresence>
             <span className={cn(dgSideLabel, 'min-h-[17px]')}>{where}</span>
           </div>
           <div>
-            <span className={dgSideLabel}>{msg('canFire')}</span>
+            <span className={dgSideLabel}>{'Events you can fire'}</span>
             <div className="mt-1.5 flex min-h-[66px] flex-wrap content-start gap-1.5 [@media(pointer:coarse)]:min-h-[78px]">
               {available.length ? available.map(([t, i]) => <Button key={i} size="sm" className={cn('font-[family-name:var(--mono)] !text-xs', TOUCH.tap36)} onClick={() => fire(i)}>{t.event}</Button>)
-                : <span className={dgSideLabel}>{msg('noEvents')}</span>}
+                : <span className={dgSideLabel}>{'No events from here'}</span>}
             </div>
           </div>
           <div>
-            <span className={dgSideLabel}>{msg('history')}</span>
+            <span className={dgSideLabel}>{'History'}</span>
             {/* room for five entries from the start, so firing events never grows the card */}
             <div className="mt-1.5 flex h-[236px] flex-col gap-1 overflow-hidden text-xs">
               {log.length ? (
@@ -323,11 +277,11 @@ export function StateDiagram({ states, transitions, initial, history, width = 94
                     <motion.div key={x.k} layout initial={{ opacity: 0, y: -6 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0 }} transition={spring(0.2, 0.3)}
                       className="flex flex-none flex-col rounded-[var(--r-md)] bg-[var(--muted)] px-2 py-1.5">
                       <b className="font-[family-name:var(--mono)] font-semibold">{x.ev}</b>
-                      <span className="text-[var(--fg3)]">{msg('step', { from: nice(x.from), to: nice(x.to) })}{x.guard ? ` · [${x.guard}]` : ''}{x.act ? ` · / ${x.act}` : ''}</span>
+                      <span className="text-[var(--fg3)]">{`${nice(x.from)} → ${nice(x.to)}`}{x.guard ? ` · [${x.guard}]` : ''}{x.act ? ` · / ${x.act}` : ''}</span>
                     </motion.div>
                   ))}
                 </AnimatePresence>
-              ) : <span className={dgSideLabel}>{msg('fireToStart')}</span>}
+              ) : <span className={dgSideLabel}>{'Fire an event to start'}</span>}
             </div>
           </div>
         </aside>
@@ -335,10 +289,6 @@ export function StateDiagram({ states, transitions, initial, history, width = 94
     </div>
   )
 }
-
-/* ════════════════════════════════════════════════════════════════════════════
- * State machine: a live workflow engine plus its statechart
- * ══════════════════════════════════════════════════════════════════════════ */
 
 /** One run of a workflow machine. */
 export type WorkflowJob = {
@@ -599,7 +549,6 @@ export class WorkflowEngine {
   }
 }
 
-
 const WF_H = 250
 /** Columns by breadth-first depth from the start state; fork, join, guard and back edges included. */
 function wfLayout(m: WorkflowMachine, minW = 900) {
@@ -637,7 +586,6 @@ const WF_NONE: Record<string, WorkflowMachine> = {}
  */
 export function StateMachine({ machines = WF_NONE, order, defaultValue, className }:
   { machines?: Record<string, WorkflowMachine>; order?: string[]; defaultValue?: string; className?: string }) {
-  const msg = useMessages(STATECHART_MESSAGES), { fmt } = useLocale()
   const engine = useMemo(() => new WorkflowEngine(machines, order ?? Object.keys(machines).slice(0, 3), { speed: 1.5 }), [machines, order])
   const [picked, setType] = useState(defaultValue ?? Object.keys(machines)[0] ?? '')
   const type = machines[picked] ? picked : Object.keys(machines)[0] ?? ''
@@ -653,10 +601,10 @@ export function StateMachine({ machines = WF_NONE, order, defaultValue, classNam
     if (ev.kind === 'queued') { force(); return }
     if (ev.job.type !== type) { if (ev.kind === 'enter' || ev.kind === 'done') force(); return }
     if (ev.kind === 'move' && ev.to) spark(`${ev.state}>${ev.to}`, 700)
-    const [wait0, wait1] = msg('waiting').split(/<b>|<\/b>/)
-    const text = ev.kind === 'hitl' ? <>{wait0}<b>{wait1}</b></> : ev.kind === 'hitl-done' ? <>{msg('human')} <b>{ev.result}</b></>
-      : ev.kind === 'trigger' ? <>{msg('emits')} <b>{ev.ev}</b> {msg('queued')}</> : ev.kind === 'guard' ? <bdi><b>{ev.guard}?</b> → {ev.result}</bdi>
-      : ev.kind === 'join' ? <>{msg('reviews')} <b>{msg('joined')}</b></> : ev.kind === 'spawn' ? <><b>{machines[ev.job.type].event}</b> {msg('started')}</> : ev.kind === 'done' ? <b>{msg('done')}</b> : null
+    const [wait0, wait1] = 'waiting for <b>human approval</b>'.split(/<b>|<\/b>/)
+    const text = ev.kind === 'hitl' ? <>{wait0}<b>{wait1}</b></> : ev.kind === 'hitl-done' ? <>{'human:'} <b>{ev.result}</b></>
+      : ev.kind === 'trigger' ? <>{'emits'} <b>{ev.ev}</b> {'→ queued'}</> : ev.kind === 'guard' ? <bdi><b>{ev.guard}?</b> → {ev.result}</bdi>
+      : ev.kind === 'join' ? <>{'reviews'} <b>{'joined'}</b></> : ev.kind === 'spawn' ? <><b>{machines[ev.job.type].event}</b> {'→ started'}</> : ev.kind === 'done' ? <b>{'done'}</b> : null
     if (text) setLog(l => [{ k: `${ev.job.id}-${ev.kind}-${performance.now()}`, id: ev.job.id, name: ev.job.name, text }, ...l].slice(0, 5))
     force()
   }), [engine, type, reduce, machines]) // eslint-disable-line react-hooks/exhaustive-deps -- spark and repaint only read reduce and setState
@@ -666,7 +614,7 @@ export function StateMachine({ machines = WF_NONE, order, defaultValue, classNam
     if (k === 'done') return { id: k, kind: 'end', x, y }
     const st = m!.states[k]
     const secs = fmt.number(st.work ?? 0, { style: 'unit', unit: 'second', unitDisplay: 'narrow' })
-    const sub = st.hitl ? msg('subHuman') : st.work ? (st.at[1] === 'Index' ? secs : msg('subAgent', { time: secs })) : st.orch ? (st.guard ? msg('subDecision') : st.fork ? msg('subFork') : msg('subOrch')) : msg('subTrigger')
+    const sub = st.hitl ? 'human approval' : st.work ? (st.at[1] === 'Index' ? secs : `agent · ${secs}`) : st.orch ? (st.guard ? 'decision' : st.fork ? 'fork → join' : 'orchestrator') : 'trigger'
     return { id: k, kind: 'state', x: x - L.nw / 2, y: y - 22, w: L.nw, h: 44, label: st.at[1] === 'Index' ? m!.event : st.at[1], sub, dashed: !!st.orch, on: !!counts[k], count: counts[k] }
   })
   const pick = (v: string) => { setType(v); clear(); setLog([]) }
@@ -674,16 +622,16 @@ export function StateMachine({ machines = WF_NONE, order, defaultValue, classNam
     <div ref={box} className={cn('flex flex-col gap-3', className)}>
       <div className="flex flex-wrap items-center justify-end gap-2">
         {m && <div className="max-w-full overflow-x-auto"><SegmentedControl size="sm" value={type} onChange={pick} options={Object.entries(machines).map(([k, x]) => ({ value: k, label: x.short ?? x.name }))} /></div>}
-        <Button size="sm" variant="primary" className={TOUCH.tap36} disabled={!m} onClick={() => { engine.fire(type); force() }}>{msg('fire')}</Button>
+        <Button size="sm" variant="primary" className={TOUCH.tap36} disabled={!m} onClick={() => { engine.fire(type); force() }}>{'Fire event'}</Button>
       </div>
-      <Statechart key={type} width={L.W} height={L.H} nodes={nodes} edges={L.edges} dots={dots} label={m ? msg('machineLabel', { name: m.name }) : msg('noMachines')} minWidth={900} />
+      <Statechart key={type} width={L.W} height={L.H} nodes={nodes} edges={L.edges} dots={dots} label={m ? `${m.name} statechart` : 'Workflow statechart (no workflows)'} minWidth={900} />
       {/* fixed heights: the queue scrolls in one row and the log always holds five lines, so neither a workflow switch nor
           new events ever change the card's height */}
       <div className="flex h-[22px] items-center gap-1.5 overflow-x-auto overflow-y-hidden text-xs whitespace-nowrap text-[var(--fg3)] [scrollbar-width:none]">
-        <span className="flex-none">{msg('queue')}</span>
+        <span className="flex-none">{'Queue'}</span>
         {engine.queue.length ? engine.queue.map(q => <motion.span key={q.id} className="flex-none" initial={{ opacity: 0, scale: 0.8 }} animate={{ opacity: 1, scale: 1 }} transition={spring(0.4, 0.3)}>
           <Badge size="sm" tone={q.ev === m?.event ? 'accent' : 'neutral'} className="font-[family-name:var(--mono)]">{q.ev}</Badge></motion.span>)
-          : <span className="truncate">{msg('queueEmpty', { n: engine.maxJobs })}</span>}
+          : <span className="truncate">{`empty · jobs start as soon as one of ${engine.maxJobs} slots is free`}</span>}
       </div>
       <div className="flex h-[96px] flex-col gap-0.5 overflow-hidden font-[family-name:var(--mono)] text-xs text-[var(--fg2)]" aria-live="polite">
         {log.length ? (
@@ -694,7 +642,7 @@ export function StateMachine({ machines = WF_NONE, order, defaultValue, classNam
               </motion.div>
             ))}
           </AnimatePresence>
-        ) : <div className="font-[family-name:var(--font)] text-[var(--fg3)]">{m ? msg('idle', { name: m.name.toLowerCase() }) : msg('none')}</div>}
+        ) : <div className="font-[family-name:var(--font)] text-[var(--fg3)]">{m ? `Live engine. Fire an event to start a ${m.name.toLowerCase()} job, or wait for the next trigger.` : 'No workflows yet: pass `machines` to run them here.'}</div>}
       </div>
     </div>
   )

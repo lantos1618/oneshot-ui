@@ -5,7 +5,6 @@ import { createElement as h } from 'react'
 import { act, fireEvent, render, screen } from '@testing-library/react'
 import { describe, expect, it, vi } from 'vitest'
 import { LaneGraph, LaneGutter, laneAncestry, laneColor, layoutLanes, type LaneLayout, type LaneNode } from '../../src/lib/lanes'
-import { UIProvider } from '../../src/lib/provider'
 import { GIT_SAMPLE, gitHistory } from '../../src/examples/git'
 import { AGENT_RUN_SAMPLE, CHAT_TREE_SAMPLE, DEPENDENCY_SAMPLE, agentRunNodes, astLaneNodes, chatBranchGraph, dependencyNodes, parseAst, AST_SAMPLE } from '../../src/examples/graphs'
 
@@ -326,10 +325,4 @@ describe('LaneGraph', () => {
     expect(rows[0].querySelector('svg')!.getAttribute('height')).toBe('100%')
   })
 
-  it('keeps the gutter an LTR island in RTL locales', () => {
-    render(h(UIProvider, { locale: 'ar-EG', children: h(LaneGraph<(typeof nodes)[number]>, { nodes, order: 'input', renderRow }) }))
-    const row = screen.getAllByRole('row')[0]
-    expect(row.querySelector('[role=gridcell]')).toHaveAttribute('dir', 'ltr')
-    expect(screen.getByRole('grid')).toHaveAccessibleName('المخطط')
-  })
 })

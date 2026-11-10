@@ -5,7 +5,6 @@ import { act, fireEvent, render, screen, waitFor, within } from '@testing-librar
 import userEvent from '@testing-library/user-event'
 import { useState, type ReactNode } from 'react'
 import { describe, expect, it, vi } from 'vitest'
-import { LocaleProvider } from '../../src/lib/core'
 import {
   Calendar, DateField, DatePicker, DateRangePicker, DateTimeField, DateTimePicker, Form, FormField, MonthPicker, MultiSelect, type Option, TimeField, TimePicker,
   TimeZonePicker, YearPicker, timeZoneOptions, toZonedISO, zonedDate, zonedParts, zoneOffset,
@@ -63,27 +62,12 @@ describe('Calendar constraints', () => {
   })
 })
 
-describe('Calendar locale and week start', () => {
-  it('takes weekday names and the first day of the week from the locale', () => {
-    const { unmount } = render(<Calendar month={new Date(2026, 10, 1)} />)
-    expect(headers()).toEqual(['Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday', 'Sunday']) // en-GB default
+describe('Calendar week', () => {
+  it('starts on Monday with English weekday names', () => {
+    render(<Calendar month={new Date(2026, 10, 1)} />)
+    expect(headers()).toEqual(['Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday', 'Sunday'])
     expect(screen.getAllByRole('columnheader')[0]).toHaveTextContent('Mon')
-    unmount()
-    const r2 = render(<Calendar month={new Date(2026, 10, 1)} locale="en-US" />)
-    expect(headers()[0]).toBe('Sunday')
     expect(screen.getByRole('grid', { name: 'November 2026' })).toBeInTheDocument()
-    r2.unmount()
-    const r3 = render(<Calendar month={new Date(2026, 10, 1)} locale="de-DE" weekStartsOn={3} />)
-    expect(headers()).toEqual(['Mittwoch', 'Donnerstag', 'Freitag', 'Samstag', 'Sonntag', 'Montag', 'Dienstag'])
-    expect(screen.getByRole('grid', { name: 'November 2026' })).toBeInTheDocument()
-    r3.unmount()
-  })
-
-  it('follows a LocaleProvider: Arabic (Egypt) starts on Saturday, with Arabic-Indic digits', () => {
-    render(<LocaleProvider locale="ar-EG"><Calendar month={new Date(2026, 10, 1)} /></LocaleProvider>)
-    expect(headers()[0]).toBe('السبت')
-    const first = within(screen.getAllByRole('row')[1]).getAllByRole('button')[0]
-    expect(first).toHaveTextContent('٣١') // 31 October leads a Saturday-first week
   })
 
   it('shows several months, and only the first month’s days in each', () => {
@@ -117,12 +101,12 @@ describe('Calendar keyboard (APG date grid)', () => {
 
   it('Home/End follow the week start, and navigation stops at max', async () => {
     const user = userEvent.setup()
-    render(<Calendar selected={new Date(2026, 10, 12)} locale="en-US" max={new Date(2026, 10, 24)} autoFocus />)
-    await waitFor(() => expect(day('Thursday, November 12, 2026')).toHaveFocus())
+    render(<Calendar selected={new Date(2026, 10, 12)} max={new Date(2026, 10, 24)} autoFocus />)
+    await waitFor(() => expect(day('Thursday 12 November 2026')).toHaveFocus())
     await user.keyboard('{Home}')
-    expect(day('Sunday, November 8, 2026')).toHaveFocus()
+    expect(day('Monday 9 November 2026')).toHaveFocus()
     await user.keyboard('{PageDown}')
-    expect(day('Tuesday, November 24, 2026')).toHaveFocus() // clamped to max
+    expect(day('Tuesday 24 November 2026')).toHaveFocus() // clamped to max
   })
 
   it('Enter picks the focused day; disabled days are skipped by Enter', async () => {
@@ -156,14 +140,10 @@ describe('Calendar keyboard (APG date grid)', () => {
 })
 
 describe('DateField segments', () => {
-  it.each([
-    ['en-GB', '08112026', ['Day', 'Month', 'Year']],
-    ['en-US', '11082026', ['Month', 'Day', 'Year']],
-    ['de-DE', '08112026', ['Tag', 'Monat', 'Jahr']],
-    ['ja-JP', '20261108', ['年', '月', '日']],
-  ])('%s: segments in the locale’s order; typing fills and auto-advances', async (locale, keys, order) => {
+  it('day, month, year segments; typing fills and auto-advances', async () => {
+    const keys = '08112026', order = ['Day', 'Month', 'Year']
     const user = userEvent.setup(), onChange = vi.fn()
-    render(<DateField aria-label="Due" locale={locale} onChange={onChange} />)
+    render(<DateField aria-label="Due" onChange={onChange} />)
     expect(screen.getAllByRole('spinbutton').map(s => s.getAttribute('aria-label'))).toEqual(order)
     await user.click(screen.getAllByRole('spinbutton')[0])
     await user.keyboard(keys)
@@ -201,27 +181,17 @@ describe('DateField segments', () => {
     expect(seg(/Year/)).toHaveAttribute('aria-valuetext', 'Empty')
   })
 
-  it('pastes ISO and locale-formatted dates', async () => {
+  it('pastes ISO and day/month/year dates', async () => {
     const user = userEvent.setup(), onChange = vi.fn()
     const { unmount } = render(<DateField aria-label="Due" onChange={onChange} />)
     await user.click(seg(/Day/))
     await user.paste('2026-11-08')
     expect(onChange).toHaveBeenLastCalledWith(new Date(2026, 10, 8))
     unmount()
-    render(<DateField aria-label="Fällig" locale="de-DE" onChange={onChange} />)
-    await user.click(seg(/Tag/))
-    await user.paste('24.12.2026')
+    render(<DateField aria-label="Due" onChange={onChange} />)
+    await user.click(seg(/Day/))
+    await user.paste('24/12/2026')
     expect(onChange).toHaveBeenLastCalledWith(new Date(2026, 11, 24))
-  })
-
-  it('accepts Arabic-Indic digits and shows them in an Arabic locale', async () => {
-    const user = userEvent.setup(), onChange = vi.fn()
-    render(<DateField aria-label="Due" locale="ar-EG" onChange={onChange} />)
-    const segs = screen.getAllByRole('spinbutton')
-    await user.click(segs[0])
-    await user.keyboard('٠٨١١٢٠٢٦')
-    expect(onChange).toHaveBeenLastCalledWith(new Date(2026, 10, 8))
-    expect(segs[0]).toHaveValue('٠٨')
   })
 
   it('a half-typed date blocks the submit with a message; min/max are checked', async () => {
@@ -260,14 +230,14 @@ describe('TimeField, 24- and 12-hour', () => {
     expect(onChange).toHaveBeenLastCalledWith('23:31')
   })
 
-  it('12-hour from the locale (en-US): am/pm segment, "p" sets pm, value stays 24-hour', async () => {
+  it('12-hour clock: am/pm segment, "p" sets pm, value stays 24-hour', async () => {
     const user = userEvent.setup(), onChange = vi.fn()
-    render(<TimeField aria-label="Start" locale="en-US" onChange={onChange} />)
-    expect(screen.getAllByRole('spinbutton').map(s => s.getAttribute('aria-label'))).toEqual(['Hour', 'Minute', 'AM/PM'])
+    render(<TimeField aria-label="Start" hourCycle={12} onChange={onChange} />)
+    expect(screen.getAllByRole('spinbutton').map(s => s.getAttribute('aria-label'))).toEqual(['Hour', 'Minute', 'Am/pm'])
     await user.click(seg(/Hour/))
     await user.keyboard('930p')
     expect(onChange).toHaveBeenLastCalledWith('21:30')
-    expect(seg(/AM\/PM/)).toHaveValue('PM')
+    expect(seg(/Am\/pm/)).toHaveValue('pm')
     await user.keyboard('{ArrowUp}')
     expect(onChange).toHaveBeenLastCalledWith('09:30')
   })
@@ -431,12 +401,12 @@ describe('FormData from the date controls', () => {
     expect(data().get('ro')).toBe('10:00')
   })
 
-  it('DateRangePicker and DatePicker show dates in the locale', () => {
+  it('DateRangePicker and DatePicker show their dates', () => {
     render(<>
-      <DatePicker locale="de-DE" defaultValue={new Date(2026, 10, 8)} aria-label="x" />
-      <DateRangePicker locale="en-GB" defaultValue={[new Date(2026, 10, 1), new Date(2026, 10, 7)]} />
+      <DatePicker defaultValue={new Date(2026, 10, 8)} aria-label="x" />
+      <DateRangePicker defaultValue={[new Date(2026, 10, 1), new Date(2026, 10, 7)]} />
     </>)
-    expect(screen.getByText('So., 8. Nov. 2026')).toBeInTheDocument()
+    expect(screen.getByText('Sun, 8 Nov 2026')).toBeInTheDocument()
     expect(screen.getByText(/^1\s*–\s*7 Nov 2026$/)).toBeInTheDocument()
     expect(screen.getByText('7 days')).toBeInTheDocument()
   })

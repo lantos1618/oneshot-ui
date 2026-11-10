@@ -1,11 +1,7 @@
-/** Form-control plumbing: FormFieldContext, useFormControl, useFormFieldProps, useControllableState. Part of @lyndon/ui/core. */
+/** Form-control plumbing: FormFieldContext, useFormControl, useFormFieldProps. Part of @lyndon/ui/core. */
 import { createContext, useCallback, useContext, useEffect, useLayoutEffect, useRef, useState } from 'react'
 import { dayKey } from './locale'
-
-/* ════════════════════════════════════════════════════════════════════════════
- * FORM CONTROLS (0.3): the plumbing that makes a custom control behave like a native field (name + hidden inputs,
- * required, disabled, read-only, invalid, reset, focus, FormField ids). Used by forms.tsx; keep this section together.
- * ══════════════════════════════════════════════════════════════════════════ */
+import { useControllable } from './hooks'
 
 /** What a FormField hands to the control inside it: ids for the label, description and error, plus field-level flags. */
 export type FormFieldState = {
@@ -28,16 +24,6 @@ export type FormControlProps = {
   id?: string; 'aria-describedby'?: string; 'aria-labelledby'?: string
 }
 
-/** Controlled-or-uncontrolled state like useControllable, plus `reset()` back to the latest `defaultValue`. */
-export function useControllableState<T>(value: T | undefined, defaultValue: T, onChange?: (v: T) => void) {
-  const [inner, setInner] = useState(defaultValue)
-  const controlled = value !== undefined
-  const def = useRef(defaultValue)
-  useLayoutEffect(() => { def.current = defaultValue })
-  const set = useCallback((v: T) => { if (!controlled) setInner(v); onChange?.(v) }, [controlled, onChange])
-  const reset = useCallback(() => setInner(def.current), [])
-  return [controlled ? value : inner, set, reset] as const
-}
 
 /** Serialised form value: a string, one field per array item (repeated names), or null to submit nothing. */
 export type FormValue = string | string[] | null
@@ -83,7 +69,7 @@ export function useFormControl<T>(p: FormControlProps & {
   /** 'checkbox' validates like a required native checkbox (a "tick this box" message) */ kind?: 'text' | 'checkbox'
 }) {
   const field = useContext(FormFieldContext)
-  const [value, setValue, resetValue] = useControllableState(p.value, p.defaultValue, p.onChange)
+  const [value, setValue, resetValue] = useControllable(p.value, p.defaultValue, p.onChange)
   const name = p.name ?? field?.name
   const disabled = !!(p.disabled ?? field?.disabled), readOnly = !!(p.readOnly ?? field?.readOnly), required = !!(p.required ?? field?.required)
   const [failed, setFailed] = useState(false) // the browser found it invalid; cleared by the next change

@@ -1,6 +1,6 @@
-// Every showcase section, in every profile (desktop light, desktop dark, iPhone 13, and right to left in Arabic on desktop
-// and iPhone): renders without console errors, stays within its layout-shift budget, adds no axe violations beyond the
-// baseline, and (on the phone, and in every RTL profile) never makes the page scroll sideways.
+// Every showcase section, in every profile (desktop light, desktop dark, iPhone 13): renders without console errors,
+// stays within its layout-shift budget, adds no axe violations beyond the baseline, and (on the phone) never makes the
+// page scroll sideways.
 import { ALLOWED_CONSOLE_ERRORS, CLS_BUDGET, CLS_OVERRIDES, SETTLE_MS, STEP_DWELL_MS } from './budgets'
 import { UPDATE, readBaseline, writePart } from './baseline'
 import { SECTION_IDS, axeCounts, expect, test, type AxeCounts, type AxeViolation } from './fixtures'
@@ -17,13 +17,9 @@ function newViolations(found: AxeViolation[], known: AxeCounts = {}) {
 }
 
 test.describe('showcase', () => {
-  test('page shell: loads cleanly, sections match SECTIONS, chrome has no new axe violations', async ({ showcase, showcaseLocale: locale }, info) => {
+  test('page shell: loads cleanly, sections match SECTIONS, chrome has no new axe violations', async ({ showcase }, info) => {
     const t0 = Date.now()
     await showcase.open()
-    if (locale) {
-      const html = await showcase.page.evaluate(() => ({ dir: document.documentElement.dir, lang: document.documentElement.lang }))
-      expect(html, `<html> for the showcase in ${locale}`).toEqual({ dir: /^(ar|he|fa|ur)(-|$)/.test(locale) ? 'rtl' : 'ltr', lang: locale })
-    }
     const ids = await showcase.page.evaluate(() => [...document.querySelectorAll('main section[id], section[id]')].map(s => s.id))
     expect([...new Set(ids)], 'section ids on the page vs SECTIONS in src/showcase/kit.tsx').toEqual(SECTION_IDS)
     await showcase.page.waitForTimeout(SETTLE_MS)
@@ -38,7 +34,7 @@ test.describe('showcase', () => {
   })
 
   for (const id of SECTION_IDS) {
-    test(`section ${id}`, async ({ showcase, showcaseLocale: locale }, info) => {
+    test(`section ${id}`, async ({ showcase }, info) => {
       const profile = info.project.name
       await showcase.open(id)
       const t0 = Date.now()
@@ -68,7 +64,7 @@ test.describe('showcase', () => {
         if (!UPDATE) expect.soft(newViolations(v, baseline[profile]?.[id]), `axe violations in #${id} beyond tests/e2e/axe-baseline.json (run pnpm test:e2e:update-baseline if they are expected)`).toEqual([])
       })
 
-      if (profile.startsWith('iphone') || locale) {
+      if (profile.startsWith('iphone')) {
         await test.step('no horizontal page scroll', async () => {
           const o = await showcase.horizontalOverflow(id)
           expect.soft(o.scrolls, `page scrolls sideways in #${id} (scrollWidth ${o.scrollWidth} > ${o.viewport})\n${o.offenders.join('\n')}`).toBe(false)

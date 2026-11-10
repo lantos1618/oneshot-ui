@@ -2,11 +2,7 @@ import { useEffect, useLayoutEffect, useRef, useState, type ReactNode, type RefO
 import { type DOMKeyframesDefinition, type HTMLMotionProps, animate, motion, useInView, useReducedMotion, type Transition } from 'motion/react'
 import { isCoarsePointer, prefersReducedMotion, spring } from './core'
 
-/* ════════════════════════════════════════════════════════════════════════════
- * Motion: scroll entrances, frame loops, tweens and one-shot animations
- * ══════════════════════════════════════════════════════════════════════════ */
-
-/** The library's entrance easing (quick out, long settle), same as the original page. */
+/** The library's entrance easing (quick out, long settle). */
 export const EASE_OUT: [number, number, number, number] = [0.22, 1, 0.36, 1]
 
 type ViewportMargin = NonNullable<Parameters<typeof useInView>[1]>['margin']
@@ -124,8 +120,6 @@ export function Reveal({ children, delay = 0, y = 14, amount = 0.15, ...p }:
     </motion.div>
   )
 }
-
-/* Playground ───────────────────────────────────────────────────────────────── */
 
 export type MotionPreset = [name: string, bounce: number, duration: number]
 export const MOTION_PRESETS: MotionPreset[] = [['Snappy', 0.1, 0.3], ['Default', 0.25, 0.45], ['Bouncy', 0.55, 0.6], ['Gentle', 0, 0.9]]

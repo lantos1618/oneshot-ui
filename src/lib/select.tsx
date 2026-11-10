@@ -1,10 +1,10 @@
 import { useEffect, useId, useLayoutEffect, useRef, useState, type CSSProperties, type ReactNode, type Ref, type KeyboardEvent as RKeyboardEvent } from 'react'
 import { AnimatePresence, motion } from 'motion/react'
-import { type MessageKeyOf, type ModuleTranslate, defineMessages, useMessages, type FormControlProps, Spinner, formDisabledClass, formReadOnlyClass, useFormControl, Button, Icon, type IconName, useLocale, cn, inputClass, menuItemClass, spring, useCoarsePointer, useDisclosure, useRoving } from './core'
+import { type FormControlProps, Spinner, formDisabledClass, formReadOnlyClass, useFormControl, Button, Icon, type IconName, cn, inputClass, menuItemClass, spring, useCoarsePointer, useDisclosure, useRoving, composeRefs } from './core'
 import { play } from './motion'
 import { FloatingPanel, type Placement } from './overlay'
 import { useVirtual } from './virtual'
-import { formsMergeRefs, formsPlacement, formsScrollIntoList, formsTriggerClass } from './formkit'
+import { formsPlacement, formsScrollIntoList, formsTriggerClass } from './formkit'
 import { inputShellClass, CheckboxBox, type Option } from './fields'
 
 /** Bold the first case-insensitive match of `query` inside `text` (for option lists and autocomplete). */
@@ -23,26 +23,6 @@ function formsScrollParent(el: HTMLElement | null): HTMLElement | null {
   return p && p !== document.body ? p : null
 }
 
-/** The select controls' own strings (machine-drafted de/ar). Override one with `<UIProvider messages={{ 'select.noMatches': … }}>`. */
-export const SELECT_MESSAGES = defineMessages('select', {
-  en: {
-    noMatches: 'No matches', noMatchesFor: 'No matches for “{query}”', create: 'Create “{query}”',
-    minChars: '{count, plural, one {Type at least # character} other {Type at least # characters}}',
-    loadFailed: 'Couldn’t load results', loadFailedRetry: 'Couldn’t load results. Press Enter to retry.',
-  },
-  de: {
-    noMatches: 'Keine Treffer', noMatchesFor: 'Keine Treffer für „{query}“', create: '„{query}“ erstellen',
-    minChars: '{count, plural, one {Gib mindestens # Zeichen ein} other {Gib mindestens # Zeichen ein}}',
-    loadFailed: 'Ergebnisse konnten nicht geladen werden', loadFailedRetry: 'Ergebnisse konnten nicht geladen werden. Drücke Enter für einen neuen Versuch.',
-  },
-  ar: {
-    noMatches: 'لا توجد نتائج مطابقة', noMatchesFor: 'لا توجد نتائج مطابقة لـ”{query}“', create: 'إنشاء ”{query}“',
-    minChars: '{count, plural, zero {اكتب حرفًا واحدًا على الأقل} one {اكتب حرفًا واحدًا على الأقل} two {اكتب حرفين على الأقل} few {اكتب # أحرف على الأقل} many {اكتب # حرفًا على الأقل} other {اكتب # حرف على الأقل}}',
-    loadFailed: 'تعذّر تحميل النتائج', loadFailedRetry: 'تعذّر تحميل النتائج. اضغط Enter لإعادة المحاولة.',
-  },
-})
-type SelectT = ModuleTranslate<MessageKeyOf<typeof SELECT_MESSAGES>>
-
 /**
  * The option list shared by Select, Combobox, MultiSelect and the phone country picker. Keeps the active option scrolled
  * into view. Options with a `group` are listed under a heading (a role="group"). Past `virtualize` options (default 100)
@@ -56,7 +36,6 @@ export function OptionList({ options, active, isSelected, onPick, onHover, id, m
     /** render only visible rows past this many options (false: never) */ virtualize?: number | false
     /** results are loading (aria-busy) */ busy?: boolean }) {
   const first = useRef(true)
-  const t = useMessages(SELECT_MESSAGES)
   const root = useRef<HTMLDivElement>(null), scroller = useRef<HTMLElement | null>(null)
   const virtual = virtualize !== false && options.length > virtualize
   useLayoutEffect(() => { // before useVirtual subscribes; looked up again only if the list moved
@@ -69,7 +48,7 @@ export function OptionList({ options, active, isSelected, onPick, onHover, id, m
     else { const el = document.getElementById(`${id}-${active}`); if (el) formsScrollIntoList(el, first.current) }
     first.current = false
   }, [active, id, options.length, virtual]) // eslint-disable-line react-hooks/exhaustive-deps
-  if (!options.length) return <div ref={root} role="status" className={cn('p-3 text-center text-[13px] text-[var(--fg3)]', className)}>{empty ?? t('noMatches')}</div>
+  if (!options.length) return <div ref={root} role="status" className={cn('p-3 text-center text-[13px] text-[var(--fg3)]', className)}>{empty ?? 'No matches'}</div>
   const row = (o: Option, i: number, style?: CSSProperties, animated = true) => {
     const sel = isSelected(o)
     const props = {
@@ -84,7 +63,7 @@ export function OptionList({ options, active, isSelected, onPick, onHover, id, m
           {o.leading && <span className="flex-none leading-none">{o.leading}</span>}
           {o.dot && <span className="h-2 w-2 flex-none rounded-full" style={{ background: o.dot }} />}
           {o.icon && <Icon name={o.icon} size={15} className="text-[var(--fg3)]" />}
-          <span className="truncate" dir="auto">{formsHighlight(o.label, query)}{o.hint && <span className="ms-2 text-xs text-[var(--fg3)]">{o.hint}</span>}</span>
+          <span className="truncate">{formsHighlight(o.label, query)}{o.hint && <span className="ms-2 text-xs text-[var(--fg3)]">{o.hint}</span>}</span>
         </span>
         {!multi && sel && <Icon name="check" size={14} />}
       </>
@@ -129,7 +108,7 @@ export function Select({ options, value, defaultValue, onChange, placeholder: pl
   { options: Option[]; value?: string; defaultValue?: string; onChange?: (v: string) => void; placeholder?: string; className?: string; 'aria-label'?: string
     /** leading icon in the trigger (TimePicker uses 'clock') */ icon?: IconName; mono?: boolean; ref?: Ref<HTMLButtonElement> }) {
   const btn = useRef<HTMLButtonElement>(null)
-  const { t: tc } = useLocale(), placeholder = placeholderProp ?? tc('common.select')
+  const placeholder = placeholderProp ?? 'Select…'
   const fc = useFormControl<string>({ ...fp, value, defaultValue: defaultValue ?? '', onChange, serialize: x => x, focus: () => btn.current?.focus() })
   const v = fc.value, set = fc.set, locked = fc.disabled || fc.readOnly
   const { open, setOpen, ref: wrap } = useDisclosure(), lid = useId()
@@ -158,7 +137,7 @@ export function Select({ options, value, defaultValue, onChange, placeholder: pl
   }
   return (
     <div ref={wrap} className={cn('relative', className)} onBlur={fc.onBlur}>
-      <button type="button" ref={formsMergeRefs(btn, ref)} {...fc.control} role="combobox" aria-label={ariaLabel} aria-expanded={open} aria-haspopup="listbox" aria-controls={lid} aria-activedescendant={open ? `${lid}-${active}` : undefined}
+      <button type="button" ref={composeRefs(btn, ref)} {...fc.control} role="combobox" aria-label={ariaLabel} aria-expanded={open} aria-haspopup="listbox" aria-controls={lid} aria-activedescendant={open ? `${lid}-${active}` : undefined}
         aria-required={fc.required || undefined} aria-readonly={fc.readOnly || undefined} disabled={fc.disabled}
         onClick={() => show(!open)} onKeyDown={onKey}
         className={cn(formsTriggerClass, 'cursor-pointer justify-between')}>
@@ -185,14 +164,13 @@ type FormsLoad = { q: string; status: 'idle' | 'loading' | 'done' | 'error'; ite
 /** The async list's message (too short, failed with Retry, loading, or no matches) and what the live region says. */
 function useSelectStatus({ short, failed, loading, done, count, minChars, query, empty, retry }: { short: boolean; failed: boolean; loading: boolean; done: boolean; count: number
   minChars: number; query: string; empty?: (q: string) => ReactNode; retry: () => void }) {
-  const t: SelectT = useMessages(SELECT_MESSAGES), { t: tc } = useLocale()
-  const message = short ? t('minChars', { count: minChars })
-    : failed ? <span className="flex flex-col items-center gap-2"><span className="text-[var(--bad)]">{t('loadFailed')}</span>
-      <Button size="xs" onPointerDown={e => e.preventDefault()} onClick={retry}>{tc('common.retry')}</Button></span>
-    : loading ? <span className="inline-flex items-center gap-2"><span aria-hidden className="grid"><Spinner size={13} /></span>{tc('status.loadingEllipsis')}</span>
-    : empty ? empty(query) : t('noMatchesFor', { query })
-  const live = loading ? tc('status.loadingResults') : failed ? t('loadFailedRetry') : done ? tc('status.resultsCount', { count }) : ''
-  return { message, live, t }
+  const message = short ? (minChars === 1 ? `Type at least ${minChars} character` : `Type at least ${minChars} characters`)
+    : failed ? <span className="flex flex-col items-center gap-2"><span className="text-[var(--bad)]">{'Couldn’t load results'}</span>
+      <Button size="xs" onPointerDown={e => e.preventDefault()} onClick={retry}>{'Retry'}</Button></span>
+    : loading ? <span className="inline-flex items-center gap-2"><span aria-hidden className="grid"><Spinner size={13} /></span>{'Loading…'}</span>
+    : empty ? empty(query) : `No matches for “${query}”`
+  const live = loading ? 'Loading results' : failed ? 'Couldn’t load results. Press Enter to retry.' : done ? (count === 0 ? 'No results' : count === 1 ? `${count} result` : `${count} results`) : ''
+  return { message, live }
 }
 
 /**
@@ -246,9 +224,8 @@ export function Combobox({ options = [], loadOptions, debounce = 200, minChars =
   const matches = [...(loadOptions ? source : source.filter(hit)), ...created.filter(hit)].filter(o => !seen.has(o.value) && !!seen.add(o.value))
   const canCreate = !!creatable && !!query && !chosen && !matches.some(o => o.label.toLowerCase() === query.toLowerCase())
   const retry = () => { reload(); input.current?.focus() }
-  const { message, live, t } = useSelectStatus({ short, failed, loading, done: !!loadOptions && load.status === 'done', count: matches.length + (canCreate ? 1 : 0), minChars, query: q, empty, retry })
-  const { t: tc } = useLocale()
-  const createOpt: Option | null = canCreate ? { value: query, label: createLabel ? createLabel(query) : t('create', { query }), icon: 'plus' } : null
+  const { message, live } = useSelectStatus({ short, failed, loading, done: !!loadOptions && load.status === 'done', count: matches.length + (canCreate ? 1 : 0), minChars, query: q, empty, retry })
+  const createOpt: Option | null = canCreate ? { value: query, label: createLabel ? createLabel(query) : `Create “${query}”`, icon: 'plus' } : null
   const list = short ? [] : createOpt ? [...matches, createOpt] : matches
   const pick = (i: number) => {
     let o = list[i]; if (!o || o.disabled) return
@@ -262,9 +239,9 @@ export function Combobox({ options = [], loadOptions, debounce = 200, minChars =
       <span className="pointer-events-none absolute top-1/2 start-3 grid -translate-y-1/2 place-items-center text-[var(--fg3)]">
         {leading ? <motion.span key={v} initial={{ scale: 0.5 }} animate={{ scale: 1 }} transition={spring(0.5, 0.35)} className="text-sm leading-none">{leading}</motion.span> : <Icon name="search" size={14} />}
       </span>
-      <input ref={formsMergeRefs(input, ref)} {...fc.control} role="combobox" aria-label={ariaLabel} aria-expanded={open} aria-controls={lid} aria-autocomplete="list" aria-activedescendant={open && list.length ? `${lid}-${active}` : undefined}
+      <input ref={composeRefs(input, ref)} {...fc.control} role="combobox" aria-label={ariaLabel} aria-expanded={open} aria-controls={lid} aria-autocomplete="list" aria-activedescendant={open && list.length ? `${lid}-${active}` : undefined}
         aria-required={fc.required || undefined} disabled={fc.disabled} readOnly={fc.readOnly}
-        value={q} placeholder={placeholder ?? tc('common.searchPlaceholder')} autoComplete="off" className={cn(inputClass, formDisabledClass, formReadOnlyClass, '!ps-8', loading && '!pe-8')}
+        value={q} placeholder={placeholder ?? 'Search…'} autoComplete="off" className={cn(inputClass, formDisabledClass, formReadOnlyClass, '!ps-8', loading && '!pe-8')}
         onChange={e => { setQ(e.target.value); onInputChange?.(e.target.value); setOpen(true); setActive(0) }} onFocus={() => setOpen(true)}
         onBlur={e => { if (!wrap.current?.contains(e.relatedTarget as Node)) setOpen(false) }}
         onKeyDown={e => {
@@ -312,7 +289,6 @@ export function MultiSelect(props: MultiSelectProps) {
 
 /** MultiSelect's chips: each value's label and colour dot, with a × while it can be edited. */
 function FormsChips({ values, optionOf, locked, onRemove }: { values: string[]; optionOf: (v: string) => Option | undefined; locked: boolean; onRemove: (v: string) => void }) {
-  const { t } = useLocale()
   return (
     <AnimatePresence initial={false} mode="popLayout">
       {values.map(x => {
@@ -322,7 +298,7 @@ function FormsChips({ values, optionOf, locked, onRemove }: { values: string[]; 
             className={cn('inline-flex items-center gap-1.5 rounded-[var(--r-md)] py-0.5 ps-2 text-xs', locked ? 'bg-[var(--card)] pe-2 shadow-[inset_0_0_0_1px_var(--line)]' : 'bg-[var(--muted)] pe-1')}>
             {o?.dot && <span className="h-2 w-2 flex-none rounded-full" style={{ background: o.dot }} />}
             {label}
-            {!locked && <button type="button" tabIndex={-1} aria-label={t('common.removeItem', { name: label })} className="ui-target cursor-pointer rounded-[var(--r-sm)] border-0 bg-transparent px-0.5 leading-none hover:bg-[var(--line)] text-[var(--fg3)] hover:text-[var(--fg)] [@media(pointer:coarse)]:-my-2 [@media(pointer:coarse)]:-me-1 [@media(pointer:coarse)]:min-h-8 [@media(pointer:coarse)]:min-w-8 [@media(pointer:coarse)]:text-base"
+            {!locked && <button type="button" tabIndex={-1} aria-label={`Remove ${label}`} className="ui-target cursor-pointer rounded-[var(--r-sm)] border-0 bg-transparent px-0.5 leading-none hover:bg-[var(--line)] text-[var(--fg3)] hover:text-[var(--fg)] [@media(pointer:coarse)]:-my-2 [@media(pointer:coarse)]:-me-1 [@media(pointer:coarse)]:min-h-8 [@media(pointer:coarse)]:min-w-8 [@media(pointer:coarse)]:text-base"
               onPointerDown={e => e.preventDefault()} onClick={e => { e.stopPropagation(); onRemove(x) }}>×</button>}
           </motion.span>
         )
@@ -335,7 +311,6 @@ function FormsChips({ values, optionOf, locked, onRemove }: { values: string[]; 
 function FormsMultiStatic({ options = [], value, defaultValue = [], onChange, placeholder, 'aria-label': ariaLabel, className, ref, ...rest }: MultiSelectProps) {
   const { loadOptions: _l, debounce: _d, minChars: _m, defaultOptions: _o, creatable: _c, createLabel: _cl, onCreate: _oc, onInputChange: _oi, empty: _e, ...fp } = rest
   const box = useRef<HTMLDivElement>(null)
-  const { t: tc } = useLocale()
   const fc = useFormControl<string[]>({ ...fp, value, defaultValue, onChange, serialize: x => x, filled: x => x.length > 0, focus: () => box.current?.focus() })
   const v = fc.value, set = fc.set, locked = fc.disabled || fc.readOnly
   const { open, setOpen, ref: wrap } = useDisclosure(), lid = useId()
@@ -346,7 +321,7 @@ function FormsMultiStatic({ options = [], value, defaultValue = [], onChange, pl
   const show = (o: boolean) => { if (o && locked) return; if (o) { setPlace(formsPlacement(wrap.current)); if (off(active)) setActive(Math.max(0, options.findIndex(x => !x.disabled))) } setOpen(o) }
   return (
     <div ref={wrap} className={cn('relative', className)} onBlur={fc.onBlur}>
-      <div ref={formsMergeRefs<HTMLDivElement>(box, ref as Ref<HTMLDivElement>)} {...fc.control} role="combobox" tabIndex={fc.disabled ? -1 : 0} aria-label={ariaLabel} aria-labelledby={ariaLabel ? undefined : fc.labelledBy} aria-expanded={open} aria-controls={lid} aria-haspopup="listbox"
+      <div ref={composeRefs<HTMLDivElement>(box, ref as Ref<HTMLDivElement>)} {...fc.control} role="combobox" tabIndex={fc.disabled ? -1 : 0} aria-label={ariaLabel} aria-labelledby={ariaLabel ? undefined : fc.labelledBy} aria-expanded={open} aria-controls={lid} aria-haspopup="listbox"
         aria-activedescendant={open ? `${lid}-${active}` : undefined} aria-required={fc.required || undefined} aria-readonly={fc.readOnly || undefined} aria-disabled={fc.disabled || undefined}
         onClick={() => show(!open)} onKeyDown={e => {
           if (locked) return
@@ -358,7 +333,7 @@ function FormsMultiStatic({ options = [], value, defaultValue = [], onChange, pl
           else onKeyDown(e)
         }}
         className={cn(inputClass, formDisabledClass, 'relative flex !h-auto min-h-9 flex-wrap items-center gap-1 py-1 !pe-8 focus-visible:border-[var(--fg3)] aria-readonly:bg-[var(--muted)]', locked ? fc.disabled ? 'cursor-not-allowed' : 'cursor-default' : 'cursor-pointer')}>
-        {v.length === 0 && <span className="text-[var(--fg3)]">{placeholder ?? tc('common.select')}</span>}
+        {v.length === 0 && <span className="text-[var(--fg3)]">{placeholder ?? 'Select…'}</span>}
         <FormsChips values={v} optionOf={x => options.find(p => p.value === x)} locked={locked} onRemove={x => set(v.filter(y => y !== x))} />
         {!fc.readOnly && <motion.span animate={{ rotate: open ? 180 : 0 }} className="absolute end-3 top-[11px] text-[var(--fg3)]"><Icon name="chevronDown" size={14} /></motion.span>}
       </div>
@@ -393,9 +368,8 @@ function FormsMultiAsync({ options = [], loadOptions, debounce = 200, minChars =
   const same = (o?: Option) => !!o && o.label.toLowerCase() === query.toLowerCase()
   const canCreate = !!creatable && !!query && !matches.some(same) && !v.some(x => same(known.current.get(x)))
   const retry = () => { reload(); input.current?.focus() }
-  const { message, live, t } = useSelectStatus({ short, failed, loading, done: load.status === 'done', count: matches.length + (canCreate ? 1 : 0), minChars, query: q, empty, retry })
-  const { t: tc } = useLocale()
-  const createOpt: Option | null = canCreate ? { value: '\u0000create', label: createLabel ? createLabel(query) : t('create', { query }), icon: 'plus' } : null
+  const { message, live } = useSelectStatus({ short, failed, loading, done: load.status === 'done', count: matches.length + (canCreate ? 1 : 0), minChars, query: q, empty, retry })
+  const createOpt: Option | null = canCreate ? { value: '\u0000create', label: createLabel ? createLabel(query) : `Create “${query}”`, icon: 'plus' } : null
   const list = short ? [] : createOpt ? [...matches, createOpt] : matches
   const toggle = (i: number) => {
     const o = list[i]
@@ -416,9 +390,9 @@ function FormsMultiAsync({ options = [], loadOptions, debounce = 200, minChars =
         className={cn(inputShellClass(fc.invalid), 'relative flex min-h-9 w-full flex-wrap items-center gap-1 py-1 ps-1.5 pe-8 text-[13px]',
           fc.disabled ? 'cursor-not-allowed bg-[var(--muted)] text-[var(--fg3)]' : fc.readOnly ? 'bg-[var(--muted)]' : 'cursor-text')}>
         <FormsChips values={v} optionOf={x => known.current.get(x)} locked={locked} onRemove={x => set(v.filter(y => y !== x))} />
-        <input ref={formsMergeRefs<HTMLInputElement>(input, ref as Ref<HTMLInputElement>)} {...fc.control} role="combobox" aria-label={ariaLabel} aria-expanded={open} aria-controls={lid} aria-autocomplete="list"
+        <input ref={composeRefs<HTMLInputElement>(input, ref as Ref<HTMLInputElement>)} {...fc.control} role="combobox" aria-label={ariaLabel} aria-expanded={open} aria-controls={lid} aria-autocomplete="list"
           aria-activedescendant={open && list.length ? `${lid}-${active}` : undefined} aria-required={fc.required || undefined} disabled={fc.disabled} readOnly={fc.readOnly}
-          value={q} placeholder={v.length ? '' : placeholder ?? tc('common.searchPlaceholder')} autoComplete="off"
+          value={q} placeholder={v.length ? '' : placeholder ?? 'Search…'} autoComplete="off"
           className="h-7 min-w-[8ch] flex-1 border-0 bg-transparent px-1 text-[13px] [color:inherit] outline-none placeholder:text-[var(--fg3)] disabled:cursor-not-allowed [@media(pointer:coarse)]:text-base"
           onChange={e => { setQ(e.target.value); onInputChange?.(e.target.value); setOpen(true); setActive(0) }} onFocus={() => setOpen(true)}
           onBlur={e => { if (!wrap.current?.contains(e.relatedTarget as Node)) setOpen(false) }}

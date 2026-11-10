@@ -3,6 +3,35 @@
 All notable changes to `@lyndon/ui`, newest first. While on 0.x, a minor release may break APIs; each breaking
 change is listed with how to migrate.
 
+## 0.10.0
+
+English only, no right-to-left, and a smaller chart kit. Breaking: see Removed for what to delete from your code.
+
+### Removed
+- Translations and message catalogues: `defineMessages`, `useMessages`, `createMessagesTranslator`, `messageCatalog`, `createTranslator`, `formatMessage`, `UI_MESSAGES_EN/DE/AR`, every `*_MESSAGES` catalogue, `t()` from `useLocale()`, the `messages` prop and the `messages-de` / `messages-ar` registry items. UI text is plain English; text you may want to change is a prop with an English default.
+- Locale switching: `LocaleProvider`, `useLocale`, `resolveLocale`, `fmtFor`, `localeWeekStart`, `localeHourCycle`, and the `locale`, `timeZone`, `weekStartsOn` and `hourCycle` props of `UIProvider`; the `locale` and `weekStartsOn` props of the date controls and `AnimatedNumber`. Numbers and dates use the fixed English `fmt` (en-GB); weeks start on Monday. Date controls keep `hourCycle` and `timeZone`.
+- Right-to-left support: `useDir`, `logicalArrow`, `dirX`, `localeDir`, `UI_DIR_CSS`, `UI_FLIP_ICONS`, `.ui-flip`, `rtl:` variants, `dir` props and LTR islands, `scripts/rtl-lint.mjs`, `scripts/i18n-extract.mjs`, the `desktop-rtl` / `iphone-rtl` e2e profiles and the showcase language menu.
+- DataGrid pins and `GridPinned` take `left` / `right` only (`start` / `end` are gone); `useControllableState` (use `useControllable`, which now returns `[value, set, reset]`); `formsMergeRefs` (use `composeRefs`); `floatingSurface` (use `surface.floating`); `formsInterleave`.
+
+### Added
+- `plural(n, one, many?)` and `rangeStr(values, format?)`; `memoOnce(key, make)`.
+- Hooks: `useActiveIndex(count, ref)` (bounded active index cleared by Escape, a tap outside and the mouse leaving), `useStatusFlash(ms)`, `useLive()`, `useResizeObserver(ref, cb)`.
+- Helpers: `gridKeyMove` and `menuKeyMove` (one key-to-move map for grids, lists and menus), `downloadBlob`, `writeClipboard`; `UI_VERSION`.
+- Charts: `useChartShell` + `ChartShell` (focus, live region, tooltip, data table, Show data, export menu and legend slot in one place); `ChartTable` takes raw rows plus per-column formats. Chart math (`PALETTE`, `CHART_NEUTRAL`, `seriesColor`, `linScale`, `polarPt`, `svgWedge`, `niceTicks`) lives in `vizkit.tsx`; `@lyndon/ui/charts` still exports `PALETTE`, `CHART_NEUTRAL` and `niceTicks`.
+
+### Changed
+- `useChartFocus` is replaced by `useChartShell`. Every chart's JSX now holds only its marks; `charts.tsx` is 20% shorter.
+- Buttons and chips press with CSS (`motion-safe:active:scale-[.96]`) instead of `motion.button`; `Dialog.Close` draws its ✕ inline.
+- Showcase: "Typed dates in any locale" is now "Typed dates" with a 12/24-hour switch; the "i18n" tag is "formatting".
+
+### Fixed
+- The shared-state key used a stale `'0.4'` version: it now derives from `UI_VERSION`.
+- HexEditor's copy announced success when the clipboard refused it.
+- PhoneInput built an `Intl.DisplayNames` per country on every render.
+- `Popover.Root` re-created its context value on every render.
+- AgentComposer's queued follow-ups could run after unmount.
+- The currency input's parsing comment didn't match what it does.
+
 ## 0.9.0
 
 Live agent runs, binary inspection, theme export and sharing, better toasts and chart export, and one tag vocabulary.

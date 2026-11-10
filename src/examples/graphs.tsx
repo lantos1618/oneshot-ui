@@ -1,5 +1,5 @@
 import { useCallback, useLayoutEffect, useMemo, useRef, useState } from 'react'
-import { Badge, Icon, IconButton, StatusIcon, cn, useLocale, type StatusIconStatus } from '../lib/core'
+import { Badge, Icon, IconButton, StatusIcon, cn, fmt, type StatusIconStatus } from '../lib/core'
 import { Switch } from '../lib/forms'
 import { CodeBlock, type CodeMark, type CodeTokenRange } from '../lib/code'
 import { Message, MessageActions } from '../lib/aichat'
@@ -152,14 +152,14 @@ export function ChatBranchesExample({ height = 560, messages: initial = CHAT_TRE
     if (collapse && !on) return (
       <div className="flex h-full min-w-0 items-center gap-2 pe-3 text-xs text-[var(--fg3)]">
         <span className="flex-none font-medium">{m.role === 'user' ? 'You' : 'Assistant'}</span>
-        <span dir="auto" className="min-w-0 truncate">{aiMessageText(m).split('\n')[0] || m.parts.find(p => p.type === 'tool')?.type}</span>
+        <span className="min-w-0 truncate">{aiMessageText(m).split('\n')[0] || m.parts.find(p => p.type === 'tool')?.type}</span>
       </div>
     )
     const switcher = sibs.length > 1 && (
       <span className="flex items-center gap-0.5 text-[11px] text-[var(--fg3)]">
-        <IconButton size="icon-xs" icon={<Icon name="chevronLeft" size={13} className="ui-flip" />} label="Previous branch" disabled={at <= 0} onClick={e => { e.stopPropagation(); goBranch(sibs[at - 1]) }} />
+        <IconButton size="icon-xs" icon={<Icon name="chevronLeft" size={13} />} label="Previous branch" disabled={at <= 0} onClick={e => { e.stopPropagation(); goBranch(sibs[at - 1]) }} />
         <span className="ui-num">{at + 1} / {sibs.length}</span>
-        <IconButton size="icon-xs" icon={<Icon name="chevronRight" size={13} className="ui-flip" />} label="Next branch" disabled={at >= sibs.length - 1} onClick={e => { e.stopPropagation(); goBranch(sibs[at + 1]) }} />
+        <IconButton size="icon-xs" icon={<Icon name="chevronRight" size={13} />} label="Next branch" disabled={at >= sibs.length - 1} onClick={e => { e.stopPropagation(); goBranch(sibs[at + 1]) }} />
       </span>
     )
     const merge = row.parents.length > 1 && <Badge size="sm" tone="accent" className="me-auto">Combines {row.parents.length} branches</Badge>
@@ -389,7 +389,7 @@ export function AstGraphExample({ source = AST_SAMPLE, height = 420 }: { source?
       <div data-lit={state.lit || undefined} className="flex h-full min-w-0 items-center gap-2 pe-3 font-[family-name:var(--mono)] text-xs">
         <span className={cn('flex-none', AST_KIND_CLASS[n.kind] ?? 'text-[var(--fg)]')}>{n.kind}</span>
         {n.label && <Badge size="sm" className="flex-none font-[family-name:var(--mono)]">{n.label}</Badge>}
-        {n.children.length > 0 && <span dir="ltr" className="min-w-0 truncate text-[var(--fg3)]">{slice}</span>}
+        {n.children.length > 0 && <span className="min-w-0 truncate text-[var(--fg3)]">{slice}</span>}
       </div>
     )
   }, [source])
@@ -440,7 +440,6 @@ export const agentRunNodes = (steps: readonly AgentRunStep[]) => steps.map(s => 
 
 /** The agent run example: steps with fan-out and fan-in, statuses and durations. */
 export function AgentRunExample({ steps = AGENT_RUN_SAMPLE, height = 420 }: { steps?: readonly AgentRunStep[]; height?: number }) {
-  const { fmt } = useLocale()
   const nodes = useMemo(() => agentRunNodes(steps), [steps])
   const renderRow = useCallback((row: LaneRow<(typeof nodes)[number]>) => {
     const s = row.node.step
@@ -486,13 +485,12 @@ export const dependencyNodes = (packages: readonly DependencyPackage[]) => packa
 
 /** The dependency example: name@version, size and how many packages use each one. */
 export function DependencyGraphExample({ packages = DEPENDENCY_SAMPLE, height = 420 }: { packages?: readonly DependencyPackage[]; height?: number }) {
-  const { fmt } = useLocale()
   const nodes = useMemo(() => dependencyNodes(packages), [packages])
   const renderRow = useCallback((row: LaneRow<(typeof nodes)[number]>) => {
     const p = row.node.pkg
     return (
       <div className="flex h-full min-w-0 items-center gap-2 pe-3 text-[13px]">
-        <span dir="ltr" className="min-w-0 truncate font-[family-name:var(--mono)] text-xs"><span className="text-[var(--fg)]">{p.name}</span><span className="text-[var(--fg3)]">@{p.version}</span></span>
+        <span className="min-w-0 truncate font-[family-name:var(--mono)] text-xs"><span className="text-[var(--fg)]">{p.name}</span><span className="text-[var(--fg3)]">@{p.version}</span></span>
         {row.children.length > 1 && <Badge size="sm" tone="accent">used by {row.children.length}</Badge>}
         <span className="flex-1" />
         <span className="ui-num flex-none text-xs text-[var(--fg3)]">{fmt.bytes(p.size)}</span>

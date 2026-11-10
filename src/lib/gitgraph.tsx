@@ -1,31 +1,11 @@
 import { memo, useCallback, useDeferredValue, useEffect, useImperativeHandle, useMemo, useRef, useState, type CSSProperties, type KeyboardEvent as RKeyboardEvent, type ReactNode, type Ref } from 'react'
-import { Avatar, Badge, Button, Chip, Icon, IconButton, Kbd, Spinner, TOUCH, cn, defineMessages, inputClass, useCoarsePointer, useControllable, useLocale, useMessages, useWidth, type IconName } from './core'
+import { Avatar, Badge, Button, Chip, Icon, IconButton, Kbd, Spinner, TOUCH, cn, inputClass, useCoarsePointer, useControllable, useWidth, type IconName, plural, fmt } from './core'
 import { LANE_COLORS, LaneGraph, laneAncestry, laneColor, laneGutterWidth, laneHash, layoutLanes, type LaneEdge, type LaneGraphHandle, type LaneNode, type LaneRow, type LaneRowState } from './lanes'
 // the parts, not the ContextMenu/DropdownMenu/Sheet objects: those reference every menu part, which drop-in files would carry
 import { ContextMenuContent, ContextMenuRoot, ContextMenuTrigger, DialogClose, DialogRoot, DialogTitle, DropdownMenuContent, DropdownMenuRoot, DropdownMenuTrigger, MenuCheckboxItem, MenuItem, MenuLabel, MenuSeparator, SheetContent, SheetHeader } from './overlay'
 import { CopyButton, useCopy } from './feedback'
 import { Diff } from './code'
 import { Markdown } from './markdown'
-
-/* ════════════════════════════════════════════════════════════════════════════
- * GIT GRAPH: a commit history graph (VS Code's Git Graph, GitKraken, Sourcetree, `git log --graph`), built as a preset
- * of the lane graph in lanes.tsx: layoutLanes does the order and the lanes, LaneGraph the virtualised rows, the gutter,
- * keyboard moves along edges and hover ancestry. This file adds what is git's own:
- *
- * 1. Data. `GitCommit = { hash, parents, subject, body?, author, date, refs? }`, in any order. `parseGitLog(text)`
- *    reads the output of GIT_LOG_COMMAND (fields split by \x1f, records by \x1e), so a real repository pipes in:
- *      git log --all --date-order --pretty=format:'%H%x1f%P%x1f%an%x1f%ae%x1f%at%x1f%D%x1f%s%x1e' > log.txt
- *
- * 2. Commits as lane nodes (gitLanes): id = hash, time = date, group = the branch a commit carries (origin/x counts as
- *    x), so a branch ref starts that branch's colour; `pin` names branches (main, develop) whose first-parent lines keep
- *    the leftmost lanes, starting at the local branch (else the remote); a lane opened for a merge takes the branch
- *    named in "Merge branch 'x'". `order: 'date'` is layoutLanes' 'time' (`git log --date-order`), 'topo' its 'topo'.
- *
- * 3. The component around the rows: refs, subject, author, date and hash columns; search (message, author, hash
- *    prefix, ref), branch filter, first-parent and hide-merged views (filterGitHistory); details (side panel or a sheet
- *    on phones) with Markdown body and diffs from `loadCommit`; Shift+click compares two commits (`loadDiff`); a context
- *    menu whose actions call the host (the component never runs git); new commits on top keep the reader's place.
- * ══════════════════════════════════════════════════════════════════════════ */
 
 /** What a ref is: a local branch, a remote-tracking branch, a tag, HEAD (`name` is the checked-out branch, or "HEAD" when detached), or the stash. */
 export type GitRefType = 'branch' | 'remote' | 'tag' | 'head' | 'stash'
@@ -100,8 +80,6 @@ function gitMergeNames(subject: string): string[] {
   return [...subject.matchAll(/'([^']+)'/g)].map(m => m[1].replace(/^origin\//, ''))
 }
 
-/* ── commits as lane nodes ─────────────────────────────────────────────────── */
-
 /** A commit as a lane node (what the GitGraph's LaneGraph rows carry). */
 type GitLaneNode = LaneNode & { commit: GitCommit }
 
@@ -160,8 +138,6 @@ function gitLanes(commits: readonly GitCommit[], { order = 'date', firstParentLa
 export function layoutGitGraph(commits: readonly GitCommit[], options: GitLayoutOptions = {}): GitGraphLayout {
   return gitLanes(commits, options).git
 }
-
-/* ── filters, ranges, paths ────────────────────────────────────────────────── */
 
 /**
  * Which commits a view shows. `branches`: only what those refs reach (branch, remote or tag names). `firstParent`: follow
@@ -223,8 +199,6 @@ export function gitRange(layout: GitGraphLayout, a: number, b: number): { marks:
 /** The first-parent ancestry of row `r` (itself, its first parent, its first parent's first parent…), as marks. */
 export const gitFirstParentPath = (layout: GitGraphLayout, r: number): Uint8Array => laneAncestry(layout, r)
 
-/* ── parser ────────────────────────────────────────────────────────────────── */
-
 /** One ref from `%D` ("HEAD -> main", "origin/main", "tag: v1.2.0", "refs/stash", or the full forms with --decorate=full). */
 function gitParseRef(raw: string, remotes: readonly string[]): GitRef[] {
   const s = raw.trim()
@@ -261,60 +235,7 @@ export function parseGitLog(text: string, { remotes = ['origin', 'upstream'] }: 
   return out
 }
 
-/* ── strings ───────────────────────────────────────────────────────────────── */
-
-/** GitGraph's UI strings (de/ar machine-drafted). */
-export const GIT_GRAPH_MESSAGES = defineMessages('git', {
-  en: {
-    label: 'Commit history', search: 'Search commits', searchPlaceholder: 'Message, author, hash', matches: '{n} of {total}', noMatches: 'No matches',
-    prevMatch: 'Previous match', nextMatch: 'Next match', branches: 'Branches', allBranches: 'All branches', branchesCount: '{count, plural, one {# branch} other {# branches}}',
-    firstParent: 'First parent only', hideMerged: 'Hide merged', jumpHead: 'Jump to HEAD', goTo: 'Go to {name}', removeFilter: 'Remove {name} from the filter',
-    moreLanes: '{n, plural, one {+# lane} other {+# lanes}}', fewerLanes: 'Fold lanes', graph: 'Graph', description: 'Description', author: 'Author', date: 'Date', commit: 'Commit',
-    row: 'Commit {hash}: {subject}, by {author}, {when}', menu: 'Commit actions', checkout: 'Checkout', checkoutBranch: 'Checkout {branch}',
-    createBranch: 'Create branch here…', cherryPick: 'Cherry-pick', revert: 'Revert', copyHash: 'Copy hash', compareWith: 'Compare with {hash}',
-    comparing: 'Comparing {from}…{to}', commits: '{count, plural, one {# commit} other {# commits}}', exitCompare: 'Exit compare',
-    details: 'Commit {hash}', closeDetails: 'Close details', parents: 'Parents', children: 'Children', merge: 'Merge', files: 'Files changed',
-    filesCount: '{count, plural, one {# file} other {# files}}', loading: 'Loading changes…', loadFailed: 'Couldn’t load the changes', retry: 'Retry',
-    noFiles: 'No file changes', added: 'Added', modified: 'Modified', deleted: 'Deleted', renamed: 'Renamed', notLoaded: 'Not loaded (shallow history)',
-    newCommits: '{count, plural, one {# new commit} other {# new commits}}', compareHint: 'Shift+click another commit to compare', empty: 'No commits',
-    inRange: 'In range', selectFile: 'Show the diff of {path}', range: 'Range',
-  },
-  de: {
-    label: 'Commit-Verlauf', search: 'Commits durchsuchen', searchPlaceholder: 'Nachricht, Autor, Hash', matches: '{n} von {total}', noMatches: 'Keine Treffer',
-    prevMatch: 'Vorheriger Treffer', nextMatch: 'Nächster Treffer', branches: 'Branches', allBranches: 'Alle Branches', branchesCount: '{count, plural, one {# Branch} other {# Branches}}',
-    firstParent: 'Nur erste Eltern', hideMerged: 'Gemergte ausblenden', jumpHead: 'Zu HEAD springen', goTo: 'Zu {name}', removeFilter: '{name} aus dem Filter entfernen',
-    moreLanes: '{n, plural, one {+# Spur} other {+# Spuren}}', fewerLanes: 'Spuren einklappen', graph: 'Graph', description: 'Beschreibung', author: 'Autor', date: 'Datum', commit: 'Commit',
-    row: 'Commit {hash}: {subject}, von {author}, {when}', menu: 'Commit-Aktionen', checkout: 'Auschecken', checkoutBranch: '{branch} auschecken',
-    createBranch: 'Branch hier erstellen…', cherryPick: 'Cherry-pick', revert: 'Rückgängig machen', copyHash: 'Hash kopieren', compareWith: 'Mit {hash} vergleichen',
-    comparing: 'Vergleich {from}…{to}', commits: '{count, plural, one {# Commit} other {# Commits}}', exitCompare: 'Vergleich beenden',
-    details: 'Commit {hash}', closeDetails: 'Details schließen', parents: 'Eltern', children: 'Kinder', merge: 'Merge', files: 'Geänderte Dateien',
-    filesCount: '{count, plural, one {# Datei} other {# Dateien}}', loading: 'Änderungen werden geladen…', loadFailed: 'Änderungen konnten nicht geladen werden', retry: 'Erneut versuchen',
-    noFiles: 'Keine Dateiänderungen', added: 'Hinzugefügt', modified: 'Geändert', deleted: 'Gelöscht', renamed: 'Umbenannt', notLoaded: 'Nicht geladen (flacher Verlauf)',
-    newCommits: '{count, plural, one {# neuer Commit} other {# neue Commits}}', compareHint: 'Umschalt+Klick auf einen anderen Commit zum Vergleichen', empty: 'Keine Commits',
-    inRange: 'Im Bereich', selectFile: 'Diff von {path} anzeigen', range: 'Bereich',
-  },
-  ar: {
-    label: 'سجل الإيداعات', search: 'البحث في الإيداعات', searchPlaceholder: 'الرسالة، المؤلف، المعرّف', matches: '{n} من {total}', noMatches: 'لا نتائج',
-    prevMatch: 'النتيجة السابقة', nextMatch: 'النتيجة التالية', branches: 'الفروع', allBranches: 'كل الفروع', branchesCount: '{count, plural, zero {لا فروع} one {فرع واحد} two {فرعان} few {# فروع} many {# فرعًا} other {# فرع}}',
-    firstParent: 'الأصل الأول فقط', hideMerged: 'إخفاء المدموجة', jumpHead: 'الانتقال إلى HEAD', goTo: 'الانتقال إلى {name}', removeFilter: 'إزالة {name} من التصفية',
-    moreLanes: '{n, plural, one {+# مسار} two {+# مساران} few {+# مسارات} other {+# مسارًا}}', fewerLanes: 'طي المسارات', graph: 'المخطط', description: 'الوصف', author: 'المؤلف', date: 'التاريخ', commit: 'الإيداع',
-    row: 'الإيداع {hash}: {subject}، بواسطة {author}، {when}', menu: 'إجراءات الإيداع', checkout: 'التبديل', checkoutBranch: 'التبديل إلى {branch}',
-    createBranch: 'إنشاء فرع هنا…', cherryPick: 'انتقاء', revert: 'تراجع', copyHash: 'نسخ المعرّف', compareWith: 'مقارنة مع {hash}',
-    comparing: 'مقارنة {from}…{to}', commits: '{count, plural, zero {لا إيداعات} one {إيداع واحد} two {إيداعان} few {# إيداعات} many {# إيداعًا} other {# إيداع}}', exitCompare: 'إنهاء المقارنة',
-    details: 'الإيداع {hash}', closeDetails: 'إغلاق التفاصيل', parents: 'الأصول', children: 'الفروع اللاحقة', merge: 'دمج', files: 'الملفات المعدّلة',
-    filesCount: '{count, plural, zero {لا ملفات} one {ملف واحد} two {ملفان} few {# ملفات} many {# ملفًا} other {# ملف}}', loading: 'جارٍ تحميل التغييرات…', loadFailed: 'تعذّر تحميل التغييرات', retry: 'إعادة المحاولة',
-    noFiles: 'لا تغييرات في الملفات', added: 'مضاف', modified: 'معدّل', deleted: 'محذوف', renamed: 'معاد تسميته', notLoaded: 'غير محمّل (سجل سطحي)',
-    newCommits: '{count, plural, zero {لا إيداعات جديدة} one {إيداع جديد} two {إيداعان جديدان} few {# إيداعات جديدة} many {# إيداعًا جديدًا} other {# إيداع جديد}}', compareHint: 'Shift+نقرة على إيداع آخر للمقارنة', empty: 'لا إيداعات',
-    inRange: 'ضمن النطاق', selectFile: 'عرض فروقات {path}', range: 'النطاق',
-  },
-})
-type GitT = (key: keyof typeof GIT_GRAPH_MESSAGES.en, vars?: Record<string, string | number>) => string
-
-/* ── drawing ───────────────────────────────────────────────────────────────── */
-
 const gitStroke = (color: number) => GIT_LANE_COLORS[color % GIT_LANE_COLORS.length]
-
-/* ── refs ──────────────────────────────────────────────────────────────────── */
 
 const GIT_REF_ICON: Record<GitRefType, IconName> = { branch: 'branch', remote: 'cloud', tag: 'bookmark', head: 'branch', stash: 'layers' }
 const GIT_REF_CLASS: Record<GitRefType, string> = {
@@ -343,7 +264,7 @@ function GitRefChip({ chip, color }: { chip: GitChip; color: number }) {
   const body = (
     <Badge size="sm" tone={tone} className={cn('max-w-[16ch] gap-1', GIT_REF_CLASS[ref.type])}>
       {ref.type === 'head' && <span className="text-[10px] tracking-wide">HEAD</span>}
-      {!(ref.type === 'head' && ref.name === 'HEAD') && <><Icon name={GIT_REF_ICON[ref.type]} size={11} className="flex-none" /><span dir="ltr" className="truncate">{ref.name}</span></>}
+      {!(ref.type === 'head' && ref.name === 'HEAD') && <><Icon name={GIT_REF_ICON[ref.type]} size={11} className="flex-none" /><span className="truncate">{ref.name}</span></>}
       {chip.alsoRemote && <Icon name="cloud" size={11} className="flex-none opacity-70" />}
     </Badge>
   )
@@ -351,8 +272,6 @@ function GitRefChip({ chip, color }: { chip: GitChip; color: number }) {
     <span className="inline-flex min-w-0 flex-none" style={{ '--lane': gitStroke(color) } as CSSProperties} title={chip.alsoRemote ? `${ref.name} · ${chip.alsoRemote}` : ref.name}>{body}</span>
   )
 }
-
-/* ── row ───────────────────────────────────────────────────────────────────── */
 
 /** Wraps the first case-insensitive match of `q` in a <mark>. */
 function gitMark(text: string, q: string): ReactNode {
@@ -376,7 +295,7 @@ function GitRowCells({ row, narrow, showAuthor, match, query, when, absolute, on
       {chips.length > shown.length && <Badge size="sm">+{chips.length - shown.length}</Badge>}
     </span>
   )
-  const subject = <span dir="auto" className={cn('min-w-0 truncate', row.parents.length > 1 ? 'text-[var(--fg2)]' : 'text-[var(--fg)]')}>{gitMark(c.subject, query)}</span>
+  const subject = <span className={cn('min-w-0 truncate', row.parents.length > 1 ? 'text-[var(--fg2)]' : 'text-[var(--fg)]')}>{gitMark(c.subject, query)}</span>
   const time = <time dateTime={new Date(gitTime(c.date)).toISOString()} title={absolute} className="truncate">{when}</time>
   const marker = match && <span aria-hidden className="pointer-events-none absolute inset-y-1 start-0 w-[3px] rounded-full bg-[var(--warn)]" />
   if (narrow) return (
@@ -387,7 +306,7 @@ function GitRowCells({ row, narrow, showAuthor, match, query, when, absolute, on
         <span className="flex min-w-0 items-center gap-1.5 text-[11px] text-[var(--fg3)] group-aria-selected:text-[var(--fg2)] group-data-[range]:text-[var(--fg2)]">
           <Avatar name={c.author.name} src={c.author.avatar} size={16} className="!border-0" />
           <span className="min-w-0 truncate">{c.author.name}</span><span aria-hidden>·</span>{time}<span aria-hidden>·</span>
-          <span dir="ltr" className="font-[family-name:var(--mono)]">{gitMark(short, /^[0-9a-f]+$/.test(query) ? query : '')}</span>
+          <span className="font-[family-name:var(--mono)]">{gitMark(short, /^[0-9a-f]+$/.test(query) ? query : '')}</span>
         </span>
       </div>
     </>
@@ -414,14 +333,12 @@ function GitRowCells({ row, narrow, showAuthor, match, query, when, absolute, on
   )
 }
 
-/* ── details ───────────────────────────────────────────────────────────────── */
-
 /** A changed file: `before`/`after` are its text (omit for binary or unloaded files); `oldPath` for renames. */
 export type GitFileChange = { path: string; status: 'added' | 'modified' | 'deleted' | 'renamed'; oldPath?: string; before?: string; after?: string }
 /** What `loadCommit(hash)` and `loadDiff(from, to)` resolve to. */
 export type GitChanges = { files: GitFileChange[] }
-const GIT_STATUS: Record<GitFileChange['status'], { letter: string; tone: 'ok' | 'accent' | 'bad' | 'warn' }> = {
-  added: { letter: 'A', tone: 'ok' }, modified: { letter: 'M', tone: 'accent' }, deleted: { letter: 'D', tone: 'bad' }, renamed: { letter: 'R', tone: 'warn' },
+const GIT_STATUS: Record<GitFileChange['status'], { letter: string; name: string; tone: 'ok' | 'accent' | 'bad' | 'warn' }> = {
+  added: { letter: 'A', name: 'Added', tone: 'ok' }, modified: { letter: 'M', name: 'Modified', tone: 'accent' }, deleted: { letter: 'D', name: 'Deleted', tone: 'bad' }, renamed: { letter: 'R', name: 'Renamed', tone: 'warn' },
 }
 
 /** Loads `load()` whenever `key` changes; stale answers are dropped. */
@@ -439,17 +356,17 @@ function useGitLoad(key: string | null, load: (() => Promise<GitChanges>) | null
   return { state: state?.key === key ? state : key ? { key } : null, retry: () => setNonce(x => x + 1) }
 }
 
-function GitFiles({ loadKey, load, t }: { loadKey: string; load: (() => Promise<GitChanges>) | null; t: GitT }) {
+function GitFiles({ loadKey, load }: { loadKey: string; load: (() => Promise<GitChanges>) | null }) {
   const { state, retry } = useGitLoad(load ? loadKey : null, load)
   const [pick, setPick] = useState(0)
   useEffect(() => setPick(0), [loadKey])
   if (!load || !state) return null
   if (state.error) return (
-    <div role="alert" className="flex items-center gap-2 text-[13px] text-[var(--bad)]"><Icon name="alertCircle" size={14} />{t('loadFailed')}<Button size="xs" onClick={retry}>{t('retry')}</Button></div>
+    <div role="alert" className="flex items-center gap-2 text-[13px] text-[var(--bad)]"><Icon name="alertCircle" size={14} />{'Couldn’t load the changes'}<Button size="xs" onClick={retry}>{'Retry'}</Button></div>
   )
-  if (!state.files) return <div className="flex items-center gap-2 text-[13px] text-[var(--fg2)]"><Spinner size={13} />{t('loading')}</div>
+  if (!state.files) return <div className="flex items-center gap-2 text-[13px] text-[var(--fg2)]"><Spinner size={13} />{'Loading changes…'}</div>
   const files = state.files, f = files[Math.min(pick, files.length - 1)]
-  if (!files.length) return <p className="m-0 text-[13px] text-[var(--fg3)]">{t('noFiles')}</p>
+  if (!files.length) return <p className="m-0 text-[13px] text-[var(--fg3)]">{'No file changes'}</p>
   return (
     <div className="flex min-w-0 flex-col gap-2">
       <ul className="m-0 flex list-none flex-col p-0">
@@ -457,10 +374,10 @@ function GitFiles({ loadKey, load, t }: { loadKey: string; load: (() => Promise<
           const s = GIT_STATUS[file.status]
           return (
             <li key={file.path}>
-              <button type="button" aria-pressed={i === pick} title={t('selectFile', { path: file.path })} onClick={() => setPick(i)}
+              <button type="button" aria-pressed={i === pick} title={`Show the diff of ${file.path}`} onClick={() => setPick(i)}
                 className={cn('flex h-8 w-full cursor-pointer items-center gap-2 rounded-[var(--r-md)] border-0 bg-transparent px-2 text-start text-xs', TOUCH.row, i === pick ? 'bg-[var(--muted)] text-[var(--fg)]' : 'text-[var(--fg2)] hover:bg-[var(--muted)]')}>
-                <Badge size="sm" tone={s.tone} className="w-[18px] justify-center !px-0 font-[family-name:var(--mono)]"><span aria-hidden title={t(file.status)}>{s.letter}</span><span className="sr-only">{t(file.status)} </span></Badge>
-                <span dir="ltr" className="min-w-0 truncate font-[family-name:var(--mono)]">{file.oldPath ? `${file.oldPath} → ${file.path}` : file.path}</span>
+                <Badge size="sm" tone={s.tone} className="w-[18px] justify-center !px-0 font-[family-name:var(--mono)]"><span aria-hidden title={s.name}>{s.letter}</span><span className="sr-only">{s.name} </span></Badge>
+                <span className="min-w-0 truncate font-[family-name:var(--mono)]">{file.oldPath ? `${file.oldPath} → ${file.path}` : file.path}</span>
               </button>
             </li>
           )
@@ -475,12 +392,12 @@ function GitSection({ title, children }: { title: string; children: ReactNode })
   return <section className="flex min-w-0 flex-col gap-1.5"><h3 className="m-0 text-[11px] font-semibold tracking-wide text-[var(--fg3)] uppercase">{title}</h3>{children}</section>
 }
 
-function GitCommitLink({ row, onJump, t }: { row: GitGraphRow | null; onJump: (i: number) => void; t: GitT }) {
-  if (!row) return <span className="text-xs text-[var(--fg3)]">{t('notLoaded')}</span>
+function GitCommitLink({ row, onJump }: { row: GitGraphRow | null; onJump: (i: number) => void }) {
+  if (!row) return <span className="text-xs text-[var(--fg3)]">{'Not loaded (shallow history)'}</span>
   return (
     <button type="button" onClick={() => onJump(row.index)} className={cn('flex h-8 min-w-0 cursor-pointer items-center gap-2 rounded-[var(--r-md)] border-0 bg-transparent px-2 text-start text-xs text-[var(--fg2)] hover:bg-[var(--muted)]', TOUCH.row)}>
-      <span dir="ltr" className="flex-none font-[family-name:var(--mono)] text-[var(--accent)]">{gitShortHash(row.commit.hash)}</span>{' '}
-      <span dir="auto" className="min-w-0 truncate">{row.commit.subject}</span>
+      <span className="flex-none font-[family-name:var(--mono)] text-[var(--accent)]">{gitShortHash(row.commit.hash)}</span>{' '}
+      <span className="min-w-0 truncate">{row.commit.subject}</span>
     </button>
   )
 }
@@ -488,22 +405,21 @@ function GitCommitLink({ row, onJump, t }: { row: GitGraphRow | null; onJump: (i
 type GitDetailsProps = {
   layout: GitGraphLayout; row: GitGraphRow | null; compare: { older: number; newer: number; count: number } | null
   loadCommit?: (hash: string) => Promise<GitChanges>; loadDiff?: (from: string, to: string) => Promise<GitChanges>
-  onJump: (i: number) => void; t: GitT; now: number
+  onJump: (i: number) => void; now: number
 }
 
-const GitDetails = memo(function GitDetails({ layout, row, compare, loadCommit, loadDiff, onJump, t, now }: GitDetailsProps) {
-  const { fmt } = useLocale()
+const GitDetails = memo(function GitDetails({ layout, row, compare, loadCommit, loadDiff, onJump, now }: GitDetailsProps) {
   if (compare) {
     const a = layout.rows[compare.older].commit, b = layout.rows[compare.newer].commit
     return (
       <div className="flex min-w-0 flex-col gap-4">
-        <p className="m-0 text-[13px] text-[var(--fg2)]">{t('commits', { count: compare.count })}</p>
-        <GitSection title={t('range')}>
-          <GitCommitLink row={layout.rows[compare.newer]} onJump={onJump} t={t} />
-          <GitCommitLink row={layout.rows[compare.older]} onJump={onJump} t={t} />
+        <p className="m-0 text-[13px] text-[var(--fg2)]">{plural(compare.count, 'commit')}</p>
+        <GitSection title={'Range'}>
+          <GitCommitLink row={layout.rows[compare.newer]} onJump={onJump} />
+          <GitCommitLink row={layout.rows[compare.older]} onJump={onJump} />
         </GitSection>
-        <GitSection title={t('files')}>
-          <GitFiles loadKey={`${a.hash}..${b.hash}`} load={loadDiff ? () => loadDiff(a.hash, b.hash) : null} t={t} />
+        <GitSection title={'Files changed'}>
+          <GitFiles loadKey={`${a.hash}..${b.hash}`} load={loadDiff ? () => loadDiff(a.hash, b.hash) : null} />
         </GitSection>
       </div>
     )
@@ -513,7 +429,7 @@ const GitDetails = memo(function GitDetails({ layout, row, compare, loadCommit, 
   return (
     <div className="flex min-w-0 flex-col gap-4">
       <div className="flex min-w-0 flex-col gap-2">
-        <p dir="auto" className="m-0 text-base font-semibold break-words text-[var(--fg)]">{c.subject}</p>
+        <p className="m-0 text-base font-semibold break-words text-[var(--fg)]">{c.subject}</p>
         {chips.length > 0 && <div className="flex flex-wrap gap-1">{chips.map(ch => <GitRefChip key={ch.ref.type + ch.ref.name} chip={ch} color={row.color} />)}</div>}
         <div className="flex min-w-0 items-center gap-2 text-xs text-[var(--fg2)]">
           <Avatar name={c.author.name} src={c.author.avatar} size={28} className="!border-0" />
@@ -523,25 +439,23 @@ const GitDetails = memo(function GitDetails({ layout, row, compare, loadCommit, 
           </span>
         </div>
         <div className="flex min-w-0 items-center gap-1.5">
-          <code dir="ltr" className="min-w-0 truncate font-[family-name:var(--mono)] text-[11px] text-[var(--fg3)]">{c.hash}</code>
-          <CopyButton text={c.hash} size="icon-xs" label={t('copyHash')} />
+          <code className="min-w-0 truncate font-[family-name:var(--mono)] text-[11px] text-[var(--fg3)]">{c.hash}</code>
+          <CopyButton text={c.hash} size="icon-xs" label={'Copy hash'} />
         </div>
       </div>
       {c.body && <div className="min-w-0 text-[13px]"><Markdown>{c.body}</Markdown></div>}
       {row.parents.length > 0 && (
-        <GitSection title={row.parents.length > 1 ? `${t('parents')} · ${t('merge')}` : t('parents')}>
-          {row.parents.map((p, i) => <GitCommitLink key={i} row={p >= 0 ? layout.rows[p] : null} onJump={onJump} t={t} />)}
+        <GitSection title={row.parents.length > 1 ? `Parents · Merge` : 'Parents'}>
+          {row.parents.map((p, i) => <GitCommitLink key={i} row={p >= 0 ? layout.rows[p] : null} onJump={onJump} />)}
         </GitSection>
       )}
       {row.children.length > 0 && (
-        <GitSection title={t('children')}>{row.children.slice(0, 6).map(k => <GitCommitLink key={k} row={layout.rows[k]} onJump={onJump} t={t} />)}</GitSection>
+        <GitSection title={'Children'}>{row.children.slice(0, 6).map(k => <GitCommitLink key={k} row={layout.rows[k]} onJump={onJump} />)}</GitSection>
       )}
-      {loadCommit && <GitSection title={t('files')}><GitFiles loadKey={c.hash} load={() => loadCommit(c.hash)} t={t} /></GitSection>}
+      {loadCommit && <GitSection title={'Files changed'}><GitFiles loadKey={c.hash} load={() => loadCommit(c.hash)} /></GitSection>}
     </div>
   )
 })
-
-/* ── component ─────────────────────────────────────────────────────────────── */
 
 /** GitGraph's imperative handle (pass `ref`). */
 export type GitGraphHandle = { scrollToCommit: (hash: string, align?: 'auto' | 'center' | 'start') => void; select: (hash: string | null) => void; focus: () => void }
@@ -579,7 +493,6 @@ const gitEditable = (t: EventTarget | null) => t instanceof Element && !!t.close
 export function GitGraph({ commits, order = 'date', pin, selected, defaultSelected = null, onSelectedChange, loadCommit, loadDiff,
   onCheckout, onCreateBranch, onCherryPick, onRevert, onCopyHash, onCompare, branches, defaultBranches = [], onBranchesChange,
   defaultFirstParent = false, defaultHideMerged = false, height = 480, maxLanes, now: nowProp, toolbar = true, className, 'aria-label': ariaLabel, ref }: GitGraphProps) {
-  const t = useMessages(GIT_GRAPH_MESSAGES) as GitT, { fmt } = useLocale()
   const [mountedAt] = useState(() => Date.now()), now = nowProp ?? mountedAt
   const [rootRef, width] = useWidth<HTMLDivElement>()
   const coarse = useCoarsePointer()
@@ -667,21 +580,21 @@ export function GitGraph({ commits, order = 'date', pin, selected, defaultSelect
     select(r.index)
   }, [selRow, select, startCompare])
   // each row's dates and accessible name, formatted once per layout (scrolling re-renders the list often)
-  const textCache = useMemo(() => new Map<number, { when: string; absolute: string; label: string }>(), [rows, now, t, fmt])
+  const textCache = useMemo(() => new Map<number, { when: string; absolute: string; label: string }>(), [rows, now, fmt])
   const rowText = useCallback((i: number) => {
     let x = textCache.get(i)
     if (!x) {
       const c = rows[i].commit, when = fmt.relative(gitTime(c.date), now)
-      x = { when, absolute: fmt.dateTime(gitTime(c.date)), label: t('row', { hash: gitShortHash(c.hash), subject: c.subject, author: c.author.name, when }) }
+      x = { when, absolute: fmt.dateTime(gitTime(c.date)), label: `Commit ${gitShortHash(c.hash)}: ${c.subject}, by ${c.author.name}, ${when}` }
       textCache.set(i, x)
     }
     return x
-  }, [textCache, rows, fmt, now, t])
+  }, [textCache, rows, fmt, now])
 
   /* copying a row's hash: one clipboard helper and one announcement for the whole list */
-  const { t: tc } = useLocale(), copier = useCopy()
+  const copier = useCopy()
   const [copiedRow, setCopiedRow] = useState(-1)
-  const copyLabel = t('copyHash')
+  const copyLabel = 'Copy hash'
   const copyTimer = useRef<ReturnType<typeof setTimeout>>(undefined)
   useEffect(() => () => clearTimeout(copyTimer.current), [])
   const copyHash = useRef<(hash: string) => void>(() => {})
@@ -689,7 +602,7 @@ export function GitGraph({ commits, order = 'date', pin, selected, defaultSelect
   const copyRow = useCallback((i: number) => { const h = rowsRef.current[i]?.commit.hash; if (h) copyHash.current(h) }, [])
   copyHash.current = hash => {
     copier.copy(hash).then(ok => {
-      setAnnounce(`${ok ? tc('common.copied') : tc('common.copyFailed')}: ${gitShortHash(hash)}`)
+      setAnnounce(`${ok ? 'Copied' : 'Couldn’t copy'}: ${gitShortHash(hash)}`)
       const i = layout.rowOf.get(hash) ?? -1
       setCopiedRow(ok ? i : -1); clearTimeout(copyTimer.current); copyTimer.current = setTimeout(() => setCopiedRow(-1), 1500)
     })
@@ -740,7 +653,7 @@ export function GitGraph({ commits, order = 'date', pin, selected, defaultSelect
     if (!prev) return
     const added = commits.filter(c => !prev.has(c.hash))
     if (!added.length || added.length > 500) return
-    setFresh(new Set(added.map(c => c.hash))); setAnnounce(t('newCommits', { count: added.length }))
+    setFresh(new Set(added.map(c => c.hash))); setAnnounce(plural(added.length, 'new commit'))
     const id = setTimeout(() => setFresh(null), 1200)
     return () => clearTimeout(id)
   }, [commits]) // eslint-disable-line react-hooks/exhaustive-deps
@@ -757,14 +670,14 @@ export function GitGraph({ commits, order = 'date', pin, selected, defaultSelect
     const i = rows.find(r => r.commit.refs?.some(x => x.name === b || gitRefBranch(x) === b))?.index
     if (i !== undefined) { select(i, false); goTo(i, { focus: false, align: 'center' }) }
   }
-  const matchLabel = dq ? (matches.length ? t('matches', { n: fmt.number(matchAt >= 0 ? matchAt + 1 : 0), total: fmt.number(matches.length) }) : t('noMatches')) : ''
+  const matchLabel = dq ? (matches.length ? `${fmt.number(matchAt >= 0 ? matchAt + 1 : 0)} of ${fmt.number(matches.length)}` : 'No matches') : ''
   // the toolbar doesn't depend on the scroll position: keep it out of the re-renders scrolling causes
   const bar = useMemo(() => toolbar && (
     <div className="flex flex-col gap-2 border-b border-[var(--line)] p-2">
       <div className="flex flex-wrap items-center gap-2">
         <div className={cn('relative min-w-0', narrow ? 'w-full' : 'w-[min(320px,100%)]')}>
           <Icon name="search" size={14} className="pointer-events-none absolute start-2.5 top-1/2 -translate-y-1/2 text-[var(--fg3)]" />
-          <input ref={searchRef} type="search" value={query} onChange={e => { setQuery(e.target.value); setMatchAt(-1) }} aria-label={t('search')} placeholder={t('searchPlaceholder')}
+          <input ref={searchRef} type="search" value={query} onChange={e => { setQuery(e.target.value); setMatchAt(-1) }} aria-label={'Search commits'} placeholder={'Message, author, hash'}
             onKeyDown={e => {
               if (e.key === 'Enter') { e.preventDefault(); jumpMatch(e.shiftKey ? -1 : 1, false) }
               else if (e.key === 'Escape' && query) { e.preventDefault(); e.stopPropagation(); setQuery('') }
@@ -777,26 +690,26 @@ export function GitGraph({ commits, order = 'date', pin, selected, defaultSelect
         </div>
         {dq && (
           <span className="flex items-center">
-            <IconButton icon={<Icon name="chevronDown" size={14} className="rotate-180" />} label={t('prevMatch')} disabled={!matches.length} onClick={() => jumpMatch(-1, false)} className={TOUCH.tap} />
-            <IconButton icon="chevronDown" label={t('nextMatch')} disabled={!matches.length} onClick={() => jumpMatch(1, false)} className={TOUCH.tap} />
+            <IconButton icon={<Icon name="chevronDown" size={14} className="rotate-180" />} label={'Previous match'} disabled={!matches.length} onClick={() => jumpMatch(-1, false)} className={TOUCH.tap} />
+            <IconButton icon="chevronDown" label={'Next match'} disabled={!matches.length} onClick={() => jumpMatch(1, false)} className={TOUCH.tap} />
           </span>
         )}
         <DropdownMenuRoot>
-          <DropdownMenuTrigger size="sm" className={TOUCH.tap}><Icon name="branch" size={13} />{branchSel.length ? t('branchesCount', { count: branchSel.length }) : t('allBranches')}<Icon name="chevronDown" size={12} /></DropdownMenuTrigger>
-          <DropdownMenuContent aria-label={t('branches')} className="max-h-[min(60vh,360px)] overflow-y-auto">
-            <MenuLabel>{t('branches')}</MenuLabel>
-            {allBranches.map(b => <MenuCheckboxItem key={b} checked={branchSel.includes(b)} onCheckedChange={on => toggleBranch(b, on)} textValue={b}><span dir="ltr" className="truncate">{b}</span></MenuCheckboxItem>)}
+          <DropdownMenuTrigger size="sm" className={TOUCH.tap}><Icon name="branch" size={13} />{branchSel.length ? plural(branchSel.length, 'branch', 'branches') : 'All branches'}<Icon name="chevronDown" size={12} /></DropdownMenuTrigger>
+          <DropdownMenuContent aria-label={'Branches'} className="max-h-[min(60vh,360px)] overflow-y-auto">
+            <MenuLabel>{'Branches'}</MenuLabel>
+            {allBranches.map(b => <MenuCheckboxItem key={b} checked={branchSel.includes(b)} onCheckedChange={on => toggleBranch(b, on)} textValue={b}><span className="truncate">{b}</span></MenuCheckboxItem>)}
           </DropdownMenuContent>
         </DropdownMenuRoot>
         {/* phones: the rest scrolls sideways in one row (the branch menu stays outside it, so its panel isn't clipped) */}
         <div className={cn('items-center gap-2', narrow ? 'flex min-w-0 flex-1 overflow-x-auto [scrollbar-width:none]' : 'contents')}>
-        <Chip pressed={firstParent} onClick={() => setFirstParent(x => !x)}>{t('firstParent')}</Chip>
-        <Chip pressed={hideMerged} onClick={() => setHideMerged(x => !x)}>{t('hideMerged')}</Chip>
+        <Chip pressed={firstParent} onClick={() => setFirstParent(x => !x)}>{'First parent only'}</Chip>
+        <Chip pressed={hideMerged} onClick={() => setHideMerged(x => !x)}>{'Hide merged'}</Chip>
         <span className="flex-1" />
         {headRow >= 0 && (
-          <Button size="sm" variant="ghost" className={cn('flex-none', TOUCH.tap)} onClick={() => { select(headRow, false); goTo(headRow, { align: 'center' }) }} title={t('jumpHead')}>
+          <Button size="sm" variant="ghost" className={cn('flex-none', TOUCH.tap)} onClick={() => { select(headRow, false); goTo(headRow, { align: 'center' }) }} title={'Jump to HEAD'}>
             <Badge size="sm" tone="accent" className="border border-[var(--accent)]">HEAD</Badge>{' '}
-            {headName && headName !== 'HEAD' && <span dir="ltr" className="max-w-[18ch] truncate font-[family-name:var(--mono)] text-xs">{headName}</span>}
+            {headName && headName !== 'HEAD' && <span className="max-w-[18ch] truncate font-[family-name:var(--mono)] text-xs">{headName}</span>}
           </Button>
         )}
         </div>
@@ -805,10 +718,10 @@ export function GitGraph({ commits, order = 'date', pin, selected, defaultSelect
         <div className="flex flex-wrap items-center gap-1.5">
           {branchSel.map(b => (
             <span key={b} className="inline-flex h-[30px] items-center rounded-full border border-[var(--line)] bg-[var(--card)] text-xs [@media(pointer:coarse)]:h-9">
-              <button type="button" onClick={() => goToBranch(b)} title={t('goTo', { name: b })} className="flex h-full cursor-pointer items-center gap-1 rounded-s-full border-0 bg-transparent ps-2.5 pe-1 text-[var(--fg)] hover:bg-[var(--muted)]">
-                <Icon name="branch" size={12} style={{ color: gitStroke(gitLaneColor(gitRefBranch({ name: b, type: b.includes('/') && /^(origin|upstream)\//.test(b) ? 'remote' : 'branch' }) ?? b)) }} /><span dir="ltr">{b}</span>
+              <button type="button" onClick={() => goToBranch(b)} title={`Go to ${b}`} className="flex h-full cursor-pointer items-center gap-1 rounded-s-full border-0 bg-transparent ps-2.5 pe-1 text-[var(--fg)] hover:bg-[var(--muted)]">
+                <Icon name="branch" size={12} style={{ color: gitStroke(gitLaneColor(gitRefBranch({ name: b, type: b.includes('/') && /^(origin|upstream)\//.test(b) ? 'remote' : 'branch' }) ?? b)) }} /><span>{b}</span>
               </button>
-              <button type="button" aria-label={t('removeFilter', { name: b })} onClick={() => toggleBranch(b, false)} className="ui-target relative flex h-full cursor-pointer items-center rounded-e-full border-0 bg-transparent pe-2 ps-1 text-[var(--fg3)] hover:bg-[var(--muted)] hover:text-[var(--fg)]">
+              <button type="button" aria-label={`Remove ${b} from the filter`} onClick={() => toggleBranch(b, false)} className="ui-target relative flex h-full cursor-pointer items-center rounded-e-full border-0 bg-transparent pe-2 ps-1 text-[var(--fg3)] hover:bg-[var(--muted)] hover:text-[var(--fg)]">
                 <Icon name="x" size={12} />
               </button>
             </span>
@@ -816,38 +729,38 @@ export function GitGraph({ commits, order = 'date', pin, selected, defaultSelect
         </div>
       )}
     </div>
-  ), [toolbar, narrow, query, dq, matches, matchAt, matchLabel, act, branchSel, allBranches, firstParent, hideMerged, headRow, headName, rows, t]) // eslint-disable-line react-hooks/exhaustive-deps
+  ), [toolbar, narrow, query, dq, matches, matchAt, matchLabel, act, branchSel, allBranches, firstParent, hideMerged, headRow, headName, rows]) // eslint-disable-line react-hooks/exhaustive-deps
 
   const compareBar = compare && (
     <div className="flex flex-wrap items-center gap-2 border-b border-[var(--line)] bg-[var(--accent-soft)] px-3 py-1.5 text-xs text-[var(--fg)]">
       <Icon name="diff" size={13} className="text-[var(--accent)]" />
-      <span dir="ltr" className="font-[family-name:var(--mono)]">{t('comparing', { from: gitShortHash(rows[compare.older].commit.hash), to: gitShortHash(rows[compare.newer].commit.hash) })}</span>
-      <span className="text-[var(--fg2)]">{t('commits', { count: compare.count })}</span>
+      <span className="font-[family-name:var(--mono)]">{`Comparing ${gitShortHash(rows[compare.older].commit.hash)}…${gitShortHash(rows[compare.newer].commit.hash)}`}</span>
+      <span className="text-[var(--fg2)]">{plural(compare.count, 'commit')}</span>
       <span className="flex-1" />
-      <Button size="xs" variant="ghost" onClick={() => setCmp(null)}>{t('exitCompare')}</Button>
+      <Button size="xs" variant="ghost" onClick={() => setCmp(null)}>{'Exit compare'}</Button>
     </div>
   )
 
   const selR = selRow >= 0 ? rows[selRow] : null
-  const panelTitle = compare ? t('comparing', { from: gitShortHash(rows[compare.older].commit.hash), to: gitShortHash(rows[compare.newer].commit.hash) }) : selR ? t('details', { hash: gitShortHash(selR.commit.hash) }) : ''
+  const panelTitle = compare ? `Comparing ${gitShortHash(rows[compare.older].commit.hash)}…${gitShortHash(rows[compare.newer].commit.hash)}` : selR ? `Commit ${gitShortHash(selR.commit.hash)}` : ''
   const showPanel = open && (!!compare || !!selR)
   const jump = useCallback((i: number) => { select(i); goTo(i, { focus: false, align: 'center' }) }, [select, goTo])
-  const details = showPanel && <GitDetails layout={layout} row={selR} compare={compare} loadCommit={loadCommit} loadDiff={loadDiff} onJump={jump} t={t} now={now} />
+  const details = showPanel && <GitDetails layout={layout} row={selR} compare={compare} loadCommit={loadCommit} loadDiff={loadDiff} onJump={jump} now={now} />
 
   const hdr = 'flex h-full min-w-0 items-center truncate pe-2 text-[11px] font-medium text-[var(--fg3)]'
   const header = (
     <div role="row" aria-rowindex={1} className="grid h-full items-center" style={{ gridTemplateColumns: `${gw}px ${cols}` }}>
-      <div role="columnheader" dir="ltr" className="flex h-full items-center justify-center">
+      <div role="columnheader" className="flex h-full items-center justify-center">
         {foldable
-          ? <button type="button" onClick={() => setAllLanes(x => !x)} aria-pressed={allLanes} title={allLanes ? t('fewerLanes') : undefined} className="ui-target relative h-5 cursor-pointer rounded-full border border-dashed border-[var(--line2)] bg-transparent px-1.5 text-[11px] text-[var(--fg2)] hover:bg-[var(--muted)]">
-              <span className="sr-only">{t('graph')} </span>{allLanes ? '−' : t('moreLanes', { n: layout.laneCount - cap })}
+          ? <button type="button" onClick={() => setAllLanes(x => !x)} aria-pressed={allLanes} title={allLanes ? 'Fold lanes' : undefined} className="ui-target relative h-5 cursor-pointer rounded-full border border-dashed border-[var(--line2)] bg-transparent px-1.5 text-[11px] text-[var(--fg2)] hover:bg-[var(--muted)]">
+              <span className="sr-only">{'Graph'} </span>{allLanes ? '−' : ((layout.laneCount - cap) === 1 ? `+${layout.laneCount - cap} lane` : `+${layout.laneCount - cap} lanes`)}
             </button>
-          : <span className="sr-only">{t('graph')}</span>}
+          : <span className="sr-only">{'Graph'}</span>}
       </div>
-      <div role="columnheader" className={hdr}>{narrow ? t('commit') : t('description')}</div>
-      {!narrow && showAuthor && <div role="columnheader" className={hdr}>{t('author')}</div>}
-      {!narrow && <div role="columnheader" className={hdr}>{t('date')}</div>}
-      {!narrow && <div role="columnheader" className={cn(hdr, 'justify-end pe-3')}>{t('commit')}</div>}
+      <div role="columnheader" className={hdr}>{narrow ? 'Commit' : 'Description'}</div>
+      {!narrow && showAuthor && <div role="columnheader" className={hdr}>{'Author'}</div>}
+      {!narrow && <div role="columnheader" className={hdr}>{'Date'}</div>}
+      {!narrow && <div role="columnheader" className={cn(hdr, 'justify-end pe-3')}>{'Commit'}</div>}
     </div>
   )
   const renderRow = useCallback((r: LaneRow<GitLaneNode>) => {
@@ -855,7 +768,7 @@ export function GitGraph({ commits, order = 'date', pin, selected, defaultSelect
     return <GitRowCells row={rows[r.index]} narrow={narrow} showAuthor={showAuthor} match={matchSet.has(r.index)} query={dq} when={when} absolute={absolute}
       onCopy={copyRow} copied={copiedRow === r.index} copyLabel={copyLabel} />
   }, [rowText, rows, narrow, showAuthor, matchSet, dq, copyRow, copiedRow, copyLabel])
-  const rowLabel = useCallback((r: LaneRow<GitLaneNode>) => { const { label } = rowText(r.index); return range?.marks[r.index] ? `${label}, ${t('inRange')}` : label }, [rowText, range, t])
+  const rowLabel = useCallback((r: LaneRow<GitLaneNode>) => { const { label } = rowText(r.index); return range?.marks[r.index] ? `${label}, In range` : label }, [rowText, range])
   const inRange = useCallback((r: LaneRow<GitLaneNode>) => (range?.marks[r.index] ? { 'data-range': true } : undefined), [range])
   const rangeClass = useCallback((r: LaneRow<GitLaneNode>, s: LaneRowState) => (!s.selected && range?.marks[r.index] ? 'bg-[color-mix(in_srgb,var(--accent-soft)_55%,transparent)]' : undefined), [range])
   const isHead = useCallback((r: LaneRow<GitLaneNode>) => r.index === headRow, [headRow])
@@ -863,20 +776,20 @@ export function GitGraph({ commits, order = 'date', pin, selected, defaultSelect
   const list = (
     <ContextMenuRoot onOpenChange={o => { if (o) setMenuRow(pendingMenu.current >= 0 ? pendingMenu.current : act); else pendingMenu.current = -1 }}>
       <LaneGraph ref={graph} nodes={lanes} renderRow={renderRow} cells columns={cols} rowHeight={h} laneWidth={lw} maxLanes={cap} height={height} fit={false}
-        header={header} headerHeight={GIT_HEADER_H} contentMinWidth={minW} empty={<p className="m-0 p-6 text-center text-[13px] text-[var(--fg3)]">{t('empty')}</p>}
-        aria-label={ariaLabel ?? t('label')} aria-colcount={narrow ? 2 : showAuthor ? 5 : 4}
+        header={header} headerHeight={GIT_HEADER_H} contentMinWidth={minW} empty={<p className="m-0 p-6 text-center text-[13px] text-[var(--fg3)]">{'No commits'}</p>}
+        aria-label={ariaLabel ?? 'Commit history'} aria-colcount={narrow ? 2 : showAuthor ? 5 : 4}
         active={act} onActiveChange={setActive} selected={marked} onSelect={id => { if (id == null) setSel(null) }} onActivate={onActivate}
         onKeyDown={onKeyDown} onContextMenu={onRowMenu} rowLabel={rowLabel} rowAttrs={inRange} rowClassName={rangeClass} emphasis={isHead} fresh={fresh}
-        className="flex-1" wrapScroller={el => <ContextMenuTrigger asChild label={t('menu')}>{el}</ContextMenuTrigger>} />
-      <ContextMenuContent aria-label={t('menu')}>
-        <MenuItem icon="branch" disabled={!onCheckout} onSelect={() => menuCommit && onCheckout?.(menuCommit.hash, menuBranch)}>{menuBranch ? t('checkoutBranch', { branch: menuBranch }) : t('checkout')}</MenuItem>
-        <MenuItem icon="branch" disabled={!onCreateBranch} onSelect={() => menuCommit && onCreateBranch?.(menuCommit.hash)}>{t('createBranch')}</MenuItem>
-        <MenuItem icon="commit" disabled={!onCherryPick} onSelect={() => menuCommit && onCherryPick?.(menuCommit.hash)}>{t('cherryPick')}</MenuItem>
-        <MenuItem icon="replay" disabled={!onRevert} onSelect={() => menuCommit && onRevert?.(menuCommit.hash)}>{t('revert')}</MenuItem>
+        className="flex-1" wrapScroller={el => <ContextMenuTrigger asChild label={'Commit actions'}>{el}</ContextMenuTrigger>} />
+      <ContextMenuContent aria-label={'Commit actions'}>
+        <MenuItem icon="branch" disabled={!onCheckout} onSelect={() => menuCommit && onCheckout?.(menuCommit.hash, menuBranch)}>{menuBranch ? `Checkout ${menuBranch}` : 'Checkout'}</MenuItem>
+        <MenuItem icon="branch" disabled={!onCreateBranch} onSelect={() => menuCommit && onCreateBranch?.(menuCommit.hash)}>{'Create branch here…'}</MenuItem>
+        <MenuItem icon="commit" disabled={!onCherryPick} onSelect={() => menuCommit && onCherryPick?.(menuCommit.hash)}>{'Cherry-pick'}</MenuItem>
+        <MenuItem icon="replay" disabled={!onRevert} onSelect={() => menuCommit && onRevert?.(menuCommit.hash)}>{'Revert'}</MenuItem>
         <MenuSeparator />
-        <MenuItem icon="copy" onSelect={() => { if (menuCommit) copyHash.current(menuCommit.hash) }}>{t('copyHash')}</MenuItem>
+        <MenuItem icon="copy" onSelect={() => { if (menuCommit) copyHash.current(menuCommit.hash) }}>{'Copy hash'}</MenuItem>
         <MenuItem icon="diff" disabled={selRow < 0 || selRow === menuRow} onSelect={() => { if (menuRow >= 0 && selRow >= 0) startCompare(selRow, menuRow) }}>
-          {selR && selRow !== menuRow ? t('compareWith', { hash: gitShortHash(selR.commit.hash) }) : t('compareHint')}
+          {selR && selRow !== menuRow ? `Compare with ${gitShortHash(selR.commit.hash)}` : 'Shift+click another commit to compare'}
         </MenuItem>
       </ContextMenuContent>
     </ContextMenuRoot>
@@ -892,8 +805,8 @@ export function GitGraph({ commits, order = 'date', pin, selected, defaultSelect
           <aside aria-label={panelTitle} className="flex w-[min(400px,42%)] flex-none flex-col border-s border-[var(--line)]" style={{ height }}
             onKeyDown={e => { if (e.key === 'Escape') { e.preventDefault(); if (cmp) setCmp(null); else setOpen(false); goTo(act) } }}>
             <div className="flex h-10 flex-none items-center gap-2 border-b border-[var(--line)] ps-3 pe-1.5">
-              <h3 dir="ltr" className="m-0 min-w-0 flex-1 truncate text-start font-[family-name:var(--mono)] text-xs font-semibold text-[var(--fg)]">{panelTitle}</h3>
-              <IconButton icon="x" label={t('closeDetails')} onClick={() => { setOpen(false); setCmp(null); goTo(act) }} />
+              <h3 className="m-0 min-w-0 flex-1 truncate text-start font-[family-name:var(--mono)] text-xs font-semibold text-[var(--fg)]">{panelTitle}</h3>
+              <IconButton icon="x" label={'Close details'} onClick={() => { setOpen(false); setCmp(null); goTo(act) }} />
             </div>
             <div className="min-h-0 flex-1 overflow-y-auto overscroll-contain p-3">{details}</div>
           </aside>
@@ -902,7 +815,7 @@ export function GitGraph({ commits, order = 'date', pin, selected, defaultSelect
       {!wide && (
         <DialogRoot open={showPanel} onOpenChange={o => { if (!o) { setOpen(false); setCmp(null) } }}>
           <SheetContent>
-            <SheetHeader><DialogTitle><span dir="ltr" className="font-[family-name:var(--mono)]">{panelTitle}</span></DialogTitle><DialogClose /></SheetHeader>
+            <SheetHeader><DialogTitle><span className="font-[family-name:var(--mono)]">{panelTitle}</span></DialogTitle><DialogClose /></SheetHeader>
             <div className="flex-1">{details}</div>
           </SheetContent>
         </DialogRoot>

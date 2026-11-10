@@ -1,20 +1,7 @@
 import { useEffect, useId, useLayoutEffect, useRef, useState } from 'react'
 import { AnimatePresence, motion } from 'motion/react'
-import { Button, Icon, type IconName, ScrollEdges, TOUCH, cn, defineMessages, dirX, spring, surface, useControllable, useDir, useMessages, useRoving, useScrollEdges, useWidth } from './core'
+import { Button, Icon, type IconName, ScrollEdges, TOUCH, cn, spring, surface, useControllable, useRoving, useScrollEdges, useWidth } from './core'
 import { ActiveIndicator, Input, Select, Switch, type Option } from './forms'
-
-/* ════════════════════════════════════════════════════════════════════════════
- * 12. PAGES
- * ══════════════════════════════════════════════════════════════════════════ */
-
-/** This module's strings (machine-drafted de/ar: have a native speaker review). */
-const PAGES_MSG = defineMessages('pages', {
-  en: { sections: 'Settings sections', saved: 'Saved ✓' },
-  de: { sections: 'Einstellungsbereiche', saved: 'Gespeichert ✓' },
-  ar: { sections: 'أقسام الإعدادات', saved: 'تم الحفظ ✓' },
-})
-
-/* ── Settings page ─────────────────────────────────────────────────────── */
 
 export type SettingsValue = boolean | string
 export type SettingsRow = { id: string; label: string; description?: string } & (
@@ -46,13 +33,12 @@ export function SettingsPage({ sections, section, defaultSection, onSectionChang
   const navRefs = useRef<(HTMLButtonElement | null)[]>([])
   const [wrap, w] = useWidth<HTMLDivElement>()
   const row = w !== 0 && w < 600
-  const group = useId(), tm = useMessages(PAGES_MSG), rtl = useDir() === 'rtl'
+  const group = useId()
   const i = Math.max(0, sections.findIndex(s => s.id === cur)), sec = sections[i]
   const [navEdges, edges] = useScrollEdges<HTMLElement>()
   const navEl = useRef<HTMLElement | null>(null)
   useEffect(() => { // the row scrolls: keep the open section in view (scrolling the strip only, never the page)
     const el = navEl.current, t = navRefs.current[i]; if (!row || !el || !t) return
-    // a physical delta from the visible edges, so it works the same right to left
     const er = el.getBoundingClientRect(), tr = t.getBoundingClientRect()
     const by = tr.left < er.left ? tr.left - er.left - 24 : tr.right > er.right ? tr.right - er.right + 24 : 0
     if (by) el.scrollLeft += by
@@ -91,7 +77,7 @@ export function SettingsPage({ sections, section, defaultSection, onSectionChang
   return (
     <div ref={wrap} className={cn(surface.card, 'grid min-h-[400px] overflow-hidden', row ? 'grid-cols-1' : 'grid-cols-[200px_minmax(0,1fr)]', className)}>
       <div className={cn('relative min-w-0', row ? 'border-b border-[var(--line)]' : 'border-e border-[var(--line)]')}>
-      <nav ref={el => { navEl.current = el; navEdges(el) }} aria-label={tm('sections')} onKeyDown={nav.onKeyDown} role="tablist" aria-orientation={row ? 'horizontal' : 'vertical'}
+      <nav ref={el => { navEl.current = el; navEdges(el) }} aria-label={'Settings sections'} onKeyDown={nav.onKeyDown} role="tablist" aria-orientation={row ? 'horizontal' : 'vertical'}
         className={cn('flex h-full gap-0.5 bg-[color-mix(in_srgb,var(--muted)_35%,var(--card))] p-2.5', row ? 'flex-row overflow-x-auto overscroll-x-contain [scrollbar-width:none] [&::-webkit-scrollbar]:hidden' : 'flex-col')}>
         {sections.map((s, k) => (
           <button key={s.id} ref={el => { navRefs.current[k] = el }} role="tab" aria-selected={k === i} tabIndex={k === i ? 0 : -1} onClick={() => select(k)}
@@ -108,11 +94,11 @@ export function SettingsPage({ sections, section, defaultSection, onSectionChang
         <span aria-live="polite" className={cn('absolute', row ? 'top-5 end-4' : 'top-6 end-6')}>
           <AnimatePresence>
             {flashOn && <motion.span key={flash} initial={{ opacity: 0, y: -4 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0, transition: { duration: 0.3 } }} transition={{ duration: 0.2 }}
-              className="absolute end-0 text-xs whitespace-nowrap text-[var(--ok)]">{tm('saved')}</motion.span>}
+              className="absolute end-0 text-xs whitespace-nowrap text-[var(--ok)]">{'Saved ✓'}</motion.span>}
           </AnimatePresence>
         </span>
         {sec && (
-          <motion.div key={sec.id} initial={dir ? { opacity: 0, x: row ? dirX(16 * dir, rtl ? 'rtl' : 'ltr') : 0, y: row ? 0 : 12 * dir } : false}
+          <motion.div key={sec.id} initial={dir ? { opacity: 0, x: row ? 16 * dir : 0, y: row ? 0 : 12 * dir } : false}
  animate={{ opacity: 1, x: 0, y: 0 }} transition={spring(0.2, 0.35)}>
             <h4 className="m-0 mb-1 pe-20 text-base font-semibold">{sec.label}</h4>
             {sec.description && <p className="m-0 mb-4 text-[13px] text-[var(--fg3)]">{sec.description}</p>}
@@ -136,4 +122,3 @@ export function SettingsPage({ sections, section, defaultSection, onSectionChang
   )
 }
 
-/* ── Profile ───────────────────────────────────────────────────────────── */

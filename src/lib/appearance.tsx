@@ -1,6 +1,6 @@
 import { useEffect, useId, useMemo, useRef, useState } from 'react'
 import { AnimatePresence, motion } from 'motion/react'
-import { Button, FONTS, Icon, IconButton, type Palette, THEMES, type Theme, type ThemeSettings, type UIMessageKey, cn, defineMessages, derive, editPalette, inputClass, loadFont, spring, themeCSS, themePalette, themeShareUrl, useControllable, useLocale, useMessages, useTheme } from './core'
+import { Button, FONTS, Icon, IconButton, type Palette, THEMES, type Theme, type ThemeSettings, cn, derive, editPalette, inputClass, loadFont, spring, themeCSS, themePalette, themeShareUrl, useControllable, useTheme, plural, downloadBlob } from './core'
 import { Collapse, CopyButton, useCopy, useToast } from './feedback'
 import { SegmentedControl, Slider } from './forms'
 import { TabsContent, TabsList, TabsRoot, TabsTrigger } from './navigation'
@@ -35,9 +35,8 @@ export function ThemePreview({ theme, variant = 0, className }: { theme: Theme; 
 /** One-click light/dark switch for the header. The new theme sweeps out from the button. */
 export function ThemeToggle({ className }: { className?: string }) {
   const { dark, toggle } = useTheme()
-  const { t } = useLocale()
   return (
-    <Button size="icon" aria-label={t(dark ? 'theme.switchToLight' : 'theme.switchToDark')} onClick={e => toggle(e.currentTarget)} className={className}>
+    <Button size="icon" aria-label={(dark ? 'Switch to light theme' : 'Switch to dark theme')} onClick={e => toggle(e.currentTarget)} className={className}>
       <AnimatePresence mode="popLayout" initial={false}>
         <motion.span key={String(dark)} initial={{ rotate: -90, scale: 0.5, opacity: 0 }} animate={{ rotate: 0, scale: 1, opacity: 1 }} exit={{ rotate: 90, scale: 0.5, opacity: 0 }} transition={spring(0.4, 0.4)}>
           <Icon name={dark ? 'moon' : 'sun'} />
@@ -48,58 +47,11 @@ export function ThemeToggle({ className }: { className?: string }) {
 }
 
 /** Strings of the export, import and share controls (ThemeExportPanel). Override one as 'themeExport.<key>' in UIProvider messages. */
-export const THEME_EXPORT_MESSAGES = defineMessages('themeExport', {
-  en: {
-    section: 'Export and share', subheading: 'Use this theme in other projects', formats: 'Export format', code: '{format} code',
-    copyCode: 'Copy code', download: 'Download', shareLink: 'Copy share link', shareCopied: 'Share link copied',
-    shareHint: 'Opens this page with your theme where theme links are on', import: 'Import', importTitle: 'Import a theme',
-    importLabel: 'Theme CSS or JSON', importPlaceholder: 'Paste a shadcn :root { … } .dark { … } block, CSS variables, a Tailwind @theme or DTCG JSON',
-    importApply: 'Apply as Custom theme', importApplied: 'Theme imported', importMode: 'Palette to apply',
-    found: '{format} theme · {modes, select, both {light and dark} dark {dark} other {light}}',
-    'error.empty': 'Paste a theme to preview it', 'error.too-large': 'That is too long to be a theme',
-    'error.invalid-json': 'That JSON could not be read', 'error.unrecognised': 'No theme colours found: it needs a background and a text colour',
-    notes: '{count, plural, one {# change} other {# changes}}', 'note.missing': '{token}: not set, so the default is used',
-    'note.blended': '{token}: translucent, flattened onto the background', 'note.clipped': '{token}: outside sRGB, clipped to the nearest colour',
-    'note.contrast': '{token}: adjusted for 4.5:1 contrast, {from} → {to}', 'note.font': 'The font {font} is not offered here, so yours is kept',
-    adjusted: '{count, plural, =0 {No colours needed adjusting} one {# colour adjusted for contrast} other {# colours adjusted for contrast}}',
-  },
-  de: {
-    section: 'Exportieren und teilen', subheading: 'Dieses Design in anderen Projekten nutzen', formats: 'Exportformat', code: '{format}-Code',
-    copyCode: 'Code kopieren', download: 'Herunterladen', shareLink: 'Link zum Teilen kopieren', shareCopied: 'Link kopiert',
-    shareHint: 'Öffnet diese Seite mit deinem Design, wo Design-Links aktiv sind', import: 'Importieren', importTitle: 'Design importieren',
-    importLabel: 'Design als CSS oder JSON', importPlaceholder: 'Einen shadcn-Block :root { … } .dark { … }, CSS-Variablen, ein Tailwind-@theme oder DTCG-JSON einfügen',
-    importApply: 'Als eigenes Design übernehmen', importApplied: 'Design importiert', importMode: 'Zu übernehmende Palette',
-    found: '{format}-Design · {modes, select, both {hell und dunkel} dark {dunkel} other {hell}}',
-    'error.empty': 'Füge ein Design ein, um es anzusehen', 'error.too-large': 'Das ist zu lang für ein Design',
-    'error.invalid-json': 'Dieses JSON konnte nicht gelesen werden', 'error.unrecognised': 'Keine Designfarben gefunden: Hintergrund und Textfarbe fehlen',
-    notes: '{count, plural, one {# Änderung} other {# Änderungen}}', 'note.missing': '{token}: nicht gesetzt, Standard wird verwendet',
-    'note.blended': '{token}: transparent, auf den Hintergrund verrechnet', 'note.clipped': '{token}: außerhalb von sRGB, auf die nächste Farbe begrenzt',
-    'note.contrast': '{token}: für Kontrast 4,5:1 angepasst, {from} → {to}', 'note.font': 'Die Schrift {font} gibt es hier nicht, deine bleibt',
-    adjusted: '{count, plural, =0 {Keine Farbe musste angepasst werden} one {# Farbe für Kontrast angepasst} other {# Farben für Kontrast angepasst}}',
-  },
-  ar: {
-    section: 'التصدير والمشاركة', subheading: 'استخدم هذه السمة في مشاريع أخرى', formats: 'صيغة التصدير', code: 'رمز {format}',
-    copyCode: 'نسخ الرمز', download: 'تنزيل', shareLink: 'نسخ رابط المشاركة', shareCopied: 'تم نسخ رابط المشاركة',
-    shareHint: 'يفتح هذه الصفحة بسمتك حيث تكون روابط السمات مفعّلة', import: 'استيراد', importTitle: 'استيراد سمة',
-    importLabel: 'السمة بصيغة CSS أو JSON', importPlaceholder: 'الصق كتلة shadcn ‏:root { … } .dark { … } أو متغيرات CSS أو ‎@theme من Tailwind أو JSON بصيغة DTCG',
-    importApply: 'تطبيق كسمة مخصصة', importApplied: 'تم استيراد السمة', importMode: 'اللوحة المراد تطبيقها',
-    found: 'سمة {format} · {modes, select, both {فاتحة وداكنة} dark {داكنة} other {فاتحة}}',
-    'error.empty': 'الصق سمة لمعاينتها', 'error.too-large': 'هذا أطول من أن يكون سمة',
-    'error.invalid-json': 'تعذّرت قراءة JSON هذا', 'error.unrecognised': 'لم يُعثر على ألوان سمة: يلزم لون خلفية ولون نص',
-    notes: '{count, plural, zero {لا تغييرات} one {تغيير واحد} two {تغييران} few {# تغييرات} many {# تغييرًا} other {# تغيير}}', 'note.missing': '{token}: غير محدد، فاستُخدم الافتراضي',
-    'note.blended': '{token}: شفاف، دُمج مع الخلفية', 'note.clipped': '{token}: خارج نطاق sRGB، قُصّ إلى أقرب لون',
-    'note.contrast': '{token}: عُدّل لتباين 4.5:1، {from} ← {to}', 'note.font': 'الخط {font} غير متاح هنا، فبقي خطك',
-    adjusted: '{count, plural, =0 {لم يلزم تعديل أي لون} one {عُدّل لون واحد للتباين} two {عُدّل لونان للتباين} few {عُدّلت # ألوان للتباين} many {عُدّل # لونًا للتباين} other {عُدّل # لون للتباين}}',
-  },
-})
 
-/** Save text as a file (a Blob link, so it works offline and under a CSP without outside hosts). */
-function appearanceDownload(text: string, filename: string, type: string) {
-  const url = URL.createObjectURL(new Blob([text], { type: `${type};charset=utf-8` }))
-  const a = document.createElement('a')
-  a.href = url; a.download = filename; a.rel = 'noopener'; a.style.display = 'none'
-  document.body.appendChild(a); a.click(); a.remove()
-  setTimeout(() => URL.revokeObjectURL(url), 1000)
+
+const THEME_IMPORT_ERRORS = {
+  empty: 'Paste a theme to preview it', 'too-large': 'That is too long to be a theme', 'invalid-json': 'That JSON could not be read',
+  unrecognised: 'No theme colours found: it needs a background and a text colour',
 }
 
 /**
@@ -112,8 +64,6 @@ function appearanceDownload(text: string, filename: string, type: string) {
  */
 export function ThemeExportPanel({ className }: { className?: string }) {
   const { settings, set, dark } = useTheme()
-  const m = useMessages(THEME_EXPORT_MESSAGES)
-  const { t } = useLocale()
   const toast = useToast()
   const [format, setFormat] = useState<ThemeExportFormat>('css')
   const code = useMemo(() => themeExport(format, settings), [format, settings])
@@ -131,25 +81,29 @@ export function ThemeExportPanel({ className }: { className?: string }) {
   const ids = useId()
   const share = async () => {
     const ok = await copyLink(themeShareUrl(settings))
-    toast(ok ? { title: m('shareCopied'), description: m('shareHint') } : { title: t('common.copyFailed'), description: t('common.clipboardBlocked'), tone: 'bad' })
+    toast(ok ? { title: 'Share link copied', description: 'Opens this page with your theme where theme links are on' } : { title: 'Couldn’t copy', description: 'Clipboard blocked', tone: 'bad' })
   }
   const apply = () => {
     if (!result?.ok || !mode) return
     const next = themeImportSettings(result, settings, mode)
     if (!next) return
     set({ custom: next.custom, useCustom: true, radius: next.radius, font: next.font })
-    toast({ title: m('importApplied'), description: m('adjusted', { count: notes.filter(n => n.code === 'contrast').length }), tone: 'ok' })
+    toast({ title: 'Theme imported', description: ((notes.filter(n => n.code === 'contrast').length) === 0 ? 'No colours needed adjusting' : (notes.filter(n => n.code === 'contrast').length) === 1 ? `${notes.filter(n => n.code === 'contrast').length} colour adjusted for contrast` : `${notes.filter(n => n.code === 'contrast').length} colours adjusted for contrast`), tone: 'ok' })
   }
-  const noteText = (n: ThemeImportNote) => n.code === 'font' ? m('note.font', { font: n.from ?? '?' }) : m(`note.${n.code}`, { token: n.token, from: n.from ?? '', to: n.to ?? '' })
+  const noteText = (n: ThemeImportNote) => ({
+    missing: `${n.token}: not set, so the default is used`, blended: `${n.token}: translucent, flattened onto the background`,
+    clipped: `${n.token}: outside sRGB, clipped to the nearest colour`, contrast: `${n.token}: adjusted for 4.5:1 contrast, ${n.from} → ${n.to}`,
+    font: `The font ${n.from ?? '?'} is not offered here, so yours is kept`,
+  })[n.code]
   return (
     <div className={className}>
       <TabsRoot value={format} onValueChange={v => setFormat(v as ThemeExportFormat)}>
-        <TabsList aria-label={m('formats')} className="gap-4">
+        <TabsList aria-label={'Export format'} className="gap-4">
           {THEME_EXPORT_FORMATS.map(f => <TabsTrigger key={f.id} value={f.id}>{f.label}</TabsTrigger>)}
         </TabsList>
         {THEME_EXPORT_FORMATS.map(f => (
           <TabsContent key={f.id} value={f.id} className="!pt-2">
-            <pre dir="ltr" tabIndex={0} role="region" aria-label={m('code', { format: f.label })}
+            <pre tabIndex={0} role="region" aria-label={`${f.label} code`}
               className="m-0 max-h-56 overflow-auto overscroll-contain rounded-[var(--r-md)] border border-[var(--line)] bg-[var(--muted)] p-2.5 text-start font-[family-name:var(--mono)] text-[11px] leading-relaxed whitespace-pre text-[var(--fg2)] [@media(pointer:coarse)]:max-h-48">
               {f.id === format ? code : ''}
             </pre>
@@ -157,44 +111,44 @@ export function ThemeExportPanel({ className }: { className?: string }) {
         ))}
       </TabsRoot>
       <div className="mt-2 flex flex-wrap items-center gap-2">
-        <CopyButton size="sm" text={() => code} label={m('copyCode')} />
-        <Button size="sm" onClick={() => appearanceDownload(code, meta.filename, meta.type)} title={meta.filename}>
-          <Icon name="download" size={14} />{m('download')}<span className="font-[family-name:var(--mono)] text-[11px] text-[var(--fg3)]" dir="ltr">{meta.filename.slice(meta.filename.lastIndexOf('.'))}</span>
+        <CopyButton size="sm" text={() => code} label={'Copy code'} />
+        <Button size="sm" onClick={() => downloadBlob(new Blob([code], { type: `${meta.type};charset=utf-8` }), meta.filename)} title={meta.filename}>
+          <Icon name="download" size={14} />{'Download'}<span className="font-[family-name:var(--mono)] text-[11px] text-[var(--fg3)]">{meta.filename.slice(meta.filename.lastIndexOf('.'))}</span>
         </Button>
       </div>
       <div className="mt-2 flex flex-wrap items-center gap-2">
-        <Button size="sm" onClick={share}><Icon name="link" size={14} />{m('shareLink')}</Button>
+        <Button size="sm" onClick={share}><Icon name="link" size={14} />{'Copy share link'}</Button>
         <Button size="sm" aria-expanded={importing} aria-controls={`${ids}-import`} onClick={() => setImporting(o => !o)}>
-          <Icon name="upload" size={14} />{m('import')}
+          <Icon name="upload" size={14} />{'Import'}
         </Button>
       </div>
       <Collapse open={importing}>
         <div id={`${ids}-import`} className="mt-3 rounded-[var(--r-md)] border border-[var(--line)] p-2.5">
-          <label htmlFor={`${ids}-text`} className="mb-1.5 block text-xs font-medium text-[var(--fg2)]">{m('importLabel')}</label>
-          <textarea id={`${ids}-text`} dir="ltr" rows={5} spellCheck={false} autoCapitalize="off" autoCorrect="off" value={text} onChange={e => setText(e.target.value)}
-            placeholder={m('importPlaceholder')} aria-invalid={result && !result.ok ? true : undefined} aria-describedby={`${ids}-status`}
+          <label htmlFor={`${ids}-text`} className="mb-1.5 block text-xs font-medium text-[var(--fg2)]">{'Theme CSS or JSON'}</label>
+          <textarea id={`${ids}-text`} rows={5} spellCheck={false} autoCapitalize="off" autoCorrect="off" value={text} onChange={e => setText(e.target.value)}
+            placeholder={'Paste a shadcn :root { … } .dark { … } block, CSS variables, a Tailwind @theme or DTCG JSON'} aria-invalid={result && !result.ok ? true : undefined} aria-describedby={`${ids}-status`}
             className={cn(inputClass, '!h-auto max-h-48 min-h-24 resize-y !py-2 font-[family-name:var(--mono)] text-[11px] leading-relaxed')} />
           <div id={`${ids}-status`} aria-live="polite" className="mt-2 text-xs">
-            {result && !result.ok && <p className="m-0 text-[var(--bad)]">{m(`error.${result.error}`)}</p>}
+            {result && !result.ok && <p className="m-0 text-[var(--bad)]">{THEME_IMPORT_ERRORS[result.error]}</p>}
             {result?.ok && preview && (
               <>
                 <div className="flex items-center gap-2.5">
                   <span className="relative block h-[58px] w-[96px] flex-none overflow-hidden rounded-[var(--r-md)] shadow-[inset_0_0_0_1px_rgba(127,127,127,.2)]" aria-hidden><ThemeMini p={preview} /></span>
-                  <span className="min-w-0 text-[var(--fg2)]">{m('found', { format: result.format, modes: modes.length > 1 ? 'both' : modes[0] })}</span>
+                  <span className="min-w-0 text-[var(--fg2)]">{`${result.format} theme · ${(modes.length > 1 ? 'both' : modes[0]) === 'both' ? 'light and dark' : (modes.length > 1 ? 'both' : modes[0]) === 'dark' ? 'dark' : 'light'}`}</span>
                 </div>
                 {modes.length > 1 && (
-                  <SegmentedControl size="sm" aria-label={m('importMode')} className="mt-2 w-full" value={mode} onChange={v => setPick(v as ThemeExportMode)}
-                    options={[{ value: 'light', label: t('theme.light'), icon: 'sun' }, { value: 'dark', label: t('theme.dark'), icon: 'moon' }]} />
+                  <SegmentedControl size="sm" aria-label={'Palette to apply'} className="mt-2 w-full" value={mode} onChange={v => setPick(v as ThemeExportMode)}
+                    options={[{ value: 'light', label: 'Light', icon: 'sun' }, { value: 'dark', label: 'Dark', icon: 'moon' }]} />
                 )}
                 {notes.length > 0 && (
                   <details className="mt-2">
-                    <summary className="cursor-pointer text-[var(--fg2)]">{m('notes', { count: notes.length })}</summary>
+                    <summary className="cursor-pointer text-[var(--fg2)]">{plural(notes.length, 'change')}</summary>
                     <ul className="m-0 mt-1 list-none space-y-0.5 p-0 text-[11px] text-[var(--fg3)]">
                       {notes.map((n, i) => <li key={i} className={n.code === 'contrast' ? 'text-[var(--fg2)]' : undefined}>{noteText(n)}</li>)}
                     </ul>
                   </details>
                 )}
-                <Button size="sm" variant="primary" className="mt-2.5 w-full" onClick={apply}>{m('importApply')}</Button>
+                <Button size="sm" variant="primary" className="mt-2.5 w-full" onClick={apply}>{'Apply as Custom theme'}</Button>
               </>
             )}
           </div>
@@ -204,7 +158,7 @@ export function ThemeExportPanel({ className }: { className?: string }) {
   )
 }
 
-const CUSTOMISE: [keyof Palette, UIMessageKey][] = [['bg', 'theme.colour.bg'], ['card', 'theme.colour.card'], ['fg', 'theme.colour.fg'], ['primary', 'theme.colour.primary'], ['accent', 'theme.colour.accent'], ['ok', 'theme.colour.ok'], ['warn', 'theme.colour.warn'], ['bad', 'theme.colour.bad']]
+const CUSTOMISE: [keyof Palette, string][] = [['bg', 'Background'], ['card', 'Surface'], ['fg', 'Text'], ['primary', 'Primary'], ['accent', 'Accent'], ['ok', 'Success'], ['warn', 'Warning'], ['bad', 'Danger']]
 const appearanceLabel = 'mb-2.5 text-xs font-medium text-[var(--fg2)]'
 const appearanceSection = 'border-b border-[var(--line)] px-3 pt-2.5 pb-3'
 
@@ -219,13 +173,11 @@ export function AppearancePanel({ onClose, open = true, className }: { onClose?:
   const { settings, set, reset, dark, tokens, label, fonts } = useTheme()
   const preload = (f: string) => { if (fonts) loadFont(f) } // Google Fonts only when the provider allows it
   const toast = useToast()
-  const { t } = useLocale()
   const grid = useRef<HTMLDivElement>(null)
   const { copied, copy: copyText } = useCopy(() => themeCSS(tokens, label))
-  const mx = useMessages(THEME_EXPORT_MESSAGES)
   const [exportOpen, setExportOpen] = useState(false)
   const exportId = useId()
-  useEffect(() => { // land on the current theme, like the original
+  useEffect(() => { // land on the current theme
     if (!open) return
     const id = requestAnimationFrame(() => grid.current?.querySelector<HTMLElement>('[aria-pressed="true"]')?.focus())
     return () => cancelAnimationFrame(id)
@@ -235,22 +187,22 @@ export function AppearancePanel({ onClose, open = true, className }: { onClose?:
   const cur = Math.min(settings.variant[fam.id] ?? 0, list.length - 1)
   const base = themePalette(settings, dark)
   const copy = async () => {
-    if (await copyText()) toast({ title: t('theme.cssCopied'), description: label })
-    else toast({ title: t('common.copyFailed'), description: t('common.clipboardBlocked'), tone: 'bad' })
+    if (await copyText()) toast({ title: 'CSS variables copied', description: label })
+    else toast({ title: 'Couldn’t copy', description: 'Clipboard blocked', tone: 'bad' })
   }
   return (
     <div className={className}>
       <div className="flex items-center justify-between px-3 pt-3 pb-1">
-        <b className="text-base font-semibold">{t('theme.appearance')}</b>
-        {onClose && <IconButton icon="x" label={t('common.close')} onClick={onClose} />}
+        <b className="text-base font-semibold">{'Appearance'}</b>
+        {onClose && <IconButton icon="x" label={'Close'} onClick={onClose} />}
       </div>
       <div className={appearanceSection}>
-        <div className={appearanceLabel}>{t('theme.mode')}</div>
-        <SegmentedControl aria-label={t('theme.mode')} className={cn('w-full transition-opacity', settings.useCustom && 'opacity-60')} value={settings.mode} onChange={m => set({ mode: m as ThemeSettings['mode'] })}
-          options={[{ value: 'light', label: t('theme.light'), icon: 'sun' }, { value: 'dark', label: t('theme.dark'), icon: 'moon' }, { value: 'system', label: t('theme.system'), icon: 'monitor' }]} />
+        <div className={appearanceLabel}>{'Mode'}</div>
+        <SegmentedControl aria-label={'Mode'} className={cn('w-full transition-opacity', settings.useCustom && 'opacity-60')} value={settings.mode} onChange={m => set({ mode: m as ThemeSettings['mode'] })}
+          options={[{ value: 'light', label: 'Light', icon: 'sun' }, { value: 'dark', label: 'Dark', icon: 'moon' }, { value: 'system', label: 'System', icon: 'monitor' }]} />
       </div>
       <div className={appearanceSection}>
-        <div className={appearanceLabel}>{t('theme.theme')}</div>
+        <div className={appearanceLabel}>{'Theme'}</div>
         <div ref={grid} className="grid grid-cols-2 gap-2.5">
           {THEMES.map((t, i) => {
             const on = !settings.useCustom && t.id === settings.theme
@@ -271,8 +223,8 @@ export function AppearancePanel({ onClose, open = true, className }: { onClose?:
               className={cn('flex cursor-pointer flex-col gap-0.5 rounded-[var(--r-lg)] border bg-[var(--card)] p-1.5 pb-2 text-start transition-[border-color,box-shadow]',
                 settings.useCustom ? 'border-[var(--accent)] shadow-[0_0_0_1px_var(--accent)]' : 'border-[var(--line)] hover:border-[var(--line2)]')}>
               <span className={previewFrame} aria-hidden><ThemeMini p={settings.custom.v} /></span>
-              <span className="px-1 text-[13px] font-medium">{t('theme.custom')}</span>
-              <span className="px-1 text-[11px] text-[var(--fg3)]">{t('theme.customHint')}</span>
+              <span className="px-1 text-[13px] font-medium">{'Custom'}</span>
+              <span className="px-1 text-[11px] text-[var(--fg3)]">{'Your colours'}</span>
             </motion.button>
           )}
         </div>
@@ -280,7 +232,7 @@ export function AppearancePanel({ onClose, open = true, className }: { onClose?:
           {!settings.useCustom && list.length > 1 && (
             <motion.div key={fam.id + String(dark)} initial={{ opacity: 0, height: 0 }} animate={{ opacity: 1, height: 'auto' }} exit={{ opacity: 0, height: 0 }} transition={spring(0.1, 0.35)} className="overflow-hidden">
               <div className="mt-3 flex flex-wrap items-center gap-1.5 rounded-[var(--r-md)] bg-[var(--muted)] px-2.5 py-2">
-                <span className="text-xs text-[var(--fg3)]">{t('theme.variantStyle', { theme: fam.name, mode: dark ? 'dark' : 'light' })}</span><span className="flex-1" />
+                <span className="text-xs text-[var(--fg3)]">{`${fam.name} ${(dark ? 'dark' : 'light') === 'dark' ? 'dark' : 'light'} style`}</span><span className="flex-1" />
                 {list.map(([n, v], i) => (
                   <button key={n} aria-pressed={i === cur} onClick={e => { if (i !== cur) set({ variant: { ...settings.variant, [fam.id]: i } }, e.currentTarget) }}
                     className={cn('inline-flex cursor-pointer items-center gap-1.5 rounded-full border bg-[var(--card)] py-1 pe-2.5 ps-1 text-xs [@media(pointer:coarse)]:min-h-8',
@@ -294,20 +246,20 @@ export function AppearancePanel({ onClose, open = true, className }: { onClose?:
         </AnimatePresence>
       </div>
       <div className={appearanceSection}>
-        <div className={cn(appearanceLabel, 'flex items-center justify-between')}>{t('theme.customise')}<span className="text-[11px] font-normal text-[var(--fg3)]">{t(settings.useCustom ? 'theme.customEditing' : 'theme.customCreates')}</span></div>
+        <div className={cn(appearanceLabel, 'flex items-center justify-between')}>{'Customise'}<span className="text-[11px] font-normal text-[var(--fg3)]">{(settings.useCustom ? 'Editing your Custom theme' : 'Edits create a Custom theme')}</span></div>
         <div className="mb-3 grid grid-cols-2 gap-2">
           {CUSTOMISE.map(([k, n]) => (
             <label key={k} className="relative flex min-w-0 cursor-pointer items-center gap-2 rounded-[var(--r-md)] border border-[var(--line)] px-2 py-1 text-xs hover:bg-[var(--muted)] [@media(pointer:coarse)]:min-h-9 has-[:focus-visible]:outline-2 has-[:focus-visible]:outline-[var(--accent)]">
-              <span className="h-[18px] w-[18px] flex-none rounded-[var(--r-sm)] shadow-[inset_0_0_0_1px_rgba(127,127,127,.35)]" style={{ background: base.v[k] }} />{t(n)}
+              <span className="h-[18px] w-[18px] flex-none rounded-[var(--r-sm)] shadow-[inset_0_0_0_1px_rgba(127,127,127,.35)]" style={{ background: base.v[k] }} />{n}
               <span className="ms-auto font-[family-name:var(--mono)] text-[11px] text-[var(--fg3)]">{base.v[k]}</span>
-              <input type="color" aria-label={t('theme.colourLabel', { name: t(n) })} value={base.v[k].length === 7 ? base.v[k].toLowerCase() : '#000000'}
+              <input type="color" aria-label={`${n} colour`} value={base.v[k].length === 7 ? base.v[k].toLowerCase() : '#000000'}
                 onChange={e => set({ custom: editPalette(base.v, base.dark, k, e.target.value), useCustom: true })}
                 className="absolute inset-0 h-full w-full cursor-pointer opacity-0" />
             </label>
           ))}
         </div>
-        <Slider label={t('theme.radius')} min={0} max={18} value={settings.radius} onChange={radius => set({ radius })} format={v => `${v} px`} />
-        <div className="mt-3 mb-1.5 text-[13px]">{t('theme.font')}</div>
+        <Slider label={'Corner radius'} min={0} max={18} value={settings.radius} onChange={radius => set({ radius })} format={v => `${v} px`} />
+        <div className="mt-3 mb-1.5 text-[13px]">{'Font'}</div>
         <div className="grid grid-cols-2 gap-1.5">
           {FONTS.map(([f]) => (
             <button key={f} aria-pressed={f === settings.font} onPointerEnter={() => preload(f)} onFocus={() => preload(f)} onClick={() => set({ font: f })} style={{ fontFamily: `"${f}",system-ui,sans-serif` }}
@@ -319,15 +271,15 @@ export function AppearancePanel({ onClose, open = true, className }: { onClose?:
       <div className={appearanceSection}>
         <button type="button" aria-expanded={exportOpen} aria-controls={`${exportId}-panel`} onClick={() => setExportOpen(o => !o)}
           className="flex w-full cursor-pointer items-center gap-2 rounded-[var(--r-md)] border-0 bg-transparent p-0 text-start [@media(pointer:coarse)]:min-h-9">
-          <span className="text-xs font-medium text-[var(--fg2)]">{mx('section')}</span>
-          <span className="truncate text-[11px] text-[var(--fg3)]">{mx('subheading')}</span>
+          <span className="text-xs font-medium text-[var(--fg2)]">{'Export and share'}</span>
+          <span className="truncate text-[11px] text-[var(--fg3)]">{'Use this theme in other projects'}</span>
           <motion.span initial={false} animate={{ rotate: exportOpen ? 180 : 0 }} transition={spring(0.2, 0.3)} className="ms-auto grid text-[var(--fg3)]"><Icon name="chevronDown" size={14} /></motion.span>
         </button>
         <Collapse open={exportOpen}><div id={`${exportId}-panel`} className="pt-2.5"><ThemeExportPanel /></div></Collapse>
       </div>
       <div className="sticky bottom-0 flex gap-2 bg-[var(--card)] p-3 max-[480px]:pb-[max(12px,env(safe-area-inset-bottom))]">
-        <Button size="sm" onClick={e => reset(e.currentTarget)}>{t('common.reset')}</Button><span className="flex-1" />
-        <Button size="sm" onClick={copy}><Icon name={copied ? 'check' : 'copy'} size={14} className={copied ? 'text-[var(--ok)]' : ''} />{t(copied ? 'common.copied' : 'theme.copyCss')}</Button>
+        <Button size="sm" onClick={e => reset(e.currentTarget)}>{'Reset'}</Button><span className="flex-1" />
+        <Button size="sm" onClick={copy}><Icon name={copied ? 'check' : 'copy'} size={14} className={copied ? 'text-[var(--ok)]' : ''} />{(copied ? 'Copied' : 'Copy CSS')}</Button>
       </div>
     </div>
   )
@@ -340,14 +292,13 @@ export function AppearancePanel({ onClose, open = true, className }: { onClose?:
 export function AppearanceMenu({ open: o, onOpenChange, className }: { open?: boolean; onOpenChange?: (v: boolean) => void; className?: string }) {
   const [open, setOpen] = useControllable(o, false, onOpenChange)
   const trigger = useRef<HTMLDivElement>(null)
-  const { t, dir } = useLocale()
   return (
     <div ref={trigger} className={cn('inline-flex', className)}>
       <Popover open={open} onOpenChange={setOpen}>
-        <PopoverTrigger size="icon" aria-label={t('theme.settings')}>
+        <PopoverTrigger size="icon" aria-label={'Appearance settings'}>
           <motion.span initial={false} animate={{ rotate: open ? 90 : 0 }} transition={spring(0.3, 0.5)} className="grid place-items-center"><Icon name="settings" /></motion.span>
         </PopoverTrigger>
-        <PopoverContent aria-label={t('theme.appearance')} placement={dir === 'rtl' ? 'bottom-start' : 'bottom-end'} className="max-h-[min(680px,calc(100dvh-90px))] w-[min(372px,calc(100vw-32px))] overflow-auto overscroll-contain !p-0 max-[480px]:fixed max-[480px]:top-[calc(env(safe-area-inset-top,0px)+62px)] max-[480px]:right-[max(12px,env(safe-area-inset-right))] max-[480px]:left-[max(12px,env(safe-area-inset-left))] max-[480px]:w-auto max-[480px]:max-w-none max-[480px]:max-h-[calc(100dvh-74px-env(safe-area-inset-top,0px)-max(12px,env(safe-area-inset-bottom)))]">
+        <PopoverContent aria-label={'Appearance'} placement={'bottom-end'} className="max-h-[min(680px,calc(100dvh-90px))] w-[min(372px,calc(100vw-32px))] overflow-auto overscroll-contain !p-0 max-[480px]:fixed max-[480px]:top-[calc(env(safe-area-inset-top,0px)+62px)] max-[480px]:right-[max(12px,env(safe-area-inset-right))] max-[480px]:left-[max(12px,env(safe-area-inset-left))] max-[480px]:w-auto max-[480px]:max-w-none max-[480px]:max-h-[calc(100dvh-74px-env(safe-area-inset-top,0px)-max(12px,env(safe-area-inset-bottom)))]">
           <AppearancePanel open={open} onClose={() => { setOpen(false); trigger.current?.querySelector('button')?.focus() }} />
         </PopoverContent>
       </Popover>

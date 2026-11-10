@@ -1,5 +1,5 @@
 // The showcase's Design QA audit (src/showcase/DesignQA.tsx, ⇧D on the page) run per section, as a routine check: on
-// desktop light, iPhone 13 and iPhone in Arabic (RTL) (the projects are picked in playwright.config.ts). A section
+// desktop light and iPhone 13 (the projects are picked in playwright.config.ts). A section
 // fails when a red rule (misalignment, clipped content, low contrast) finds more than tests/e2e/design-qa-baseline.json
 // allows, or when the audit's layout-shift (CLS) meter rates the visit "Poor". Amber and orange findings (off-grid
 // spacing, one-off sizes, type and radii) are reported in the test's annotations but don't fail it.

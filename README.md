@@ -111,12 +111,6 @@ What it does:
 | `injectStyles` | `true` | `false` renders no `<style>`: link `@lyndon/ui/tokens.css` instead (for a CSP without nonces). |
 | `themeFromUrl` | `false` | Apply a theme share link (`#theme=…` or `?theme=…`) on load, validated like saved settings, then remove it from the address bar. See [Exporting and sharing themes](#exporting-and-sharing-themes). |
 | `className` | | Classes for the `.ui-root` wrapper. |
-| `locale` | `'en-GB'` | BCP 47 locale for built-in strings, numbers, dates and the week start. See [Internationalisation and RTL](#internationalisation-and-rtl). |
-| `dir` | `'auto'` | `'ltr'`, `'rtl'`, or `'auto'` (from the locale: Arabic, Hebrew, Persian, Urdu… are right to left). |
-| `timeZone` | the runtime's | IANA zone for formatted dates and times. Set it when you server-render dates. |
-| `weekStartsOn` | from the locale | `0` = Sunday … `6` = Saturday. en-GB → 1, en-US → 0, ar-EG → 6. |
-| `hourCycle` | from the locale | Force `'h12'` or `'h23'`. |
-| `messages` | | A (partial) message catalog: `UI_MESSAGES_DE`, `UI_MESSAGES_AR`, or your own keys. Missing keys fall back to English. |
 
 Changed: `fonts` used to default to `true`. Pass `<UIProvider fonts>` to keep loading Geist from Google
 Fonts.
@@ -324,85 +318,24 @@ first paint and the linked one right after hydration.
   `shadow-(--shadow-card)` but not to `shadow-card`.
 - `--mono` is not a theme setting; the exports write the default mono stack.
 
-## Internationalisation and RTL
+## Formatting
 
-New in 0.4. `UIProvider` takes a locale, and everything that reads `useLocale()` formats and words itself for it:
+UI text is English, written where it is used. Text a person might want to change is a prop with an English default
+(`<Spinner label="Saving" />`, `<CopyButton copiedLabel="Done" />`). Numbers and dates go through one fixed English
+(en-GB) formatter set, `fmt`, built on cached `Intl` formatters:
 
-```tsx
-import { UIProvider, UI_MESSAGES_AR, UI_MESSAGES_DE } from '@lyndon/ui'
+```ts
+import { fmt, plural, rangeStr } from '@lyndon/ui'
 
-<UIProvider locale="de-DE" messages={UI_MESSAGES_DE}>…</UIProvider>   // German strings, 1.234,50 €, Monday weeks
-<UIProvider locale="ar-EG" messages={UI_MESSAGES_AR}>…</UIProvider>   // Arabic, right to left, Saturday weeks
-<UIProvider locale="en-US" timeZone="America/New_York">…</UIProvider> // English strings, Nov 8, 2026, 2:05 PM
+fmt.compact(12400)         // "12.4k"
+fmt.money(1234.5, 'EUR')   // "€1,234.50"
+fmt.date(new Date())       // "8 Nov 2026"
+fmt.relative(Date.now() - 3 * 864e5) // "3 days ago"
+plural(3, 'file')          // "3 files"
+rangeStr([3, 1, 2])        // "1 to 3"
 ```
 
-The default is `en-GB`, not `navigator.language`, so the server and the first client render agree. To follow
-the browser, pass its language after mount (`useEffect(() => setLocale(navigator.language), [])`), or read
-`Accept-Language` on the server and pass that.
-
-**In a component**, `useLocale()` returns `{ locale, dir, timeZone, weekStartsOn, hourCycle, t, fmt }`:
-
-```tsx
-const { t, fmt, dir, weekStartsOn } = useLocale()
-t('common.removeItem', { name: file.name })                // "Remove report.pdf" · "report.pdf entfernen"
-t('status.resultsCount', { count: n })                     // "No results" · "1 result" · "1,204 results"
-fmt.money(1234.5, 'EUR')                                   // "€1,234.50" · "1.234,50 €" · "‏١٬٢٣٤٫٥٠ €"
-fmt.date(d) · fmt.time(d) · fmt.relative(d)                // "8 Nov 2026" · "14:05" · "3 hours ago"
-fmt.weekdays('short')                                      // from the locale's first day: ['Mon', … 'Sun']
-fmt.number(n) · fmt.percent(0.125) · fmt.list(names) · fmt.compact(12400) · fmt.bytes(2.4e6)
-```
-
-`fmt` caches its `Intl` formatters per locale and options, so calling it in render is cheap. The module-level
-`fmt`, `fmtDate` and `LOCALE` still exist and stay en-GB (for code outside React and for backwards
-compatibility); `fmtFor(locale, { timeZone })` gives the same API for any locale, and `LocaleProvider` scopes a
-locale to one subtree.
-
-**Messages.** `UI_MESSAGES_EN` lists every built-in string under a stable key (`common.close`,
-`status.noResults`, `paging.rangeOf`, `theme.appearance`…). Values use a small ICU subset: `{name}`,
-`{n, number}`, `{count, plural, =0 {…} one {# item} other {# items}}` (plural categories from
-`Intl.PluralRules`, so Arabic's zero/one/two/few/many/other work) and `{x, select, a {…} other {…}}`. Override
-a few strings, or add your own keys and call `t('myApp.key')`:
-
-```tsx
-<UIProvider messages={{ 'common.close': 'Dismiss', 'myApp.greeting': 'Hi {name}' }}>
-```
-
-A key missing from your catalog falls back to English (development builds warn once per key); an unknown key
-renders as the key itself. `formatMessage(pattern, vars, locale)` and `createTranslator(locale, messages)` are
-exported for use outside components.
-
-**Adding a locale.** Copy `UI_MESSAGES_EN` (typed as `UIMessages`, so TypeScript lists any key you missed),
-translate the values, and pass it as `messages` with the matching `locale`. `UI_MESSAGES_DE` and
-`UI_MESSAGES_AR` are machine-drafted examples: have a native speaker review them before shipping. Numbers,
-dates, weekday and month names, plural rules, the week start and the clock come from `Intl`, so they need no
-catalog.
-
-**Right to left.** `dir` and `lang` go on the `.ui-root` wrapper (in the server HTML too), and with
-`target="html"` on `<html>` after hydration. When you server-render, also put them on your own `<html>` tag so
-the first paint is already mirrored: `<html lang={locale} dir={localeDir(locale)}>`. Inside components:
-
-- Use logical utilities: `ms-*`/`me-*`, `ps-*`/`pe-*`, `start-*`/`end-*`, `border-s`/`border-e`,
-  `rounded-s`/`rounded-e`, `text-start`/`text-end` (Tailwind v3.3+ or v4). `rtl:` variants for anything else.
-- Keep safe-area padding physical (`pl-[max(16px,env(safe-area-inset-left))]`): the inset belongs to that side
-  of the screen in both directions.
-- Arrow keys: `switch (logicalArrow(e.key, dir))` treats ArrowLeft as "forward" in RTL.
-- Motion offsets: `initial={{ x: dirX(12, dir) }}` slides in from the same logical side.
-- Directional icons (chevrons, undo, list icons): add `className="ui-flip"`; UIProvider injects
-  `[dir=rtl] .ui-flip { transform: scaleX(-1) }` (`UI_DIR_CSS`). With `injectStyles={false}`, add that rule to
-  your CSS.
-- `useDir()` returns `'ltr'` or `'rtl'`.
-
-**What is translated in 0.4.** The infrastructure, the appearance panel (`AppearancePanel`, `AppearanceMenu`,
-`ThemeToggle`), the page shell of the showcase, and the catalog keys for the strings that recur across modules.
-The remaining components still render English literals and some physical classes; the 0.4 sweep routes them
-through `t()`/`fmt` and logical utilities module by module. Two scripts track it:
-
-```sh
-node scripts/i18n-extract.mjs [files] [--summary] [--check]   # user-facing strings that bypass t()
-node scripts/rtl-lint.mjs [files] [--all] [--summary]         # physical utilities, arrow keys, icons, inline styles
-node scripts/rtl-lint.mjs --fix [files]                       # dry run: diff of the mechanical replacements
-node scripts/rtl-lint.mjs --fix --write [files]               # apply them
-```
+Weeks start on Monday. Date and time controls take `hourCycle` (12 or 24) and `timeZone` props where they matter.
 
 ## Content Security Policy
 
@@ -746,15 +679,15 @@ npx @lyndon/ui info data-grid                           # exports, embedded comp
 `--overwrite` replaces them), never writes outside `--dir` and refuses names that aren't registry names (no paths).
 It prints the npm packages your `package.json` is missing (usually `motion`).
 
-Wrap the app once in `<UIProvider>` from `ui-provider.tsx`. The files share it: React contexts (theme, locale, forms)
+Wrap the app once in `<UIProvider>` from `ui-provider.tsx`. The files share it: React contexts (theme, forms)
 and module state (toast queue, scroll lock, modal stack and `inert` list, focus-trap stack, icon registry) live on
-`globalThis` under a versioned key (`@lyndon/ui@0.4:<name>`), so a provider or modal from one file works with
+`globalThis` under a versioned key (`@lyndon/ui@<minor>:<name>`, from `UI_VERSION`), so a provider or modal from one file works with
 components from another, exactly as with the npm package.
 
-`ui-provider` holds only the theme engine, the locale engine with the English messages, `ThemeScript` and the host
+`ui-provider` holds only the theme engine, `ThemeScript` and the host
 outlet. Optional items: `toast` (toasts; `useToast()` without a `ToastProvider` uses one page-wide queue), `icon`
 (the full icon set: each drop-in embeds only the icons it draws, and items that take icon names from props list
-`suggests: ['icon']` in `index.json`), `messages-de` and `messages-ar` (drafted catalogues). Embedded library helpers
+`suggests: ['icon']` in `index.json`). Embedded library helpers
 keep a one-sentence summary of their docs; each item's own exports keep their full JSDoc.
 
 ### Blocks
@@ -859,7 +792,7 @@ toast({ id: 'new-version', title: 'A new version is available', duration: Infini
   `e.preventDefault()`), `duration` (ms, default 4200, 6000 with an action; `Infinity` stays until dismissed; loading
   toasts never time out), `position`, `onDismiss(reason)` (`timeout`, `close`, `swipe`, `action` or `api`).
 - **Position:** `top-start`, `top-center`, `top-end`, `bottom-start`, `bottom-center`, `bottom-end` (default).
-  Start and end are logical, so they swap in RTL. Set it per toast, on `<ToastProvider position>`, or for the page-wide
+  Start is the left, end the right. Set it per toast, on `<ToastProvider position>`, or for the page-wide
   queue with `toast.configure({ position, max })`. Phones get full-width toasts.
 - **Stacking:** at most `max` (default 5) per position are on screen, the newest ones. Older toasts wait behind a
   "+n more" badge and come back as newer ones leave. Moving toasts animate with transforms, so nothing reflows.
@@ -872,7 +805,7 @@ toast({ id: 'new-version', title: 'A new version is available', duration: Infini
 
 Every chart (`Chart`, `DonutChart`, `RadarChart`, `ScatterChart`, `FunnelChart`, `BarList`, `Treemap`, `BulletChart`,
 `Heatmap`, `CalendarHeatmap`, `RegressionChart`, `BoxViolinChart`, `DensityHistogram`, `ForestPlot`) renders its
-data as a real `<table>`, with numbers formatted in the provider's locale (the chart's `format` when you pass one).
+data as a real `<table>`, with numbers formatted by the chart's `format` (or `fmt.number`).
 
 - `table="hidden"` (default): the table is visually hidden. Screen-reader users can browse it with table navigation,
   and its caption holds the summary that the chart's `aria-describedby` points to.
@@ -925,7 +858,6 @@ Put events and periods on a time axis. One tag type, `TimeTag` (`{ id, at, end?,
   for live or streaming data so the chart's height never changes.
 - Linking: `activeId` / `onActiveChange` / `onSelect` connect a chart, lanes, ribbon and journal. Each view is one Tab
   stop; ←/→ move through tags in time order (↑/↓ between lanes), Enter selects, Escape clears.
-- Plots stay left to right in RTL; labels, legends and lists mirror. Strings: `ANNOTATE_MESSAGES`, `TIMELINE_MESSAGES`.
 
 ## Graphs as rows (lane graphs)
 
@@ -1027,15 +959,15 @@ the local branch; a lane opened for a merge takes the branch named in "Merge bra
 on phones) fold into a dashed "+n lanes" gutter; its header button shows them all and the list then scrolls sideways.
 
 Also exported: `filterGitHistory` (branch filter, `firstParent`, `hideMerged`), `gitRange` (git's `a..b`),
-`gitFirstParentPath`, `gitLaneColor`, `GIT_GRAPH_MESSAGES`.
+`gitFirstParentPath`, `gitLaneColor`.
 
 - Keyboard: one Tab stop (the active row). ↑/↓, Home/End, PageUp/PageDown move; ← goes to the first parent
-  (Shift+← the second), → to the child (time runs down the plot, so these don't mirror in RTL); Enter opens details,
+  (Shift+← the second), → to the child; Enter opens details,
   Shift+Enter compares with the selection; `/` searches, n/N jump between matches; Escape leaves compare, closes details,
   then clears the selection; Shift+F10 or the Menu key opens the actions menu (right-click and long-press too).
 - Hover or focus lights the commit's first-parent ancestry and dims the other lanes. Rows are 32 px (44 on touch, two
   lines at 52 px under 640 px). Details are a side panel from 900 px and a sheet below. Rows are named
-  "Commit a1b2c3d: Fix login, by Ana, 2 days ago"; the graph is an LTR island, the columns mirror in RTL.
+  "Commit a1b2c3d: Fix login, by Ana, 2 days ago".
 - New commits added at the top keep the reader's place (when scrolled) and fade in; a polite live region counts them.
 - Size: the `git-graph` drop-in is about 317 KB (~90k tokens; it embeds the lane graph, the virtualiser, menus, sheet,
   Markdown and Diff); `lanes` alone is about 89 KB (~25k tokens).
@@ -1082,8 +1014,7 @@ const sections = [{ name: '.text', offset: 0x1000, size: 0x3000, vaddr: 0x401000
 <HexEditor data={bytes} cursor={cursor} onCursorChange={setCursor} highlights={[{ start: 0x7000, end: 0x9000, label: 'packed' }]} readOnly />
 ```
 
-The grid, strip and map are LTR islands in every locale; toolbars, legends, lists and readouts mirror. Strings:
-`BINARY_MESSAGES` (en, drafted de/ar). Sample data: `binarySample()` / `BINARY_SAMPLE_SECTIONS` (a synthetic 44 KiB
+Sample data: `binarySample()` / `BINARY_SAMPLE_SECTIONS` (a synthetic 44 KiB
 ELF-like file) and `binarySampleLarge(mb)` in `@lyndon/ui/examples`.
 
 ## Magnets (snapping for sliders and drags)
@@ -1223,9 +1154,8 @@ function JoinForm() {
 }
 ```
 
-**Dates and times.** The date controls read `locale`, `weekStartsOn`, the hour cycle and `timeZone` from `UIProvider`
-(or `LocaleProvider`), and each takes them as props too. Month and weekday names, digits, the order of the typed segments
-(en-GB `dd/mm/yyyy`, en-US `mm/dd/yyyy`, ja-JP `yyyy/mm/dd`) and the 12/24-hour clock all come from `Intl`.
+**Dates and times.** The date controls use English names and the `dd/mm/yyyy` order, weeks start on Monday, and
+`hourCycle` (12 or 24, default 24) and `timeZone` are props where they matter.
 
 - `Calendar`, `DatePicker`, `DateRangePicker`: `min`, `max`, `isDateUnavailable(date)` (disabled days stay focusable and
   are announced), `numberOfMonths` (1–3, stacked on phones), the caption opens a month grid and then a year grid, and
@@ -1369,14 +1299,11 @@ Menu items close the menu when chosen. Checkbox and radio items stay open so you
 `closeOnSelect`, or call `e.preventDefault()` in `onSelect` to keep the menu open. Menu content positions its
 submenus itself, so don't give it `overflow-hidden` or `overflow-auto`.
 
-### Placement in RTL
+### Placement
 
-`side` is physical, as in Floating UI and Radix: `top`, `right`, `bottom` and `left` are the same screen edge in both
-directions. `align` is logical for top and bottom panels (`-start` lines up with the trigger's start edge, its right
-edge in RTL). Things that hang off an inline edge mirror themselves: submenus and context menus open toward the
-inline end, and a collapsed sidebar's tooltips pick their side from the direction. `Sheet` takes
-`side="start" | "end"` (default `end`) as well as the physical `left`/`right`; DataGrid pins take `start`/`end`
-(logical) or `left`/`right` (physical).
+`side` is `top`, `right`, `bottom` or `left`; `-start` and `-end` line a top or bottom panel up with the trigger's left
+or right edge. `Sheet` takes `side="end"` (default, the right), `start` (the left), `left`, `right` or `bottom`.
+DataGrid pins take `left`/`right`.
 
 ### asChild and links
 

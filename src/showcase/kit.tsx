@@ -1,6 +1,6 @@
 import { flushSync } from 'react-dom'
 import { Suspense, createContext, lazy, startTransition, useContext, useEffect, useId, useLayoutEffect, useRef, useState, useSyncExternalStore, type ComponentType, type CSSProperties, type ReactNode } from 'react'
-import { Badge, Button, type ButtonProps, Card, Icon, Kbd, cn, defineMessages, logicalArrow, useDir, useMessages } from '../lib'
+import { Badge, Button, type ButtonProps, Card, Icon, Kbd, cn } from '../lib'
 import { CARD_HEIGHTS } from './cardHeights'
 import { openCodeDrawer } from './CodeDrawer'
 import { TAG_BY_ID, TAG_CARDS, type TagCard, type TagId, tagCardTags, tagChipOrder, tagMatches } from './tags'
@@ -56,48 +56,6 @@ type KitShell = {
   /** where a tag chip links (default `?tags=<id>`, this page filtered) */
   tagHref?: (id: TagId) => string
 }
-/** The showcase chrome's own strings (cards, sidebar, header). Demo content stays English. de/ar machine-drafted. */
-export const SHOWCASE_MSG = defineMessages('showcase', {
-  en: {
-    goodAt: 'Good at', breaksWhen: 'Breaks when', openState: 'Open state', viewCode: 'View code', viewCodeFor: 'View code for {title}', keyboard: 'Keyboard', tagsFor: 'Tags for {title}',
-    showTagged: 'Show components tagged {tag}', skipNext: 'Skip to next card', sections: 'Sections', filterPlaceholder: 'Search by name or use case',
-    filterShort: 'Name or use case', filterLabel: 'Filter components by name or use case', filterComponents: 'Filter components', filter: 'Filter',
-    matches: 'Matches', noMatches: 'No matches', found: '{count} found', searchComponents: 'Search components',
-    paletteSearch: 'Search components, use cases, actions, themes…', shortcuts: 'Keyboard shortcuts',
-    shortcutsHint: 'With a hardware keyboard. Single keys work anywhere except while typing.', noneMatch: 'No components match “{query}”.',
-    clearFilter: 'Clear filter', auto: 'Auto ({dir})', tagline: 'React · Motion · Tailwind', libraryName: 'UI library',
-    tags: 'Tags', filterByTag: 'Filter by tag', clearFilters: 'Clear filters', removeTag: 'Remove filter: {tag}', activeFilters: 'Active filters',
-    facetKind: 'Kind', facetArea: 'Area', facetUse: 'Use case', facetCapability: 'Capability', facetStatus: 'Status',
-    noneMatchTags: 'No components match these filters.', showResults: '{count, plural, one {Show # component} other {Show # components}}',
-    tagFilterHint: 'Within a group any tag matches; across groups all must.',
-  },
-  de: {
-    goodAt: 'Gut für', breaksWhen: 'Stößt an Grenzen, wenn', openState: 'Geöffneter Zustand', viewCode: 'Code anzeigen', viewCodeFor: 'Code für {title} anzeigen', keyboard: 'Tastatur', tagsFor: 'Tags für {title}',
-    showTagged: 'Komponenten mit {tag} anzeigen', skipNext: 'Zur nächsten Karte springen', sections: 'Abschnitte', filterPlaceholder: 'Nach Name oder Anwendungsfall suchen',
-    filterShort: 'Name oder Anwendungsfall', filterLabel: 'Komponenten nach Name oder Anwendungsfall filtern', filterComponents: 'Komponenten filtern', filter: 'Filtern',
-    matches: 'Treffer', noMatches: 'Keine Treffer', found: '{count} gefunden', searchComponents: 'Komponenten suchen',
-    paletteSearch: 'Komponenten, Anwendungsfälle, Aktionen, Designs suchen…', shortcuts: 'Tastenkürzel',
-    shortcutsHint: 'Mit einer Hardware-Tastatur. Einzelne Tasten funktionieren überall außer beim Tippen.', noneMatch: 'Keine Komponente passt zu „{query}“.',
-    clearFilter: 'Filter entfernen', auto: 'Automatisch ({dir})', tagline: 'React · Motion · Tailwind', libraryName: 'UI-Bibliothek',
-    tags: 'Tags', filterByTag: 'Nach Tag filtern', clearFilters: 'Filter zurücksetzen', removeTag: 'Filter entfernen: {tag}', activeFilters: 'Aktive Filter',
-    facetKind: 'Art', facetArea: 'Bereich', facetUse: 'Anwendungsfall', facetCapability: 'Fähigkeit', facetStatus: 'Status',
-    noneMatchTags: 'Keine Komponente passt zu diesen Filtern.', showResults: '{count, plural, one {# Komponente anzeigen} other {# Komponenten anzeigen}}',
-    tagFilterHint: 'Innerhalb einer Gruppe genügt ein Tag; gruppenübergreifend müssen alle passen.',
-  },
-  ar: {
-    goodAt: 'مناسب لـ', breaksWhen: 'يتعثر عندما', openState: 'الحالة المفتوحة', viewCode: 'عرض الشيفرة', viewCodeFor: 'عرض شيفرة {title}', keyboard: 'لوحة المفاتيح', tagsFor: 'وسوم {title}',
-    showTagged: 'عرض المكونات الموسومة بـ {tag}', skipNext: 'انتقل إلى البطاقة التالية', sections: 'الأقسام', filterPlaceholder: 'ابحث بالاسم أو حالة الاستخدام',
-    filterShort: 'الاسم أو حالة الاستخدام', filterLabel: 'تصفية المكونات بالاسم أو حالة الاستخدام', filterComponents: 'تصفية المكونات', filter: 'تصفية',
-    matches: 'النتائج المطابقة', noMatches: 'لا توجد نتائج مطابقة', found: 'عُثر على {count}', searchComponents: 'البحث في المكونات',
-    paletteSearch: 'ابحث في المكونات وحالات الاستخدام والإجراءات والسمات…', shortcuts: 'اختصارات لوحة المفاتيح',
-    shortcutsHint: 'مع لوحة مفاتيح فعلية. تعمل المفاتيح المفردة في أي مكان إلا أثناء الكتابة.', noneMatch: 'لا توجد مكونات تطابق «{query}».',
-    clearFilter: 'مسح التصفية', auto: 'تلقائي ({dir})', tagline: 'React · Motion · Tailwind', libraryName: 'مكتبة واجهات',
-    tags: 'الوسوم', filterByTag: 'التصفية حسب الوسم', clearFilters: 'مسح عوامل التصفية', removeTag: 'إزالة عامل التصفية: {tag}', activeFilters: 'عوامل التصفية النشطة',
-    facetKind: 'النوع', facetArea: 'المجال', facetUse: 'حالة الاستخدام', facetCapability: 'القدرة', facetStatus: 'الحالة',
-    noneMatchTags: 'لا توجد مكونات تطابق عوامل التصفية هذه.', showResults: '{count, plural, one {عرض مكوّن واحد} other {عرض # مكونات}}',
-    tagFilterHint: 'داخل المجموعة يكفي أي وسم؛ وبين المجموعات يجب أن تتحقق كلها.',
-  },
-})
 
 export const ShellContext = createContext<KitShell>({ query: '', tags: [], setQuery: () => {}, focusFilter: () => {} })
 const SectionContext = createContext('')
@@ -248,10 +206,9 @@ export function SpecAction({ className, ...p }: Omit<ButtonProps, 'size'>) {
 /** A static picture of a demo's open or finished state (a menu, a dialog, a toast), so the card shows what its trigger
  * does. Not interactive and hidden from assistive tech: the live control above it is the real thing. */
 export function SpecPreview({ children, className, label }: { children: ReactNode; className?: string; label?: string }) {
-  const t = useMessages(SHOWCASE_MSG)
   return (
     <div aria-hidden inert className={cn('relative mt-auto overflow-hidden rounded-[var(--r-md)] border border-dashed border-[var(--line)] bg-[var(--bg)] px-3 pt-6 pb-3 select-none', className)}>
-      <span className="absolute top-1.5 start-2.5 text-[11px] font-medium text-[var(--fg3)]">{label ?? t('openState')}</span>
+      <span className="absolute top-1.5 start-2.5 text-[11px] font-medium text-[var(--fg3)]">{label ?? 'Open state'}</span>
       {children}
     </div>
   )
@@ -334,10 +291,9 @@ export function Spec({ title, desc, children, span = 1, actions, keys, notes }:
     if (!pickTag || e.metaKey || e.ctrlKey || e.shiftKey || e.button !== 0) return // a new tab gets the link
     e.preventDefault(); pickTag(id)
   }
-  const dir = useDir(), t = useMessages(SHOWCASE_MSG)
   const tagKeys = (e: React.KeyboardEvent, i: number) => {
-    const k = logicalArrow(e.key, dir) // ← is next in RTL
-    // rtl-lint-ignore: `k` is logicalArrow-mapped
+    const k = e.key
+
     const n = chips.length, d = k === 'ArrowRight' || k === 'ArrowDown' ? 1 : k === 'ArrowLeft' || k === 'ArrowUp' ? -1 : 0
     const j = d ? (i + d + n) % n : e.key === 'Home' ? 0 : e.key === 'End' ? n - 1 : -1
     if (j < 0) return
@@ -360,25 +316,25 @@ export function Spec({ title, desc, children, span = 1, actions, keys, notes }:
         <div className="flex min-w-0 items-start gap-1.5">
           <h3 className="m-0 min-w-0 flex-1 text-sm leading-snug font-semibold">{title}</h3>
           {actions && <div className="-my-0.5 flex flex-none flex-wrap items-center justify-end gap-1.5 [@media(pointer:coarse)]:-my-[7px]">{actions}</div>}
-          <button type="button" data-qa-skip data-kit-entry onClick={() => openCodeDrawer(title)} aria-label={t('viewCodeFor', { title })} title={t('viewCode')}
+          <button type="button" data-qa-skip data-kit-entry onClick={() => openCodeDrawer(title)} aria-label={`View code for ${title}`} title={'View code'}
             className="-my-0.5 grid h-[22px] w-[22px] flex-none cursor-pointer place-items-center rounded-[var(--r-md)] border-0 bg-transparent text-[var(--fg3)] transition-colors duration-150 hover:bg-[var(--muted)] hover:text-[var(--fg)] focus-visible:outline-2 focus-visible:outline-[var(--accent)] [@media(pointer:coarse)]:-my-[7px] [@media(pointer:coarse)]:-me-[5px] [@media(pointer:coarse)]:-ms-[5px] [@media(pointer:coarse)]:h-8 [@media(pointer:coarse)]:w-8">
             <Icon name="code" size={15} />
           </button>
         </div>
         {desc && <p className="m-0 mt-1 text-xs leading-snug text-[var(--fg3)]">{desc}</p>}
         {keys && keys.length > 0 && (
-          <ul aria-label={t('keyboard')} className="m-0 mt-2 flex list-none flex-wrap gap-x-3 gap-y-1.5 p-0 text-[11px] leading-none text-[var(--fg3)]">
+          <ul aria-label={'Keyboard'} className="m-0 mt-2 flex list-none flex-wrap gap-x-3 gap-y-1.5 p-0 text-[11px] leading-none text-[var(--fg3)]">
             {keys.map(([ks, label], i) => <li key={i} className="inline-flex items-center gap-1">{ks.map((k, j) => <Kbd key={j} className="inline-grid h-[18px] min-w-[18px] place-items-center leading-none">{k}</Kbd>)}<span className="ms-0.5">{label}</span></li>)}
           </ul>
         )}
         {chips.length > 0 && (
-          <div role="toolbar" aria-label={t('tagsFor', { title })} className="mt-2 mb-4 flex flex-wrap gap-1">
+          <div role="toolbar" aria-label={`Tags for ${title}`} className="mt-2 mb-4 flex flex-wrap gap-1">
             {/* one Tab stop for the row (arrows move inside it); on touch each chip is 32px tall (transparent padding, pulled back with negative margins) around the same 21px pill */}
             {chips.map((tag, i) => {
               const label = TAG_BY_ID[tag].label
               return (
                 <a key={tag} ref={el => { tagRefs.current[i] = el }} href={tagHref ? tagHref(tag) : `?tags=${tag}`} tabIndex={i === Math.min(tagAt, chips.length - 1) ? 0 : -1}
-                  onClick={e => onChip(e, tag)} onKeyDown={e => tagKeys(e, i)} onFocus={() => setTagAt(i)} aria-label={t('showTagged', { tag: label })} title={TAG_BY_ID[tag].desc}
+                  onClick={e => onChip(e, tag)} onKeyDown={e => tagKeys(e, i)} onFocus={() => setTagAt(i)} aria-label={`Show components tagged ${label}`} title={TAG_BY_ID[tag].desc}
                   className="group/tag inline-flex cursor-pointer rounded-full p-0 no-underline focus-visible:outline-2 focus-visible:outline-offset-1 focus-visible:outline-[var(--accent)] [@media(pointer:coarse)]:-my-[5.5px] [@media(pointer:coarse)]:py-[5.5px]">
                   <Badge size="sm" className="group-hover/tag:!bg-[var(--accent-soft)] group-hover/tag:!text-[var(--accent)]">{label}</Badge>
                 </a>
@@ -390,7 +346,7 @@ export function Spec({ title, desc, children, span = 1, actions, keys, notes }:
         <a href="#" tabIndex={skip ? 0 : -1} aria-hidden={!skip || undefined} data-qa-skip
           onClick={e => { e.preventDefault(); const n = kitNextCard(cardRef.current); if (n) kitFocusCard(n) }}
           className="pointer-events-none absolute end-3 bottom-3 z-10 rounded-[var(--r-md)] border border-[var(--line)] bg-[var(--card)] px-2.5 py-1.5 text-xs font-medium text-[var(--fg)] no-underline opacity-0 shadow-[var(--shadow)] focus-visible:pointer-events-auto focus-visible:opacity-100 focus-visible:outline-2 focus-visible:outline-[var(--accent)]">
-          {t('skipNext')} ↓
+          {'Skip to next card'} ↓
         </a>
         <div ref={bodyRef} data-spec-body className="flex flex-1 flex-col gap-3">
           {/* reserves the demo's height until it mounts: measured per card on a phone and a desktop (cardHeights.ts, from
@@ -403,8 +359,8 @@ export function Spec({ title, desc, children, span = 1, actions, keys, notes }:
         </div>
         {notes && (
           <dl className="m-0 mt-4 grid gap-x-6 gap-y-3 border-t border-[var(--line)] pt-3 text-xs leading-relaxed sm:grid-cols-2">
-            <div><dt className="mb-0.5 text-[11px] font-semibold tracking-[.06em] text-[var(--fg3)] uppercase">{t('goodAt')}</dt><dd className="m-0 text-[var(--fg2)]">{notes.good}</dd></div>
-            <div><dt className="mb-0.5 text-[11px] font-semibold tracking-[.06em] text-[var(--fg3)] uppercase">{t('breaksWhen')}</dt><dd className="m-0 text-[var(--fg2)]">{notes.breaks}</dd></div>
+            <div><dt className="mb-0.5 text-[11px] font-semibold tracking-[.06em] text-[var(--fg3)] uppercase">{'Good at'}</dt><dd className="m-0 text-[var(--fg2)]">{notes.good}</dd></div>
+            <div><dt className="mb-0.5 text-[11px] font-semibold tracking-[.06em] text-[var(--fg3)] uppercase">{'Breaks when'}</dt><dd className="m-0 text-[var(--fg2)]">{notes.breaks}</dd></div>
           </dl>
         )}
       </Card>

@@ -4,7 +4,7 @@
 import { act, fireEvent, render, screen, within } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { describe, expect, it } from 'vitest'
-import { LocaleProvider, type TreeNode, TreeView } from '../../src/lib'
+import { type TreeNode, TreeView } from '../../src/lib'
 
 const TREE: TreeNode[] = [
   { id: 'src', label: 'src', children: [
@@ -64,14 +64,6 @@ describe('TreeView lines', () => {
       expect(lines(screen.getByRole('treeitem', { name: /^Button\.tsx/ }))).toHaveLength(2)
       unmount()
     }
-  })
-
-  it('positions lines with logical offsets, so they sit on the inline start in RTL', () => {
-    render(<LocaleProvider locale="en-GB" dir="rtl"><TreeView nodes={TREE} defaultExpanded={OPEN} lines /></LocaleProvider>)
-    const [l] = lines(screen.getByRole('treeitem', { name: /^Button\.tsx/ }))
-    expect(l.style.insetInlineStart).not.toBe('')
-    expect(l.style.left).toBe('')
-    expect(l.style.right).toBe('')
   })
 
   it('works in a virtual 10k-node tree: lines on the rendered rows, click collapses', () => {

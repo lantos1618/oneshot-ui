@@ -12,10 +12,6 @@
  */
 import { type CustomTheme, DEFAULT_THEME, FONTS, type Palette, THEMES, type ThemeSettings, contrast, derive, hex, luminance, mix, rgb, themeLoad, themeSafeTokens, themeTokens } from './core'
 
-/* ════════════════════════════════════════════════════════════════════════════
- * 1. SOURCE
- * ══════════════════════════════════════════════════════════════════════════ */
-
 export type ThemeExportMode = 'light' | 'dark'
 
 /**
@@ -27,13 +23,13 @@ export type ThemeExportSource = { label: string; modes: Partial<Record<ThemeExpo
 /** Settings (resolved with themeTokens) or tokens you already have. */
 export type ThemeExportInput = ThemeSettings | ThemeExportSource
 
-/** The export formats, with the file each one downloads as. Labels are product and format names (not translated). */
+/** The export formats, with the file each one downloads as. Labels are product and format names. */
 export const THEME_EXPORT_FORMATS = [
-  { id: 'css', label: 'CSS', filename: 'theme.css', type: 'text/css' }, // i18n-ignore
-  { id: 'tailwind', label: 'Tailwind', filename: 'theme.tailwind.css', type: 'text/css' }, // i18n-ignore
-  { id: 'shadcn', label: 'shadcn', filename: 'shadcn-theme.css', type: 'text/css' }, // i18n-ignore
-  { id: 'dtcg', label: 'DTCG', filename: 'tokens.json', type: 'application/json' }, // i18n-ignore
-  { id: 'tokens-studio', label: 'Figma', filename: 'tokens-studio.json', type: 'application/json' }, // i18n-ignore
+  { id: 'css', label: 'CSS', filename: 'theme.css', type: 'text/css' },
+  { id: 'tailwind', label: 'Tailwind', filename: 'theme.tailwind.css', type: 'text/css' },
+  { id: 'shadcn', label: 'shadcn', filename: 'shadcn-theme.css', type: 'text/css' },
+  { id: 'dtcg', label: 'DTCG', filename: 'tokens.json', type: 'application/json' },
+  { id: 'tokens-studio', label: 'Figma', filename: 'tokens-studio.json', type: 'application/json' },
 ] as const
 
 export type ThemeExportFormat = (typeof THEME_EXPORT_FORMATS)[number]['id']
@@ -51,7 +47,7 @@ const TX_COLOURS = ['bg', 'card', 'muted', 'line', 'line2', 'fg', 'fg2', 'fg3', 
  */
 export function themeExportSource(s: ThemeSettings): ThemeExportSource {
   const c = themeLoad(s)
-  // i18n-ignore: theme names are proper nouns in a code comment of the export
+
   if (c.useCustom && c.custom) return { label: 'Custom', modes: { [c.custom.dark ? 'dark' : 'light']: themeTokens(c, c.custom.dark) } }
   const t = THEMES.find(x => x.id === c.theme) ?? THEMES[0], i = c.variant[t.id] ?? 0
   const name = (list: [string, Palette][]) => list[Math.min(i, list.length - 1)][0]
@@ -98,10 +94,6 @@ function txRgba(v: string): { c: number[]; a: number } {
   return { c: rgb(v), a: 1 }
 }
 
-/* ════════════════════════════════════════════════════════════════════════════
- * 2. OKLCH
- * ══════════════════════════════════════════════════════════════════════════ */
-
 const txLinear = (v: number) => (v <= 0.04045 ? v / 12.92 : ((v + 0.055) / 1.055) ** 2.4)
 const txGamma = (v: number) => (v <= 0.0031308 ? 12.92 * v : 1.055 * Math.sign(v) * Math.abs(v) ** (1 / 2.4) - 0.055)
 
@@ -143,10 +135,6 @@ export function oklchString(color: string, alpha = 1) {
   const c = txNum(C, d)
   return `oklch(${txNum(L, d)} ${c} ${c === '0' ? 0 : txNum(H, 3)}${alpha < 1 ? ` / ${txNum(alpha * 100, 2)}%` : ''})`
 }
-
-/* ════════════════════════════════════════════════════════════════════════════
- * 3. EXPORTERS
- * ══════════════════════════════════════════════════════════════════════════ */
 
 /** Non-colour tokens after the colours, in order. */
 const TX_REST = ['shadow', 'r-sm', 'r-md', 'r-lg', 'font'] as const
@@ -335,10 +323,6 @@ export function themeExport(format: ThemeExportFormat, input: ThemeExportInput):
   }
 }
 
-/* ════════════════════════════════════════════════════════════════════════════
- * 4. IMPORT
- * ══════════════════════════════════════════════════════════════════════════ */
-
 export type ThemeImportFormat = 'shadcn' | 'css' | 'tailwind' | 'dtcg' | 'tokens-studio'
 
 /**
@@ -443,8 +427,6 @@ function txJsonVars(doc: unknown): { light: TxVars; dark: TxVars; studio: boolea
   if (doc && typeof doc === 'object' && ('$themes' in doc || '$metadata' in doc)) studio = true
   return { light, dark, studio }
 }
-
-/* Colour parsing ─────────────────────────────────────────────────────────── */
 
 type TxColour = { c: number[]; a: number; clipped: boolean }
 

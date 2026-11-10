@@ -2,7 +2,7 @@
 // state changes (never the countdown), a calm "Retrying…" at each retry, `paused` (e.g. off screen), Arabic digits.
 import { act, fireEvent, render, screen } from '@testing-library/react'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
-import { OfflineIndicator, UIProvider } from '../../src/lib'
+import { OfflineIndicator } from '../../src/lib'
 
 const live = () => screen.getAllByRole('status').find(el => el.classList.contains('sr-only'))!
 const tick = (ms: number) => act(() => { vi.advanceTimersByTime(ms) })
@@ -58,11 +58,4 @@ describe('OfflineIndicator', () => {
     expect(onRetry).toHaveBeenCalledTimes(2)
   })
 
-  it('counts down in Arabic digits in ar-EG', () => {
-    render(<UIProvider locale="ar-EG"><OfflineIndicator online={false} retryEvery={5} /></UIProvider>)
-    tick(1000)
-    const el = screen.getByText(/إعادة المحاولة خلال/)
-    expect(el.textContent).toContain('٤')
-    expect(el.textContent).not.toMatch(/[0-9]/)
-  })
 })

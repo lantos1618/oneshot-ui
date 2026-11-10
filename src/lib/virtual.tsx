@@ -1,11 +1,6 @@
 import { useCallback, useEffect, useImperativeHandle, useLayoutEffect, useReducer, useRef, type CSSProperties, type Key, type ReactNode, type Ref, type RefObject } from 'react'
 import { flushSync } from 'react-dom'
-import { cn, useDir } from './core'
-
-/* ════════════════════════════════════════════════════════════════════════════
- * VIRTUALIZATION: render only what is in view. `useVirtual` is the engine (lists, grids, trees, chat logs);
- * `VirtualList` is the ready-made scroller for the common case.
- * ══════════════════════════════════════════════════════════════════════════ */
+import { cn } from './core'
 
 /** Items rendered beyond each edge of the viewport by default (keeps fast scrolling and Tab/arrow keys from hitting blanks). */
 export const VIRTUAL_OVERSCAN = 6
@@ -205,7 +200,7 @@ export function useVirtual(options: VirtualOptions): Virtualizer {
   /* ---- DOM access (effects and handlers only) ---- */
   const getEl = (): HTMLElement | null => scrollRef === 'window' ? null : scrollRef.current
   const readOffset = () => {
-    // horizontal offsets are distances from the start edge: in RTL scrollLeft/scrollX run from 0 to negative
+    // horizontal offsets are distances from the start edge:
     if (scrollRef === 'window') return (horizontal ? Math.abs(scrollX) : scrollY) - (opts.current.scrollMargin ?? 0)
     const el = getEl(); return el ? (horizontal ? Math.abs(el.scrollLeft) : el.scrollTop) : st.current!.offset
   }
@@ -217,7 +212,6 @@ export function useVirtual(options: VirtualOptions): Virtualizer {
       return
     }
     const el = opts.current.scrollRef.current; if (!el) return
-    if (hz && getComputedStyle(el).direction === 'rtl') to = -to // RTL: from the right edge, scrollLeft ≤ 0
     if (behavior && behavior !== 'auto' && el.scrollTo) el.scrollTo(hz ? { left: to, behavior } : { top: to, behavior })
     else if (hz) el.scrollLeft = to; else el.scrollTop = to
   }
@@ -418,7 +412,7 @@ export function VirtualList({ count, estimateSize, renderItem, getItemKey, overs
   useImperativeHandle(ref, () => ({ scrollToIndex: v.scrollToIndex, scrollToOffset: v.scrollToOffset, measure: v.measure, getScrollOffset: v.getScrollOffset, element: box.current }), [v.scrollToIndex, v.scrollToOffset, v.measure, v.getScrollOffset])
   const ir = itemRole ?? VIRTUAL_ITEM_ROLE[role]
   const set = !!ir && ['listitem', 'option', 'treeitem', 'article', 'menuitem'].includes(ir)
-  const end = anchor === 'end', rtl = useDir() === 'rtl'
+  const end = anchor === 'end'
   return (
     <div ref={box} role={role} tabIndex={tabIndex} {...aria}
       className={cn('relative outline-none focus-visible:shadow-[inset_0_0_0_2px_var(--accent)]', !useWindow && (horizontal ? 'overflow-x-auto overflow-y-hidden' : 'overflow-y-auto overflow-x-hidden'), !useWindow && 'overscroll-contain', end && !horizontal && 'flex flex-col', className)}
@@ -427,7 +421,7 @@ export function VirtualList({ count, estimateSize, renderItem, getItemKey, overs
         {v.items.map(it => (
           <div key={it.key} data-index={it.index} ref={measure ? v.measureElement : undefined} role={ir} {...(set ? v.setAria(it.index) : null)} className={itemClassName}
             style={horizontal
-              ? { position: 'absolute', top: 0, insetInlineStart: 0, height: '100%', transform: `translateX(${rtl ? -it.start : it.start}px)`, width: measure ? undefined : it.size }
+              ? { position: 'absolute', top: 0, insetInlineStart: 0, height: '100%', transform: `translateX(${it.start}px)`, width: measure ? undefined : it.size }
               : { position: 'absolute', top: 0, left: 0, width: '100%', transform: `translateY(${it.start}px)`, height: measure ? undefined : it.size }}>
             {renderItem(it.index, it)}
           </div>

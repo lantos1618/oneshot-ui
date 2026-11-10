@@ -3,9 +3,7 @@
 import { act, fireEvent, render, screen, waitFor } from '@testing-library/react'
 import { useState, type ReactNode } from 'react'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
-import { LocaleProvider } from '../../src/lib/core'
-import { UI_MESSAGES_AR } from '../../src/lib/provider'
-import { ANNOTATE_MESSAGES, Chart, layoutTimeTags, timeTicks, type TimeTag } from '../../src/lib'
+import { Chart, layoutTimeTags, timeTicks, type TimeTag } from '../../src/lib'
 import { TAGS_BUSY_DAY, TAGS_LIGHT_DAY, POSTURE_STATES_DAY, tagsDay } from '../../src/examples'
 
 const at = (h: number, m = 0) => new Date(2026, 10, 9, h, m).getTime()
@@ -116,7 +114,7 @@ describe('Chart annotations', () => {
   afterEach(() => vi.restoreAllMocks())
   const day = tagsDay('light')
   const tags = [tag('w', 10, 40), tag('s', 10, 50, 'snack'), tag('lunch', 12, 30, 'lunch', [13, 5])]
-  const en = (ui: ReactNode) => render(<LocaleProvider locale="en-GB">{ui}</LocaleProvider>)
+  const en = (ui: ReactNode) => render(<>{ui}</>)
   const chart = (extra: object = {}) => <Chart data={day.points} x="t" series={[{ key: 'points', label: 'Points', type: 'area' }]} legend={false} annotations={{ tags, ...extra }} />
 
   it('renders the tags as a list with accessible names in time order', () => {
@@ -179,7 +177,7 @@ describe('Chart annotations', () => {
   it('activeId is controllable from outside (a linked list)', () => {
     const { rerender } = en(chart({ activeId: null }))
     expect(screen.getByRole('option', { name: 'Snack at 10:50' })).toHaveAttribute('aria-selected', 'false')
-    rerender(<LocaleProvider locale="en-GB">{chart({ activeId: 's' })}</LocaleProvider>)
+    rerender(chart({ activeId: 's' }))
     expect(screen.getByRole('option', { name: 'Snack at 10:50' })).toHaveAttribute('aria-selected', 'true')
     expect(screen.getByRole('tooltip')).toHaveTextContent('Snack')
   })
@@ -191,28 +189,19 @@ describe('Chart annotations', () => {
     expect(screen.getByRole('tooltip')).toHaveTextContent('10:50')
   })
   it("reserve: 'max' keeps the height for every auto style; 'current' takes only what the shown style needs", async () => {
-    const box = () => screen.getByRole('listbox').closest('[dir="ltr"]') as HTMLElement
+    const box = () => screen.getByRole('listbox').closest('[style*="height"]') as HTMLElement
     const busy = TAGS_BUSY_DAY.filter(t => !t.end)
     const { rerender } = en(chart({ reserve: 'max' }))
     expect(box().style.height).toBe(`${220 + 3 * 23 + 6}px`) // auto: pins now, room for the rug and rollup band too
-    rerender(<LocaleProvider locale="en-GB"><Chart data={day.points} x="t" series={[{ key: 'points', type: 'area' }]} legend={false} annotations={{ tags: busy, reserve: 'max' }} /></LocaleProvider>)
+    rerender(<Chart data={day.points} x="t" series={[{ key: 'points', type: 'area' }]} legend={false} annotations={{ tags: busy, reserve: 'max' }} />)
     expect(box().style.height).toBe(`${220 + 3 * 23 + 6}px`) // rollups: same height
-    rerender(<LocaleProvider locale="en-GB">{chart({ style: 'rug', spans: 'none' })}</LocaleProvider>)
+    rerender(chart({ style: 'rug', spans: 'none' }))
     expect(box().style.height).toBe(`${220 + 2 * 23 + 6}px`) // current (default): the two rug rows 10:40 and 10:50 need
-    rerender(<LocaleProvider locale="en-GB">{chart({ spans: 'none' })}</LocaleProvider>)
+    rerender(chart({ spans: 'none' }))
     await waitFor(() => expect(box().style.height).toBe('220px'), { timeout: 4000 }) // auto resolved to pins: no band (eased over 250 ms)
   })
   it('rollups keep one option per tag', () => {
     en(chart({ style: 'rollup', spans: 'none' }))
     expect(screen.getAllByRole('option').map(o => o.getAttribute('aria-label'))).toEqual(['Water at 10:40', 'Snack at 10:50'])
-  })
-  it('the plot stays an LTR island and the names translate (Arabic)', () => {
-    render(<LocaleProvider locale="ar-EG" messages={UI_MESSAGES_AR}>{chart()}</LocaleProvider>)
-    const list = screen.getByRole('listbox', { name: 'الوسوم' })
-    expect(list.closest('[dir]')).toHaveAttribute('dir', 'ltr')
-    expect(screen.getAllByRole('option')[0].getAttribute('aria-label')).toMatch(/^Water عند /)
-  })
-  it('ANNOTATE_MESSAGES: de and ar translate every key', () => {
-    for (const lang of ['de', 'ar']) expect(Object.keys(ANNOTATE_MESSAGES.catalogs[lang] ?? {}).sort()).toEqual(Object.keys(ANNOTATE_MESSAGES.en).sort())
   })
 })

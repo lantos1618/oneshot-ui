@@ -102,7 +102,7 @@ describe('search', () => {
     expect(find('color')).toContain('Colour picker')
     expect(find('drawer')).toContain('Sheet / drawer')
     expect(find('snackbar')).toContain('Toasts')
-    expect(find('right to left')).toContain('Typed dates in any locale') // the i18n tag's synonym
+    expect(find('time zone')).toContain('Typed dates') // the formatting tag's synonym
   })
 
   it('needs every word, matches word starts and plurals, and ignores case and accents', () => {

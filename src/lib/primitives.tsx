@@ -1,50 +1,42 @@
 /** Primitives: surface classes, Button, IconButton, Spinner, Badge, StatusIcon, Chip, Kbd, Card, Avatar, AnimatedNumber, ScrollEdges, sparklines. Part of @lyndon/ui/core. */
-import { type ButtonHTMLAttributes, type CSSProperties, type HTMLAttributes, type ReactNode, cloneElement as slotClone, type ReactElement as SlotElement, type Ref as SlotRef, useMemo, useRef, useState } from 'react'
+import { type ButtonHTMLAttributes, type CSSProperties, type HTMLAttributes, type ReactNode, cloneElement as slotClone, type ReactElement as SlotElement, useMemo, useRef, useState } from 'react'
 import { AnimatePresence, motion, useInView } from 'motion/react'
 import { cn, maxOf, minOf, spring, variants } from './helpers'
 import { useWidth } from './hooks'
 import { Icon, type IconName, isIconName } from './icons'
-import { dirX, numberFormat, useLocale } from './locale'
+import { LOCALE, fmt, numberFormat, plural } from './locale'
 import { safeMediaUrl } from './safe'
 import { Slot, slotOnlyChild } from './slot'
 
-// rtl-lint-ignore: the fades are physical on purpose (useScrollEdges reports hidden content per physical side)
 const SCROLL_FADE = {
-  card: ['from-[var(--card)]', 'bg-gradient-to-r', 'bg-gradient-to-l'], // rtl-lint-ignore
-  bg: ['from-[var(--bg)]', 'bg-gradient-to-r', 'bg-gradient-to-l'], // rtl-lint-ignore
+  card: ['from-[var(--card)]', 'bg-gradient-to-r', 'bg-gradient-to-l'],
+  bg: ['from-[var(--bg)]', 'bg-gradient-to-r', 'bg-gradient-to-l'],
 } as const
 
 /**
  * Edge fades for a horizontal scroller, plus (on touch screens, until the first scroll) a small "swipe for
- * more" pill on the end side (right in LTR, left in RTL). Render it as a sibling of the scroller inside a `relative`
+ * more" pill on the end side. Render it as a sibling of the scroller inside a `relative`
  * wrapper; feed it `useScrollEdges`. `hint` defaults to the locale's "Swipe for more"; pass `null` to hide it.
  */
 export function ScrollEdges({ left, right, touched, hint, fade = 'card', at = 'bottom', className }:
   { left: boolean; right: boolean; touched?: boolean; hint?: ReactNode; fade?: keyof typeof SCROLL_FADE; /** where the hint pill sits */ at?: 'top' | 'bottom'; className?: string }) {
-  const { t, dir } = useLocale()
   const [from, toR, toL] = SCROLL_FADE[fade]
-  const more = dir === 'rtl' ? left : right, label = hint === undefined ? t('field.swipeForMore') : hint
+  const more = right, label = hint === undefined ? 'Swipe for more' : hint
   return (
     <>
-      {/* rtl-lint-ignore: physical sides, matching useScrollEdges' left/right */}
       <span aria-hidden className={cn('pointer-events-none absolute inset-y-0 left-0 z-[6] w-5 to-transparent transition-opacity duration-200', from, toR, left ? 'opacity-100' : 'opacity-0', className)} />
-      {/* rtl-lint-ignore */}
       <span aria-hidden className={cn('pointer-events-none absolute inset-y-0 right-0 z-[6] w-5 to-transparent transition-opacity duration-200', from, toL, right ? 'opacity-100' : 'opacity-0', className)} />
       <AnimatePresence>
         {more && !touched && label && (
-          <motion.span key="hint" aria-hidden initial={{ opacity: 0, x: dirX(6, dir) }} animate={{ opacity: 1, x: 0 }} exit={{ opacity: 0, transition: { duration: 0.15 } }}
+          <motion.span key="hint" aria-hidden initial={{ opacity: 0, x: 6 }} animate={{ opacity: 1, x: 0 }} exit={{ opacity: 0, transition: { duration: 0.15 } }}
             className={cn('pointer-events-none absolute end-2 z-[7] hidden items-center gap-1 rounded-full bg-[color-mix(in_srgb,var(--fg)_86%,transparent)] px-2.5 py-1 text-[11px] font-medium text-[var(--card)] shadow-[var(--shadow)] [@media(pointer:coarse)]:flex', at === 'top' ? 'top-2' : 'bottom-2')}>
-            {label}<Icon name="chevronRight" size={12} strokeWidth={2.6} className="ui-flip" />
+            {label}<Icon name="chevronRight" size={12} strokeWidth={2.6} />
           </motion.span>
         )}
       </AnimatePresence>
     </>
   )
 }
-
-/* ════════════════════════════════════════════════════════════════════════════
- * 4. PRIMITIVES
- * ══════════════════════════════════════════════════════════════════════════ */
 
 /**
  * Surface class strings: `card` (large radius, bordered), `md` (medium-radius tile), `muted` (tinted inset), `floating`
@@ -58,8 +50,6 @@ export const surface = {
   dashed: 'rounded-[var(--r-md)] border-[1.5px] border-dashed border-[var(--line2)]',
 } as const
 
-/** Shared surface for every floating panel (same as surface.floating). */
-export const floatingSurface = 'rounded-[var(--r-lg)] border border-[var(--line)] bg-[var(--card)] shadow-[var(--shadow)]'
 
 /** Row look shared by menus, listboxes and the palette. Rows are at least 40px tall on touch screens. */
 export const menuItemClass = 'flex w-full cursor-pointer items-center justify-between gap-3 rounded-[var(--r-md)] border-0 bg-transparent px-2 py-2 text-start text-[13px] [@media(pointer:coarse)]:min-h-10 ' +
@@ -97,7 +87,7 @@ export const TOUCH = {
 
 export const buttonVariants = variants(
   'relative inline-flex items-center justify-center gap-1.5 whitespace-nowrap font-medium rounded-[var(--r-md)] border overflow-hidden ' +
-  'cursor-pointer select-none transition-[background,opacity,border-color] disabled:opacity-60 disabled:cursor-default',
+  'cursor-pointer select-none transition-[background,opacity,border-color,scale] duration-150 motion-safe:active:scale-[.96] disabled:opacity-60 disabled:cursor-default disabled:active:scale-100',
   {
     variant: {
       default: 'bg-[var(--card)] border-[var(--line)] hover:bg-[var(--muted)]',
@@ -130,7 +120,7 @@ export type ButtonProps = Omit<ButtonHTMLAttributes<HTMLButtonElement>, 'onAnima
 }
 
 /**
- * Every button presses down slightly (scale .96), like the original page. `asChild` renders your element instead
+ * Every button presses down slightly (scale .96, CSS). `asChild` renders your element instead
  * (`<Button asChild><a href="/docs">Docs</a></Button>`): same look, and `disabled`/`loading` become aria-disabled plus a
  * blocked click (the spinner only shows on a real <button>).
  */
@@ -138,17 +128,16 @@ export function Button({ variant, size, loading, className, children, disabled, 
   if (asChild) {
     const off = disabled || loading
     return (
-      <Slot {...(p as HTMLAttributes<HTMLElement>)} ref={p.ref as SlotRef<HTMLElement>} aria-disabled={off || undefined} aria-busy={loading || undefined} data-disabled={off ? '' : undefined}
-        className={buttonVariants({ variant, size, className: cn('no-underline active:scale-[0.96] aria-disabled:pointer-events-none aria-disabled:opacity-60', className) })}
-        onClick={off ? e => e.preventDefault() : p.onClick as HTMLAttributes<HTMLElement>['onClick']}>{children}</Slot>
+      <Slot<HTMLButtonElement> {...p} aria-disabled={off || undefined} aria-busy={loading || undefined} data-disabled={off ? '' : undefined}
+        className={buttonVariants({ variant, size, className: cn('no-underline aria-disabled:pointer-events-none aria-disabled:opacity-60', className) })}
+        onClick={off ? e => e.preventDefault() : p.onClick}>{children}</Slot>
     )
   }
   return (
-    <motion.button type={type} whileTap={disabled || loading ? undefined : { scale: 0.96 }} transition={{ duration: 0.12 }}
-      disabled={disabled || loading} className={buttonVariants({ variant, size, className })} {...p}>
+    <button type={type} disabled={disabled || loading} className={buttonVariants({ variant, size, className })} {...p}>
       {loading && <Spinner />}
       {children}
-    </motion.button>
+    </button>
   )
 }
 
@@ -191,11 +180,10 @@ function useSpinPause<T extends Element>() {
 
 const SPINNER_TONE = { current: 'border-current', accent: 'border-[var(--accent)]', ok: 'border-[var(--ok)]', warn: 'border-[var(--warn)]', bad: 'border-[var(--bad)]' } as const
 
-/** Spinning ring (role=status, "Loading" in the provider's language). `tone` colours it; default is the text colour. */
+/** Spinning ring (role=status, `label` default "Loading"). `tone` colours it; default is the text colour. */
 export function Spinner({ size = 14, tone = 'current', label, className }: { size?: number; tone?: keyof typeof SPINNER_TONE; label?: string; className?: string }) {
   const pause = useSpinPause<HTMLSpanElement>() // stops spinning while off screen
-  const { t } = useLocale()
-  return <span ref={pause.ref} role="status" aria-label={label ?? t('status.loading')} style={{ width: size, height: size, ...pause.style }}
+  return <span ref={pause.ref} role="status" aria-label={label ?? 'Loading'} style={{ width: size, height: size, ...pause.style }}
     className={cn('inline-block flex-none animate-spin rounded-full border-2 border-e-transparent', SPINNER_TONE[tone], className)} />
 }
 
@@ -231,15 +219,14 @@ export function Badge({ tone = 'neutral', size = 'md', dot, className, children 
  */
 export function DeltaBadge({ value, lowerIsBetter, digits = 1, suffix = '%', title, className }:
   { value: number; lowerIsBetter?: boolean; digits?: number; suffix?: string; title?: string; className?: string }) {
-  const { t, fmt } = useLocale()
   if (!Number.isFinite(value)) return null
   const good = lowerIsBetter ? value < 0 : value >= 0
   return (
     <motion.span key={`${value >= 0}${good}`} initial={{ scale: 0.85 }} animate={{ scale: 1 }} transition={spring(0.5, 0.35)}
-      title={title ?? t('status.deltaTitle', { value: t(good ? 'status.betterWord' : 'status.worseWord') })}
+      title={title ?? `${(good ? 'Better' : 'Worse')} than the previous period`}
       className={cn('ui-num inline-flex items-center rounded-full leading-none font-medium whitespace-nowrap', BADGE_SIZE.sm,
         good ? 'bg-[var(--ok-soft)] text-[color-mix(in_srgb,var(--ok)_72%,var(--fg))]' : 'bg-[var(--bad-soft)] text-[color-mix(in_srgb,var(--bad)_78%,var(--fg))]', className)}>
-      {value >= 0 ? '▲' : '▼'} {fmt.number(Math.abs(value), { minimumFractionDigits: digits, maximumFractionDigits: digits })}{suffix}<span className="sr-only">{' ' + t(good ? 'status.better' : 'status.worse')}</span>
+      {value >= 0 ? '▲' : '▼'} {numberFormat(LOCALE, { minimumFractionDigits: digits, maximumFractionDigits: digits }).format(Math.abs(value))}{suffix}<span className="sr-only">{' ' + (good ? '(better)' : '(worse)')}</span>
     </motion.span>
   )
 }
@@ -247,6 +234,12 @@ export function DeltaBadge({ value, lowerIsBetter, digits = 1, suffix = '%', tit
 /** The states StatusIcon draws. */
 export type StatusIconStatus = 'done' | 'active' | 'pending' | 'failed'
 
+const STATUS_ICON_CLASS: Record<StatusIconStatus, string> = {
+  done: 'border-[var(--primary)] bg-[var(--primary)] text-[var(--on-primary)]', failed: 'border-[var(--bad)] bg-[var(--bad)] text-[var(--card)]',
+  active: 'border-[var(--fg)] bg-[var(--card)] text-[var(--fg)]', pending: 'border-[var(--line2)] bg-[var(--card)] text-[var(--fg3)]',
+}
+const STATUS_ICON_DONE_OK = 'border-[var(--ok)] bg-[var(--ok)] text-[var(--card)]'
+const STATUS_ICON_SPIN = 'animate-spin border-[var(--accent)] border-e-transparent bg-[var(--card)]'
 /**
  * Round step/status marker for steppers, checks and task lists: done (filled tick, pops in), failed (filled ✕), active
  * (spinning ring, or the step `number` in a bold ring), pending (grey ring, with `number` if given). `tone="ok"` paints done
@@ -259,10 +252,7 @@ export function StatusIcon({ status, size = 18, number, tone = 'primary', label,
   return (
     <span ref={pause.ref} role={label ? 'img' : undefined} aria-label={label} aria-hidden={label ? undefined : true} style={{ width: size, height: size, fontSize: Math.max(10, Math.round(size * 0.5)), ...(spin ? pause.style : null) }}
       className={cn('relative z-[1] grid flex-none place-items-center rounded-full border-[1.5px] font-semibold leading-none not-italic transition-colors',
-        status === 'done' ? (tone === 'ok' ? 'border-[var(--ok)] bg-[var(--ok)] text-[var(--card)]' : 'border-[var(--primary)] bg-[var(--primary)] text-[var(--on-primary)]')
-          : status === 'failed' ? 'border-[var(--bad)] bg-[var(--bad)] text-[var(--card)]'
-            : spin ? 'animate-spin border-[var(--accent)] border-e-transparent bg-[var(--card)]'
-              : status === 'active' ? 'border-[var(--fg)] bg-[var(--card)] text-[var(--fg)]' : 'border-[var(--line2)] bg-[var(--card)] text-[var(--fg3)]', className)}>
+        spin ? STATUS_ICON_SPIN : status === 'done' && tone === 'ok' ? STATUS_ICON_DONE_OK : STATUS_ICON_CLASS[status], className)}>
       <AnimatePresence initial={false}>
         {status === 'done' && <motion.span key="d" className="grid" initial={{ scale: 0.5 }} animate={{ scale: 1 }} transition={spring(0.5, 0.35)}><Icon name="check" size={Math.round(size * 0.55)} strokeWidth={3.5} /></motion.span>}
       </AnimatePresence>
@@ -278,17 +268,17 @@ export function StatusIcon({ status, size = 18, number, tone = 'primary', label,
  */
 export function Chip({ pressed, icon, className, children, type = 'button', ...p }: Omit<ButtonProps, 'variant' | 'size' | 'loading'> & { pressed?: boolean; icon?: IconName | ReactNode }) {
   return (
-    <motion.button type={type} aria-pressed={pressed} whileTap={p.disabled ? undefined : { scale: 0.95 }} transition={{ duration: 0.12 }}
-      className={cn('inline-flex h-[30px] flex-none cursor-pointer items-center gap-1.5 rounded-full border px-3 text-xs font-medium whitespace-nowrap transition-colors disabled:cursor-default disabled:opacity-50 [@media(pointer:coarse)]:h-9',
+    <button type={type} aria-pressed={pressed}
+      className={cn('inline-flex h-[30px] flex-none cursor-pointer items-center gap-1.5 rounded-full border px-3 text-xs font-medium whitespace-nowrap transition-[color,background-color,border-color,scale] duration-150 motion-safe:active:scale-[.95] disabled:cursor-default disabled:opacity-50 disabled:active:scale-100 [@media(pointer:coarse)]:h-9',
         pressed ? 'border-[var(--primary)] bg-[var(--primary)] text-[var(--on-primary)]' : 'border-[var(--line)] bg-[var(--card)] text-[var(--fg2)] hover:bg-[var(--muted)] hover:text-[var(--fg)]', className)} {...p}>
       {isIconName(icon) ? <Icon name={icon} size={13} /> : icon}{children}
-    </motion.button>
+    </button>
   )
 }
 
-/** A key or shortcut ("⌘K", "Esc"). Always left to right, so "⌘K" doesn't turn into "K⌘" in RTL text. */
+/** A key or shortcut ("⌘K", "Esc"). Always left to right, so "⌘K" doesn't turn into "K⌘". */
 export function Kbd({ children, className }: { children: ReactNode; className?: string }) {
-  return <kbd dir="ltr" className={cn('rounded-[var(--r-sm)] border border-[var(--line)] bg-[var(--muted)] px-1 font-[family-name:var(--mono)] text-[11px] text-[var(--fg2)]', className)}>{children}</kbd>
+  return <kbd className={cn('rounded-[var(--r-sm)] border border-[var(--line)] bg-[var(--muted)] px-1 font-[family-name:var(--mono)] text-[11px] text-[var(--fg2)]', className)}>{children}</kbd>
 }
 
 /** Surface for grouping content. */
@@ -334,16 +324,15 @@ export function Avatar({ name, src, size = 32, status, className }:
 export function AvatarStack({ names, max = 4, size = 32, caption, spread: canSpread = true, className }:
   { names: string[]; max?: number; size?: number; caption?: ReactNode; spread?: boolean; className?: string }) {
   const [spread, setSpread] = useState(false)
-  const { t, fmt, dir } = useLocale()
   const shown = names.slice(0, max), extra = names.length - shown.length
   const fan = canSpread && spread
   return (
     <div className={cn('flex flex-col items-center gap-2', className)}>
-      <div className="flex outline-none" tabIndex={canSpread ? 0 : undefined} role="group" aria-label={t('people.groupLabel', { count: names.length, names: fmt.list(names) })}
+      <div className="flex outline-none" tabIndex={canSpread ? 0 : undefined} role="group" aria-label={`${plural(names.length, 'person', 'people')}: ${fmt.list(names)}`}
         onPointerEnter={e => e.pointerType === 'mouse' && setSpread(true)} onPointerLeave={e => e.pointerType === 'mouse' && setSpread(false)}
         onFocus={() => setSpread(true)} onBlur={() => setSpread(false)}>
         {[...shown, ...(extra > 0 ? [null] : [])].map((n, i) => (
-          <motion.span key={n ?? '+'} initial={false} animate={{ x: fan ? dirX(i * 6, dir) : 0 }} transition={spring(0.3, 0.35)} className={cn(i > 0 && '-ms-2')} style={{ zIndex: 10 - i }}>
+          <motion.span key={n ?? '+'} initial={false} animate={{ x: fan ? (i * 6) : 0 }} transition={spring(0.3, 0.35)} className={cn(i > 0 && '-ms-2')} style={{ zIndex: 10 - i }}>
             {n ? <Avatar name={n} size={size} />
               : <span className="grid place-items-center rounded-full border-2 border-[var(--card)] bg-[var(--muted)] text-xs font-semibold text-[var(--fg2)]" style={{ width: size, height: size }}>+{fmt.number(extra)}</span>}
           </motion.span>
@@ -357,6 +346,7 @@ export function AvatarStack({ names, max = 4, size = 32, caption, spread: canSpr
 /** The CSS transition AnimatedNumber's digit columns and SparkChart's marks use (off for reduced motion). */
 const ROLL_EASE = 'cubic-bezier(.22,1,.36,1)'
 
+const AN_DIGITS = [...'0123456789']
 /**
  * Rolling number (replaces the NumberFlow web component): each digit rolls to its new value.
  * format: Intl.NumberFormatOptions, e.g. { style: 'currency', currency: 'EUR' }.
@@ -366,19 +356,15 @@ const ROLL_EASE = 'cubic-bezier(.22,1,.36,1)'
  * frame), nothing is written when a digit is unchanged, and the roll is skipped (the digit jumps) for reduced motion
  * and while the number is off screen.
  */
-export function AnimatedNumber({ value, format, locale, className }:
-  { value: number; format?: Intl.NumberFormatOptions; /** default: the provider's locale */ locale?: string; className?: string }) {
-  const ctx = useLocale(), loc = locale ?? ctx.locale
-  const str = useMemo(() => numberFormat(loc, format).format(value), [value, format, loc])
-  // the locale's own digits (Arabic-Indic for ar-EG …), so every script rolls, not just 0–9
-  const glyphs = useMemo(() => { const nf = numberFormat(loc, { useGrouping: false }); return [...'0123456789'].map(d => nf.format(Number(d))) }, [loc])
+export function AnimatedNumber({ value, format, className }: { value: number; format?: Intl.NumberFormatOptions; className?: string }) {
+  const str = useMemo(() => numberFormat(LOCALE, format).format(value), [value, format])
+  const glyphs = AN_DIGITS
   const ref = useRef<HTMLSpanElement>(null)
   const visible = useInView(ref, { margin: '64px' })
-  // digits and their separators form left-to-right runs (numbers read LTR in RTL scripts too); text around them
-  // (currency, %) follows the surrounding direction, as the browser's bidi algorithm would place it
+  // digits and their separators form runs that roll; text around them (currency, %) is static
   const chars = [...str], runs: { num: boolean; chars: [string, number][] }[] = []
   chars.forEach((c, i) => {
-    const num = glyphs.includes(c) || (/[.,'’٫٬\u00a0\u202f\s]/.test(c) && glyphs.includes(chars[i - 1] ?? '') && glyphs.includes(chars[i + 1] ?? ''))
+    const num = glyphs.includes(c) || (/[.,'’\u00a0\u202f\s]/.test(c) && glyphs.includes(chars[i - 1] ?? '') && glyphs.includes(chars[i + 1] ?? ''))
     const last = runs[runs.length - 1]
     if (last && last.num === num) last.chars.push([c, i]); else runs.push({ num, chars: [[c, i]] })
   })
@@ -399,16 +385,11 @@ export function AnimatedNumber({ value, format, locale, className }:
     <span ref={ref} className={cn('ui-num inline-flex leading-none whitespace-nowrap', className)}>
       <span className="sr-only">{str}</span>
       <span aria-hidden className="inline-flex">
-        {runs.map((r, k) => r.num ? <span key={'n' + (runs.length - k)} dir="ltr" className="inline-flex">{r.chars.map(cell)}</span> : r.chars.map(cell))}
+        {runs.map((r, k) => r.num ? <span key={'n' + (runs.length - k)} className="inline-flex">{r.chars.map(cell)}</span> : r.chars.map(cell))}
       </span>
     </span>
   )
 }
-
-/* ════════════════════════════════════════════════════════════════════════════
- * Sparklines: word-sized charts. Here (not in charts) so the foundation bundle (stat cards, kanban metrics) can use
- * them; the chart kit imports SparkChart and chartPath from core.
- * ══════════════════════════════════════════════════════════════════════════ */
 
 /** Curve shape for line paths: straight segments or a monotone cubic. */
 export type Curve = 'linear' | 'monotone'

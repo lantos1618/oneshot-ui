@@ -3,7 +3,7 @@
 import { act, fireEvent, render, screen } from '@testing-library/react'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import {
-  Gantt, MAGNET_IDLE, MagnetMarks, RangeSlider, Slider, SplitPane, UIProvider, magnetKeyDirection, magnetStops, magnetize, nextMagnet,
+  Gantt, MAGNET_IDLE, MagnetMarks, RangeSlider, Slider, SplitPane, magnetKeyDirection, magnetStops, magnetize, nextMagnet,
   type Magnet, type MagnetState,
 } from '../../src/lib'
 
@@ -126,7 +126,6 @@ describe('keyboard jumps', () => {
     expect(magnetKeyDirection({ key: 'ArrowRight' })).toBe(0)
     expect(magnetKeyDirection({ key: 'ArrowRight', ctrlKey: true })).toBe(1)
     expect(magnetKeyDirection({ key: 'ArrowDown', metaKey: true })).toBe(-1)
-    expect(magnetKeyDirection({ key: 'ArrowLeft', ctrlKey: true }, 'rtl')).toBe(1)
     expect(magnetKeyDirection({ key: 'ArrowRight', ctrlKey: true, altKey: true })).toBe(0)
   })
 })
@@ -226,15 +225,6 @@ describe('Slider with magnets', () => {
     expect(container.querySelectorAll('[data-magnet-zone]')).toHaveLength(1)
   })
 
-  it('in RTL the track runs from the right and the magnets follow', () => {
-    stubRect(216)
-    render(<UIProvider locale="ar-EG" injectStyles={false} target="self"><Slider label="Volume" defaultValue={10} magnets={MARKS} /></UIProvider>)
-    const input = screen.getByRole('slider', { name: 'Volume' }) as HTMLInputElement
-    fire.pointerDown(input, pointer(216 - sx(23))) // 23 from the right-hand start
-    expect(input.value).toBe('25')
-    fire.keyDown(input, { key: 'ArrowLeft', ctrlKey: true }) // ← is forward in RTL
-    expect(input.value).toBe('50')
-  })
 })
 
 describe('RangeSlider with magnets', () => {

@@ -19,13 +19,11 @@
 // ui-provider.tsx reaches the components in every other drop-in file. Other module state (toast queue, modal stack,
 // scroll lock, focus traps, icon registry) is shared in the source itself through uiShared() (src/lib/shared.tsx).
 // To keep the files small: ICONS keeps only the icons a file draws (the rest resolve through the page-wide icon
-// registry; icon.tsx has them all), DROPIN_STUBS swaps out declarations only ui-provider.tsx needs (the locale
-// engine behind useLocale() outside a provider), and embedded helpers keep only a one-sentence summary of their docs
+// registry; icon.tsx has them all), and embedded helpers keep only a one-sentence summary of their docs
 // (scripts/registry/diet.mjs; the item's own exports keep theirs).
 import { readFileSync, writeFileSync, mkdirSync, rmSync } from 'node:fs'
 import { join } from 'node:path'
-import { createHash } from 'node:crypto'
-import { execFileSync } from 'node:child_process'
+import { commit, dirty, header, pkg, sha256 } from './registry/stamp.mjs'
 import { analyze, closure } from './registry/analyze.mjs'
 import { dietPart } from './registry/diet.mjs'
 import { FAMILIES, BLOCKS, EXCLUDE, kebab, humanize, isComponentName } from './registry/items.mjs'
@@ -34,7 +32,6 @@ import { TAGS, TAG_FACETS, TAG_BY_ID, tagRegistryMeta } from '../src/showcase/ta
 
 const root = new URL('..', import.meta.url).pathname
 const out = join(root, 'dist-registry')
-const pkg = JSON.parse(readFileSync(join(root, 'package.json'), 'utf8'))
 const repo = pkg.homepage.replace(/#readme$/, '')
 const BASE = (process.env.REGISTRY_BASE_URL ?? 'https://lantos1618.github.io/oneshot-ui').replace(/\/$/, '')
 // llms.txt links: the files as deployed with the docs (pages.yml); after a release also on unpkg (see the README)
@@ -42,57 +39,12 @@ const RAW = BASE
 const minor = pkg.version.split('.').slice(0, 2).join('.')
 const t0 = Date.now()
 
-const git = args => { try { return execFileSync('git', args, { cwd: root, encoding: 'utf8', stdio: ['ignore', 'pipe', 'ignore'] }).trim() } catch { return '' } }
-const commit = git(['rev-parse', '--short=12', 'HEAD'])
-const dirty = commit && git(['status', '--porcelain', '--', 'src/lib', 'src/blocks', 'scripts', 'package.json']) ? '+dirty' : ''
-const sha256 = text => createHash('sha256').update(text, 'utf8').digest('hex')
 const tokensOf = bytes => Math.round(bytes / 3.6)
 const warn = msg => console.warn(`build-registry: ${msg}`)
 
-// Declarations swapped for a stub in drop-in files: the real one is only needed in ui-provider.tsx (or where the item
-// embeds what it depends on anyway). localeFallback is useLocale() outside a provider; with it, every file that
-// calls t() would carry the whole locale engine (Intl formatters, the English catalog) that UIProvider already provides.
-const DROPIN_STUBS = {
-  localeFallback: {
-    keepIf: ['resolveLocale'],
-    deps: ['UILocale'],
-    text: `/** useLocale() outside a provider: in a drop-in file the locale comes from <UIProvider> (ui-provider.tsx). */
-function localeFallback(): UILocale {
-  throw new Error('@lyndon/ui: render this component inside <UIProvider> from ui-provider.tsx (it provides the locale)')
-}`,
-  },
-  // `keyof typeof UI_MESSAGES_EN` would embed the English catalog in every file that types a t() call
-  UIMessageKey: {
-    keepIf: ['UI_MESSAGES_EN'],
-    deps: [],
-    text: `/** A message key of the built-in catalog (ui-provider.tsx, which embeds the catalog, has the full union). */
-export type UIMessageKey = string`,
-  },
-}
-
-
 function build() {
   const { decls, modules } = graph
-  // the same graph with DROPIN_STUBS swapped in
-  const stubDecls = new Map(decls)
-  for (const [name, stub] of Object.entries(DROPIN_STUBS)) {
-    const d = decls.get(name)
-    if (!d) { warn(`stub ${name}: no such declaration`); continue }
-    stubDecls.set(name, { ...d, deps: new Set(stub.deps), ext: [], dynImports: {}, parts: [{ order: d.parts[0].order, text: stub.text }] })
-  }
-  // per item: stub what the item does not otherwise embed (a stub whose `keepIf` names end up in the file goes back to real)
-  const itemClosure = it => {
-    if (it.name === 'ui-provider') return closure(graph, it.roots, rank)
-    const stubs = new Set(Object.keys(DROPIN_STUBS))
-    for (;;) {
-      const view = new Map(decls)
-      for (const n of stubs) if (stubDecls.has(n)) view.set(n, stubDecls.get(n))
-      const c = closure({ ...graph, decls: view }, it.roots, rank)
-      const back = [...stubs].filter(n => c.names.has(n) && DROPIN_STUBS[n].keepIf.some(k => c.names.has(k)))
-      if (!back.length) return c
-      back.forEach(n => stubs.delete(n))
-    }
-  }
+  const itemClosure = it => closure(graph, it.roots, rank)
 
   // modules in dependency order (imports first), so top-level code runs after what it uses
   const byName = new Map(modules.map((m, i) => [m.name, i]))
@@ -315,14 +267,13 @@ function pruneIcons(body) {
   for (const x of rest.matchAll(/\bICONS\.(\w+)/g)) used.add(x[1])
   const keep = entries.filter(([k]) => used.has(k))
   const typed = /^export type IconName = keyof typeof ICONS$/m.test(rest), key = typed ? 'IconName' : 'string'
-  const all = entries.map(([k]) => `'${k}'`)
-  const union = all.reduce((lines, k) => { if ((lines.at(-1) + ' | ' + k).length > 116) lines.push(k); else lines[lines.length - 1] = lines.at(-1) ? `${lines.at(-1)} | ${k}` : k; return lines }, [''])
+  const map = keep.length
+    ? `Object.assign(Object.create(iconRegistry) as Record<${key}, string>, {\n${keep.map(([k, v]) => `  ${k}: '${v}',`).join('\n')}\n})`
+    : `iconRegistry as Record<${key}, string>`
   const icons = `/** The icons this file draws (${keep.length} of ${entries.length}). Any other name resolves through the page-wide registry: add icon.tsx for all of them, or registerIcons(). */
-export const ICONS: Record<${key}, string> = Object.assign(Object.create(iconRegistry) as Record<${key}, string>, {
-${keep.map(([k, v]) => `  ${k}: '${v}',`).join('\n')}
-})`
+export const ICONS: Record<${key}, string> = ${map}`
   return { icons: { kept: keep.length, total: entries.length }, body: (body.slice(0, start) + icons + body.slice(end))
-    .replace(/^export type IconName = keyof typeof ICONS$/m, `/** Every icon name in @lyndon/ui (this file embeds only the paths it draws, see ICONS). */\nexport type IconName =\n  | ${union.join('\n  | ')}`) }
+    .replace(/^export type IconName = keyof typeof ICONS$/m, '/** An icon name (this file embeds only the paths it draws, see ICONS). */\nexport type IconName = string') }
 }
 
 // `const X = createContext<T>(v)` (top level) → `const X = uiSharedContext<T>('X', v)`
@@ -360,10 +311,8 @@ function uiSharedContext<T>(name: string, defaultValue: T): Context<T> {
   return store.get(key) as Context<T>
 }`
 
-/** 'use client' and one short provenance line. The checksums live in index.json and dist-registry/SHA256SUMS. */
-function stamp(name, body) {
-  return `'use client'\n/* ${pkg.name} ${pkg.version} · ${name}${commit ? ` · ${commit.slice(0, 7)}${dirty}` : ''} */\n` + body
-}
+/** The one-line header (scripts/registry/stamp.mjs). The checksums live in index.json and dist-registry/SHA256SUMS. */
+const stamp = (name, body) => header(name, { needsProvider: !/^ui-provider(\.tsx)?$/.test(name) }) + body
 
 /** A small CSS → nested object converter for the shadcn `css` field (rules, @media/@layer blocks, @keyframes). */
 function cssToObject(css) {

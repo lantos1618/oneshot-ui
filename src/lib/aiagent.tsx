@@ -1,7 +1,7 @@
 import { Fragment, memo, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, useSyncExternalStore, type ReactNode } from 'react'
 import { AnimatePresence, cubicBezier, motion, useReducedMotion } from 'motion/react'
 import { flushSync } from 'react-dom'
-import { Badge, Button, Chip, FONT_CSS, Icon, IconButton, Spinner, TOUCH, cn, defineMessages, ScrollEdges, sleep, spring, surface, themeCSS, useLocale, useMediaQuery, useMessages, useRoving, useScrollEdges, useTheme, useWidth } from './core'
+import { Badge, Button, Chip, FONT_CSS, Icon, IconButton, Spinner, TOUCH, cn, ScrollEdges, sleep, spring, surface, themeCSS, useMediaQuery, useRoving, useScrollEdges, useTheme, useWidth, plural, fmt } from './core'
 import { CopyButton, TypingDots } from './feedback'
 import { SegmentedControl, Slider, Switch } from './forms'
 import { SendButton } from './ai'
@@ -9,43 +9,6 @@ import { lcsDiff } from './code'
 import { WorkflowEngine, type WorkflowJob, type WorkflowMachine, type WorkflowToken } from './statechart'
 import { useFrameLoop, useViewport } from './motion'
 import { runLatestMs, runTotals, type AgentRun, type AgentSpan } from './agentrun'
-
-/* ════════════════════════════════════════════════════════════════════════════
- * 11c. AI WORKSPACES: the canvas (chat + living document) and the agent transit map
- * In RTL the chat and the panels mirror; the canvas's code and the transit map's drawing (and the trace's time strips)
- * stay left to right, because they are geometry, with their labels translated.
- * ══════════════════════════════════════════════════════════════════════════ */
-
-/** AICanvas strings (machine-drafted de/ar). */
-export const AI_CANVAS_MESSAGES = defineMessages('aiCanvas', {
-  en: {
-    explain: 'Line {n, number} is part of the document’s {kind, select, styles {styles} other {markup}}. Ask me to change it and I’ll edit it in place.',
-    failed: 'Something went wrong. Try again.', noChange: 'No change.', noMoreEdits: 'I have no more edits. Use the version arrows to step back through v1 to v{n, number}.',
-    cantEdit: 'I can’t edit this document yet.', assistant: 'Assistant', editing: 'Editing {file}', edited: 'Edited {file}', viewVersion: 'View v{n, number}',
-    askChange: 'Ask for a change', code: 'Code', preview: 'Preview', prevVersion: 'Previous version', nextVersion: 'Next version', version: 'v{n, number}',
-    copyCode: 'Copy code', emptyDoc: 'Nothing here yet. Ask for something and it will appear here.', previewOf: 'Preview of {file}, version {n, number}',
-    scrollMore: 'Scroll for more', askLine: 'Ask about line {n, number}', explainLine: 'Explain line {n, number}: {text}',
-    status: '{lines, plural, one {# line} other {# lines}} · v{cur, number} of {total, number}',
-  },
-  de: {
-    explain: 'Zeile {n, number} gehört zu {kind, select, styles {den Stilen} other {dem Markup}} des Dokuments. Bitte mich um eine Änderung, dann bearbeite ich sie direkt.',
-    failed: 'Etwas ist schiefgelaufen. Versuch es noch einmal.', noChange: 'Keine Änderung.', noMoreEdits: 'Ich habe keine weiteren Änderungen. Mit den Versionspfeilen kommst du zurück von v1 bis v{n, number}.',
-    cantEdit: 'Dieses Dokument kann ich noch nicht bearbeiten.', assistant: 'Assistent', editing: 'Bearbeite {file}', edited: '{file} bearbeitet', viewVersion: 'v{n, number} ansehen',
-    askChange: 'Um eine Änderung bitten', code: 'Code', preview: 'Vorschau', prevVersion: 'Vorige Version', nextVersion: 'Nächste Version', version: 'v{n, number}',
-    copyCode: 'Code kopieren', emptyDoc: 'Noch leer. Bitte um etwas, dann erscheint es hier.', previewOf: 'Vorschau von {file}, Version {n, number}',
-    scrollMore: 'Für mehr scrollen', askLine: 'Zu Zeile {n, number} fragen', explainLine: 'Erkläre Zeile {n, number}: {text}',
-    status: '{lines, plural, one {# Zeile} other {# Zeilen}} · v{cur, number} von {total, number}',
-  },
-  ar: {
-    explain: 'السطر {n, number} جزء من {kind, select, styles {أنماط} other {ترميز}} المستند. اطلب مني تغييره وسأعدّله في مكانه.',
-    failed: 'حدث خطأ ما. حاول مجددًا.', noChange: 'لا تغيير.', noMoreEdits: 'لا تعديلات أخرى لديّ. استخدم أسهم الإصدارات للرجوع من v1 إلى v{n, number}.',
-    cantEdit: 'لا يمكنني تعديل هذا المستند بعد.', assistant: 'المساعد', editing: 'جارٍ تعديل {file}', edited: 'عُدّل {file}', viewVersion: 'عرض v{n, number}',
-    askChange: 'اطلب تغييرًا', code: 'الشيفرة', preview: 'معاينة', prevVersion: 'الإصدار السابق', nextVersion: 'الإصدار التالي', version: 'v{n, number}',
-    copyCode: 'نسخ الشيفرة', emptyDoc: 'لا شيء هنا بعد. اطلب شيئًا وسيظهر هنا.', previewOf: 'معاينة {file}، الإصدار {n, number}',
-    scrollMore: 'مرّر للمزيد', askLine: 'اسأل عن السطر {n, number}', explainLine: 'اشرح السطر {n, number}: {text}',
-    status: '{lines, plural, zero {لا أسطر} one {سطر واحد} two {سطران} few {# أسطر} many {# سطرًا} other {# سطر}} · v{cur, number} من {total, number}',
-  },
-})
 
 /* Tiny HTML/CSS highlighter for the canvas (code's highlightCode has no HTML/CSS mode yet) ─ */
 
@@ -76,8 +39,6 @@ function aiHighlight(line: string): ReactNode[] {
 /** Line diff for the streaming edit (code's lcsDiff): '=' kept, '+' added, '-' removed, in display order. */
 const aiLineDiff = (a: string[], b: string[]): ['=' | '+' | '-', string][] => lcsDiff(a, b).map(s => [s.type, s.type === '+' ? b[s.b!] : a[s.a!]])
 
-/* AI canvas ──────────────────────────────────────────────────────────────── */
-
 export type CanvasEdit = { prompt: string; reply: string; code: string }
 /** The default explainer: says whether a line is style or markup. */
 const aiExplainKind = (ln: string) => /[{}]|:\s/.test(ln) ? 'styles' : 'markup'
@@ -87,9 +48,7 @@ export type CanvasReply = { reply: string; code?: string } | string | null | und
 type CvMsg = { id: number; role: 'u' | 'a'; text: string; tool?: { state: 'run' | 'done'; add: number; del: number; ver: number }; dots?: boolean; stream?: boolean }
 type CvDiff = { lines: ['=' | '+' | '-', string][]; typing: number; chars: number; collapsing: boolean }
 
-const AI_NO_EDITS: CanvasEdit[] = [], AI_CANVAS_SLOT = '\u0000'
-/** A translated "Editing {file}" with the file name in bold. */
-const aiCanvasBold = (s: string, file: string) => { const i = s.indexOf(AI_CANVAS_SLOT); return i < 0 ? s : <>{s.slice(0, i)}<b className="font-medium text-[var(--fg)]">{file}</b>{s.slice(i + 1)}</> }
+const AI_NO_EDITS: CanvasEdit[] = []
 
 /** The page's Google Fonts stylesheets, matched by exact host (https://fonts.googleapis.com only). */
 const aiFontLink = (href: string) => { try { const u = new URL(href); return u.protocol === 'https:' && u.hostname === 'fonts.googleapis.com' } catch { return false } }
@@ -157,9 +116,8 @@ body{box-sizing:border-box;min-height:100vh;display:flex;align-items:center;just
 export function AICanvas({ file = 'untitled.html', initial = '', edits = AI_NO_EDITS, respond, explain: explainProp, intro, allowRemote = false, className }:
   { file?: string; initial?: string; edits?: CanvasEdit[]; respond?: (prompt: string, code: string) => CanvasReply | Promise<CanvasReply>; explain?: (n: number, line: string) => string; intro?: string; allowRemote?: boolean; className?: string }) {
   const reduce = useReducedMotion()
-  const t = useMessages(AI_CANVAS_MESSAGES)
-  const explain = explainProp ?? ((n: number, ln: string) => t('explain', { n, kind: aiExplainKind(ln) }))
-  const asked = useRef<{ text: string; n: number } | null>(null) // the "Ask about line N" prompt, so a translated one still explains
+  const explain = explainProp ?? ((n: number, ln: string) => `Line ${n} is part of the document’s ${(aiExplainKind(ln)) === 'styles' ? 'styles' : 'markup'}. Ask me to change it and I’ll edit it in place.`)
+  const asked = useRef<{ text: string; n: number } | null>(null) // the "Ask about line N" prompt
   const [V, setV] = useState([initial])
   const [cur, setCur] = useState(0)
   const [view, setView] = useState<'code' | 'prev'>('code')
@@ -218,7 +176,7 @@ export function AICanvas({ file = 'untitled.html', initial = '', edits = AI_NO_E
     }
     if (respond) {
       let r: CanvasReply
-      try { r = await respond(q, V[V.length - 1]) } catch { r = t('failed') }
+      try { r = await respond(q, V[V.length - 1]) } catch { r = 'Something went wrong. Try again.' }
       if (!alive.current) return
       const reply = typeof r === 'string' ? r : r?.reply ?? ''
       if (r && typeof r === 'object' && typeof r.code === 'string') {
@@ -226,10 +184,10 @@ export function AICanvas({ file = 'untitled.html', initial = '', edits = AI_NO_E
         const done = await apply(r.code); if (!done || !alive.current) return
         patch(id, { tool: { state: 'done', ...done } })
       } else patch(id, { dots: false })
-      await streamInto(id, reply || t('noChange')); setBusy(false); return
+      await streamInto(id, reply || 'No change.'); setBusy(false); return
     }
     const idx = edits.findIndex(e => e.prompt.toLowerCase() === q.toLowerCase()), e = edits[idx >= 0 ? idx : step]
-    if (!e) { patch(id, { dots: false, text: V.length > 1 ? t('noMoreEdits', { n: V.length }) : t('cantEdit') }); setBusy(false); return }
+    if (!e) { patch(id, { dots: false, text: V.length > 1 ? `I have no more edits. Use the version arrows to step back through v1 to v${V.length}.` : 'I can’t edit this document yet.' }); setBusy(false); return }
     patch(id, { dots: false, tool: { state: 'run', add: 0, del: 0, ver: 0 } })
     const r = await apply(e.code); if (!r || !alive.current) return
     setStep(s => Math.max(s, (idx >= 0 ? idx : step) + 1))
@@ -255,28 +213,28 @@ export function AICanvas({ file = 'untitled.html', initial = '', edits = AI_NO_E
       <div className="flex min-h-0 min-w-0 flex-col gap-2.5 border-[var(--line)] bg-[color-mix(in_srgb,var(--muted)_35%,var(--card))] p-3 max-md:h-[340px] max-md:border-b md:border-e">
         <div ref={logRef} aria-live="polite" aria-busy={busy} className="flex min-h-0 flex-1 flex-col gap-2.5 overflow-auto p-0.5">
           {msgs.map(m => m.role === 'u'
-            ? <motion.div key={m.id} initial={{ opacity: 0, y: 8 }} animate={{ opacity: 1, y: 0 }} transition={spring(0.25, 0.35)} dir="auto" className="max-w-[85%] self-end rounded-[14px] rounded-ee-[4px] bg-[var(--primary)] px-3 py-2 text-[13px] text-[var(--on-primary)]">{m.text}</motion.div>
+            ? <motion.div key={m.id} initial={{ opacity: 0, y: 8 }} animate={{ opacity: 1, y: 0 }} transition={spring(0.25, 0.35)} className="max-w-[85%] self-end rounded-[14px] rounded-ee-[4px] bg-[var(--primary)] px-3 py-2 text-[13px] text-[var(--on-primary)]">{m.text}</motion.div>
             : <motion.div key={m.id} initial={{ opacity: 0, y: 8 }} animate={{ opacity: 1, y: 0 }} transition={spring(0.25, 0.35)} className="max-w-[95%] text-[13px] leading-normal">
-              <div className="mb-1 flex items-center gap-1.5 text-xs font-medium text-[var(--fg3)]"><i className="h-2 w-2 rounded-full bg-[var(--accent)]" />{t('assistant')}</div>
+              <div className="mb-1 flex items-center gap-1.5 text-xs font-medium text-[var(--fg3)]"><i className="h-2 w-2 rounded-full bg-[var(--accent)]" />{'Assistant'}</div>
               {m.dots && <TypingDots />}
               {m.tool && <div className={cn('mt-1.5 flex flex-wrap items-center gap-2 px-2.5 py-2 text-xs text-[var(--fg2)]', surface.md)}>
-                {m.tool.state === 'run' ? <><Spinner size={12} tone="accent" label={t('editing', { file })} /><span>{aiCanvasBold(t('editing', { file: AI_CANVAS_SLOT }), file)}</span></>
-                  : <><Icon name="check" size={12} strokeWidth={3} className="text-[var(--ok)]" /><span>{aiCanvasBold(t('edited', { file: AI_CANVAS_SLOT }), file)}</span>
-                    <span dir="ltr" className="font-[family-name:var(--mono)] text-[var(--ok)]">+{m.tool.add}</span><span dir="ltr" className="font-[family-name:var(--mono)] text-[var(--bad)]">−{m.tool.del}</span><span className="flex-1" />
-                    <Button size="sm" variant="ghost" className={cn('!h-6', TOUCH.tap)} onClick={() => { setCur(m.tool!.ver - 1); setView('prev'); if (narrow) docPane.current?.scrollIntoView({ block: 'nearest', behavior: reduce ? 'auto' : 'smooth' }) }}>{t('viewVersion', { n: m.tool.ver })}</Button></>}
+                {m.tool.state === 'run' ? <><Spinner size={12} tone="accent" label={`Editing ${file}`} /><span>Editing <b className="font-medium text-[var(--fg)]">{file}</b></span></>
+                  : <><Icon name="check" size={12} strokeWidth={3} className="text-[var(--ok)]" /><span>Edited <b className="font-medium text-[var(--fg)]">{file}</b></span>
+                    <span className="font-[family-name:var(--mono)] text-[var(--ok)]">+{m.tool.add}</span><span className="font-[family-name:var(--mono)] text-[var(--bad)]">−{m.tool.del}</span><span className="flex-1" />
+                    <Button size="sm" variant="ghost" className={cn('!h-6', TOUCH.tap)} onClick={() => { setCur(m.tool!.ver - 1); setView('prev'); if (narrow) docPane.current?.scrollIntoView({ block: 'nearest', behavior: reduce ? 'auto' : 'smooth' }) }}>{`View v${m.tool.ver}`}</Button></>}
               </div>}
-              {m.text && <div dir="auto" className={cn(m.tool && 'mt-2', m.stream && 'ui-caret')}>{m.text}</div>}
+              {m.text && <div className={cn(m.tool && 'mt-2', m.stream && 'ui-caret')}>{m.text}</div>}
             </motion.div>)}
         </div>
         <div className="flex flex-wrap gap-1.5">
           {!busy && step < edits.length && (
             <motion.span key={step} initial={{ opacity: 0, y: 4 }} animate={{ opacity: 1, y: 0 }} className="inline-flex">
-              <Chip icon="sparkles" onClick={() => send(edits[step].prompt)}><span dir="auto">{edits[step].prompt}</span></Chip>
+              <Chip icon="sparkles" onClick={() => send(edits[step].prompt)}><span>{edits[step].prompt}</span></Chip>
             </motion.span>
           )}
         </div>
         <div className="flex items-center gap-2 rounded-full border border-[var(--line)] bg-[var(--card)] py-1 pe-1 ps-4 focus-within:border-[var(--fg3)]">
-          <input ref={inRef} value={text} onChange={e => setText(e.target.value)} onKeyDown={e => { if (e.key === 'Enter' && !e.nativeEvent.isComposing) send(text) }} dir="auto" placeholder={t('askChange')} aria-label={t('askChange')}
+          <input ref={inRef} value={text} onChange={e => setText(e.target.value)} onKeyDown={e => { if (e.key === 'Enter' && !e.nativeEvent.isComposing) send(text) }} placeholder={'Ask for a change'} aria-label={'Ask for a change'}
             className={cn('h-8 min-w-0 flex-1 border-0 bg-transparent text-[13px] outline-none placeholder:text-[var(--fg3)]', TOUCH.input)} />
           <SendButton onClick={() => send(text)} disabled={busy || !text.trim()} />
         </div>
@@ -285,22 +243,22 @@ export function AICanvas({ file = 'untitled.html', initial = '', edits = AI_NO_E
       <div ref={docPane} className="flex min-h-0 min-w-0 flex-col max-md:h-[440px] max-md:scroll-mt-24">
         <div className="flex h-12 flex-none items-center gap-2.5 border-b border-[var(--line)] pe-2.5 ps-3 max-sm:gap-1.5 max-sm:pe-1.5 max-sm:ps-2">
           <span className="flex min-w-0 items-center gap-1.5 text-[13px] font-medium whitespace-nowrap max-sm:hidden"><Icon name="file" size={13} />{file}</span>
-          <SegmentedControl size="sm" className="[@media(pointer:coarse)]:[&>button]:min-h-8" options={[{ value: 'code', label: t('code') }, { value: 'prev', label: t('preview') }]} value={view} onChange={v => { setView(v as 'code' | 'prev'); setSelLine(null) }} />
+          <SegmentedControl size="sm" className="[@media(pointer:coarse)]:[&>button]:min-h-8" options={[{ value: 'code', label: 'Code' }, { value: 'prev', label: 'Preview' }]} value={view} onChange={v => { setView(v as 'code' | 'prev'); setSelLine(null) }} />
           <span className="flex-1" />
           <span className="flex items-center gap-0.5 text-xs text-[var(--fg2)]">
-            <IconButton icon={<Icon name="chevronLeft" size={14} className="ui-flip" />} label={t('prevVersion')} className={TOUCH.tap} disabled={cur === 0 || !!diff} onClick={() => { setCur(c => c - 1); setFlash(f => f + 1); setSelLine(null) }} />
-            <span className="ui-num w-6 text-center">{t('version', { n: cur + 1 })}</span>
-            <IconButton icon={<Icon name="chevronRight" size={14} className="ui-flip" />} label={t('nextVersion')} className={TOUCH.tap} disabled={cur === V.length - 1 || !!diff} onClick={() => { setCur(c => c + 1); setFlash(f => f + 1); setSelLine(null) }} />
+            <IconButton icon={<Icon name="chevronLeft" size={14} />} label={'Previous version'} className={TOUCH.tap} disabled={cur === 0 || !!diff} onClick={() => { setCur(c => c - 1); setFlash(f => f + 1); setSelLine(null) }} />
+            <span className="ui-num w-6 text-center">{`v${cur + 1}`}</span>
+            <IconButton icon={<Icon name="chevronRight" size={14} />} label={'Next version'} className={TOUCH.tap} disabled={cur === V.length - 1 || !!diff} onClick={() => { setCur(c => c + 1); setFlash(f => f + 1); setSelLine(null) }} />
           </span>
-          <CopyButton text={shown} size="icon-sm" label={t('copyCode')} className={TOUCH.tap} />
+          <CopyButton text={shown} size="icon-sm" label={'Copy code'} className={TOUCH.tap} />
         </div>
         <div className="relative min-h-0 flex-1">
           {empty ? (
             <div className="absolute inset-0 grid place-items-center bg-[var(--card)] p-6 text-center text-[13px] text-[var(--fg3)]">
-              <span><Icon name="file" size={18} className="mx-auto mb-2 block" />{t('emptyDoc')}</span>
+              <span><Icon name="file" size={18} className="mx-auto mb-2 block" />{'Nothing here yet. Ask for something and it will appear here.'}</span>
             </div>
           ) : view === 'code' ? (
-            <div ref={el => { codeRef.current = el; edgeRef(el) }} dir="ltr" onScroll={() => setSelLine(null)} className="absolute inset-0 overflow-auto overscroll-x-contain bg-[var(--card)] [contain:inline-size]">
+            <div ref={el => { codeRef.current = el; edgeRef(el) }} onScroll={() => setSelLine(null)} className="absolute inset-0 overflow-auto overscroll-x-contain bg-[var(--card)] [contain:inline-size]">
               <motion.pre key={diff ? 'diff' : `v${cur}-${flash}`} initial={diff ? false : { opacity: 0.3 }} animate={{ opacity: 1 }} transition={{ duration: 0.2 }}
                 className="m-0 min-w-max pt-3 pb-12 font-[family-name:var(--mono)] text-xs leading-[1.65]" onKeyDown={diff ? undefined : roving.onKeyDown}>
                 {diff ? diff.lines.map(([t, l], i) => {
@@ -327,86 +285,30 @@ export function AICanvas({ file = 'untitled.html', initial = '', edits = AI_NO_E
             </div>
           ) : (
             <div className="absolute inset-0 bg-[var(--bg)] bg-[radial-gradient(circle,var(--line2)_1px,transparent_1.2px)] bg-[length:16px_16px]">
-              <AiPreview key={`${cur}-${flash}`} html={shown} allowRemote={allowRemote} title={t('previewOf', { file, n: cur + 1 })} />
+              <AiPreview key={`${cur}-${flash}`} html={shown} allowRemote={allowRemote} title={`Preview of ${file}, version ${cur + 1}`} />
             </div>
           )}
-          {view === 'code' && !empty && <ScrollEdges {...edges} at="top" hint={t('scrollMore')} />}
+          {view === 'code' && !empty && <ScrollEdges {...edges} at="top" hint={'Scroll for more'} />}
           <AnimatePresence>
             {selLine && view === 'code' && (
-              <motion.button key={selLine.n} dir="ltr" initial={{ opacity: 0, x: 6 }} animate={{ opacity: 1, x: 0 }} exit={{ opacity: 0 }} transition={{ duration: 0.18 }}
-                style={{ top: selLine.top - 4 }} onClick={() => { const ln = shownLines[selLine.n - 1].trim(), q = t('explainLine', { n: selLine.n, text: ln.slice(0, 40) + (ln.length > 40 ? '…' : '') }); asked.current = { text: q, n: selLine.n }; setText(q); setSelLine(null); inRef.current?.focus() }}
-                className="absolute end-4 z-[3] h-7 cursor-pointer rounded-full border border-[var(--line)] bg-[var(--card)] px-2.5 text-xs font-medium shadow-[var(--shadow)] [@media(pointer:coarse)]:-mt-1.5 [@media(pointer:coarse)]:h-10 [@media(pointer:coarse)]:px-3.5 [@media(pointer:coarse)]:text-[13px]"><span dir="auto">{t('askLine', { n: selLine.n })}</span></motion.button>
+              <motion.button key={selLine.n} initial={{ opacity: 0, x: 6 }} animate={{ opacity: 1, x: 0 }} exit={{ opacity: 0 }} transition={{ duration: 0.18 }}
+                style={{ top: selLine.top - 4 }} onClick={() => { const ln = shownLines[selLine.n - 1].trim(), q = `Explain line ${selLine.n}: ${ln.slice(0, 40) + (ln.length > 40 ? '…' : '')}`; asked.current = { text: q, n: selLine.n }; setText(q); setSelLine(null); inRef.current?.focus() }}
+                className="absolute end-4 z-[3] h-7 cursor-pointer rounded-full border border-[var(--line)] bg-[var(--card)] px-2.5 text-xs font-medium shadow-[var(--shadow)] [@media(pointer:coarse)]:-mt-1.5 [@media(pointer:coarse)]:h-10 [@media(pointer:coarse)]:px-3.5 [@media(pointer:coarse)]:text-[13px]"><span>{`Ask about line ${selLine.n}`}</span></motion.button>
             )}
           </AnimatePresence>
-          <Badge size="sm" className="absolute bottom-3 start-3 border border-[var(--line)] !bg-[var(--card)] font-normal tabular-nums !text-[var(--fg3)]">{t('status', { lines: lineCount, cur: cur + 1, total: V.length })}</Badge>
+          <Badge size="sm" className="absolute bottom-3 start-3 border border-[var(--line)] !bg-[var(--card)] font-normal tabular-nums !text-[var(--fg3)]">{`${plural(lineCount, 'line')} · v${cur + 1} of ${V.length}`}</Badge>
         </div>
       </div>
     </div>
   )
 }
 
-/* Agent transit map: geometry ────────────────────────────────────────────── */
-
-/** AgentTransitMap strings: its line, station, hub and zone names and its panels (machine-drafted de/ar). */
-export const TRANSIT_MESSAGES = defineMessages('transit', {
-  en: {
-    research: 'Research', payments: 'Payments', approvals: 'Approvals', evals: 'Evals', memory: 'Memory', index: 'Indexing loop',
-    Intake: 'Intake', Analyst: 'Analyst', Deploy: 'Deploy', Search: 'Search', 'Pay agent': 'Pay agent', Ledger: 'Ledger', Human: 'Human', Risk: 'Risk', Audit: 'Audit',
-    Grader: 'Grader', Evals: 'Evals', Memory: 'Memory', Recall: 'Recall', Embed: 'Embed', Cache: 'Cache', Refresh: 'Refresh', Index: 'Index', Research: 'Research',
-    Product: 'Product', Finance: 'Finance', zoneRead: 'Zone 1 · read', zoneWrite: 'Zone 2 · write', zoneQuality: 'Zone 4 · quality', zoneMoney: 'Zone 3 · money',
-    needsApproval: '{name} needs your approval', policyTimeout: 'Approved by policy when it runs out', secs: '{n}s', reject: 'Reject', approve: 'Approve',
-    moreWaiting: '+{n, number} more waiting', noApprovals: 'No approvals waiting', mapScrolls: 'Transit map, scrolls sideways', mapLabel: 'Transit map of agent teams',
-    queueLabel: 'Event queue, {n, number} waiting', queue: 'Event queue', emptyQueue: 'empty', more: '+{n, number} more', jobs: '{n, number}/{max, number} jobs',
-    dropped: ' · {n, number} dropped', swipeMap: 'Swipe the map', waitingSr: '{n, plural, one {# waiting for your approval} other {# waiting for your approval}}',
-    routing: 'Routing decision', orchestrator: 'Orchestrator', job: 'Job (numbered, matches the trace)', queued: 'Queued for a busy agent', congestion: 'Congestion',
-    waiting: 'Waiting for approval', play: 'Play', pause: 'Pause', speed: 'Speed', hitl: 'Human in the loop', maxJobs: 'Max jobs', fire: 'Fire event',
-    traceScrolls: 'Trace table, scrolls sideways', trace: 'Trace', ago: '−{n, number}s', now: 'now', time: 'time', tokens: 'tokens', usd: 'USD',
-    jobsAppear: 'Jobs appear here as they start.', rejected: 'rejected', done: 'done', inReview: '{n, number} in review', waitingFor: 'waiting for {station}',
-    follow: 'Follow job {id}, {name}, on the map', swipeTrace: 'Swipe the trace',
-    runLive: 'Live', runDone: 'Complete', runFailed: 'Failed', runCancelled: 'Cancelled', runAgent: 'Agent (numbered, matches the trace)', runStop: 'Stop (visits)',
-    runErrorStop: 'Failed here', offMap: 'off the map', runEmpty: 'Steps appear here as the run reports them.', step: 'Step',
-    runSteps: '{n, plural, one {# step} other {# steps}}', runSummary: '{steps} · {time} · {tokens} tokens · {usd}',
-  },
-  de: {
-    research: 'Recherche', payments: 'Zahlungen', approvals: 'Freigaben', evals: 'Evaluierung', memory: 'Gedächtnis', index: 'Indexierungsschleife',
-    Intake: 'Eingang', Analyst: 'Analyst', Deploy: 'Deployment', Search: 'Suche', 'Pay agent': 'Zahl-Agent', Ledger: 'Hauptbuch', Human: 'Mensch', Risk: 'Risiko', Audit: 'Prüfung',
-    Grader: 'Bewerter', Evals: 'Evals', Memory: 'Gedächtnis', Recall: 'Abruf', Embed: 'Einbetten', Cache: 'Cache', Refresh: 'Auffrischen', Index: 'Index', Research: 'Recherche',
-    Product: 'Produkt', Finance: 'Finanzen', zoneRead: 'Zone 1 · lesen', zoneWrite: 'Zone 2 · schreiben', zoneQuality: 'Zone 4 · Qualität', zoneMoney: 'Zone 3 · Geld',
-    needsApproval: '{name} braucht deine Freigabe', policyTimeout: 'Wird bei Ablauf per Richtlinie freigegeben', secs: '{n} s', reject: 'Ablehnen', approve: 'Freigeben',
-    moreWaiting: '+{n, number} weitere warten', noApprovals: 'Keine Freigaben offen', mapScrolls: 'Liniennetz, seitlich scrollbar', mapLabel: 'Liniennetz der Agenten-Teams',
-    queueLabel: 'Ereigniswarteschlange, {n, number} wartend', queue: 'Ereignisse', emptyQueue: 'leer', more: '+{n, number} weitere', jobs: '{n, number}/{max, number} Jobs',
-    dropped: ' · {n, number} verworfen', swipeMap: 'Karte wischen', waitingSr: '{n, number} warten auf deine Freigabe',
-    routing: 'Routing-Entscheidung', orchestrator: 'Orchestrator', job: 'Job (nummeriert, wie im Trace)', queued: 'Wartet auf einen belegten Agenten', congestion: 'Stau',
-    waiting: 'Wartet auf Freigabe', play: 'Abspielen', pause: 'Pausieren', speed: 'Tempo', hitl: 'Mensch im Prozess', maxJobs: 'Max. Jobs', fire: 'Ereignis auslösen',
-    traceScrolls: 'Trace-Tabelle, seitlich scrollbar', trace: 'Trace', ago: '−{n, number} s', now: 'jetzt', time: 'Zeit', tokens: 'Tokens', usd: 'USD',
-    jobsAppear: 'Jobs erscheinen hier, sobald sie starten.', rejected: 'abgelehnt', done: 'fertig', inReview: '{n, number} in Prüfung', waitingFor: 'wartet auf {station}',
-    follow: 'Job {id}, {name}, auf der Karte folgen', swipeTrace: 'Trace wischen',
-    runLive: 'Live', runDone: 'Abgeschlossen', runFailed: 'Fehlgeschlagen', runCancelled: 'Abgebrochen', runAgent: 'Agent (nummeriert, wie im Trace)', runStop: 'Halt (Besuche)',
-    runErrorStop: 'Hier fehlgeschlagen', offMap: 'nicht auf der Karte', runEmpty: 'Schritte erscheinen hier, sobald der Lauf sie meldet.', step: 'Schritt',
-    runSteps: '{n, plural, one {# Schritt} other {# Schritte}}', runSummary: '{steps} · {time} · {tokens} Tokens · {usd}',
-  },
-  ar: {
-    research: 'البحث', payments: 'المدفوعات', approvals: 'الموافقات', evals: 'التقييمات', memory: 'الذاكرة', index: 'حلقة الفهرسة',
-    Intake: 'الاستقبال', Analyst: 'المحلّل', Deploy: 'النشر', Search: 'البحث', 'Pay agent': 'وكيل الدفع', Ledger: 'السجل', Human: 'إنسان', Risk: 'المخاطر', Audit: 'التدقيق',
-    Grader: 'المقيّم', Evals: 'التقييمات', Memory: 'الذاكرة', Recall: 'الاسترجاع', Embed: 'التضمين', Cache: 'التخزين المؤقت', Refresh: 'التحديث', Index: 'الفهرس', Research: 'البحث',
-    Product: 'المنتج', Finance: 'المالية', zoneRead: 'المنطقة 1 · قراءة', zoneWrite: 'المنطقة 2 · كتابة', zoneQuality: 'المنطقة 4 · الجودة', zoneMoney: 'المنطقة 3 · المال',
-    needsApproval: '{name} بحاجة إلى موافقتك', policyTimeout: 'تُمنح الموافقة وفق السياسة عند انتهاء الوقت', secs: '{n} ث', reject: 'رفض', approve: 'موافقة',
-    moreWaiting: '+{n, number} أخرى في الانتظار', noApprovals: 'لا موافقات معلّقة', mapScrolls: 'خريطة الخطوط، تُمرَّر أفقيًا', mapLabel: 'خريطة خطوط فرق الوكلاء',
-    queueLabel: 'قائمة الأحداث، {n, number} في الانتظار', queue: 'قائمة الأحداث', emptyQueue: 'فارغة', more: '+{n, number} أخرى', jobs: '{n, number}/{max, number} مهام',
-    dropped: ' · أُسقط {n, number}', swipeMap: 'اسحب الخريطة', waitingSr: '{n, number} بانتظار موافقتك',
-    routing: 'قرار توجيه', orchestrator: 'منسّق', job: 'مهمة (مرقّمة، تطابق السجل)', queued: 'في انتظار وكيل مشغول', congestion: 'ازدحام',
-    waiting: 'بانتظار الموافقة', play: 'تشغيل', pause: 'إيقاف مؤقت', speed: 'السرعة', hitl: 'إنسان في الحلقة', maxJobs: 'أقصى عدد للمهام', fire: 'إطلاق حدث',
-    traceScrolls: 'جدول السجل، يُمرَّر أفقيًا', trace: 'السجل', ago: '−{n, number} ث', now: 'الآن', time: 'الوقت', tokens: 'الرموز', usd: 'دولار',
-    jobsAppear: 'تظهر المهام هنا عند بدئها.', rejected: 'مرفوضة', done: 'منجزة', inReview: '{n, number} قيد المراجعة', waitingFor: 'بانتظار {station}',
-    follow: 'تتبّع المهمة {id}، {name}، على الخريطة', swipeTrace: 'اسحب السجل',
-    runLive: 'مباشر', runDone: 'اكتمل', runFailed: 'أخفق', runCancelled: 'أُلغي', runAgent: 'وكيل (مرقّم، يطابق السجل)', runStop: 'محطة (الزيارات)',
-    runErrorStop: 'أخفق هنا', offMap: 'خارج الخريطة', runEmpty: 'تظهر الخطوات هنا عندما يبلّغ عنها التشغيل.', step: 'خطوة',
-    runSteps: '{n, plural, zero {لا خطوات} one {خطوة واحدة} two {خطوتان} few {# خطوات} many {# خطوة} other {# خطوة}}', runSummary: '{steps} · {time} · {tokens} رمز · {usd}',
-  },
-})
-type AtKey = keyof typeof TRANSIT_MESSAGES.en
-/** A station, hub or line name in the reader's language (names the map doesn't know show as given). */
-const atName = (t: (k: AtKey) => string, n: string) => Object.prototype.hasOwnProperty.call(TRANSIT_MESSAGES.en, n) ? t(n as AtKey) : n
+/** Display names for the map's line and zone ids; stations are named by their id. */
+const AT_NAMES: Record<string, string> = {
+  research: 'Research', payments: 'Payments', approvals: 'Approvals', evals: 'Evals', memory: 'Memory', index: 'Indexing loop',
+  zoneRead: 'Zone 1 · read', zoneWrite: 'Zone 2 · write', zoneQuality: 'Zone 4 · quality', zoneMoney: 'Zone 3 · money',
+}
+const atName = (n: string) => AT_NAMES[n] ?? n
 
 type Pt = [number, number]
 const AT_W = 1000, AT_H = 720
@@ -450,8 +352,6 @@ const AT_SP: Record<string, Record<string, number>> = {}
 AT_ST.forEach(([n, k, pt]) => { (AT_SP[k] ??= {})[n] = atNear(k, pt) })
 Object.entries(AT_PATH).forEach(([k, pts]) => AT_HUBS.forEach(([n, pt]) => { if (pts.some(p => atSame(p, pt))) (AT_SP[k] ??= {})[n] = atNear(k, pt) }))
 AT_SP.memory.Index = atNear('memory', [AT_LC[0] - AT_LR, AT_LC[1]])
-
-/* Agent transit map: the shared WorkflowEngine (diagrams), on this geometry ─────── */
 
 const AT_HITL_TIMEOUT = 25, AT_QMAX = 8, AT_WIN = 30
 /** map units a token covers per simulated second along a line; the Indexing-loop train is slower */
@@ -650,20 +550,20 @@ const atTrainDeg = (clock: number) => ((((AT_LOOP_L * 0.55 + AT_LOOP_SPEED * clo
  * animations can stay pure scale + opacity, which run on the compositor (a % translate would keep them on the main thread). */
 const atCentred = (x: number, y: number, u: number) => ({ left: `${(x / AT_W) * 100}%`, top: `${(y / AT_H) * 100}%`, marginLeft: `${(-u / 2 / AT_W) * 100}%`, marginTop: `${(-u / 2 / AT_W) * 100}%`, ...atBox(u) })
 // each layer is a fixed-size box with strict containment: a change inside one lays out and repaints that layer only
-const AT_SVG_LAYER = 'pointer-events-none absolute top-0 left-0 block h-full w-full [contain:strict]' // rtl-lint-ignore: map layer (LTR drawing)
+const AT_SVG_LAYER = 'pointer-events-none absolute top-0 left-0 block h-full w-full [contain:strict]' // rtl-lint-ignore: map layer
 const AT_HTML_LAYER = 'pointer-events-none absolute inset-0 [contain:strict]'
+
 const AT_VIEWBOX = `0 0 ${AT_W} ${AT_H}`
 
 /** The still drawing: zones, congestion heat, lines and ticks (three stacked SVGs). Re-renders only when the followed job's lines (`lit`) change; the heat paths are styled by the map's heat tween (`regHeat`). */
 const AtMapBase = memo(function AtMapBase({ lit, fs, regHeat }: { lit: string | null; fs: number; regHeat: (el: SVGPathElement | null) => void }) {
-  const t = useMessages(TRANSIT_MESSAGES)
   const litSet = useMemo(() => lit === null ? null : new Set(lit.split(',')), [lit])
   const on = (k: string) => !litSet || litSet.has(k)
   return <>
-    <svg viewBox={AT_VIEWBOX} role="img" aria-label={t('mapLabel')} className="block h-auto w-full">
+    <svg viewBox={AT_VIEWBOX} role="img" aria-label={'Transit map of agent teams'} className="block h-auto w-full">
       {AT_ZONES.map(([x, y, w, h, l, pos]) => <g key={l}>
         <rect x={x} y={y} width={w} height={h} fill="var(--muted)" stroke="var(--line2)" strokeDasharray="5 4" />
-        <text x={pos.includes('l') ? x + 14 : x + w - 14} y={pos.includes('t') ? y + 22 : y + h - 12} textAnchor={pos.includes('l') ? 'start' : 'end'} fill="var(--fg)" style={{ font: `500 ${12 * fs}px var(--font)` }}>{t(l)}</text>
+        <text x={pos.includes('l') ? x + 14 : x + w - 14} y={pos.includes('t') ? y + 22 : y + h - 12} textAnchor={pos.includes('l') ? 'start' : 'end'} fill="var(--fg)" style={{ font: `500 ${12 * fs}px var(--font)` }}>{atName(l)}</text>
       </g>)}
     </svg>
     {/* the heat has its own small drawing on its own layer, so a heat tween lays out and repaints a few paths, not the whole map */}
@@ -695,11 +595,10 @@ const AtMapBase = memo(function AtMapBase({ lit, fs, regHeat }: { lit: string | 
 /** The global event queue panel (waiting for a job slot), redrawn only when what it shows changes. */
 const AtQueuePanel = memo(function AtQueuePanel({ queue, qlen, qmax, maxJobs, running, active, dropped, narrow }:
   { sig: string; queue: { id: number; ev: string; from: string }[]; qlen: number; qmax: number; maxJobs: number; running: number; active: number; dropped: number; narrow: boolean }) {
-  const t = useMessages(TRANSIT_MESSAGES), { fmt } = useLocale()
   return (
-    <g transform={`translate(${AT_EQ[0]},${AT_EQ[1]})`} aria-label={t('queueLabel', { n: qlen })}>
+    <g transform={`translate(${AT_EQ[0]},${AT_EQ[1]})`} aria-label={`Event queue, ${qlen} waiting`}>
       <rect width={AT_EQ_W} height={44 + AT_EQ_ROWS * AT_EQ_ROW + 46} rx={12} fill="var(--card)" stroke="var(--line2)" />
-      <text x={14} y={26} fill="var(--fg)" style={{ font: '600 15px var(--font)' }}>{t('queue')}</text>
+      <text x={14} y={26} fill="var(--fg)" style={{ font: '600 15px var(--font)' }}>{'Event queue'}</text>
       <text x={AT_EQ_W - 14} y={26} textAnchor="end" fill="var(--fg3)" style={{ font: `${narrow ? 14 : 13}px var(--mono)` }}>{fmt.number(qlen)}/{fmt.number(qmax)}</text>
       <AnimatePresence initial={false}>
         {queue.map((q, i) => (
@@ -709,11 +608,11 @@ const AtQueuePanel = memo(function AtQueuePanel({ queue, qlen, qmax, maxJobs, ru
             <text x={37} y={18} fill="var(--fg)" style={{ font: '14px var(--mono)' }}>{q.ev}</text>
           </motion.g>))}
       </AnimatePresence>
-      {!qlen && <text x={14} y={62} fill="var(--fg3)" style={{ font: '14px var(--font)' }}>{t('emptyQueue')}</text>}
-      {qlen > AT_EQ_ROWS && <text x={AT_EQ_W - 14} y={40 + AT_EQ_ROWS * AT_EQ_ROW + 4} textAnchor="end" fill="var(--fg3)" style={{ font: `${narrow ? 14 : 13}px var(--font)` }}>{t('more', { n: qlen - AT_EQ_ROWS })}</text>}
+      {!qlen && <text x={14} y={62} fill="var(--fg3)" style={{ font: '14px var(--font)' }}>{'empty'}</text>}
+      {qlen > AT_EQ_ROWS && <text x={AT_EQ_W - 14} y={40 + AT_EQ_ROWS * AT_EQ_ROW + 4} textAnchor="end" fill="var(--fg3)" style={{ font: `${narrow ? 14 : 13}px var(--font)` }}>{`+${qlen - AT_EQ_ROWS} more`}</text>}
       <g transform={`translate(14,${44 + AT_EQ_ROWS * AT_EQ_ROW + 22})`}>
         {Array.from({ length: maxJobs }, (_, i) => <circle key={i} cx={6 + i * 15} cy={0} r={5} fill={i < running ? 'var(--fg2)' : 'none'} stroke="var(--fg3)" strokeWidth={1.5} />)}
-        <text x={14 + maxJobs * 15} y={5} fill="var(--fg2)" style={{ font: '14px var(--font)' }}>{t('jobs', { n: active, max: maxJobs })}{dropped ? t('dropped', { n: dropped }) : ''}</text>
+        <text x={14 + maxJobs * 15} y={5} fill="var(--fg2)" style={{ font: '14px var(--font)' }}>{`${active}/${maxJobs} jobs`}{dropped ? ` · ${dropped} dropped` : ''}</text>
       </g>
     </g>
   )
@@ -772,11 +671,11 @@ const AtHubs = memo(function AtHubs() {
 
 /** Station, loop and hub names (still; they sit over the tokens). */
 const AtLabels = memo(function AtLabels({ fs }: { fs: number }) {
-  const t = useMessages(TRANSIT_MESSAGES), nm = (n: string) => atName(t, n)
+  const nm = atName
   return <>
     {AT_ST.map(([n, , pt, dx, dy, anc]) => <text key={n} x={pt[0] + dx} y={pt[1] + dy} textAnchor={anc}>{nm(n)}</text>)}
     {AT_LOOPST.map(([n, dx, dy, anc, ang]) => { const a = ang * Math.PI / 180; return <text key={n} x={AT_LC[0] + Math.cos(a) * AT_LR + dx + Math.cos(a) * 6} y={AT_LC[1] + Math.sin(a) * AT_LR + dy} textAnchor={anc}>{nm(n)}</text> })}
-    <text x={AT_LC[0] - AT_LR - 18} y={AT_LC[1] + 5} textAnchor="end" fill="var(--fg)" fontWeight={600}>{t('Index')}</text>
+    <text x={AT_LC[0] - AT_LR - 18} y={AT_LC[1] + 5} textAnchor="end" fill="var(--fg)" fontWeight={600}>{'Index'}</text>
     {AT_HUBS.map(([n, [x, y], dx, dy, anc]) => <text key={n} x={x + dx} y={y + dy} textAnchor={anc} fill="var(--fg)" style={{ font: `600 ${15 * fs}px var(--font)` }}>{nm(n)}</text>)}
   </>
 })
@@ -794,7 +693,7 @@ function AtPulse({ x, y, active }: { x: number; y: number; active: boolean }) {
     return () => { a.cancel(); anim.current = null }
   }, [])
   useEffect(() => { const a = anim.current; if (!a) return; if (active) a.play(); else a.pause() }, [active])
-  return <div ref={ref} className="absolute opacity-0" style={atCentred(x, y, AT_PULSE)} /* rtl-lint-ignore: map coordinates (LTR drawing) */>
+  return <div ref={ref} className="absolute opacity-0" style={atCentred(x, y, AT_PULSE)}>
     <svg viewBox={`${-AT_PULSE / 2} ${-AT_PULSE / 2} ${AT_PULSE} ${AT_PULSE}`} className="block h-full w-full overflow-visible"><circle r={18} fill="none" stroke="var(--warn)" strokeWidth={2} /></svg>
   </div>
 }
@@ -807,7 +706,7 @@ function AtFlash({ x, y }: { x: number; y: number }) {
     const a = el.animate([k(0.4, 1), k(1.2, 1), k(1, 0)], { duration: 1000, fill: 'forwards' })
     return () => a.cancel()
   }, [])
-  return <div ref={ref} className="absolute rounded-full bg-[var(--bad)] opacity-0" style={atCentred(x, y, AT_FLASH)} /* rtl-lint-ignore: map coordinates (LTR drawing) */ />
+  return <div ref={ref} className="absolute rounded-full bg-[var(--bad)] opacity-0" style={atCentred(x, y, AT_FLASH)} />
 }
 
 /** The trace window's slide at sim time `clock`. */
@@ -850,9 +749,8 @@ function AtRings({ eng, machines, clock }: { eng: WorkflowEngine; machines: Reco
 }
 /** An approval's seconds left (amber under 6); follows the clock store, re-rendering when the whole second changes. */
 function AtCountdown({ tk, clock }: { tk: WorkflowToken; clock: AtClock }) {
-  const t = useMessages(TRANSIT_MESSAGES)
   const [n, soon] = useSyncExternalStore(clock.sub, () => `${Math.ceil(tk.t)}|${tk.t < 6 ? 1 : ''}`, () => '0|').split('|')
-  return <span className={cn('w-8 flex-none font-[family-name:var(--mono)] text-xs whitespace-pre', soon ? 'text-[var(--warn)]' : 'text-[var(--fg3)]')} title={t('policyTimeout')}>{atPad(t('secs', { n: Number(n) }), 3)}</span>
+  return <span className={cn('w-8 flex-none font-[family-name:var(--mono)] text-xs whitespace-pre', soon ? 'text-[var(--warn)]' : 'text-[var(--fg3)]')} title={'Approved by policy when it runs out'}>{atPad(`${Number(n)}s`, 3)}</span>
 }
 /** A trace bar's look: solid, or hatched while waiting; the opacity is folded into the colour (no layer per bar). */
 const atSegFill = (s: { kind: string; sub: boolean }, c: string) => {
@@ -862,19 +760,18 @@ const atSegFill = (s: { kind: string; sub: boolean }, c: string) => {
 }
 /** A trace row's time strip and numbers; a running job's refresh with the clock store, a finished job's never. */
 function AtTraceCells({ j, clock: store, strip }: { j: WorkflowJob; clock: AtClock; strip: (el: HTMLDivElement | null) => void }) {
-  const t = useMessages(TRANSIT_MESSAGES), { fmt } = useLocale()
   const clock = useSyncExternalStore(store.sub, () => j.done ? j.t1 ?? store.get() : store.get(), () => 0)
   const tx = (v: number) => `${(v / AT_WIN) * 100}%`
   return <>
-    <div dir="ltr" className="relative h-3.5 overflow-x-clip">
+    <div className="relative h-3.5 overflow-x-clip">
       {/* the window slides by transform: the map writes it into every strip (a finished row never re-renders for it) */}
       <div ref={strip} className="absolute inset-0">
         {j.segs.map((s, k) => { const b = s.t1 ?? clock; if (b < clock - AT_WIN) return null; return (
           <span key={k} title={s.label} className={cn('absolute rounded-[var(--r-sm)]', s.sub ? 'top-[3px] h-2' : 'top-0 h-3.5')}
-            style={{ left: tx(s.t0), width: `max(1px, ${tx(b - s.t0)})`, background: atSegFill(s, AT_C(s.line)) }} /* rtl-lint-ignore: time axis (LTR) */ />) })}
+            style={{ left: tx(s.t0), width: `max(1px, ${tx(b - s.t0)})`, background: atSegFill(s, AT_C(s.line)) }} />) })}
       </div>
     </div>
-    <span className="text-end font-[family-name:var(--mono)] text-xs whitespace-pre">{atPad(t('secs', { n: fmt.number((j.t1 ?? clock) - j.t0, { minimumFractionDigits: 1, maximumFractionDigits: 1 }) }), 6)}</span>
+    <span className="text-end font-[family-name:var(--mono)] text-xs whitespace-pre">{atPad(`${fmt.number((j.t1 ?? clock) - j.t0, { minimumFractionDigits: 1, maximumFractionDigits: 1 })}s`, 6)}</span>
     <span className="text-end font-[family-name:var(--mono)] text-xs whitespace-pre">{atPad(fmt.compact(Math.round(j.usage.tokens / 100) * 100), 6)}</span>
     <span className="text-end font-[family-name:var(--mono)] text-xs whitespace-pre">{atPad(fmt.usd(j.usage.usd), 8)}</span>
   </>
@@ -890,13 +787,12 @@ type AtRowProps = {
  * A fixed-size box with strict containment, so its changing numbers lay out only itself.
  */
 const AtTraceRow = memo(function AtTraceRow({ j, i, cur, hover, pinned, clock, strip, setHover, setPin }: AtRowProps) {
-  const t = useMessages(TRANSIT_MESSAGES)
   return (
     <motion.div initial={{ opacity: 0 }} animate={{ opacity: j.done ? 0.6 : 1 }} exit={{ opacity: 0 }} transition={{ duration: 0.25 }}
       {...atFollow(j.id, setHover, setPin)} style={{ transform: `translateY(${i * AT_ROW_H}px)`, height: AT_ROW_H }}
       className={cn('absolute inset-x-0 top-0 grid cursor-pointer items-center border-b border-[var(--line)] text-[13px] [contain:strict] hover:bg-[color-mix(in_srgb,var(--muted)_60%,transparent)]', AT_TRACE_COLS, hover && 'bg-[color-mix(in_srgb,var(--muted)_60%,transparent)]')}>
-      <div className="sticky start-0 z-[1] flex min-w-0 items-center gap-2 bg-[var(--card)] whitespace-nowrap max-sm:shadow-[6px_0_6px_-6px_rgba(0,0,0,.25)] rtl:max-sm:shadow-[-6px_0_6px_-6px_rgba(0,0,0,.25)]">
-        <button type="button" aria-pressed={pinned} aria-label={t('follow', { id: String(j.id), name: j.name })} /* the id as shown on the dot and the map */ onClick={() => setPin(p => p === j.id ? null : j.id)}
+      <div className="sticky start-0 z-[1] flex min-w-0 items-center gap-2 bg-[var(--card)] whitespace-nowrap max-sm:shadow-[6px_0_6px_-6px_rgba(0,0,0,.25)]">
+        <button type="button" aria-pressed={pinned} aria-label={`Follow job ${String(j.id)}, ${j.name}, on the map`} /* the id as shown on the dot and the map */ onClick={() => setPin(p => p === j.id ? null : j.id)}
           className={cn(AT_JOB_DOT, TOUCH.hit, 'cursor-pointer border-0 transition-[background] duration-300 [text-shadow:0_0_2px_rgba(0,0,0,.55)]')} style={{ background: `color-mix(in srgb, ${AT_C(j.tokens[0]?.line ?? 'memory')} 70%, #000)` }}>{j.id}</button>
         <span className="max-w-[62%] flex-none truncate">{j.name}</span>
         <span className={cn('min-w-0 flex-1 truncate text-[11px]', j.done ? 'text-[var(--ok)]' : 'text-[var(--fg3)]')}>{cur}</span>
@@ -910,7 +806,7 @@ const AtTraceRow = memo(function AtTraceRow({ j, i, cur, hover, pinned, clock, s
 const AtTokens = memo(function AtTokens({ tokens, hj, reg, place }:
   { sig: string; tokens: WorkflowToken[]; hj: WorkflowJob | null; reg: (el: HTMLDivElement | null) => void; place: (tk: WorkflowToken) => string }) {
   return <>{tokens.map(tk => { const q = tk.phase === 'queue'; return (
-    <div key={tk.uid} data-uid={tk.uid} ref={reg} className={cn('absolute top-0 left-0 will-change-transform', atDim(!hj || hj === tk.job))} style={{ ...atBox(AT_TOK), transform: place(tk) }} /* rtl-lint-ignore: map coordinates (LTR drawing) */>
+    <div key={tk.uid} data-uid={tk.uid} ref={reg} className={cn('absolute top-0 left-0 will-change-transform', atDim(!hj || hj === tk.job))} style={{ ...atBox(AT_TOK), transform: place(tk) }}>
       <svg viewBox={`${-AT_TOK / 2} ${-AT_TOK / 2} ${AT_TOK} ${AT_TOK}`} className="block h-full w-full overflow-visible">
         {q && <circle r={tk.parent ? 11 : 13} fill="none" stroke="var(--fg3)" strokeWidth={1.5} strokeDasharray="3 2.5" />}
         <circle r={tk.parent ? 8 : 10} fill={AT_C(tk.line)} stroke="var(--card)" strokeWidth={2.5} />
@@ -923,10 +819,9 @@ const AtTokens = memo(function AtTokens({ tokens, hj, reg, place }:
 const AtCard = memo(function AtCard({ tk, i, hover, machines, eng, clock, done, setHover, setPin }:
   { sig: string; tk: WorkflowToken; i: number; hover: boolean; machines: Record<string, WorkflowMachine>; eng: WorkflowEngine; clock: AtClock; done: () => void
     setHover: (h: number | null) => void; setPin: (f: (p: number | null) => number | null) => void }) {
-  const t = useMessages(TRANSIT_MESSAGES), { fmt, dir } = useLocale()
   const st = machines[tk.job.type].states[tk.state], amount = Number(tk.job.data.amount) || 0, y = i * (AT_CARD_H + AT_CARD_GAP)
   return (
-    <motion.div dir={dir} role="group" aria-label={t('needsApproval', { name: tk.job.name })} initial={{ opacity: 0, x: -8, y }} animate={{ opacity: 1, x: 0, y }} exit={{ opacity: 0, x: -8 }} transition={spring(0.25, 0.35)}
+    <motion.div role="group" aria-label={`${tk.job.name} needs your approval`} initial={{ opacity: 0, x: -8, y }} animate={{ opacity: 1, x: 0, y }} exit={{ opacity: 0, x: -8 }} transition={spring(0.25, 0.35)}
       {...atFollow(tk.job.id, setHover, setPin)}
       className={cn('pointer-events-auto absolute top-0 start-0 flex w-full flex-col justify-between overflow-hidden rounded-[var(--r-md)] border bg-[color-mix(in_srgb,var(--warn)_5%,var(--card))] px-2.5 py-2 text-[13px] shadow-[0_6px_20px_-8px_rgba(0,0,0,.28)]',
         hover ? 'border-[var(--warn)]' : 'border-[color-mix(in_srgb,var(--warn)_45%,var(--line))]')} style={{ height: AT_CARD_H }}>
@@ -937,8 +832,8 @@ const AtCard = memo(function AtCard({ tk, i, hover, machines, eng, clock, done, 
       </div>
       <div className="flex items-center gap-1.5 [@media(pointer:coarse)]:[&>button]:min-h-9">
         <span className="min-w-0 flex-1 truncate text-xs text-[var(--fg3)]">{st.label}{amount ? ` · ${fmt.money(amount, 'CHF')}` : ''}</span>
-        <Button size="sm" onClick={() => { eng.resolve(tk, 'reject'); done() }}>{t('reject')}</Button>
-        <Button size="sm" variant="primary" onClick={() => { eng.resolve(tk, 'approve'); done() }}>{t('approve')}</Button>
+        <Button size="sm" onClick={() => { eng.resolve(tk, 'reject'); done() }}>{'Reject'}</Button>
+        <Button size="sm" variant="primary" onClick={() => { eng.resolve(tk, 'approve'); done() }}>{'Approve'}</Button>
       </div>
     </motion.div>
   )
@@ -946,16 +841,16 @@ const AtCard = memo(function AtCard({ tk, i, hover, machines, eng, clock, done, 
 
 /** The map's legend (still). */
 const AtLegend = memo(function AtLegend() {
-  const t = useMessages(TRANSIT_MESSAGES), nm = (n: string) => atName(t, n)
+  const nm = atName
   return (
     <div className="mt-1.5 mb-3 flex flex-wrap justify-center gap-x-5 gap-y-2 text-[13px] text-[var(--fg2)] max-sm:justify-start max-sm:gap-x-4">
       {Object.entries(AT_LINES).map(([k, [, c]]) => <span key={k} className="inline-flex items-center gap-2"><i className="inline-block h-[7px] w-5 rounded-[var(--r-sm)]" style={{ background: c }} />{nm(k)}</span>)}
-      <span className="inline-flex items-center gap-2"><i className="inline-block h-2.5 w-2.5 rounded-full bg-[var(--bad)]" />{t('routing')}</span>
-      <span className="inline-flex items-center gap-2"><i className="inline-block h-3 w-3 rounded-full bg-[var(--card)] shadow-[inset_0_0_0_2.5px_var(--fg)]" />{t('orchestrator')}</span>
-      <span className="inline-flex items-center gap-2"><i className="inline-block h-3.5 w-3.5 rounded-full bg-[var(--fg2)]" />{t('job')}</span>
-      <span className="inline-flex items-center gap-2"><i className="inline-block h-3.5 w-3.5 rounded-full bg-[var(--fg2)] outline-[1.5px] outline-offset-[1.5px] outline-[var(--fg3)] outline-dashed" />{t('queued')}</span>
-      <span className="inline-flex items-center gap-2"><i className="inline-block h-2.5 w-7 rounded-full bg-[linear-gradient(90deg,color-mix(in_srgb,var(--fg3)_35%,transparent),color-mix(in_srgb,var(--warn)_60%,transparent),color-mix(in_srgb,var(--bad)_65%,transparent))] rtl:bg-[linear-gradient(-90deg,color-mix(in_srgb,var(--fg3)_35%,transparent),color-mix(in_srgb,var(--warn)_60%,transparent),color-mix(in_srgb,var(--bad)_65%,transparent))]" />{t('congestion')}</span>
-      <span className="inline-flex items-center gap-2"><i className="inline-block h-3.5 w-3.5 rounded-full shadow-[inset_0_0_0_3px_var(--warn)]" />{t('waiting')}</span>
+      <span className="inline-flex items-center gap-2"><i className="inline-block h-2.5 w-2.5 rounded-full bg-[var(--bad)]" />{'Routing decision'}</span>
+      <span className="inline-flex items-center gap-2"><i className="inline-block h-3 w-3 rounded-full bg-[var(--card)] shadow-[inset_0_0_0_2.5px_var(--fg)]" />{'Orchestrator'}</span>
+      <span className="inline-flex items-center gap-2"><i className="inline-block h-3.5 w-3.5 rounded-full bg-[var(--fg2)]" />{'Job (numbered, matches the trace)'}</span>
+      <span className="inline-flex items-center gap-2"><i className="inline-block h-3.5 w-3.5 rounded-full bg-[var(--fg2)] outline-[1.5px] outline-offset-[1.5px] outline-[var(--fg3)] outline-dashed" />{'Queued for a busy agent'}</span>
+      <span className="inline-flex items-center gap-2"><i className="inline-block h-2.5 w-7 rounded-full bg-[linear-gradient(90deg,color-mix(in_srgb,var(--fg3)_35%,transparent),color-mix(in_srgb,var(--warn)_60%,transparent),color-mix(in_srgb,var(--bad)_65%,transparent))]" />{'Congestion'}</span>
+      <span className="inline-flex items-center gap-2"><i className="inline-block h-3.5 w-3.5 rounded-full shadow-[inset_0_0_0_3px_var(--warn)]" />{'Waiting for approval'}</span>
     </div>
   )
 })
@@ -963,19 +858,18 @@ const AtLegend = memo(function AtLegend() {
 /** Pause, speed, human in the loop, max jobs and the fire-event chips; re-renders only when one of them changes. */
 const AtControls = memo(function AtControls({ eng, machines, chips, rerender }:
   { sig: string; eng: WorkflowEngine; machines: Record<string, WorkflowMachine>; chips: string[]; rerender: () => void }) {
-  const t = useMessages(TRANSIT_MESSAGES), { fmt } = useLocale()
   return (
     <div className="flex flex-wrap items-center gap-x-3 gap-y-2 pb-3 text-xs text-[var(--fg2)]">
-      <IconButton size="icon" variant="default" tone="default" label={eng.paused ? t('play') : t('pause')} icon={<Icon name={eng.paused ? 'play' : 'pause'} size={14} filled />} onClick={() => { eng.paused = !eng.paused; rerender() }} />
-      <label className="contents"><span>{t('speed')}</span><Slider min={0.25} max={3} step={0.25} value={eng.speed} onChange={v => { eng.speed = v; rerender() }} className={AT_RANGE} /></label>
+      <IconButton size="icon" variant="default" tone="default" label={eng.paused ? 'Play' : 'Pause'} icon={<Icon name={eng.paused ? 'play' : 'pause'} size={14} filled />} onClick={() => { eng.paused = !eng.paused; rerender() }} />
+      <label className="contents"><span>{'Speed'}</span><Slider min={0.25} max={3} step={0.25} value={eng.speed} onChange={v => { eng.speed = v; rerender() }} className={AT_RANGE} /></label>
       <span className="ui-num w-9">{fmt.number(eng.speed)}×</span>
-      <span className="contents [@media(pointer:coarse)]:[&>label]:min-h-8"><Switch checked={eng.hitl} onChange={v => { eng.setHitl(v); rerender() }} label={<span className="me-1">{t('hitl')}</span>} /></span>
-      <label className="contents"><span className="ms-2 max-sm:ms-0">{t('maxJobs')}</span><Slider min={1} max={6} step={1} value={eng.maxJobs} onChange={v => { eng.maxJobs = v; rerender() }} className={AT_RANGE} /></label>
+      <span className="contents [@media(pointer:coarse)]:[&>label]:min-h-8"><Switch checked={eng.hitl} onChange={v => { eng.setHitl(v); rerender() }} label={<span className="me-1">{'Human in the loop'}</span>} /></span>
+      <label className="contents"><span className="ms-2 max-sm:ms-0">{'Max jobs'}</span><Slider min={1} max={6} step={1} value={eng.maxJobs} onChange={v => { eng.maxJobs = v; rerender() }} className={AT_RANGE} /></label>
       <span className="ui-num w-3.5">{fmt.number(eng.maxJobs)}</span>
       <span className="flex-1 max-sm:hidden" />
-      <span className="max-sm:basis-full">{t('fire')}</span>
+      <span className="max-sm:basis-full">{'Fire event'}</span>
       <span className="flex flex-wrap gap-1.5">{chips.map(ty => (
-        <Chip key={ty} dir="ltr" onClick={() => { eng.fire(ty); rerender() }} className="!h-7 font-[family-name:var(--mono)] !text-[11px] !font-normal [@media(pointer:coarse)]:!h-9">{machines[ty].event}</Chip>))}</span>
+        <Chip key={ty} onClick={() => { eng.fire(ty); rerender() }} className="!h-7 font-[family-name:var(--mono)] !text-[11px] !font-normal [@media(pointer:coarse)]:!h-9">{machines[ty].event}</Chip>))}</span>
     </div>
   )
 }, atSigEq)
@@ -1015,8 +909,7 @@ export function AgentTransitMap({ run, stations, ...rest }: {
 function AtSimMap({ machines = AT_NO_MACHINES, order = AT_NO_ORDER, className }:
   { machines?: Record<string, WorkflowMachine>; order?: string[]; className?: string }) {
   const eng = useMemo(() => atEngine(machines, order), [machines, order])
-  const t = useMessages(TRANSIT_MESSAGES), { dir } = useLocale()
-  const nm = (n: string) => atName(t, n)
+  const nm = atName
   const agents = useMemo(() => new Set(Object.values(machines).flatMap(m => Object.values(m.states).filter(s => s.work).map(s => s.at[1]))), [machines])
   const [, setTick] = useState(0)
   const rerender = useCallback(() => setTick(x => (x + 1) % 1e6), [])
@@ -1184,27 +1077,26 @@ function AtSimMap({ machines = AT_NO_MACHINES, order = AT_NO_ORDER, className }:
         {q.slice(0, maxCards).map((tk, i) => <AtCard key={tk.uid} sig={`${i}|${hover === tk.job.id}|${tk.state}`} tk={tk} i={i} hover={hover === tk.job.id}
           machines={machines} eng={eng} clock={clockStore} done={cardDone} setHover={setHover} setPin={setPin} />)}
         {q.length > maxCards && <motion.div key="more" initial={{ opacity: 0, y: maxCards * (AT_CARD_H + AT_CARD_GAP) }} animate={{ opacity: 1, y: maxCards * (AT_CARD_H + AT_CARD_GAP) }} exit={{ opacity: 0 }}
-          className="absolute top-0 start-0"><Badge className="border border-[var(--line)] !bg-[var(--card)] font-normal">{t('moreWaiting', { n: q.length - maxCards })}</Badge></motion.div>}
+          className="absolute top-0 start-0"><Badge className="border border-[var(--line)] !bg-[var(--card)] font-normal">{`+${q.length - maxCards} more waiting`}</Badge></motion.div>}
       </AnimatePresence>
     </div>
   )
 
   return (
     <div ref={host} className={cn('flex flex-col', className)}>
-      {/* the map is geometry: it stays left to right in every locale (its labels are translated; cards set the page's dir) */}
-      <div ref={stageRef} dir="ltr" className="relative">
+      <div ref={stageRef} className="relative">
       {/* phones: approvals get their own fixed-height strip above the map, so they never cover stations or shift anything */}
       {narrow && <div className="relative mb-2" style={{ height: AT_CARD_H + 26 }}>
-        {!eng.waiting.length && <div className="grid h-[80px] place-items-center rounded-[var(--r-md)] border border-dashed border-[var(--line2)] text-xs text-[var(--fg3)]" dir={dir}>{t('noApprovals')}</div>}
+        {!eng.waiting.length && <div className="grid h-[80px] place-items-center rounded-[var(--r-md)] border border-dashed border-[var(--line2)] text-xs text-[var(--fg3)]">{'No approvals waiting'}</div>}
         {stageW > 0 && waitBy.has('*') && atCards('*', waitBy.get('*')!)}
       </div>}
-      <div ref={mapScrollRef} className={cn(narrow && '-mx-1 overflow-x-auto overscroll-x-contain rounded-[var(--r-md)] px-1 [contain:inline-size] [scrollbar-width:thin]')} tabIndex={narrow ? 0 : undefined} aria-label={narrow ? t('mapScrolls') : undefined}>
+      <div ref={mapScrollRef} className={cn(narrow && '-mx-1 overflow-x-auto overscroll-x-contain rounded-[var(--r-md)] px-1 [contain:inline-size] [scrollbar-width:thin]')} tabIndex={narrow ? 0 : undefined} aria-label={narrow ? 'Transit map, scrolls sideways' : undefined}>
       <div className={cn('relative', narrow && 'min-w-[820px]')}>
         <AtMapBase lit={litKey} fs={fs} regHeat={heatTw.reg} />
         {/* the train (under the Index station) and the waiting stations' pulses (under their rings) */}
         <div aria-hidden className={AT_HTML_LAYER}>
-          <div ref={trainEl} className={cn('absolute', atDim(lit('index')))} style={{ ...atCentred(AT_LC[0], AT_LC[1], AT_TRAIN_BOX), transform: trainBorn.current }} /* rtl-lint-ignore: map coordinates (LTR drawing) */>
-            <div className="absolute rotate-90" style={{ left: `${(2 * AT_LR / AT_TRAIN_BOX) * 100}%`, top: `${(AT_LR / AT_TRAIN_BOX) * 100}%`, width: `${(AT_TRAIN / AT_TRAIN_BOX) * 100}%`, height: `${(AT_TRAIN / AT_TRAIN_BOX) * 100}%` }} /* rtl-lint-ignore: map coordinates (LTR drawing) */>
+          <div ref={trainEl} className={cn('absolute', atDim(lit('index')))} style={{ ...atCentred(AT_LC[0], AT_LC[1], AT_TRAIN_BOX), transform: trainBorn.current }}>
+            <div className="absolute rotate-90" style={{ left: `${(2 * AT_LR / AT_TRAIN_BOX) * 100}%`, top: `${(AT_LR / AT_TRAIN_BOX) * 100}%`, width: `${(AT_TRAIN / AT_TRAIN_BOX) * 100}%`, height: `${(AT_TRAIN / AT_TRAIN_BOX) * 100}%` }}>
               <svg viewBox={`${-AT_TRAIN / 2} ${-AT_TRAIN / 2} ${AT_TRAIN} ${AT_TRAIN}`} className="block h-full w-full overflow-visible"><rect x={-12} y={-4} width={24} height={8} rx={4} fill="var(--card)" stroke={AT_C('index')} strokeWidth={2} /></svg>
             </div>
           </div>
@@ -1223,7 +1115,7 @@ function AtSimMap({ machines = AT_NO_MACHINES, order = AT_NO_ORDER, className }:
         <div aria-hidden className={AT_HTML_LAYER}>
           {AT_HUBS.map(([n, [x, y]], i) => F.hubFlash[i] > 0 && <AtFlash key={n + F.hubFlash[i]} x={x} y={y} />)}
           <AtTokens sig={`${tokens.map(tk => `${tk.uid}:${tk.phase === 'queue'}:${!!tk.parent}:${tk.line}`).join(',')}|${hj?.id}`} tokens={tokens} hj={hj} reg={regToken} place={placeOf} />
-          {F.fading.map(f => <motion.div key={'f' + f.id} className="absolute top-0 left-0" style={{ ...atBox(AT_TOK), transform: atAt(f, AT_TOK) }} initial={{ opacity: 1 }} animate={{ opacity: 0 }} transition={{ duration: 0.8 }} /* rtl-lint-ignore: map coordinates (LTR drawing) */>
+          {F.fading.map(f => <motion.div key={'f' + f.id} className="absolute top-0 left-0" style={{ ...atBox(AT_TOK), transform: atAt(f, AT_TOK) }} initial={{ opacity: 1 }} animate={{ opacity: 0 }} transition={{ duration: 0.8 }}>
             <svg viewBox={`${-AT_TOK / 2} ${-AT_TOK / 2} ${AT_TOK} ${AT_TOK}`} className="block h-full w-full overflow-visible">
               <circle r={f.small ? 8 : 10} fill={AT_C(f.line)} stroke="var(--card)" strokeWidth={2.5} /><text y={3.6} textAnchor="middle" fill="#fff" style={{ font: '700 10px var(--font)' }}>{f.jid}</text>
             </svg>
@@ -1245,12 +1137,12 @@ function AtSimMap({ machines = AT_NO_MACHINES, order = AT_NO_ORDER, className }:
         </svg>
       </div>
       </div>
-      {narrow && <ScrollEdges {...mapEdges} hint={t('swipeMap')} className="!top-[114px]" />}
+      {narrow && <ScrollEdges {...mapEdges} hint={'Swipe the map'} className="!top-[114px]" />}
       {/* approvals float over the map beside the waiting station (pinned top-left on phones); fixed-size cards stacked
           by transform, so neither the page nor the other cards ever shift */}
-      <span className="sr-only" aria-live="polite" dir={dir}>{eng.waiting.length ? t('waitingSr', { n: eng.waiting.length }) : ''}</span>
+      <span className="sr-only" aria-live="polite">{eng.waiting.length ? plural(eng.waiting.length, 'waiting for your approval', 'waiting for your approval') : ''}</span>
       {stageW > 0 && [...waitBy].filter(([k]) => k !== '*').map(([k, q]) => { const a = anchorOf(k); return (
-        <div key={k} className="pointer-events-none absolute z-[2]" style={{ left: a.left, top: a.top, width: cardW }} /* rtl-lint-ignore: map coordinates (LTR drawing) */>{atCards(k, q)}</div>) })}
+        <div key={k} className="pointer-events-none absolute z-[2]" style={{ left: a.left, top: a.top, width: cardW }}>{atCards(k, q)}</div>) })}
       </div>
 
       <AtLegend />
@@ -1258,22 +1150,22 @@ function AtSimMap({ machines = AT_NO_MACHINES, order = AT_NO_ORDER, className }:
       <AtControls sig={`${eng.paused}|${eng.speed}|${eng.hitl}|${eng.maxJobs}|${chips.join(',')}`} eng={eng} machines={machines} chips={chips} rerender={rerender} />
 
       <div className="relative border-t border-[var(--line)]">
-      <div ref={traceScrollRef} className="overflow-x-auto overscroll-x-contain [contain:inline-size]" tabIndex={narrow ? 0 : undefined} aria-label={narrow ? t('traceScrolls') : undefined}>
+      <div ref={traceScrollRef} className="overflow-x-auto overscroll-x-contain [contain:inline-size]" tabIndex={narrow ? 0 : undefined} aria-label={narrow ? 'Trace table, scrolls sideways' : undefined}>
         <div className="min-w-[640px]">
           <div className={cn('grid h-9 items-center border-b border-[var(--line)] text-xs text-[var(--fg3)]', AT_TRACE_COLS)}>
-            <span className="sticky start-0 z-[1] bg-[var(--card)] text-sm font-semibold text-[var(--fg)]">{t('trace')}</span>
+            <span className="sticky start-0 z-[1] bg-[var(--card)] text-sm font-semibold text-[var(--fg)]">{'Trace'}</span>
             {/* time runs left to right in every locale */}
-            <span dir="ltr" className="relative h-full font-[family-name:var(--mono)] text-[11px]"><span className="absolute top-2.5 start-0">{t('ago', { n: AT_WIN })}</span><span className="absolute top-2.5 left-1/2 -translate-x-1/2">{t('ago', { n: AT_WIN / 2 })}</span><span className="absolute top-2.5 end-0">{t('now')}</span></span>
-            <span className="text-end font-[family-name:var(--mono)]">{t('time')}</span><span className="text-end font-[family-name:var(--mono)]">{t('tokens')}</span><span className="text-end font-[family-name:var(--mono)]">{t('usd')}</span>
+            <span className="relative h-full font-[family-name:var(--mono)] text-[11px]"><span className="absolute top-2.5 start-0">{`−${AT_WIN}s`}</span><span className="absolute top-2.5 left-1/2 -translate-x-1/2">{`−${AT_WIN / 2}s`}</span><span className="absolute top-2.5 end-0">{'now'}</span></span>
+            <span className="text-end font-[family-name:var(--mono)]">{'time'}</span><span className="text-end font-[family-name:var(--mono)]">{'tokens'}</span><span className="text-end font-[family-name:var(--mono)]">{'USD'}</span>
           </div>
           {/* a fixed-height list: rows sit at translateY(index), the window slides by transform, numbers keep a fixed width */}
           <div className="relative overflow-y-auto overscroll-y-contain" style={{ height: AT_ROWS * AT_ROW_H }}>
             <div className="relative" style={{ height: Math.max(AT_ROWS, eng.jobs.length) * AT_ROW_H }}>
-              {!eng.jobs.length && <span className="absolute top-3 start-0 text-xs text-[var(--fg3)]">{t('jobsAppear')}</span>}
+              {!eng.jobs.length && <span className="absolute top-3 start-0 text-xs text-[var(--fg3)]">{'Jobs appear here as they start.'}</span>}
               {/* follow-up connectors: from the triggering job at the moment it emitted, to the follow-up job's start */}
               <div aria-hidden className={cn('pointer-events-none absolute inset-0 grid', AT_TRACE_COLS)}>
                 <span />
-                <div dir="ltr" className="relative overflow-x-clip">
+                <div className="relative overflow-x-clip">
                   <div ref={regStrip} className="absolute inset-0">
                     {eng.jobs.map(j => {
                       const pi = j.parent === undefined ? undefined : rowOf.get(j.parent), ci = rowOf.get(j.id)!
@@ -1281,8 +1173,8 @@ function AtSimMap({ machines = AT_NO_MACHINES, order = AT_NO_ORDER, className }:
                       const te = j.queuedAt ?? j.t0, up = ci < pi, yp = pi * AT_ROW_H + AT_ROW_H / 2 + (up ? -7 : 7), yc = ci * AT_ROW_H + AT_ROW_H / 2
                       const on = chain.has(j.id) && chain.has(j.parent!), col = on ? 'border-[var(--fg2)]' : 'border-[color-mix(in_srgb,var(--fg3)_55%,transparent)]'
                       return <Fragment key={j.id}>
-                        <span className={cn('absolute w-0 border-s transition-colors duration-200', col)} style={{ left: tx(te), top: 0, height: Math.abs(yc - yp), transform: `translateY(${Math.min(yp, yc)}px)` }} /* rtl-lint-ignore: time axis (LTR) */ />
-                        <span className={cn('absolute h-0 border-t transition-colors duration-200', col, j.t0 - te > 0.3 && 'border-dashed')} style={{ left: tx(te), top: 0, width: `calc(${tx(Math.max(0, j.t0 - te))} + 3px)`, transform: `translateY(${yc}px)` }} /* rtl-lint-ignore: time axis (LTR) */ />
+                        <span className={cn('absolute w-0 border-s transition-colors duration-200', col)} style={{ left: tx(te), top: 0, height: Math.abs(yc - yp), transform: `translateY(${Math.min(yp, yc)}px)` }} />
+                        <span className={cn('absolute h-0 border-t transition-colors duration-200', col, j.t0 - te > 0.3 && 'border-dashed')} style={{ left: tx(te), top: 0, width: `calc(${tx(Math.max(0, j.t0 - te))} + 3px)`, transform: `translateY(${yc}px)` }} />
                       </Fragment>
                     })}
                   </div>
@@ -1290,7 +1182,7 @@ function AtSimMap({ machines = AT_NO_MACHINES, order = AT_NO_ORDER, className }:
               </div>
               <AnimatePresence initial={false}>
                 {eng.jobs.map((j, i) => {
-                  const cur = j.done ? (j.rejected ? t('rejected') : t('done')) : j.tokens.length > 1 ? t('inReview', { n: j.tokens.length - 1 }) : j.tokens[0]?.phase === 'queue' ? t('waitingFor', { station: nm(machines[j.type].states[j.tokens[0].next!]?.at[1] ?? '') }) : (machines[j.type].states[j.state]?.label ?? j.state)
+                  const cur = j.done ? (j.rejected ? 'rejected' : 'done') : j.tokens.length > 1 ? `${j.tokens.length - 1} in review` : j.tokens[0]?.phase === 'queue' ? `waiting for ${nm(machines[j.type].states[j.tokens[0].next!]?.at[1] ?? '')}` : (machines[j.type].states[j.state]?.label ?? j.state)
                   return <AtTraceRow key={j.id} sig={`${i}|${cur}|${j.done}|${j.tokens[0]?.line}|${hover === j.id}|${pin === j.id}`}
                     j={j} i={i} cur={cur} clock={clockStore} hover={hover === j.id} pinned={pin === j.id} strip={regStrip} setHover={setHover} setPin={setPin} />
                 })}
@@ -1299,13 +1191,11 @@ function AtSimMap({ machines = AT_NO_MACHINES, order = AT_NO_ORDER, className }:
           </div>
         </div>
       </div>
-      {narrow && <ScrollEdges left={false} right={traceEdges.right} touched={traceEdges.touched} hint={t('swipeTrace')} />}
+      {narrow && <ScrollEdges left={false} right={traceEdges.right} touched={traceEdges.touched} hint={'Swipe the trace'} />}
       </div>
     </div>
   )
 }
-
-/* Agent transit map: a real run (AgentRun) on the same geometry ────────────────── */
 
 /** Where a run's span stops on the transit map: a line and one of its stations or hubs (e.g. ['payments', 'Search']). */
 export type TransitStation = readonly [line: string, station: string]
@@ -1399,8 +1289,7 @@ const AtRunMarks = memo(function AtRunMarks({ marks, lit }: { sig: string; marks
 
 /** The run view of AgentTransitMap: stops, marks and tokens for a real run, with its steps in a table. */
 function AtRunMap({ run, stations, className }: { run: AgentRun; stations?: TransitRunStations; className?: string }) {
-  const t = useMessages(TRANSIT_MESSAGES), { fmt, dir } = useLocale()
-  const nm = (n: string) => atName(t, n)
+  const nm = atName
   const reduce = !!useReducedMotion()
   const narrow = useMediaQuery('(max-width: 639px)')
   const { ref: host, visible } = useViewport<HTMLDivElement>(null, { amount: 0 })
@@ -1451,20 +1340,20 @@ function AtRunMap({ run, stations, className }: { run: AgentRun; stations?: Tran
     const el = listRef.current
     if (el && run.status === 'running' && el.scrollHeight - el.scrollTop - el.clientHeight < AT_ROW_H * 1.5 + 4) el.scrollTop = el.scrollHeight
   }, [rowCount, run.status])
-  const status = run.status === 'running' ? t('runLive') : run.status === 'error' ? t('runFailed') : run.status === 'cancelled' ? t('runCancelled') : t('runDone')
-  const secs = (ms: number) => t('secs', { n: fmt.number(ms / 1000, { minimumFractionDigits: 1, maximumFractionDigits: 1 }) })
+  const status = run.status === 'running' ? 'Live' : run.status === 'error' ? 'Failed' : run.status === 'cancelled' ? 'Cancelled' : 'Complete'
+  const secs = (ms: number) => `${fmt.number(ms / 1000, { minimumFractionDigits: 1, maximumFractionDigits: 1 })}s`
   const waiting = model.marks.filter(m => m.human)
   const tx = (ms: number) => `${(Math.max(0, ms - run.startedAt) / span0) * 100}%`
 
   return (
     <div ref={host} className={cn('flex flex-col', className)}>
       <div className="mb-2 flex flex-wrap items-center gap-x-2.5 gap-y-1 text-[13px]">
-        <b className="min-w-0 truncate font-semibold" dir="auto">{run.name}</b>
+        <b className="min-w-0 truncate font-semibold">{run.name}</b>
         <Badge tone={AT_RUN_TONE[run.status]} size="sm"><span className={cn('me-1 h-1.5 w-1.5 rounded-full bg-current', run.status === 'running' && 'animate-pulse motion-reduce:animate-none')} />{status}</Badge>
-        <span className="ui-num text-xs text-[var(--fg2)]">{t('runSummary', { steps: t('runSteps', { n: rowCount }), time: secs(totals.durationMs), tokens: fmt.compact(totals.tokens.input + totals.tokens.output), usd: fmt.usd(totals.costUsd) })}</span>
+        <span className="ui-num text-xs text-[var(--fg2)]">{`${plural(rowCount, 'step')} · ${secs(totals.durationMs)} · ${fmt.compact(totals.tokens.input + totals.tokens.output)} tokens · ${fmt.usd(totals.costUsd)}`}</span>
       </div>
-      <div dir="ltr" className="relative">
-        <div ref={mapScrollRef} className={cn(narrow && '-mx-1 overflow-x-auto overscroll-x-contain rounded-[var(--r-md)] px-1 [contain:inline-size] [scrollbar-width:thin]')} tabIndex={narrow ? 0 : undefined} aria-label={narrow ? t('mapScrolls') : undefined}>
+      <div className="relative">
+        <div ref={mapScrollRef} className={cn(narrow && '-mx-1 overflow-x-auto overscroll-x-contain rounded-[var(--r-md)] px-1 [contain:inline-size] [scrollbar-width:thin]')} tabIndex={narrow ? 0 : undefined} aria-label={narrow ? 'Transit map, scrolls sideways' : undefined}>
           <div className={cn('relative', narrow && 'min-w-[820px]')}>
             <AtMapBase lit={litKey} fs={fs} regHeat={atRunNoHeat} />
             <div aria-hidden className={AT_HTML_LAYER}>{!reduce && waiting.map(m => <AtPulse key={m.key} x={m.x} y={m.y} active={visible} />)}</div>
@@ -1474,7 +1363,7 @@ function AtRunMap({ run, stations, className }: { run: AgentRun; stations?: Tran
             </svg>
             <div aria-hidden className={AT_HTML_LAYER}>
               {model.tokens.map(tk => (
-                <div key={tk.id} data-id={tk.id} ref={regTok} className="absolute top-0 left-0 will-change-transform" style={{ ...atBox(AT_TOK), transform: placeOf(tk) }} /* rtl-lint-ignore: map coordinates (LTR drawing) */>
+                <div key={tk.id} data-id={tk.id} ref={regTok} className="absolute top-0 left-0 will-change-transform" style={{ ...atBox(AT_TOK), transform: placeOf(tk) }}>
                   <svg viewBox={`${-AT_TOK / 2} ${-AT_TOK / 2} ${AT_TOK} ${AT_TOK}`} className="block h-full w-full overflow-visible">
                     <circle r={10} fill={tk.error ? 'var(--bad)' : AT_C(tk.line)} stroke="var(--card)" strokeWidth={2.5} />
                     <text y={3.6} textAnchor="middle" fill="#fff" style={{ font: '700 10px var(--font)' }}>{tk.n}</text>
@@ -1486,38 +1375,38 @@ function AtRunMap({ run, stations, className }: { run: AgentRun; stations?: Tran
             </svg>
           </div>
         </div>
-        {narrow && <ScrollEdges {...mapEdges} hint={t('swipeMap')} />}
+        {narrow && <ScrollEdges {...mapEdges} hint={'Swipe the map'} />}
       </div>
-      <span className="sr-only" aria-live="polite" dir={dir}>{waiting.length ? t('waitingSr', { n: waiting.reduce((n, m) => n + m.running, 0) }) : ''}</span>
+      <span className="sr-only" aria-live="polite">{waiting.length ? plural(waiting.reduce((n, m) => n + m.running, 0), 'waiting for your approval', 'waiting for your approval') : ''}</span>
       <div className="mt-1.5 mb-3 flex flex-wrap justify-center gap-x-5 gap-y-2 text-[13px] text-[var(--fg2)] max-sm:justify-start max-sm:gap-x-4">
         {Object.entries(AT_LINES).filter(([k]) => model.lines.has(k)).map(([k, [, c]]) => <span key={k} className="inline-flex items-center gap-2"><i className="inline-block h-[7px] w-5 rounded-[var(--r-sm)]" style={{ background: c }} />{nm(k)}</span>)}
-        <span className="inline-flex items-center gap-2"><i className="inline-block h-3.5 w-3.5 rounded-full bg-[var(--fg2)]" />{t('runAgent')}</span>
-        <span className="inline-flex items-center gap-2"><i className="inline-block h-3.5 w-3.5 rounded-full bg-[var(--card)] shadow-[inset_0_0_0_2.5px_var(--fg2)]" />{t('runStop')}</span>
-        <span className="inline-flex items-center gap-2"><i className="inline-block h-3.5 w-3.5 rounded-full bg-[var(--card)] shadow-[inset_0_0_0_2.5px_var(--bad)]" />{t('runErrorStop')}</span>
-        <span className="inline-flex items-center gap-2"><i className="inline-block h-3.5 w-3.5 rounded-full shadow-[inset_0_0_0_3px_var(--warn)]" />{t('waiting')}</span>
+        <span className="inline-flex items-center gap-2"><i className="inline-block h-3.5 w-3.5 rounded-full bg-[var(--fg2)]" />{'Agent (numbered, matches the trace)'}</span>
+        <span className="inline-flex items-center gap-2"><i className="inline-block h-3.5 w-3.5 rounded-full bg-[var(--card)] shadow-[inset_0_0_0_2.5px_var(--fg2)]" />{'Stop (visits)'}</span>
+        <span className="inline-flex items-center gap-2"><i className="inline-block h-3.5 w-3.5 rounded-full bg-[var(--card)] shadow-[inset_0_0_0_2.5px_var(--bad)]" />{'Failed here'}</span>
+        <span className="inline-flex items-center gap-2"><i className="inline-block h-3.5 w-3.5 rounded-full shadow-[inset_0_0_0_3px_var(--warn)]" />{'Waiting for approval'}</span>
       </div>
       <div className="relative border-t border-[var(--line)]">
-        <div ref={traceScrollRef} className="overflow-x-auto overscroll-x-contain [contain:inline-size]" tabIndex={narrow ? 0 : undefined} aria-label={narrow ? t('traceScrolls') : undefined}>
+        <div ref={traceScrollRef} className="overflow-x-auto overscroll-x-contain [contain:inline-size]" tabIndex={narrow ? 0 : undefined} aria-label={narrow ? 'Trace table, scrolls sideways' : undefined}>
           <div className="min-w-[640px]">
             <div className={cn('grid h-9 items-center border-b border-[var(--line)] text-xs text-[var(--fg3)]', AT_RUN_COLS)}>
-              <span className="sticky start-0 z-[1] bg-[var(--card)] text-sm font-semibold text-[var(--fg)]">{t('trace')}</span>
-              <span dir="ltr" className="relative h-full font-[family-name:var(--mono)] text-[11px]"><span className="absolute top-2.5 start-0">0</span><span className="absolute top-2.5 end-0">{secs(span0)}</span></span>
-              <span className="text-end font-[family-name:var(--mono)]">{t('time')}</span><span className="text-end font-[family-name:var(--mono)]">{t('tokens')}</span><span className="text-end font-[family-name:var(--mono)]">{t('usd')}</span>
+              <span className="sticky start-0 z-[1] bg-[var(--card)] text-sm font-semibold text-[var(--fg)]">{'Trace'}</span>
+              <span className="relative h-full font-[family-name:var(--mono)] text-[11px]"><span className="absolute top-2.5 start-0">0</span><span className="absolute top-2.5 end-0">{secs(span0)}</span></span>
+              <span className="text-end font-[family-name:var(--mono)]">{'time'}</span><span className="text-end font-[family-name:var(--mono)]">{'tokens'}</span><span className="text-end font-[family-name:var(--mono)]">{'USD'}</span>
             </div>
             <div ref={listRef} className="relative overflow-y-auto overscroll-y-contain" style={{ height: AT_ROWS * AT_ROW_H }} onPointerLeave={() => setHovered(null)}>
-              {!rowCount && <span className="absolute top-3 start-0 text-xs text-[var(--fg3)]">{t('runEmpty')}</span>}
+              {!rowCount && <span className="absolute top-3 start-0 text-xs text-[var(--fg3)]">{'Steps appear here as the run reports them.'}</span>}
               {model.rows.map(({ span: s, stop, agent }) => {
                 const col = stop ? AT_C(stop[0]) : 'var(--c-neutral)', end = s.endMs ?? latest, tok = s.tokens ? s.tokens.input + s.tokens.output : 0
                 return (
                   <div key={s.id} onPointerEnter={e => { if (e.pointerType === 'mouse') setHovered(s.id) }} onClick={() => setPin(p => p === s.id ? null : s.id)}
                     className={cn('grid cursor-pointer items-center border-b border-[var(--line)] text-[13px] hover:bg-[color-mix(in_srgb,var(--muted)_60%,transparent)]', AT_RUN_COLS, lit === s.id && 'bg-[color-mix(in_srgb,var(--muted)_60%,transparent)]')} style={{ height: AT_ROW_H }}>
-                    <div className="sticky start-0 z-[1] flex min-w-0 items-center gap-2 bg-[var(--card)] whitespace-nowrap max-sm:shadow-[6px_0_6px_-6px_rgba(0,0,0,.25)] rtl:max-sm:shadow-[-6px_0_6px_-6px_rgba(0,0,0,.25)]">
+                    <div className="sticky start-0 z-[1] flex min-w-0 items-center gap-2 bg-[var(--card)] whitespace-nowrap max-sm:shadow-[6px_0_6px_-6px_rgba(0,0,0,.25)]">
                       <span className={AT_JOB_DOT} style={{ background: `color-mix(in srgb, ${col} 70%, #000)` }}>{agent}</span>
-                      <span dir="auto" className={cn('max-w-[58%] flex-none truncate', s.status === 'error' && 'text-[var(--bad)]')}>{s.name}</span>
-                      <span className={cn('min-w-0 flex-1 truncate text-[11px]', s.status === 'error' ? 'text-[var(--bad)]' : 'text-[var(--fg3)]')} title={s.error}>{s.status === 'error' && s.error ? s.error : stop ? nm(stop[1]) : t('offMap')}</span>
+                      <span className={cn('max-w-[58%] flex-none truncate', s.status === 'error' && 'text-[var(--bad)]')}>{s.name}</span>
+                      <span className={cn('min-w-0 flex-1 truncate text-[11px]', s.status === 'error' ? 'text-[var(--bad)]' : 'text-[var(--fg3)]')} title={s.error}>{s.status === 'error' && s.error ? s.error : stop ? nm(stop[1]) : 'off the map'}</span>
                     </div>
-                    <div dir="ltr" className="relative h-3.5 overflow-x-clip">
-                      <span className="absolute top-0 h-3.5 rounded-[var(--r-sm)]" style={{ left: tx(s.startMs), width: `max(2px, ${(Math.max(0, end - s.startMs) / span0) * 100}%)`, background: s.status === 'error' ? 'var(--bad)' : atSegFill({ kind: s.status === 'running' ? 'wait' : 'work', sub: false }, col) }} /* rtl-lint-ignore: time axis (LTR) */ />
+                    <div className="relative h-3.5 overflow-x-clip">
+                      <span className="absolute top-0 h-3.5 rounded-[var(--r-sm)]" style={{ left: tx(s.startMs), width: `max(2px, ${(Math.max(0, end - s.startMs) / span0) * 100}%)`, background: s.status === 'error' ? 'var(--bad)' : atSegFill({ kind: s.status === 'running' ? 'wait' : 'work', sub: false }, col) }} />
                     </div>
                     <span className="text-end font-[family-name:var(--mono)] text-xs whitespace-pre">{atPad(secs(end - s.startMs), 6)}</span>
                     <span className="text-end font-[family-name:var(--mono)] text-xs whitespace-pre">{tok ? atPad(fmt.compact(tok), 6) : atPad('—', 6)}</span>
@@ -1528,7 +1417,7 @@ function AtRunMap({ run, stations, className }: { run: AgentRun; stations?: Tran
             </div>
           </div>
         </div>
-        {narrow && <ScrollEdges left={false} right={traceEdges.right} touched={traceEdges.touched} hint={t('swipeTrace')} />}
+        {narrow && <ScrollEdges left={false} right={traceEdges.right} touched={traceEdges.touched} hint={'Swipe the trace'} />}
       </div>
     </div>
   )

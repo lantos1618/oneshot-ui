@@ -1,50 +1,12 @@
 import { useEffect, useId, useLayoutEffect, useRef, useState, type InputHTMLAttributes, type ReactNode, type Ref, type RefObject, type TextareaHTMLAttributes } from 'react'
 import { AnimatePresence, animate, motion, useReducedMotion, useTransform } from 'motion/react'
-import { AnimatedNumber, FormFieldContext, type FormControlProps, formDisabledClass, formReadOnlyClass, useFormControl, useFormFieldProps, Button, Icon, clamp, cn, defineMessages, logicalArrow, numberFormat, useDir, useLocale, useMessages, hex2hue, hsl2hex, inputClass, isTouch, prefersReducedMotion, spring, useCoarsePointer, useDisclosure, usePointerDrag, useRoving } from './core'
+import { AnimatedNumber, FormFieldContext, type FormControlProps, formDisabledClass, formReadOnlyClass, useFormControl, useFormFieldProps, Button, Icon, clamp, cn, numberFormat, hex2hue, hsl2hex, inputClass, isTouch, prefersReducedMotion, spring, useCoarsePointer, useDisclosure, usePointerDrag, useRoving, plural, fmt, LOCALE, composeRefs } from './core'
 import { play, shake } from './motion'
 import { FloatingPanel } from './overlay'
-import { useFormsAfterReset, formsAssignRef, formsInterleave, formsMergeRefs } from './formkit'
+import { useFormsAfterReset, formsAssignRef } from './formkit'
 import { inputShellClass, rangeInputClass, type Option } from './fields'
 import { OptionList } from './select'
-import { MAGNET_MESSAGES, type Magnet, type MagnetHit, MagnetBubble, MagnetMarks, magnetKeyDirection, useMagnet, useMagnetSettle } from './magnet'
-
-
-/** The input controls' own strings (machine-drafted de/ar). Override one with `<UIProvider messages={{ 'input.quantity': … }}>`. */
-export const INPUT_MESSAGES = defineMessages('input', {
-  en: {
-    left: '{count} left', ruleLength: '8+ characters', ruleUpper: 'Uppercase', ruleNumber: 'Number', ruleSymbol: 'Symbol', met: '(met)', notMet: '(not met)',
-    strength: 'Strength {score} of 4', quantity: 'Quantity', decrease: 'Decrease {label}', increase: 'Increase {label}',
-    rating: 'Rating', stars: '{count, plural, one {# star} other {# stars}}', tapToRate: 'Tap to rate',
-    terrible: 'Terrible', bad: 'Bad', okay: 'Okay', good: 'Good', excellent: 'Excellent',
-    addTag: 'Add a tag…', otp: 'One-time code', digit: 'Digit {n}', hex: 'Hex colour', hue: 'Hue', hueValue: '{n} degrees',
-    red: 'Red', yellow: 'Yellow', green: 'Green', cyan: 'Cyan', blue: 'Blue', magenta: 'Magenta',
-    range: '{from} to {to}', minimum: 'Minimum', maximum: 'Maximum', minimumOf: 'Minimum {label}', maximumOf: 'Maximum {label}',
-    phone: 'Phone number', country: 'Country: {name} {dial}', countries: 'Country',
-    currency: 'Currency {code}, change currency', amountIn: 'Amount in {code}', switchCurrency: 'Tap the currency to switch',
-  },
-  de: {
-    left: 'noch {count}', ruleLength: 'Mind. 8 Zeichen', ruleUpper: 'Großbuchstabe', ruleNumber: 'Ziffer', ruleSymbol: 'Sonderzeichen', met: '(erfüllt)', notMet: '(nicht erfüllt)',
-    strength: 'Stärke {score} von 4', quantity: 'Menge', decrease: '{label} verringern', increase: '{label} erhöhen',
-    rating: 'Bewertung', stars: '{count, plural, one {# Stern} other {# Sterne}}', tapToRate: 'Tippe zum Bewerten',
-    terrible: 'Furchtbar', bad: 'Schlecht', okay: 'Okay', good: 'Gut', excellent: 'Ausgezeichnet',
-    addTag: 'Schlagwort hinzufügen…', otp: 'Einmalcode', digit: 'Ziffer {n}', hex: 'Hex-Farbe', hue: 'Farbton', hueValue: '{n} Grad',
-    red: 'Rot', yellow: 'Gelb', green: 'Grün', cyan: 'Cyan', blue: 'Blau', magenta: 'Magenta',
-    range: '{from} bis {to}', minimum: 'Minimum', maximum: 'Maximum', minimumOf: '{label} (Minimum)', maximumOf: '{label} (Maximum)',
-    phone: 'Telefonnummer', country: 'Land: {name} {dial}', countries: 'Land',
-    currency: 'Währung {code}, Währung wechseln', amountIn: 'Betrag in {code}', switchCurrency: 'Tippe auf die Währung, um sie zu wechseln',
-  },
-  ar: {
-    left: 'متبقٍ {count}', ruleLength: '8 أحرف أو أكثر', ruleUpper: 'حرف كبير', ruleNumber: 'رقم', ruleSymbol: 'رمز', met: '(متحقق)', notMet: '(غير متحقق)',
-    strength: 'القوة {score} من 4', quantity: 'الكمية', decrease: 'إنقاص {label}', increase: 'زيادة {label}',
-    rating: 'التقييم', stars: '{count, plural, zero {لا نجوم} one {نجمة واحدة} two {نجمتان} few {# نجوم} many {# نجمة} other {# نجمة}}', tapToRate: 'انقر للتقييم',
-    terrible: 'سيئ جدًا', bad: 'سيئ', okay: 'مقبول', good: 'جيد', excellent: 'ممتاز',
-    addTag: 'أضف وسمًا…', otp: 'رمز لمرة واحدة', digit: 'الرقم {n}', hex: 'لون سداسي عشري', hue: 'درجة اللون', hueValue: '{n} درجة',
-    red: 'أحمر', yellow: 'أصفر', green: 'أخضر', cyan: 'سماوي', blue: 'أزرق', magenta: 'أرجواني',
-    range: 'من {from} إلى {to}', minimum: 'الحد الأدنى', maximum: 'الحد الأقصى', minimumOf: 'الحد الأدنى لـ{label}', maximumOf: 'الحد الأقصى لـ{label}',
-    phone: 'رقم الهاتف', country: 'الدولة: {name} {dial}', countries: 'الدولة',
-    currency: 'العملة {code}، تغيير العملة', amountIn: 'المبلغ بـ{code}', switchCurrency: 'انقر على العملة للتبديل',
-  },
-})
+import { type Magnet, type MagnetHit, MagnetBubble, MagnetMarks, magnetKeyDirection, useMagnet, useMagnetSettle } from './magnet'
 
 /**
  * Text input. Set `invalid` to show the error ring; it shakes once when it becomes invalid. Your `ref` reaches the <input>.
@@ -57,7 +19,7 @@ export function Input({ invalid: inv, className, ref: outer, id, name, required,
   useEffect(() => {
     if (invalid && !reduce && ref.current?.animate) ref.current.animate([0, -6, 6, -4, 4, 0].map(x => ({ transform: `translateX(${x}px)` })), { duration: 350 })
   }, [invalid, reduce])
-  return <input ref={formsMergeRefs(ref, outer)} aria-invalid={invalid || undefined} className={cn(inputClass, formDisabledClass, formReadOnlyClass, className)} {...f} {...p} />
+  return <input ref={composeRefs(ref, outer)} aria-invalid={invalid || undefined} className={cn(inputClass, formDisabledClass, formReadOnlyClass, className)} {...f} {...p} />
 }
 
 const TA_TONE = {
@@ -71,7 +33,6 @@ const TA_TONE = {
 export function Textarea({ className, maxLength, value, defaultValue, onChange, rows = 3, invalid: inv, ref: outer, id, name, required, disabled, readOnly, 'aria-describedby': db, ...p }:
   TextareaHTMLAttributes<HTMLTextAreaElement> & { invalid?: boolean; ref?: Ref<HTMLTextAreaElement> }) {
   const { invalid, ...f } = useFormFieldProps({ id, name, required, disabled, readOnly, invalid: inv, 'aria-describedby': db })
-  const t = useMessages(INPUT_MESSAGES)
   const ref = useRef<HTMLTextAreaElement>(null), countRef = useRef<HTMLSpanElement>(null), fitted = useRef<string | null>(null)
   const [innerLen, setInnerLen] = useState(String(defaultValue ?? '').length)
   const len = value !== undefined ? String(value).length : innerLen
@@ -89,12 +50,12 @@ export function Textarea({ className, maxLength, value, defaultValue, onChange, 
   useEffect(() => { if (maxLength && left === 0) play(countRef.current, { scale: [1.3, 1] }, spring(0.5, 0.3)) }, [left, maxLength])
   return (
     <div>
-      <textarea ref={formsMergeRefs(ref, outer)} rows={rows} maxLength={maxLength} value={value} defaultValue={defaultValue} aria-invalid={invalid || undefined} {...f}
+      <textarea ref={composeRefs(ref, outer)} rows={rows} maxLength={maxLength} value={value} defaultValue={defaultValue} aria-invalid={invalid || undefined} {...f}
         onChange={e => { setInnerLen(e.target.value.length); fit(true); onChange?.(e) }}
         className={cn(inputClass, formDisabledClass, formReadOnlyClass, 'resize-none overflow-hidden !py-2 leading-relaxed', className)} {...p} />
       {maxLength && (
         <div className="mt-1.5 flex items-center justify-end gap-1.5">
-          <span ref={countRef} className={cn('ui-num inline-block text-xs transition-colors', TA_TONE[tone][0])}>{t('left', { count: left })}</span>
+          <span ref={countRef} className={cn('ui-num inline-block text-xs transition-colors', TA_TONE[tone][0])}>{`${left} left`}</span>
           <svg width="18" height="18" viewBox="0 0 20 20" className="-rotate-90" aria-hidden>
             <circle cx="10" cy="10" r="8" fill="none" stroke="var(--line)" strokeWidth="2.5" />
             <motion.circle cx="10" cy="10" r="8" fill="none" strokeWidth="2.5" strokeLinecap="round" strokeDasharray="50.27" className={cn('transition-[stroke]', TA_TONE[tone][1])}
@@ -106,7 +67,7 @@ export function Textarea({ className, maxLength, value, defaultValue, onChange, 
   )
 }
 
-const PW_RULES: ['ruleLength' | 'ruleUpper' | 'ruleNumber' | 'ruleSymbol', RegExp][] = [['ruleLength', /.{8,}/], ['ruleUpper', /[A-Z]/], ['ruleNumber', /\d/], ['ruleSymbol', /[^A-Za-z0-9]/]]
+const PW_RULES: [string, RegExp][] = [['8+ characters', /.{8,}/], ['Uppercase', /[A-Z]/], ['Number', /\d/], ['Symbol', /[^A-Za-z0-9]/]]
 const PW_BAR = ['bg-[var(--bad)]', 'bg-[var(--warn)]', 'bg-[var(--accent)]', 'bg-[var(--ok)]']
 
 /**
@@ -116,7 +77,6 @@ const PW_BAR = ['bg-[var(--bad)]', 'bg-[var(--warn)]', 'bg-[var(--accent)]', 'bg
 export function PasswordInput({ strength, rules = strength, className, onChange, invalid: inv, ref, id, name, required, disabled, readOnly, 'aria-describedby': db, ...p }:
   InputHTMLAttributes<HTMLInputElement> & { strength?: boolean; rules?: boolean; invalid?: boolean; ref?: Ref<HTMLInputElement> }) {
   const { invalid, ...f } = useFormFieldProps({ id, name, required, disabled, readOnly, invalid: inv, 'aria-describedby': db })
-  const t = useMessages(INPUT_MESSAGES), { t: tc } = useLocale()
   const [show, setShow] = useState(false), [flips, setFlips] = useState(0)
   const [inner, setV] = useState(String(p.defaultValue ?? ''))
   const own = useRef<HTMLInputElement>(null)
@@ -129,10 +89,10 @@ export function PasswordInput({ strength, rules = strength, className, onChange,
   return (
     <div className={cn('flex flex-col gap-2', className)}>
       <div className="relative">
-        <input ref={formsMergeRefs(own, ref)} type={show ? 'text' : 'password'} aria-invalid={invalid || undefined} className={cn(inputClass, formDisabledClass, formReadOnlyClass, '!pe-10')} {...f} {...p}
+        <input ref={composeRefs(own, ref)} type={show ? 'text' : 'password'} aria-invalid={invalid || undefined} className={cn(inputClass, formDisabledClass, formReadOnlyClass, '!pe-10')} {...f} {...p}
           onChange={e => { setV(e.target.value); onChange?.(e) }} />
         <span className="absolute top-1/2 end-1 flex -translate-y-1/2">
-          <Button size="icon-sm" variant="ghost" disabled={f.disabled} aria-label={tc(show ? 'field.hidePassword' : 'field.showPassword')} title={tc(show ? 'field.hidePassword' : 'field.showPassword')}
+          <Button size="icon-sm" variant="ghost" disabled={f.disabled} aria-label={(show ? 'Hide password' : 'Show password')} title={(show ? 'Hide password' : 'Show password')}
             className="text-[var(--fg3)] hover:text-[var(--fg)]" onClick={() => { setShow(!show); setFlips(f => f + 1) }}>
             <motion.span key={flips} className="grid" initial={flips ? { scale: 0.7 } : false} animate={{ scale: 1 }} transition={spring(0.5, 0.3)}>
               <Icon name={show ? 'eyeOff' : 'eye'} size={15} />
@@ -144,8 +104,7 @@ export function PasswordInput({ strength, rules = strength, className, onChange,
         <div className="grid grid-cols-4 gap-1" aria-hidden>
           {[0, 1, 2, 3].map(i => (
             <div key={i} className="h-1 overflow-hidden rounded-full bg-[var(--muted)]">
-              {/* rtl-lint-ignore: origin-left has its rtl: twin */}
-              <motion.div className={cn('h-full origin-left rtl:origin-right transition-colors', PW_BAR[Math.max(0, score - 1)])} initial={false}
+              <motion.div className={cn('h-full origin-left transition-colors', PW_BAR[Math.max(0, score - 1)])} initial={false}
                 animate={{ scaleX: i < score ? 1 : 0 }} transition={{ duration: 0.25, delay: i < score && i >= from ? (i - from) * 0.05 : 0 }} />
             </div>
           ))}
@@ -156,12 +115,12 @@ export function PasswordInput({ strength, rules = strength, className, onChange,
           {PW_RULES.map(([label], i) => (
             <motion.span key={label + passed[i]} initial={passed[i] ? { scale: 0.9 } : false} animate={{ scale: 1 }} transition={spring(0.5, 0.3)}
               className={cn('inline-block transition-colors', passed[i] ? 'text-[var(--ok)]' : 'text-[var(--fg3)]')}>
-              <span aria-hidden>{passed[i] ? '✓' : '○'} </span>{t(label)}<span className="sr-only"> {t(passed[i] ? 'met' : 'notMet')}</span>
+              <span aria-hidden>{passed[i] ? '✓' : '○'} </span>{label}<span className="sr-only"> {(passed[i] ? '(met)' : '(not met)')}</span>
             </motion.span>
           ))}
         </div>
       )}
-      {strength && <span className="sr-only" aria-live="polite">{v ? t('strength', { score }) : ''}</span>}
+      {strength && <span className="sr-only" aria-live="polite">{v ? `Strength ${score} of 4` : ''}</span>}
     </div>
   )
 }
@@ -176,7 +135,6 @@ export function PasswordInput({ strength, rules = strength, className, onChange,
 function useInputsMagnetRange({ input, magnets, min, max, step, value, locked, inset, set, describe, onSnap }: {
   input: RefObject<HTMLInputElement | null>; magnets?: readonly Magnet[] | null; min: number; max: number; step: number; value: number; locked: boolean; inset: number
   set: (v: number) => void; describe?: (v: number) => string; onSnap?: (hit: MagnetHit | null, value: number) => void }) {
-  const { dir } = useLocale(), rtl = dir === 'rtl'
   const mg = useMagnet({ magnets, min, max, step, describe, onSnap })
   const on = mg.enabled
   const live = useRef(value)
@@ -186,7 +144,7 @@ function useInputsMagnetRange({ input, magnets, min, max, step, value, locked, i
   const commit = (n: number) => { if (n !== live.current) { live.current = n; set(n) } }
   const moveTo = (x: number, event: PointerEvent) => {
     const r = input.current?.getBoundingClientRect(); if (!r) return
-    const w = Math.max(1, r.width - 2 * inset), f = clamp(((rtl ? r.right - x : x - r.left) - inset) / w, 0, 1)
+    const w = Math.max(1, r.width - 2 * inset), f = clamp(((x - r.left) - inset) / w, 0, 1)
     const res = mg.apply(min + f * (max - min), { px: w, event })
     if (res.captured || res.released) setKick(k => k + 1)
     commit(res.value)
@@ -210,7 +168,7 @@ function useInputsMagnetRange({ input, magnets, min, max, step, value, locked, i
     },
     onKeyDown: (e: React.KeyboardEvent<HTMLInputElement>) => {
       setPointerFocus(false); setFocusVisible(true)
-      const d = magnetKeyDirection(e, dir), to = d && !locked ? mg.next(live.current, d) : null
+      const d = magnetKeyDirection(e), to = d && !locked ? mg.next(live.current, d) : null
       if (to === null) return // not a jump key, or past the last mark: the native key does what it always did
       e.preventDefault(); commit(to); setKick(k => k + 1)
     },
@@ -240,7 +198,6 @@ export function Slider({ value, defaultValue, onChange, min: minProp = 0, max: m
   const input = useRef<HTMLInputElement>(null)
   const fc = useFormControl<number>({ ...fp, value, defaultValue: defaultValue ?? (named ? 0 : (min + max) / 2), onChange, serialize: n => String(n), focus: () => input.current?.focus() })
   const v = fc.value, set = fc.set, disabled = fc.disabled, locked = disabled || fc.readOnly
-  const { dir, fmt } = useLocale(), rtl = dir === 'rtl'
   const pct = clamp(((v - min) / (max - min || 1)) * 100, 0, 100)
   const shown = named ? steps[clamp(Math.round(v), 0, steps.length - 1)] : format ? format(v) : v
   const text = (n: number) => valueText?.(n) ?? fmt.number(n)
@@ -256,13 +213,13 @@ export function Slider({ value, defaultValue, onChange, min: minProp = 0, max: m
         </div>
       )}
       <div className={on ? 'group/mg relative' : 'contents'}>
-        <input type="range" ref={formsMergeRefs(input, ref)} {...fc.control} min={min} max={max} step={step} value={v} disabled={disabled} aria-label={label} aria-labelledby={label ? undefined : fc.labelledBy}
+        <input type="range" ref={composeRefs(input, ref)} {...fc.control} min={min} max={max} step={step} value={v} disabled={disabled} aria-label={label} aria-labelledby={label ? undefined : fc.labelledBy}
           aria-readonly={fc.readOnly || undefined} aria-valuetext={named ? String(shown) : mark?.label ? mg.valueText(v, text(v)) : valueText?.(v)}
           onChange={e => set(Number(e.target.value))} {...bind}
           className={cn(rangeInputClass, 'h-1.5 accent-[var(--primary)] transition-opacity disabled:cursor-not-allowed disabled:opacity-40', fc.readOnly && 'cursor-default', fc.invalid && 'outline outline-1 outline-offset-2 outline-[var(--bad)]',
             on && pointerFocus && 'outline-none', on && 'relative z-[1] !bg-transparent [&::-moz-range-thumb]:h-4 [&::-moz-range-thumb]:w-4 [&::-moz-range-thumb]:opacity-0 [&::-webkit-slider-thumb]:h-4 [&::-webkit-slider-thumb]:w-4 [&::-webkit-slider-thumb]:appearance-none [&::-webkit-slider-thumb]:opacity-0',
             on && !locked && (dragging ? 'cursor-grabbing' : 'cursor-pointer'))}
-          style={on ? undefined : { backgroundImage: `linear-gradient(to ${rtl ? 'left' : 'right'}, var(--primary) ${pct}%, var(--muted) ${pct}%)` }} />
+          style={on ? undefined : { backgroundImage: `linear-gradient(to right, var(--primary) ${pct}%, var(--muted) ${pct}%)` }} />
         {on && (
           // the drawn track: fill, bands, ticks and a thumb that springs onto marks (the input above it is transparent)
           <span aria-hidden className={cn('pointer-events-none absolute inset-x-0 top-1/2 h-1.5 -translate-y-1/2 transition-opacity', disabled && 'opacity-40')}>
@@ -281,7 +238,7 @@ export function Slider({ value, defaultValue, onChange, min: minProp = 0, max: m
           {steps.map((x, k) => (
             <button key={x} type="button" tabIndex={-1} disabled={disabled} onClick={() => set(k)} style={{ insetInlineStart: `${(k / (steps.length - 1)) * 100}%` }}
               className={cn('absolute top-0 cursor-pointer border-0 bg-transparent p-0 text-[11px] whitespace-nowrap disabled:cursor-default [@media(pointer:coarse)]:h-8 [@media(pointer:coarse)]:min-w-8',
-                k === 0 ? '' : k === steps.length - 1 ? '-translate-x-full rtl:translate-x-full' : '-translate-x-1/2 rtl:translate-x-1/2', k === Math.round(v) && !disabled ? 'font-semibold text-[var(--fg)]' : k === Math.round(v) ? 'font-semibold text-[var(--fg3)]' : 'text-[var(--fg3)]')}>{x}</button> // rtl-lint-ignore: rtl: twins
+                k === 0 ? '' : k === steps.length - 1 ? '-translate-x-full' : '-translate-x-1/2', k === Math.round(v) && !disabled ? 'font-semibold text-[var(--fg)]' : k === Math.round(v) ? 'font-semibold text-[var(--fg3)]' : 'text-[var(--fg3)]')}>{x}</button>
           ))}
         </span>
       )}
@@ -300,7 +257,7 @@ export function Slider({ value, defaultValue, onChange, min: minProp = 0, max: m
 export function NumberStepper({ value, defaultValue = 0, onChange, min = -Infinity, max = Infinity, step = 1, label: labelProp, format, className, ref, ...fp }: FormControlProps &
   { value?: number; defaultValue?: number; onChange?: (v: number) => void; min?: number; max?: number; step?: number; label?: string; format?: Intl.NumberFormatOptions; className?: string; ref?: Ref<HTMLDivElement> }) {
   const root = useRef<HTMLDivElement>(null)
-  const t = useMessages(INPUT_MESSAGES), { locale, dir } = useLocale(), label = labelProp ?? t('quantity')
+  const locale = LOCALE, label = labelProp ?? 'Quantity'
   const fc = useFormControl<number>({ ...fp, value, defaultValue, onChange, serialize: n => String(n), focus: () => root.current?.focus() })
   const v = fc.value, set = fc.set, locked = fc.disabled || fc.readOnly
   const change = (n: number) => {
@@ -313,21 +270,21 @@ export function NumberStepper({ value, defaultValue = 0, onChange, min = -Infini
   const labelled = fc.labelledBy && !fp['aria-labelledby'] ? undefined : label // a FormField label names it instead
   return (
     <div className="relative inline-flex" onBlur={fc.onBlur}>
-      <div ref={formsMergeRefs(root, ref)} role="spinbutton" tabIndex={fc.disabled ? -1 : 0} aria-label={labelled} aria-labelledby={labelled ? undefined : fc.labelledBy} {...fc.control}
+      <div ref={composeRefs(root, ref)} role="spinbutton" tabIndex={fc.disabled ? -1 : 0} aria-label={labelled} aria-labelledby={labelled ? undefined : fc.labelledBy} {...fc.control}
         aria-valuenow={v} aria-valuetext={numberFormat(locale, format).format(v)} aria-disabled={fc.disabled || undefined} aria-readonly={fc.readOnly || undefined}
         aria-valuemin={Number.isFinite(min) ? min : undefined} aria-valuemax={Number.isFinite(max) ? max : undefined}
         className={cn('inline-flex items-center overflow-hidden rounded-[var(--r-md)] border bg-[var(--card)] outline-none focus-visible:border-[var(--fg3)] focus-visible:shadow-[0_0_0_3px_var(--muted)]',
           fc.invalid ? 'border-[var(--bad)] shadow-[0_0_0_3px_var(--bad-soft)]' : 'border-[var(--line)]', fc.disabled ? 'cursor-not-allowed bg-[var(--muted)] text-[var(--fg3)]' : fc.readOnly && 'bg-[var(--muted)]', className)}
         onKeyDown={e => {
-          const d = ({ ArrowUp: 1, ArrowRight: 1, ArrowDown: -1, ArrowLeft: -1 } as Record<string, number>)[logicalArrow(e.key, dir)]
+          const d = ({ ArrowUp: 1, ArrowRight: 1, ArrowDown: -1, ArrowLeft: -1 } as Record<string, number>)[e.key]
           if (d) { e.preventDefault(); change(v + d * step) }
           if (e.key === 'Home' && Number.isFinite(min)) { e.preventDefault(); change(min) }
           if (e.key === 'End' && Number.isFinite(max)) { e.preventDefault(); change(max) }
         }}>
-        <button type="button" tabIndex={-1} className={btn} aria-label={t('decrease', { label })} aria-disabled={(v <= min && !locked) || undefined} disabled={locked} hidden={fc.readOnly}
+        <button type="button" tabIndex={-1} className={btn} aria-label={`Decrease ${label}`} aria-disabled={(v <= min && !locked) || undefined} disabled={locked} hidden={fc.readOnly}
           onPointerDown={e => { e.preventDefault(); root.current?.focus() }} onClick={() => change(v - step)}><Icon name="minus" size={14} /></button>
-        <span className={cn('grid min-w-14 place-items-center text-base font-medium', fc.readOnly && 'h-[34px] px-2')}><AnimatedNumber value={v} format={format} locale={locale} /></span>
-        <button type="button" tabIndex={-1} className={btn} aria-label={t('increase', { label })} aria-disabled={(v >= max && !locked) || undefined} disabled={locked} hidden={fc.readOnly}
+        <span className={cn('grid min-w-14 place-items-center text-base font-medium', fc.readOnly && 'h-[34px] px-2')}><AnimatedNumber value={v} format={format} /></span>
+        <button type="button" tabIndex={-1} className={btn} aria-label={`Increase ${label}`} aria-disabled={(v >= max && !locked) || undefined} disabled={locked} hidden={fc.readOnly}
           onPointerDown={e => { e.preventDefault(); root.current?.focus() }} onClick={() => change(v + step)}><Icon name="plus" size={14} /></button>
       </div>
       {fc.inputs}
@@ -343,8 +300,7 @@ export function NumberStepper({ value, defaultValue = 0, onChange, min = -Infini
 export function Rating({ value, defaultValue = 0, onChange, labels: labelsProp, prompt: promptProp, className, 'aria-label': ariaLabelProp, ref, ...fp }: FormControlProps &
   { value?: number; defaultValue?: number; onChange?: (v: number) => void; labels?: string[]; prompt?: string; className?: string; 'aria-label'?: string; ref?: Ref<HTMLButtonElement> }) {
   const refs = useRef<(HTMLButtonElement | null)[]>([])
-  const t = useMessages(INPUT_MESSAGES), dir = useDir()
-  const labels = labelsProp ?? [t('terrible'), t('bad'), t('okay'), t('good'), t('excellent')], prompt = promptProp ?? t('tapToRate'), ariaLabel = ariaLabelProp ?? t('rating')
+  const labels = labelsProp ?? ['Terrible', 'Bad', 'Okay', 'Good', 'Excellent'], prompt = promptProp ?? 'Tap to rate', ariaLabel = ariaLabelProp ?? 'Rating'
   const fc = useFormControl<number>({ ...fp, value, defaultValue, onChange, serialize: n => n ? String(n) : '', focus: () => refs.current[Math.max(0, (vRef.current || 1) - 1)]?.focus() })
   const v = fc.value, vRef = useRef(v); vRef.current = v
   const locked = fc.disabled || fc.readOnly
@@ -363,9 +319,9 @@ export function Rating({ value, defaultValue = 0, onChange, labels: labelsProp, 
         aria-required={fc.required || undefined} aria-readonly={fc.readOnly || undefined} aria-disabled={fc.disabled || undefined} onPointerLeave={() => setHover(0)}>
         {[1, 2, 3, 4, 5].map(n => (
           <button type="button" key={n} ref={el => { refs.current[n - 1] = el; if (n === (v || 1)) formsAssignRef(ref, el) }} role="radio" aria-checked={v === n} tabIndex={n === (v || 1) ? 0 : -1}
-            disabled={fc.disabled} aria-label={t('stars', { count: n })} onClick={() => pick(n)} onPointerEnter={e => !isTouch(e) && setHover(n)}
+            disabled={fc.disabled} aria-label={plural(n, 'star')} onClick={() => pick(n)} onPointerEnter={e => !isTouch(e) && setHover(n)}
             onKeyDown={e => {
-              const d = ({ ArrowRight: 1, ArrowUp: 1, ArrowLeft: -1, ArrowDown: -1 } as Record<string, number>)[logicalArrow(e.key, dir)]
+              const d = ({ ArrowRight: 1, ArrowUp: 1, ArrowLeft: -1, ArrowDown: -1 } as Record<string, number>)[e.key]
               if (d) { e.preventDefault(); pick(Math.min(5, Math.max(1, (v || 0) + d)), true) }
             }}
             className={cn('border-0 bg-transparent p-0.5 transition-colors [@media(pointer:coarse)]:p-1.5', locked ? fc.disabled ? 'cursor-not-allowed' : 'cursor-default' : 'cursor-pointer',
@@ -389,7 +345,7 @@ export function Rating({ value, defaultValue = 0, onChange, labels: labelsProp, 
 export function TagInput({ value, defaultValue = [], onChange, placeholder: placeholderProp, className, ref, ...fp }: FormControlProps &
   { value?: string[]; defaultValue?: string[]; onChange?: (v: string[]) => void; placeholder?: string; className?: string; ref?: Ref<HTMLInputElement> }) {
   const input = useRef<HTMLInputElement>(null)
-  const t = useMessages(INPUT_MESSAGES), { t: tc } = useLocale(), placeholder = placeholderProp ?? t('addTag')
+  const placeholder = placeholderProp ?? 'Add a tag…'
   const [text, setText] = useState('')
   const fc = useFormControl<string[]>({ ...fp, value, defaultValue, onChange, serialize: t => t, filled: t => t.length > 0, focus: () => input.current?.focus(), onReset: () => setText('') })
   const tags = fc.value, set = fc.set, locked = fc.disabled || fc.readOnly
@@ -408,11 +364,11 @@ export function TagInput({ value, defaultValue = [], onChange, placeholder: plac
             exit={{ scale: 0.6, opacity: 0, transition: { duration: 0.15 } }} transition={spring(0.4, 0.35)}
             className={cn('inline-flex items-center gap-1 rounded-[var(--r-md)] py-1 ps-2 text-xs', locked ? 'bg-[var(--card)] pe-2 shadow-[inset_0_0_0_1px_var(--line)]' : 'bg-[var(--muted)] pe-1')}>
             {tag}
-            {!locked && <button type="button" aria-label={tc('common.removeItem', { name: tag })} onClick={() => set(tags.filter(x => x !== tag))} className="ui-target cursor-pointer rounded-[var(--r-sm)] border-0 bg-transparent px-1 leading-none text-[var(--fg3)] hover:bg-[var(--line)] hover:text-[var(--fg)] [@media(pointer:coarse)]:-my-2 [@media(pointer:coarse)]:-me-1 [@media(pointer:coarse)]:min-h-8 [@media(pointer:coarse)]:min-w-8 [@media(pointer:coarse)]:text-base">×</button>}
+            {!locked && <button type="button" aria-label={`Remove ${tag}`} onClick={() => set(tags.filter(x => x !== tag))} className="ui-target cursor-pointer rounded-[var(--r-sm)] border-0 bg-transparent px-1 leading-none text-[var(--fg3)] hover:bg-[var(--line)] hover:text-[var(--fg)] [@media(pointer:coarse)]:-my-2 [@media(pointer:coarse)]:-me-1 [@media(pointer:coarse)]:min-h-8 [@media(pointer:coarse)]:min-w-8 [@media(pointer:coarse)]:text-base">×</button>}
           </motion.span>
         ))}
       </AnimatePresence>
-      <input ref={formsMergeRefs(input, ref)} {...fc.control} value={text} placeholder={fc.readOnly ? '' : placeholder} aria-label={fc.control.id && fc.labelledBy ? undefined : placeholder}
+      <input ref={composeRefs(input, ref)} {...fc.control} value={text} placeholder={fc.readOnly ? '' : placeholder} aria-label={fc.control.id && fc.labelledBy ? undefined : placeholder}
         disabled={fc.disabled} readOnly={fc.readOnly} aria-required={fc.required || undefined} onChange={e => setText(e.target.value)}
         onKeyDown={e => {
           if (e.nativeEvent.isComposing) return // Enter that confirms an IME candidate is not a submit
@@ -438,7 +394,7 @@ const otpSplit = (code: string, n: number) => { const d = code.replace(/\D/g, ''
 export function OTPInput({ length = 6, value, defaultValue = '', onComplete, onChange, status, className, 'aria-label': ariaLabelProp, ref, ...fp }: FormControlProps &
   { length?: number; value?: string; defaultValue?: string; onComplete?: (code: string) => void; onChange?: (code: string) => void; status?: 'ok' | 'bad'; className?: string; 'aria-label'?: string; ref?: Ref<HTMLInputElement> }) {
   const refs = useRef<(HTMLInputElement | null)[]>([]), box = useRef<HTMLDivElement>(null)
-  const t = useMessages(INPUT_MESSAGES), ariaLabel = ariaLabelProp ?? t('otp')
+  const ariaLabel = ariaLabelProp ?? 'One-time code'
   const [raw, setVals] = useState<string[]>(() => otpSplit(value ?? defaultValue, length))
   const vals = raw.length === length ? raw : otpSplit(raw.join(''), length)
   const fc = useFormControl<string>({ ...fp, value: vals.join(''), defaultValue, serialize: c => c, filled: c => c.length === length,
@@ -459,17 +415,17 @@ export function OTPInput({ length = 6, value, defaultValue = '', onComplete, onC
   const bad = status === 'bad' || fc.invalid
   const labelled = fc.labelledBy && !fp['aria-labelledby'] ? undefined : ariaLabel
   return (
-    // a code is read left to right in every locale (like the digits it is made of), so the boxes keep that order in RTL too
-    <div ref={box} dir="ltr" className={cn('relative flex gap-2', className)} role="group" aria-label={labelled} aria-labelledby={labelled ? undefined : fc.labelledBy} aria-describedby={fc.control['aria-describedby']} id={fc.control.id} onBlur={fc.onBlur}>
+    // a code is read left to right in every locale (like the digits it is made of), so the boxes keep that order
+    <div ref={box} className={cn('relative flex gap-2', className)} role="group" aria-label={labelled} aria-labelledby={labelled ? undefined : fc.labelledBy} aria-describedby={fc.control['aria-describedby']} id={fc.control.id} onBlur={fc.onBlur}>
       {vals.map((c, i) => (
-        <input key={i} ref={el => { refs.current[i] = el; if (i === 0) formsAssignRef(ref, el) }} value={c} inputMode="numeric" autoComplete={i === 0 ? 'one-time-code' : 'off'} maxLength={1} aria-label={t('digit', { n: i + 1 })}
+        <input key={i} ref={el => { refs.current[i] = el; if (i === 0) formsAssignRef(ref, el) }} value={c} inputMode="numeric" autoComplete={i === 0 ? 'one-time-code' : 'off'} maxLength={1} aria-label={`Digit ${i + 1}`}
           disabled={fc.disabled} readOnly={fc.readOnly} aria-invalid={bad || undefined} onFocus={e => e.target.select()}
           onChange={e => typed(i, e.target.value.replace(/\D/g, '').slice(-1))}
           onKeyDown={e => {
             if (/^\d$/.test(e.key) && e.key === c) { e.preventDefault(); typed(i, c) } // same digit again: React fires no change, so handle it here
             else if (e.key === 'Backspace' && !c && i > 0) { e.preventDefault(); const n = [...vals]; n[i - 1] = ''; update(n); refs.current[i - 1]?.focus() }
-            else if (logicalArrow(e.key, 'ltr') === 'ArrowLeft') { e.preventDefault(); refs.current[i - 1]?.focus() } // the boxes are always LTR (dir="ltr" above)
-            else if (logicalArrow(e.key, 'ltr') === 'ArrowRight') { e.preventDefault(); refs.current[i + 1]?.focus() }
+            else if (e.key === 'ArrowLeft') { e.preventDefault(); refs.current[i - 1]?.focus() }
+            else if (e.key === 'ArrowRight') { e.preventDefault(); refs.current[i + 1]?.focus() }
           }}
           onPaste={e => {
             const d = e.clipboardData.getData('text').replace(/\D/g, '').slice(0, length); if (!d) return
@@ -482,8 +438,6 @@ export function OTPInput({ length = 6, value, defaultValue = '', onComplete, onC
     </div>
   )
 }
-
-/* Colour ────────────────────────────────────────────────────────────────────── */
 
 const formsHexOk = (s: string) => /^#[0-9a-f]{6}$/i.test(s)
 
@@ -498,7 +452,6 @@ export function ColorPicker({ value, defaultValue = '#2563EB', onChange, swatche
     /** pull the hue thumb onto marks while dragging: true for the six primary and secondary hues (red, yellow, green, cyan, blue, magenta), or your own (degrees) */ hueMagnets?: boolean | readonly Magnet[]
     className?: string; ref?: Ref<HTMLInputElement> }) {
   const hexRef = useRef<HTMLInputElement>(null)
-  const t = useMessages(INPUT_MESSAGES), rtl = useDir() === 'rtl'
   const fc = useFormControl<string>({ ...fp, value: value?.toUpperCase(), defaultValue: defaultValue.toUpperCase(), onChange, serialize: x => x, focus: () => hexRef.current?.focus() })
   const c = fc.value, set = fc.set, locked = fc.disabled || fc.readOnly
   const [text, setText] = useState(c), [pops, setPops] = useState(0)
@@ -514,26 +467,26 @@ export function ColorPicker({ value, defaultValue = '#2563EB', onChange, swatche
   }
   const hueInput = useRef<HTMLInputElement>(null), coarse = useCoarsePointer()
   const hueMarks: readonly Magnet[] | null = hueMagnets === true
-    ? ([['red', 0], ['yellow', 60], ['green', 120], ['cyan', 180], ['blue', 240], ['magenta', 300], ['red', 360]] as const).map(([k, value]) => ({ value, label: t(k) }))
+    ? ([['Red', 0], ['Yellow', 60], ['Green', 120], ['Cyan', 180], ['Blue', 240], ['Magenta', 300], ['Red', 360]] as const).map(([label, value]) => ({ value, label }))
     : hueMagnets || null
   const setHueFrom = (h: number) => { setHue(h); apply(hsl2hex(h, 83, 53), 'hue') }
-  const hm = useInputsMagnetRange({ input: hueInput, magnets: hueMarks, min: 0, max: 360, step: 1, value: hue, locked, inset: coarse ? 12 : 9, set: setHueFrom, describe: n => t('hueValue', { n }) })
+  const hm = useInputsMagnetRange({ input: hueInput, magnets: hueMarks, min: 0, max: 360, step: 1, value: hue, locked, inset: coarse ? 12 : 9, set: setHueFrom, describe: n => `${n} degrees` })
   return (
     <div className={cn('relative flex flex-col gap-3', className)} onBlur={fc.onBlur}>
       <div className="flex items-center gap-3">
         <motion.span key={pops} initial={pops ? { scale: 0.85, rotate: -8 } : false} animate={{ scale: 1, rotate: 0 }} transition={spring(0.5, 0.4)}
           className="h-10 w-10 flex-none rounded-[var(--r-lg)] shadow-[inset_0_0_0_1px_rgba(0,0,0,.08)]" style={{ background: c }} aria-hidden />
         <FormFieldContext.Provider value={null}>
-          <Input ref={formsMergeRefs(hexRef, ref)} id={fc.control.id} aria-describedby={fc.control['aria-describedby']} value={text} onChange={e => { setText(e.target.value); const v = e.target.value.trim(); if (formsHexOk(v)) apply(v, 'hex') }}
+          <Input ref={composeRefs(hexRef, ref)} id={fc.control.id} aria-describedby={fc.control['aria-describedby']} value={text} onChange={e => { setText(e.target.value); const v = e.target.value.trim(); if (formsHexOk(v)) apply(v, 'hex') }}
             invalid={!formsHexOk(text.trim()) || fc.invalid} disabled={fc.disabled} readOnly={fc.readOnly} required={fc.required} spellCheck={false} className="!h-8 font-[family-name:var(--mono)]"
-            aria-label={fc.labelledBy ? undefined : t('hex')} dir="ltr" />
+            aria-label={fc.labelledBy ? undefined : 'Hex colour'} />
         </FormFieldContext.Provider>
       </div>
       <div className={hm.on ? 'group/mg relative' : 'contents'}>
-      <input type="range" ref={hueInput} min={0} max={360} value={hue} aria-label={t('hue')} disabled={locked} onChange={e => setHueFrom(+e.target.value)}
-        aria-valuetext={hm.on ? hm.mg.valueText(hue, t('hueValue', { n: hue })) : undefined} {...hm.bind}
+      <input type="range" ref={hueInput} min={0} max={360} value={hue} aria-label={'Hue'} disabled={locked} onChange={e => setHueFrom(+e.target.value)}
+        aria-valuetext={hm.on ? hm.mg.valueText(hue, `${hue} degrees`) : undefined} {...hm.bind}
         className={cn(hm.on && 'relative [&::-moz-range-thumb]:opacity-0 [&::-webkit-slider-thumb]:opacity-0', hm.on && hm.pointerFocus && 'outline-none', hm.on && !locked && hm.dragging && '!cursor-grabbing', "h-2.5 w-full disabled:cursor-not-allowed disabled:opacity-40 cursor-pointer appearance-none rounded-full bg-clip-content [@media(pointer:coarse)]:box-content [@media(pointer:coarse)]:-my-[11px] [@media(pointer:coarse)]:py-[11px] [@media(pointer:coarse)]:[&::-webkit-slider-thumb]:h-6 [@media(pointer:coarse)]:[&::-webkit-slider-thumb]:w-6 [@media(pointer:coarse)]:[&::-moz-range-thumb]:h-6 [@media(pointer:coarse)]:[&::-moz-range-thumb]:w-6 [&::-moz-range-thumb]:h-4 [&::-moz-range-thumb]:w-4 [&::-moz-range-thumb]:rounded-full [&::-moz-range-thumb]:border-2 [&::-moz-range-thumb]:border-[rgba(0,0,0,.25)] [&::-moz-range-thumb]:bg-white [&::-webkit-slider-thumb]:h-[18px] [&::-webkit-slider-thumb]:w-[18px] [&::-webkit-slider-thumb]:appearance-none [&::-webkit-slider-thumb]:rounded-full [&::-webkit-slider-thumb]:border-2 [&::-webkit-slider-thumb]:border-[rgba(0,0,0,.25)] [&::-webkit-slider-thumb]:bg-white")}
-        style={{ backgroundImage: `linear-gradient(${rtl ? 270 : 90}deg,#f00,#ff0,#0f0,#0ff,#00f,#f0f,#f00)` }} />
+        style={{ backgroundImage: `linear-gradient(${90}deg,#f00,#ff0,#0f0,#0ff,#00f,#f0f,#f00)` }} />
       {hm.on && (
         // ticks under the track and a drawn thumb that settles onto the marks (the native one is hidden)
         <span aria-hidden className={cn('pointer-events-none absolute inset-x-0 top-1/2 h-2.5 -translate-y-1/2', locked && 'opacity-40')}>
@@ -562,8 +515,6 @@ export function ColorPicker({ value, defaultValue = '#2563EB', onChange, swatche
   )
 }
 
-/* Range ─────────────────────────────────────────────────────────────────────── */
-
 /**
  * Two-thumb slider for a range. Drag either thumb (mouse or touch), click the track to move the nearest thumb there,
  * or use arrows / PageUp / PageDown / Home / End. `minGap` keeps the thumbs apart. The readout rolls (pass `format` to change it).
@@ -577,8 +528,8 @@ export function RangeSlider({ value, defaultValue = [20, 80], onChange, min = 0,
   { value?: [number, number]; defaultValue?: [number, number]; onChange?: (v: [number, number]) => void; min?: number; max?: number; step?: number; minGap?: number
     label?: string; format?: (v: number) => ReactNode; valueText?: (v: number) => string; magnets?: readonly Magnet[] | null; magnetThumbs?: boolean; onSnap?: (hit: MagnetHit | null, value: number) => void; className?: string; ref?: Ref<HTMLButtonElement> }) {
   const track = useRef<HTMLDivElement>(null), thumbs = useRef<(HTMLButtonElement | null)[]>([])
-  const t = useMessages(INPUT_MESSAGES), tm = useMessages(MAGNET_MESSAGES), { locale, dir, fmt: lf } = useLocale(), rtl = dir === 'rtl'
-  const format = formatProp ?? ((n: number) => <AnimatedNumber value={n} locale={locale} />), valueText = valueTextProp ?? lf.number
+  const locale = LOCALE, lf = fmt
+  const format = formatProp ?? ((n: number) => <AnimatedNumber value={n} />), valueText = valueTextProp ?? lf.number
   const fc = useFormControl<[number, number]>({ ...fp, value, defaultValue, onChange, serialize: r => [String(r[0]), String(r[1])], focus: () => thumbs.current[0]?.focus() })
   const v = fc.value, set = fc.set, locked = fc.disabled || fc.readOnly
   const live = useRef(v)
@@ -588,7 +539,7 @@ export function RangeSlider({ value, defaultValue = [20, 80], onChange, min = 0,
   const snap = (n: number) => clamp(Math.round((n - min) / step) * step + min, min, max)
   // while a thumb is dragged it is also pulled onto the other thumb (as close as minGap allows)
   const own = !!magnets?.length
-  const other = (k: 0 | 1): Magnet => ({ value: k === 0 ? v[1] - minGap : v[0] + minGap, label: minGap ? tm('gap') : tm('meet') })
+  const other = (k: 0 | 1): Magnet => ({ value: k === 0 ? v[1] - minGap : v[0] + minGap, label: minGap ? 'Closest allowed' : 'Same value' })
   const mg = useMagnet({ magnets: own && magnetThumbs && dragging !== null ? [...magnets!, other(dragging)] : magnets, min, max, step, describe: valueText, onSnap })
   const [kicks, setKicks] = useState([0, 0]), [dragLabel, setDragLabel] = useState<string | undefined>(), [focusK, setFocusK] = useState<0 | 1 | null>(null)
   const kick = (k: 0 | 1) => setKicks(ks => k ? [ks[0], ks[1] + 1] : [ks[0] + 1, ks[1]])
@@ -598,8 +549,7 @@ export function RangeSlider({ value, defaultValue = [20, 80], onChange, min = 0,
     next[k] = k === 0 ? Math.max(min, Math.min(x, cur[1] - minGap)) : Math.min(max, Math.max(x, cur[0] + minGap))
     if (next[k] !== cur[k]) { live.current = next; set(next) }
   }
-  // the low end is the start edge: the left in LTR, the right in RTL
-  const valAt = (x: number) => { const r = track.current?.getBoundingClientRect(); return r ? min + ((rtl ? r.right - x : x - r.left) / (r.width || 1)) * (max - min) : min }
+  const valAt = (x: number) => { const r = track.current?.getBoundingClientRect(); return r ? min + ((x - r.left) / (r.width || 1)) * (max - min) : min }
   const dragTo = (k: 0 | 1, x: number, event: PointerEvent) => {
     if (!own) return move(k, valAt(x))
     const res = mg.apply(valAt(x), { px: track.current?.getBoundingClientRect().width || undefined, event })
@@ -620,14 +570,14 @@ export function RangeSlider({ value, defaultValue = [20, 80], onChange, min = 0,
     const k: 0 | 1 = d0 < d1 ? 0 : d1 < d0 ? 1 : n < v[0] ? 0 : 1
     mg.reset(); dragTo(k, e.clientX, e.nativeEvent); startDrag(k, e)
   }
-  const thumbLabel = (k: 0 | 1) => label ? t(k ? 'maximumOf' : 'minimumOf', { label: label.toLocaleLowerCase(locale) }) : t(k ? 'maximum' : 'minimum')
+  const thumbLabel = (k: 0 | 1) => label ? (k ? `Maximum ${label.toLocaleLowerCase(locale)}` : `Minimum ${label.toLocaleLowerCase(locale)}`) : (k ? 'Maximum' : 'Minimum')
   const s0 = useMagnetSettle(pct(v[0]) / 100, kicks[0]), s1 = useMagnetSettle(pct(v[1]) / 100, kicks[1])
   const pos = [useTransform(s0, f => `${f * 100}%`), useTransform(s1, f => `${f * 100}%`)] as const
   const fillEnd = useTransform(s1, f => `${100 - f * 100}%`)
   return (
     <div role="group" aria-label={label} aria-labelledby={label ? undefined : fc.labelledBy} aria-disabled={fc.disabled || undefined} id={fc.control.id} aria-describedby={fc.control['aria-describedby']}
       className={cn('relative', className)} onBlur={fc.onBlur}>
-      {label && <div className="mb-2 flex justify-between text-[13px]"><span className={fc.disabled ? 'text-[var(--fg3)]' : 'text-[var(--fg2)]'}>{label}</span><span className={fc.disabled ? 'text-[var(--fg3)]' : 'font-medium'}>{formsInterleave(t('range'), { from: format(v[0]), to: format(v[1]) })}</span></div>}
+      {label && <div className="mb-2 flex justify-between text-[13px]"><span className={fc.disabled ? 'text-[var(--fg3)]' : 'text-[var(--fg2)]'}>{label}</span><span className={fc.disabled ? 'text-[var(--fg3)]' : 'font-medium'}>{<>{format(v[0])} to {format(v[1])}</>}</span></div>}
       <div ref={track} className={cn('relative h-5 touch-none transition-opacity [@media(pointer:coarse)]:-my-1.5 [@media(pointer:coarse)]:h-8', fc.disabled ? 'cursor-not-allowed opacity-40' : fc.readOnly ? 'cursor-default' : 'cursor-pointer')} onPointerDown={onTrackDown}>
         <div className={cn('absolute inset-x-0 top-2 h-1 rounded-full [@media(pointer:coarse)]:top-3.5', fc.invalid ? 'bg-[var(--bad-soft)] shadow-[0_0_0_1px_var(--bad)]' : 'bg-[var(--muted)]')} />
         <motion.div className="absolute top-2 h-1 rounded-full bg-[var(--primary)] [@media(pointer:coarse)]:top-3.5" style={{ insetInlineStart: pos[0], insetInlineEnd: fillEnd }} />
@@ -641,14 +591,14 @@ export function RangeSlider({ value, defaultValue = [20, 80], onChange, min = 0,
             onFocus={own ? e => { try { if (e.currentTarget.matches(':focus-visible')) setFocusK(k) } catch { /* old selector engines */ } } : undefined}
             onBlur={own ? () => setFocusK(null) : undefined}
             onKeyDown={e => {
-              const jump = own ? magnetKeyDirection(e, dir) : 0, to0 = jump ? mg.next(v[k], jump) : null
+              const jump = own ? magnetKeyDirection(e) : 0, to0 = jump ? mg.next(v[k], jump) : null
               if (to0 !== null) { e.preventDefault(); move(k, to0); kick(k); return }
               const big = Math.max(step, (max - min) / 10)
-              const to = ({ ArrowRight: v[k] + step, ArrowUp: v[k] + step, ArrowLeft: v[k] - step, ArrowDown: v[k] - step, PageUp: v[k] + big, PageDown: v[k] - big, Home: min, End: max } as Record<string, number>)[logicalArrow(e.key, dir)]
+              const to = ({ ArrowRight: v[k] + step, ArrowUp: v[k] + step, ArrowLeft: v[k] - step, ArrowDown: v[k] - step, PageUp: v[k] + big, PageDown: v[k] - big, Home: min, End: max } as Record<string, number>)[e.key]
               if (to !== undefined) { e.preventDefault(); move(k, to) }
             }}
-            /* rtl-lint-ignore: the centring translate has its rtl: twin */
-            className={cn('absolute top-0 h-5 w-5 -translate-x-1/2 rtl:translate-x-1/2 touch-none rounded-full border-0 bg-transparent p-0 [@media(pointer:coarse)]:h-8 [@media(pointer:coarse)]:w-8', locked ? fc.disabled ? 'cursor-not-allowed' : 'cursor-default' : dragging === k ? 'z-10 cursor-grabbing' : 'cursor-grab')} style={{ insetInlineStart: pos[k] }}>
+
+            className={cn('absolute top-0 h-5 w-5 -translate-x-1/2 touch-none rounded-full border-0 bg-transparent p-0 [@media(pointer:coarse)]:h-8 [@media(pointer:coarse)]:w-8', locked ? fc.disabled ? 'cursor-not-allowed' : 'cursor-default' : dragging === k ? 'z-10 cursor-grabbing' : 'cursor-grab')} style={{ insetInlineStart: pos[k] }}>
             <span aria-hidden className="absolute inset-0 rounded-full border-2 border-[var(--primary)] bg-[var(--card)] shadow-[0_1px_3px_rgba(0,0,0,.2)] [@media(pointer:coarse)]:inset-1" />
             {own && <MagnetBubble label={dragging === k ? dragLabel : mg.at(v[k]).label} show={(dragging === k || focusK === k) && !locked} />}
           </motion.button>
@@ -659,8 +609,6 @@ export function RangeSlider({ value, defaultValue = [20, 80], onChange, min = 0,
     </div>
   )
 }
-
-/* Phone and currency ────────────────────────────────────────────────────────── */
 
 /** A country for PhoneInput: digit groups like [2, 3, 2, 2] become the mask "XX XXX XX XX" unless `mask` is given. */
 export type PhoneCountry = { flag: string; dial: string; name: string; groups: number[]; mask?: string }
@@ -686,12 +634,6 @@ const formsCaretAfter = (s: string, n: number, re: RegExp) => {
   return s.length
 }
 
-/** The country's name in `locale` (from its flag's region code, via Intl.DisplayNames), else the English `name`. */
-const phoneName = (c: PhoneCountry, locale: string) => {
-  const cps = [...c.flag].map(ch => ch.codePointAt(0)! - 0x1f1e6)
-  if (cps.length !== 2 || cps.some(n => n < 0 || n > 25) || /^en\b/i.test(locale)) return c.name
-  try { return new Intl.DisplayNames(locale, { type: 'region' }).of(String.fromCharCode(65 + cps[0], 65 + cps[1])) ?? c.name } catch { return c.name }
-}
 
 /** The longest dial code `digits` (without +) starts with. */
 const phoneMatch = (countries: PhoneCountry[], digits: string) => countries.filter(c => digits.startsWith(c.dial.slice(1))).sort((x, y) => y.dial.length - x.dial.length)[0]
@@ -708,7 +650,7 @@ const phoneMax = (c: PhoneCountry) => (phoneMask(c).match(/X/g) || []).length
 export function PhoneInput({ countries = PHONE_COUNTRIES, value, defaultCountry = '+41', defaultValue = '', onChange, invalid: inv, 'aria-label': ariaLabelProp, className, ref, ...fp }: FormControlProps &
   { countries?: PhoneCountry[]; value?: string; defaultCountry?: string; defaultValue?: string; 'aria-label'?: string; className?: string; ref?: Ref<HTMLInputElement>
     onChange?: (v: { country: PhoneCountry; national: string; e164: string }) => void }) {
-  const t = useMessages(INPUT_MESSAGES), { locale } = useLocale(), ariaLabel = ariaLabelProp ?? t('phone')
+  const locale = LOCALE, ariaLabel = ariaLabelProp ?? 'Phone number'
   const initialCountry = () => countries.find(c => c.dial === defaultCountry) || countries[0]
   const [country, setCountry] = useState(() => (value?.startsWith('+') && phoneMatch(countries, value.slice(1).replace(/\D/g, ''))) || initialCountry())
   const [digits, setDigits] = useState(() => value?.startsWith('+') ? value.replace(/\D/g, '').slice(country.dial.length - 1) : defaultValue.replace(/\D/g, ''))
@@ -722,7 +664,7 @@ export function PhoneInput({ countries = PHONE_COUNTRIES, value, defaultCountry 
   const mask = phoneMask(country), maxDigits = (mask.match(/X/g) || []).length
   const { out, rest } = phoneFormat(mask, digits)
   const shown = plus ?? out
-  const names = countries.map(c => phoneName(c, locale))
+  const names = countries.map(c => c.name)
   const options: Option[] = countries.map((c, i) => ({ value: c.dial, label: names[i], leading: c.flag, hint: c.dial }))
   const choose = (c: PhoneCountry) => {
     if (c !== country) setSwaps(n => n + 1)
@@ -768,7 +710,7 @@ export function PhoneInput({ countries = PHONE_COUNTRIES, value, defaultCountry 
   return (
     <div ref={wrap} className={cn('relative', className)} onBlur={fc.onBlur}>
       <div className={cn(inputShellClass(invalid), 'flex h-9 items-stretch overflow-hidden', fc.disabled ? 'cursor-not-allowed !bg-[var(--muted)] text-[var(--fg3)] hover:!border-[var(--line)]' : fc.readOnly && '!bg-[var(--muted)]')}>
-        <button type="button" disabled={locked} aria-label={t('country', { name: phoneName(country, locale), dial: country.dial })} aria-haspopup="listbox" aria-expanded={open} aria-controls={lid} aria-activedescendant={open ? `${lid}-${active}` : undefined}
+        <button type="button" disabled={locked} aria-label={`Country: ${country.name} ${country.dial}`} aria-haspopup="listbox" aria-expanded={open} aria-controls={lid} aria-activedescendant={open ? `${lid}-${active}` : undefined}
           onClick={() => { setActive(countries.indexOf(country)); setOpen(!open) }}
           onKeyDown={e => {
             if (!open) { if (['ArrowDown', 'ArrowUp', 'Enter', ' '].includes(e.key)) { e.preventDefault(); setActive(countries.indexOf(country)); setOpen(true) } return }
@@ -780,18 +722,18 @@ export function PhoneInput({ countries = PHONE_COUNTRIES, value, defaultCountry 
           }}
           className="flex flex-none cursor-pointer items-center gap-1 border-0 border-e border-[var(--line)] bg-[var(--muted)] px-2.5 text-sm outline-none hover:bg-[var(--line)] focus-visible:bg-[var(--line)] disabled:cursor-not-allowed disabled:hover:bg-[var(--muted)]">
           <motion.span key={`f${swaps}`} initial={swaps ? { scale: 0.5, rotate: -20 } : false} animate={{ scale: 1, rotate: 0 }} transition={spring(0.5, 0.4)} className="leading-none">{country.flag}</motion.span>
-          <motion.span key={`c${swaps}`} initial={swaps ? { y: -6, opacity: 0 } : false} animate={{ y: 0, opacity: 1 }} transition={spring(0.4, 0.3)} className="ui-num text-xs text-[var(--fg2)]" dir="ltr">{country.dial}</motion.span>
+          <motion.span key={`c${swaps}`} initial={swaps ? { y: -6, opacity: 0 } : false} animate={{ y: 0, opacity: 1 }} transition={spring(0.4, 0.3)} className="ui-num text-xs text-[var(--fg2)]">{country.dial}</motion.span>
           <Icon name="chevronDown" size={10} strokeWidth={3} className="text-[var(--fg3)]" />
         </button>
         {/* the number reads left to right in every locale (dir="ltr"), with the mask's ghost digits behind it */}
-        <span className="relative flex min-w-0 flex-1" dir="ltr">
+        <span className="relative flex min-w-0 flex-1">
           {plus === null && <span aria-hidden className="pointer-events-none absolute inset-0 flex items-center overflow-hidden px-3 text-[13px] whitespace-pre text-transparent">{out}<span className="text-[var(--fg3)] opacity-70">{rest}</span></span>}
-          <input ref={formsMergeRefs(input, ref)} {...fc.control} value={shown} onChange={onInput} inputMode="tel" autoComplete="tel-national" aria-label={fc.labelledBy && !fp['aria-labelledby'] ? undefined : ariaLabel}
+          <input ref={composeRefs(input, ref)} {...fc.control} value={shown} onChange={onInput} inputMode="tel" autoComplete="tel-national" aria-label={fc.labelledBy && !fp['aria-labelledby'] ? undefined : ariaLabel}
             disabled={fc.disabled} readOnly={fc.readOnly} aria-required={fc.required || undefined} className="relative min-w-0 flex-1 border-0 bg-transparent px-3 text-[13px] outline-none disabled:cursor-not-allowed" />
         </span>
       </div>
       <FloatingPanel open={open} className="max-h-60 w-full overflow-auto overscroll-contain sm:w-[260px]" role="presentation">
-        <OptionList id={lid} label={t('countries')} options={options} active={active} isSelected={o => o.value === country.dial} onPick={pickIndex} onHover={setActive} />
+        <OptionList id={lid} label={'Country'} options={options} active={active} isSelected={o => o.value === country.dial} onPick={pickIndex} onHover={setActive} />
       </FloatingPanel>
       {fc.inputs}
     </div>
@@ -806,7 +748,7 @@ const currencySeps = (locale: string) => {
   const parts = new Intl.NumberFormat(locale).formatToParts(12345.6)
   return { group: currencyTypo(parts.find(p => p.type === 'group')?.value ?? ','), decimal: parts.find(p => p.type === 'decimal')?.value ?? '.' }
 }
-/** Normalise what was typed into "1234.5" form: drop group separators, accept either mark as the decimal point, cap at 2 decimals. */
+/** Normalise what was typed into "1234.5" form: drop group separators, spaces and apostrophes, read a remaining comma as the decimal point, cap at 2 decimals. */
 const currencyParse = (raw: string, group: string) => {
   const s = raw.split(group).join('').replace(/['’\s]/g, '').replace(/,/g, '.').replace(/[^\d.]/g, '')
   const dot = s.indexOf('.'), int = (dot < 0 ? s : s.slice(0, dot)).replace(/^0+(?=\d)/, '')
@@ -830,7 +772,6 @@ export function CurrencyInput({ currencies = CURRENCIES, defaultCurrency, value,
   { currencies?: [string, string][]; defaultCurrency?: string; value?: number | null; defaultValue?: number; className?: string; ref?: Ref<HTMLInputElement>
     /** field name for the currency code */ currencyName?: string
     onChange?: (amount: number | null, currency: string) => void }) {
-  const t = useMessages(INPUT_MESSAGES)
   const initialCi = () => Math.max(0, currencies.findIndex(c => c[0] === defaultCurrency))
   const [ci, setCi] = useState(initialCi)
   const [plain, setPlain] = useState(() => { const v = value ?? defaultValue; return v !== undefined && v !== null ? String(v) : '' })
@@ -857,12 +798,12 @@ export function CurrencyInput({ currencies = CURRENCIES, defaultCurrency, value,
   return (
     <div className={cn('relative flex flex-col gap-1.5', className)} onBlur={fc.onBlur}>
       <div className={cn(inputShellClass(invalid), 'flex h-9 items-stretch overflow-hidden', fc.disabled ? 'cursor-not-allowed !bg-[var(--muted)] text-[var(--fg3)] hover:!border-[var(--line)]' : fc.readOnly && '!bg-[var(--muted)]')}>
-        <button type="button" disabled={locked} aria-label={t('currency', { code })} onClick={() => { const n = (ci + 1) % currencies.length; setCi(n); emit(plain, n) }}
+        <button type="button" disabled={locked} aria-label={`Currency ${code}, change currency`} onClick={() => { const n = (ci + 1) % currencies.length; setCi(n); emit(plain, n) }}
           className="flex w-14 flex-none cursor-pointer items-center justify-center overflow-hidden border-0 border-e border-[var(--line)] bg-[var(--muted)] text-[13px] outline-none hover:bg-[var(--line)] focus-visible:bg-[var(--line)] disabled:cursor-not-allowed disabled:hover:bg-[var(--muted)]">
           <motion.b key={code} initial={{ y: -8, opacity: 0 }} animate={{ y: 0, opacity: 1 }} transition={spring(0.4, 0.3)} className="font-semibold">{code}</motion.b>
         </button>
-        <input ref={formsMergeRefs(input, ref)} {...fc.control} value={currencyShow(plain, seps)} inputMode="decimal" autoComplete="off" placeholder={`0${seps.decimal}00`}
-          aria-label={fc.labelledBy && !fp['aria-labelledby'] ? undefined : t('amountIn', { code })} dir="ltr" disabled={fc.disabled} readOnly={fc.readOnly} aria-required={fc.required || undefined}
+        <input ref={composeRefs(input, ref)} {...fc.control} value={currencyShow(plain, seps)} inputMode="decimal" autoComplete="off" placeholder={`0${seps.decimal}00`}
+          aria-label={fc.labelledBy && !fp['aria-labelledby'] ? undefined : `Amount in ${code}`} disabled={fc.disabled} readOnly={fc.readOnly} aria-required={fc.required || undefined}
           onChange={e => {
             if (locked) return
             const raw = e.target.value, at = e.target.selectionStart ?? raw.length
@@ -873,7 +814,7 @@ export function CurrencyInput({ currencies = CURRENCIES, defaultCurrency, value,
           className="min-w-0 flex-1 border-0 bg-transparent px-3 text-end font-[family-name:var(--mono)] text-[13px] outline-none placeholder:text-[var(--fg3)] disabled:cursor-not-allowed" />
       </div>
       <span className="text-xs text-[var(--fg3)]" aria-live="polite">
-        {Number.isFinite(amount) && amount > 0 ? <bdi>{currencyTypo(numberFormat(locale, { style: 'currency', currency: code }).format(amount))}</bdi> : t('switchCurrency')}
+        {Number.isFinite(amount) && amount > 0 ? <bdi>{currencyTypo(numberFormat(locale, { style: 'currency', currency: code }).format(amount))}</bdi> : 'Tap the currency to switch'}
       </span>
       {currencyName && !fc.disabled && <input type="hidden" name={currencyName} form={fp.form} value={code} />}
       {fc.inputs}

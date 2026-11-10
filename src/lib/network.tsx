@@ -1,6 +1,6 @@
 import { useEffect, useId, useLayoutEffect, useMemo, useReducer, useRef, useState, type CSSProperties, type PointerEvent as ReactPointerEvent } from 'react'
 import { AnimatePresence, animate, cubicBezier, motion, useInView, useReducedMotion } from 'motion/react'
-import { AnimatedNumber, Button, ICONS, Icon, StatusIcon, TOUCH, clamp, cn, defineMessages, isTouch, onMouseLeave, safeColor, sleep, spring, surface, useLocale, useMessages, useOutside, useWidth, type IconName } from './core'
+import { AnimatedNumber, Button, ICONS, Icon, StatusIcon, TOUCH, clamp, cn, isTouch, onMouseLeave, safeColor, sleep, spring, surface, useOutside, useWidth, type IconName, plural, useActiveIndex, fmt } from './core'
 import { Slider } from './forms'
 import { PointerTooltip, usePointerTooltip } from './overlay'
 import { useFrameLoop, useViewport } from './motion'
@@ -8,47 +8,6 @@ import { DG_DOTS, DgDot, dgBez, dgSafeId } from './diagramkit'
 import type { StatechartDot } from './statechart'
 
 /* DIAGRAMS · Flows and graphs: Sankey, force-directed network graph, process flow canvas and streaming data flow. */
-
-/* ════════════════════════════════════════════════════════════════════════════
- * Sankey
- * ══════════════════════════════════════════════════════════════════════════ */
-
-/** Sankey, NetworkGraph, ProcessFlow and DataFlow strings (machine-drafted de/ar). */
-export const NETWORK_MESSAGES = defineMessages('network', {
-  en: {
-    sankey: 'Sankey diagram', flow: '{from} → {to} · {share}', graph: 'Network graph', shuffle: 'Shuffle',
-    nodeLabel: '{name}, {group}, {n, plural, one {# connection} other {# connections}}',
-    counts: '{nodes, plural, one {# node} other {# nodes}} · {links, plural, one {# link} other {# links}}',
-    graphHint: 'Tap a node to highlight its links · drag a node to move it',
-    idle: 'Idle · {n, plural, one {# step} other {# steps}}', completed: 'Completed in {time}', run: 'Run', fit: 'Fit view',
-    review: 'Needs review', running: 'Running', done: 'Done', waiting: 'Waiting', panHint: 'Drag sideways to pan · pinch to zoom',
-    engine: 'Engine', ingest: 'Ingest', transform: 'Transform', enrich: 'Enrich', route: 'Route',
-    speed: 'Speed', resume: 'Resume', dataFlow: 'Data flow from sources through a processing engine to destinations',
-    rate: '{n} ev/s', delivered: '{n} delivered', throughput: 'Throughput', processed: 'Processed', inFlight: 'In flight', latency: 'Latency p95', perSec: 'ev/s', ms: 'ms',
-  },
-  de: {
-    sankey: 'Sankey-Diagramm', flow: '{from} → {to} · {share}', graph: 'Netzwerkgraph', shuffle: 'Mischen',
-    nodeLabel: '{name}, {group}, {n, plural, one {# Verbindung} other {# Verbindungen}}',
-    counts: '{nodes, plural, one {# Knoten} other {# Knoten}} · {links, plural, one {# Verbindung} other {# Verbindungen}}',
-    graphHint: 'Tippe auf einen Knoten, um seine Verbindungen hervorzuheben · ziehe ihn, um ihn zu verschieben',
-    idle: 'Bereit · {n, plural, one {# Schritt} other {# Schritte}}', completed: 'Abgeschlossen in {time}', run: 'Ausführen', fit: 'Ansicht einpassen',
-    review: 'Prüfung nötig', running: 'Läuft', done: 'Fertig', waiting: 'Wartet', panHint: 'Seitlich ziehen zum Verschieben · zwei Finger zum Zoomen',
-    engine: 'Engine', ingest: 'Aufnahme', transform: 'Umwandlung', enrich: 'Anreicherung', route: 'Weiterleitung',
-    speed: 'Tempo', resume: 'Fortsetzen', dataFlow: 'Datenfluss von den Quellen über eine Verarbeitungs-Engine zu den Zielen',
-    rate: '{n} Ereignisse/s', delivered: '{n} zugestellt', throughput: 'Durchsatz', processed: 'Verarbeitet', inFlight: 'Unterwegs', latency: 'Latenz p95', perSec: 'Ereignisse/s', ms: 'ms',
-  },
-  ar: {
-    sankey: 'مخطط سانكي', flow: '{from} ← {to}، {share}', graph: 'مخطط الشبكة', shuffle: 'خلط',
-    nodeLabel: '{name}، {group}، {n, plural, zero {لا اتصالات} one {اتصال واحد} two {اتصالان} few {# اتصالات} many {# اتصالًا} other {# اتصال}}',
-    counts: '{nodes, plural, one {عقدة واحدة} two {عقدتان} few {# عقد} many {# عقدة} other {# عقدة}}، {links, plural, one {رابط واحد} two {رابطان} few {# روابط} many {# رابطًا} other {# رابط}}',
-    graphHint: 'انقر على عقدة لإبراز روابطها، اسحب العقدة لتحريكها',
-    idle: 'خامل، {n, plural, one {خطوة واحدة} two {خطوتان} few {# خطوات} many {# خطوة} other {# خطوة}}', completed: 'اكتمل في {time}', run: 'تشغيل', fit: 'ملاءمة العرض',
-    review: 'يحتاج إلى مراجعة', running: 'قيد التشغيل', done: 'تم', waiting: 'بالانتظار', panHint: 'اسحب أفقيًا للتحريك، اضغط بإصبعين للتكبير',
-    engine: 'المحرك', ingest: 'الاستيعاب', transform: 'التحويل', enrich: 'الإثراء', route: 'التوجيه',
-    speed: 'السرعة', resume: 'استئناف', dataFlow: 'تدفق البيانات من المصادر عبر محرك المعالجة إلى الوجهات',
-    rate: '{n} حدث/ث', delivered: 'سُلّم {n}', throughput: 'الإنتاجية', processed: 'تمت معالجته', inFlight: 'قيد النقل', latency: 'زمن الاستجابة p95', perSec: 'حدث/ث', ms: 'مللي ث',
-  },
-})
 
 export type SankeyNode = { label: string; color?: string }
 type SankeyHover = { k: 'link' | 'src' | 'dst'; i: number } | null
@@ -59,12 +18,10 @@ type SankeyHover = { k: 'link' | 'src' | 'dst'; i: number } | null
  */
 export function Sankey({ sources, targets, links, width = 300, height = 176, nodeWidth = 9, gap = 10, className }:
   { sources: SankeyNode[]; targets: SankeyNode[]; links: [number, number, number][]; width?: number; height?: number; nodeWidth?: number; gap?: number; className?: string }) {
-  const [hover, setHover] = useState<SankeyHover>(null)
   const ref = useRef<SVGSVGElement>(null)
+  const [hover, setHover] = useActiveIndex<NonNullable<SankeyHover>>(() => true, ref)
   const inView = useInView(ref, { once: true, amount: 0.4 })
   const { tip, show, hide } = usePointerTooltip()
-  const m = useMessages(NETWORK_MESSAGES), { fmt } = useLocale()
-  useOutside([ref], () => setHover(null), hover !== null, { escape: true })
   const clip = dgSafeId(useId())
   const W = width, H = height, pad = 4, nw = nodeWidth, xL = 70, xR = W - 70 - nw
   const total = links.reduce((a, l) => a + l[2], 0) || 1
@@ -99,14 +56,14 @@ export function Sankey({ sources, targets, links, width = 300, height = 176, nod
   }
   return (
     // a flow diagram keeps its left-to-right geometry in every locale (like charts); the tooltip follows the locale
-    <div dir="ltr" className={className}>
-      <svg ref={ref} viewBox={`0 0 ${W} ${H}`} role="group" aria-label={m('sankey')} className="block h-auto w-full overflow-visible">
+    <div className={className}>
+      <svg ref={ref} viewBox={`0 0 ${W} ${H}`} role="group" aria-label={'Sankey diagram'} className="block h-auto w-full overflow-visible">
         <defs><clipPath id={clip}><motion.rect x={0} y={0} height={H} initial={{ width: 0 }} animate={inView ? { width: W } : undefined} transition={{ duration: 1, ease: [0.22, 1, 0.36, 1], delay: 0.1 }} /></clipPath></defs>
         <g clipPath={`url(#${clip})`}>
           {ribbons.map(({ i, l, d }) => (
             <motion.path key={i} d={d} fill={sources[l[0]].color ?? PALETTE_DG[l[0] % PALETTE_DG.length]} initial={false} animate={{ opacity: op(i, l) }} transition={{ duration: 0.15 }}
-              onPointerEnter={() => setHover({ k: 'link', i })} onPointerDown={e => { setHover({ k: 'link', i }); show(e, m('flow', { from: sources[l[0]].label, to: targets[l[1]].label, share: share(l[2]) })) }}
-              onPointerMove={e => show(e, m('flow', { from: sources[l[0]].label, to: targets[l[1]].label, share: share(l[2]) }))} onPointerLeave={onMouseLeave(() => { setHover(null); hide() })} />
+              onPointerEnter={() => setHover({ k: 'link', i })} onPointerDown={e => { setHover({ k: 'link', i }); show(e, `${sources[l[0]].label} → ${targets[l[1]].label} · ${share(l[2])}`) }}
+              onPointerMove={e => show(e, `${sources[l[0]].label} → ${targets[l[1]].label} · ${share(l[2])}`)} onPointerLeave={onMouseLeave(() => { setHover(null); hide() })} />
           ))}
         </g>
         {sources.map((n, i) => node('src', n, i, LP[i], lv[i]))}
@@ -117,10 +74,6 @@ export function Sankey({ sources, targets, links, width = 300, height = 176, nod
   )
 }
 const PALETTE_DG = ['var(--c2)', 'var(--c3)', 'var(--c4)', 'var(--c1)', 'var(--bad)', 'var(--warn)']
-
-/* ════════════════════════════════════════════════════════════════════════════
- * Network graph (force layout, no library)
- * ══════════════════════════════════════════════════════════════════════════ */
 
 export type NetworkNode = { label: string; group: number; size?: number }
 type NetSim = { x: number; y: number; vx: number; vy: number; fx: number | null; fy: number | null }
@@ -136,7 +89,6 @@ export function NetworkGraph({ nodes, links, groups, width = 900, height = 340, 
   { nodes: NetworkNode[]; links: [number, number][]; groups: [string, string][]; /** used until the container is measured */ width?: number; height?: number; className?: string }) {
   // the layout is sized to the container (1 SVG unit = 1px) so labels stay 11px and the graph fills the card
   const [wrapRef, measured] = useWidth<HTMLDivElement>()
-  const m = useMessages(NETWORK_MESSAGES)
   // hidden (display: none) measures 0: keep the last real size instead of re-laying out for the fallback width
   const lastW = useRef(0); if (measured > 0) lastW.current = Math.round(measured)
   const W = lastW.current || width, H = W < 560 ? Math.max(height, 420) : height
@@ -224,8 +176,8 @@ export function NetworkGraph({ nodes, links, groups, width = 900, height = 340, 
   const isOn = (i: number) => hl === null || i === hl || nb[hl].has(i)
   return (
     <div ref={wrapRef} className={cn('flex min-w-0 flex-col gap-2', className)}>
-      <div className="flex justify-end"><Button size="sm" className={TOUCH.tap36} onClick={() => { sim.current.forEach(n => { n.x = W / 2 + (Math.random() - 0.5) * W * 0.55; n.y = H / 2 + (Math.random() - 0.5) * H * 0.65 }); kick(1) }}>{m('shuffle')}</Button></div>
-      <svg ref={svgRef} viewBox={`0 0 ${W} ${H}`} width={W} height={H} role="group" aria-label={m('graph')} className="block max-w-full [direction:ltr] touch-pan-y select-none">
+      <div className="flex justify-end"><Button size="sm" className={TOUCH.tap36} onClick={() => { sim.current.forEach(n => { n.x = W / 2 + (Math.random() - 0.5) * W * 0.55; n.y = H / 2 + (Math.random() - 0.5) * H * 0.65 }); kick(1) }}>{'Shuffle'}</Button></div>
+      <svg ref={svgRef} viewBox={`0 0 ${W} ${H}`} width={W} height={H} role="group" aria-label={'Network graph'} className="block max-w-full [direction:ltr] touch-pan-y select-none">
         <g>
           {links.map(([a, b], k) => {
             const on = hl !== null && (a === hl || b === hl)
@@ -235,7 +187,7 @@ export function NetworkGraph({ nodes, links, groups, width = 900, height = 340, 
         </g>
         <g>
           {nodes.map((n, i) => (
-            <g key={i} ref={el => { nodeEls.current[i] = el }} transform={`translate(${ns[i].x.toFixed(1)},${ns[i].y.toFixed(1)})`} tabIndex={0} role="button" aria-label={m('nodeLabel', { name: n.label, group: groups[n.group][0], n: nb[i].size })} data-net-node=""
+            <g key={i} ref={el => { nodeEls.current[i] = el }} transform={`translate(${ns[i].x.toFixed(1)},${ns[i].y.toFixed(1)})`} tabIndex={0} role="button" aria-label={`${n.label}, ${groups[n.group][0]}, ${plural(nb[i].size, 'connection')}`} data-net-node=""
               className={cn('touch-none outline-none transition-opacity duration-150', dragging === i ? 'cursor-grabbing' : 'cursor-grab', !isOn(i) && 'opacity-25')}
               onPointerEnter={e => { if (dragging === null && !isTouch(e)) setHl(i) }} onPointerLeave={onMouseLeave(() => { if (dragging === null) setHl(null) })}
               onFocus={() => setHl(i)} onBlur={() => setHl(null)}
@@ -251,16 +203,12 @@ export function NetworkGraph({ nodes, links, groups, width = 900, height = 340, 
       </svg>
       <div className="flex flex-wrap items-center gap-x-3 gap-y-1 text-xs text-[var(--fg3)]">
         {groups.map(([g, c]) => <span key={g} className="inline-flex items-center gap-1"><i className="inline-block h-[9px] w-[9px] rounded-full" style={{ background: c }} />{g}</span>)}
-        <span className="ms-auto">{m('counts', { nodes: nodes.length, links: links.length })}</span>
-        <span className="hidden w-full [@media(pointer:coarse)]:block">{m('graphHint')}</span>
+        <span className="ms-auto">{`${plural(nodes.length, 'node')} · ${plural(links.length, 'link')}`}</span>
+        <span className="hidden w-full [@media(pointer:coarse)]:block">{'Tap a node to highlight its links · drag a node to move it'}</span>
       </div>
     </div>
   )
 }
-
-/* ════════════════════════════════════════════════════════════════════════════
- * Process flow (node canvas)
- * ══════════════════════════════════════════════════════════════════════════ */
 
 export type FlowNode = { id: string; x: number; y: number; icon: IconName; color: string; title: string; desc: string
   /** body text; `{n}` is replaced by the step's animated counter */
@@ -289,8 +237,7 @@ export function ProcessFlow({ nodes: initial, edges, steps, height = 420, idle, 
   const [times, setTimes] = useState<Record<string, string>>({})
   const [edgeSt, setEdgeSt] = useState<Record<number, 'live' | 'done'>>({})
   const [dots, setDots] = useState<StatechartDot[]>([])
-  const m = useMessages(NETWORK_MESSAGES), { t, fmt, dir } = useLocale()
-  const idleText = idle ?? m('idle', { n: initial.length })
+  const idleText = idle ?? `Idle · ${plural(initial.length, 'step')}`
   const [log, setLog] = useState(idleText)
   const [running, setRunning] = useState(false)
   const gen = useRef(0)
@@ -424,23 +371,21 @@ export function ProcessFlow({ nodes: initial, edges, steps, height = 420, idle, 
       if (!ok()) return
       prev = ids
     }
-    setLog(done ? done((performance.now() - t0) / 1000) : m('completed', { time: fmt.duration(performance.now() - t0) })); setRunning(false); onComplete?.()
+    setLog(done ? done((performance.now() - t0) / 1000) : `Completed in ${fmt.duration(performance.now() - t0)}`); setRunning(false); onComplete?.()
   }
   const ctl = 'grid h-[30px] w-[30px] [@media(pointer:coarse)]:h-9 [@media(pointer:coarse)]:w-9 cursor-pointer place-items-center border-0 bg-transparent text-base text-[var(--fg2)] hover:bg-[var(--muted)] hover:text-[var(--fg)] not-first:border-t not-first:border-[var(--line)]'
   const bodyText = (n: FlowNode) => { const parts = n.body.split('{n}'); return parts.length > 1 ? <>{parts[0]}<b className="font-[family-name:var(--mono)] font-semibold text-[var(--fg)]">{fmt.number(counts[n.id] ?? 0)}</b>{parts[1]}</> : n.body }
   return (
     <div className={cn('flex flex-col gap-3', className)}>
       <div className="flex justify-end gap-2">
-        <Button size="sm" className={TOUCH.tap36} onClick={reset}>{t('common.reset')}</Button>
-        <Button size="sm" variant="primary" className={TOUCH.tap36} onClick={run} disabled={running}><Icon name="play" size={12} filled />{m('run')}</Button>
+        <Button size="sm" className={TOUCH.tap36} onClick={reset}>{'Reset'}</Button>
+        <Button size="sm" variant="primary" className={TOUCH.tap36} onClick={run} disabled={running}><Icon name="play" size={12} filled />{'Run'}</Button>
       </div>
       <div ref={pf} onPointerDown={onDown} onPointerMove={onMove} onPointerUp={onUp} onPointerCancel={onUp}
         className={cn('relative touch-pan-y overflow-hidden rounded-[var(--r-lg)] border border-[var(--line)] select-none max-sm:!h-[min(var(--pf-h),68vh)]', DG_DOTS, panning ? 'cursor-grabbing' : 'cursor-grab')}
         style={{ height, '--pf-h': `${height}px`, backgroundPosition: `${view.x}px ${view.y}px`, backgroundSize: `${18 * view.z}px ${18 * view.z}px` } as CSSProperties}>
-        {/* the world layer is plain geometry (pan/zoom transform, node x/y): LTR in every locale; the node cards and the
-            canvas controls follow the locale */}
-        <div dir="ltr" className="absolute top-0 left-0 origin-top-left" style={{ transform: `translate(${view.x}px,${view.y}px) scale(${view.z})` }}>{/* rtl-lint-ignore: world geometry */}
-          <svg className="pointer-events-none absolute top-0 left-0 overflow-visible" width={1} height={1} aria-hidden>{/* rtl-lint-ignore */}
+        <div className="absolute top-0 left-0 origin-top-left" style={{ transform: `translate(${view.x}px,${view.y}px) scale(${view.z})` }}>
+          <svg className="pointer-events-none absolute top-0 left-0 overflow-visible" width={1} height={1} aria-hidden>
             {eg.map((g, k) => {
               const e = edges[k], st = edgeSt[k]
               return (
@@ -459,22 +404,22 @@ export function ProcessFlow({ nodes: initial, edges, steps, height = 420, idle, 
           {initial.map((n, i) => {
             const st = status[n.id], hasL = edges.some(e => e.to === n.id), hasR = edges.some(e => e.from === n.id)
             return (
-              <motion.div key={n.id} ref={el => { nodeEls.current[n.id] = el }} data-node={n.id} dir={dir} initial={{ opacity: 0, y: 10 }} animate={inView ? { opacity: 1, y: 0, scale: drag.current?.id === n.id ? 1.02 : 1 } : undefined}
+              <motion.div key={n.id} ref={el => { nodeEls.current[n.id] = el }} data-node={n.id} initial={{ opacity: 0, y: 10 }} animate={inView ? { opacity: 1, y: 0, scale: drag.current?.id === n.id ? 1.02 : 1 } : undefined}
                 transition={{ opacity: { duration: 0.4, delay: i * 0.08 }, y: { duration: 0.4, delay: i * 0.08 }, scale: spring(0.4, 0.25) }}
                 className={cn('absolute cursor-default rounded-[var(--r-lg)] border bg-[var(--card)] shadow-[0_1px_2px_rgba(0,0,0,.05)] transition-[border-color,box-shadow] duration-250',
                   st === 'run' ? 'border-[var(--accent)] !shadow-[0_0_0_3px_var(--accent-soft)]' : st === 'ok' ? 'border-[color-mix(in_srgb,var(--ok)_55%,var(--line))]' : st === 'warn' ? 'border-[color-mix(in_srgb,var(--warn)_60%,var(--line))]' : sel === n.id ? 'border-[var(--fg3)]' : 'border-[var(--line)]')}
-                style={{ /* rtl-lint-ignore: canvas geometry */ left: pos[n.id].x, top: pos[n.id].y, width: FLOW_W, zIndex: sel === n.id ? 2 : undefined }}>
+                style={{ left: pos[n.id].x, top: pos[n.id].y, width: FLOW_W, zIndex: sel === n.id ? 2 : undefined }}>
                 {/* ports are where the edges attach: physical sides, whatever the card's text direction */}
-                {hasL && <span /* rtl-lint-ignore: canvas geometry */ className={cn('absolute top-1/2 -left-1.5 -mt-1 h-2.5 w-2.5 rounded-full border-2 bg-[var(--card)]', st ? 'border-[var(--fg3)]' : 'border-[var(--line2)]')} />}
+                {hasL && <span className={cn('absolute top-1/2 -left-1.5 -mt-1 h-2.5 w-2.5 rounded-full border-2 bg-[var(--card)]', st ? 'border-[var(--fg3)]' : 'border-[var(--line2)]')} />}
                 {hasR && <span className={cn('absolute top-1/2 -right-1.5 -mt-1 h-2.5 w-2.5 rounded-full border-2 bg-[var(--card)]', st ? 'border-[var(--fg3)]' : 'border-[var(--line2)]')} />}
                 <div className="flex cursor-grab touch-none items-center gap-2 border-b border-[var(--line)] px-3 py-2.5">
                   <span className="grid h-[26px] w-[26px] flex-none place-items-center rounded-[var(--r-md)]" style={{ color: safeColor(n.color), background: `color-mix(in srgb, ${safeColor(n.color)} 14%, var(--card))` }}><Icon name={n.icon} size={14} /></span>
                   <div className="min-w-0"><div className="text-[13px] leading-tight font-semibold">{n.title}</div><div className="text-[11px] text-[var(--fg3)]">{n.desc}</div></div>
                   {st === 'warn' ? (
                     // StatusIcon has no warning state: same shape, warn colour, "!" instead of the tick
-                    <motion.span role="img" aria-label={m('review')} initial={{ scale: 0.4 }} animate={{ scale: 1 }} transition={spring(0.5, 0.35)}
+                    <motion.span role="img" aria-label={'Needs review'} initial={{ scale: 0.4 }} animate={{ scale: 1 }} transition={spring(0.5, 0.35)}
                       className="ms-auto grid h-[18px] w-[18px] flex-none place-items-center rounded-full bg-[var(--warn)] text-[var(--card)]"><Icon name="alert" size={10} strokeWidth={3} /></motion.span>
-                  ) : <StatusIcon status={st === 'run' ? 'active' : st === 'ok' ? 'done' : 'pending'} tone="ok" label={st === 'run' ? m('running') : st === 'ok' ? m('done') : m('waiting')} className="ms-auto motion-reduce:animate-none" />}
+                  ) : <StatusIcon status={st === 'run' ? 'active' : st === 'ok' ? 'done' : 'pending'} tone="ok" label={st === 'run' ? 'Running' : st === 'ok' ? 'Done' : 'Waiting'} className="ms-auto motion-reduce:animate-none" />}
                 </div>
                 <div className="px-3 py-2 text-xs leading-[1.45] text-[var(--fg2)]">{bodyText(n)}</div>
                 <div className="flex justify-between rounded-b-[var(--r-lg)] border-t border-[var(--line)] bg-[color-mix(in_srgb,var(--muted)_50%,var(--card))] px-3 py-2 text-[11px] text-[var(--fg3)]"><span>{n.foot[0]}</span><span>{times[n.id] ?? n.foot[1]}</span></div>
@@ -483,21 +428,17 @@ export function ProcessFlow({ nodes: initial, edges, steps, height = 420, idle, 
           })}
         </div>
         <div data-pfctl className={cn('absolute bottom-3 start-3 flex flex-col overflow-hidden shadow-[0_1px_2px_rgba(0,0,0,.05)]', surface.md)}>
-          <button type="button" aria-label={t('common.zoomIn')} className={ctl} onClick={() => zoomAt(1.25, pf.current!.clientWidth / 2, pf.current!.clientHeight / 2)}>+</button>
-          <button type="button" aria-label={t('common.zoomOut')} className={ctl} onClick={() => zoomAt(0.8, pf.current!.clientWidth / 2, pf.current!.clientHeight / 2)}>−</button>
-          <button type="button" aria-label={m('fit')} className={ctl} onClick={() => fit()}><Icon name="maximize" size={13} /></button>
+          <button type="button" aria-label={'Zoom in'} className={ctl} onClick={() => zoomAt(1.25, pf.current!.clientWidth / 2, pf.current!.clientHeight / 2)}>+</button>
+          <button type="button" aria-label={'Zoom out'} className={ctl} onClick={() => zoomAt(0.8, pf.current!.clientWidth / 2, pf.current!.clientHeight / 2)}>−</button>
+          <button type="button" aria-label={'Fit view'} className={ctl} onClick={() => fit()}><Icon name="maximize" size={13} /></button>
         </div>
-        <span data-pfctl className="pointer-events-none absolute top-2.5 start-3 hidden rounded-full border border-[var(--line)] bg-[var(--card)] px-2.5 py-1 text-[11px] text-[var(--fg3)] [@media(pointer:coarse)]:block">{m('panHint')}</span>
+        <span data-pfctl className="pointer-events-none absolute top-2.5 start-3 hidden rounded-full border border-[var(--line)] bg-[var(--card)] px-2.5 py-1 text-[11px] text-[var(--fg3)] [@media(pointer:coarse)]:block">{'Drag sideways to pan · pinch to zoom'}</span>
         <motion.div key={log} data-pfctl initial={{ opacity: 0.4 }} animate={{ opacity: 1 }} transition={{ duration: 0.2 }} aria-live="polite"
           className="absolute end-3 bottom-3 max-w-[calc(100%-76px)] truncate rounded-full border border-[var(--line)] bg-[var(--card)] px-3 py-1 text-xs text-[var(--fg2)] shadow-[0_1px_2px_rgba(0,0,0,.05)]">{log}</motion.div>
       </div>
     </div>
   )
 }
-
-/* ════════════════════════════════════════════════════════════════════════════
- * Data flow (sources → engine → destinations)
- * ══════════════════════════════════════════════════════════════════════════ */
 
 export type DataFlowSource = { label: string; icon: IconName; color: string; rate: number }
 export type DataFlowTarget = { label: string; icon: IconName; color: string; share: number }
@@ -551,9 +492,8 @@ const dfEaseOut = cubicBezier(0, 0, 0.58, 1)
 export function DataFlow({ sources, targets, engine: engineProp, stages: stagesProp, className }:
   { sources: DataFlowSource[]; targets: DataFlowTarget[]; engine?: string; stages?: string[]; className?: string }) {
   const [wrapRef, wrapW] = useWidth<HTMLDivElement>()
-  const m = useMessages(NETWORK_MESSAGES), { t, fmt, locale } = useLocale()
-  const engine = engineProp ?? m('engine')
-  const stagesDefault = [m('ingest'), m('transform'), m('enrich'), m('route')], stages = stagesProp ?? stagesDefault
+  const engine = engineProp ?? 'Engine'
+  const stagesDefault = ['Ingest', 'Transform', 'Enrich', 'Route'], stages = stagesProp ?? stagesDefault
   const tall = wrapW > 0 && wrapW < 560
   // phones: two columns of sources, the engine, then two columns of destinations
   const cols2 = (n: number, i: number, top: number, w: number) => { const row = Math.floor(i / 2), solo = i === n - 1 && n % 2 === 1; return [solo ? (w - DF_NW_T) / 2 : 8 + (i % 2) * (DF_NW_T + 8), top + row * (DF_NH + 10)] as const }
@@ -712,17 +652,17 @@ export function DataFlow({ sources, targets, engine: engineProp, stages: stagesP
   )
   const stat = (label: string, v: number, unit?: string) => (
     <div className="rounded-[var(--r-md)] bg-[var(--muted)] px-3 py-2.5"><span className="block text-[11px] text-[var(--fg3)]">{label}</span>
-      <b className="flex items-baseline text-lg font-semibold tracking-tight"><AnimatedNumber locale={locale} value={v} format={{ maximumFractionDigits: 0 }} />{unit && <span className="ms-0.5 text-xs font-normal text-[var(--fg3)]">{unit}</span>}</b></div>
+      <b className="flex items-baseline text-lg font-semibold tracking-tight"><AnimatedNumber value={v} format={{ maximumFractionDigits: 0 }} />{unit && <span className="ms-0.5 text-xs font-normal text-[var(--fg3)]">{unit}</span>}</b></div>
   )
   return (
     <div ref={box} className={cn('flex flex-col gap-3', className)}>
       <div className="flex items-center justify-end gap-2">
-        <label htmlFor={speedId} className="text-xs text-[var(--fg3)]">{m('speed')}</label>
+        <label htmlFor={speedId} className="text-xs text-[var(--fg3)]">{'Speed'}</label>
         <div className="w-[90px] [@media(pointer:coarse)]:w-[120px]"><Slider id={speedId} min={0.3} max={3} step={0.1} value={speed} onChange={setSpeed} /></div>
-        <Button size="sm" className={TOUCH.tap36} onClick={() => setPaused(p => !p)}>{paused ? m('resume') : t('common.pause')}</Button>
+        <Button size="sm" className={TOUCH.tap36} onClick={() => setPaused(p => !p)}>{paused ? 'Resume' : 'Pause'}</Button>
       </div>
       {/* geometry: left-to-right flow in every locale (like charts and Sankey) */}
-      <div ref={wrapRef} dir="ltr" className="overflow-x-auto overscroll-x-contain rounded-[var(--r-lg)] border border-[var(--line)] bg-[var(--bg)]">
+      <div ref={wrapRef} className="overflow-x-auto overscroll-x-contain rounded-[var(--r-lg)] border border-[var(--line)] bg-[var(--bg)]">
         <div className={cn('relative', tall ? 'mx-auto max-w-[420px]' : 'min-w-[640px] [@media(pointer:coarse)]:min-w-[960px]')}>
         {/* three layers with one geometry: links (SVG), particles (canvas), nodes and engine (SVG), so particles pass under the nodes */}
         <svg viewBox={`0 0 ${W} ${H}`} aria-hidden className="block h-auto w-full">
@@ -730,10 +670,10 @@ export function DataFlow({ sources, targets, engine: engineProp, stages: stagesP
           {outP.map((P, i) => lk(dfD(P), 'd', i, sources.length + i))}
         </svg>
         <canvas ref={cvRef} aria-hidden className="pointer-events-none absolute inset-0 h-full w-full" />
-        <svg viewBox={`0 0 ${W} ${H}`} role="group" aria-label={m('dataFlow')} className="pointer-events-none absolute inset-0 block h-full w-full [&_[data-df-node]]:pointer-events-auto">
+        <svg viewBox={`0 0 ${W} ${H}`} role="group" aria-label={'Data flow from sources through a processing engine to destinations'} className="pointer-events-none absolute inset-0 block h-full w-full [&_[data-df-node]]:pointer-events-auto">
           <g>
-            {sources.map((s, i) => node('s', s, i, srcAt(i)[0], srcAt(i)[1], m('rate', { n: Math.round(s.rate * speed) })))}
-            {targets.map((t, i) => node('d', t, i, dstAt(i)[0], dstAt(i)[1], m('delivered', { n: fmt.number(stats.delivered[i]) })))}
+            {sources.map((s, i) => node('s', s, i, srcAt(i)[0], srcAt(i)[1], `${Math.round(s.rate * speed)} ev/s`))}
+            {targets.map((t, i) => node('d', t, i, dstAt(i)[0], dstAt(i)[1], `${fmt.number(stats.delivered[i])} delivered`))}
           </g>
           <g transform={`translate(${ex},${ey})`} role="img" aria-label={`${engine}: ${stages[stage]}`}>
             <motion.g initial={{ opacity: 0, scale: 0.85 }} animate={inView ? { opacity: 1, scale: 1 } : undefined} transition={spring(0.3, 0.6)}>
@@ -751,7 +691,7 @@ export function DataFlow({ sources, targets, engine: engineProp, stages: stagesP
         </div>
       </div>
       <div className="grid grid-cols-2 gap-3 sm:grid-cols-4">
-        {stat(m('throughput'), paused ? 0 : stats.tp, m('perSec'))}{stat(m('processed'), stats.processed)}{stat(m('inFlight'), stats.inflight)}{stat(m('latency'), stats.p95, m('ms'))}
+        {stat('Throughput', paused ? 0 : stats.tp, 'ev/s')}{stat('Processed', stats.processed)}{stat('In flight', stats.inflight)}{stat('Latency p95', stats.p95, 'ms')}
       </div>
     </div>
   )

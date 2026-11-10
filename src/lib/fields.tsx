@@ -1,7 +1,7 @@
-import { createContext, useContext, useEffect, useId, useLayoutEffect, useRef, useState, type AriaAttributes, type FormEvent, type FormHTMLAttributes, type ReactNode, type Ref } from 'react'
+import { createContext, useContext, useEffect, useId, useRef, useState, type AriaAttributes, type FormEvent, type FormHTMLAttributes, type ReactNode, type Ref } from 'react'
 import { motion } from 'motion/react'
-import { FormFieldContext, type MessageKeyOf, type ModuleTranslate, defineMessages, dirX, useDir, useMessages, type FormControlProps, type FormFieldState, useFormControl, Badge, ICONS, Icon, type IconName, cn, spring, useCoarsePointer, useRoving } from './core'
-import { formsAssignRef, formsMergeRefs } from './formkit'
+import { FormFieldContext, type FormControlProps, type FormFieldState, useFormControl, Badge, ICONS, Icon, type IconName, cn, spring, useCoarsePointer, useRoving, composeRefs } from './core'
+import { formsAssignRef } from './formkit'
 
 /**
  * Frame for composite fields (an input plus addons, chips or buttons inside one border): focus ring while anything inside
@@ -22,15 +22,9 @@ export function Label({ children, htmlFor, id, className }: { children: ReactNod
 export type FormErrors = Record<string, ReactNode | undefined>
 const FormsFormCtx = createContext<{ errors: FormErrors; native: Record<string, string> }>({ errors: {}, native: {} })
 
-/** Form's fallback messages, for controls the browser gives none (machine-drafted de/ar; keys under `form.`). */
-export const FORM_MESSAGES = defineMessages('form', {
-  en: { required: 'This field is required', tickBox: 'Tick this box to continue', checkValue: 'Check this value' },
-  de: { required: 'Dieses Feld ist erforderlich', tickBox: 'Setze ein Häkchen, um fortzufahren', checkValue: 'Prüfe diesen Wert' },
-  ar: { required: 'هذا الحقل مطلوب', tickBox: 'حدّد هذا المربع للمتابعة', checkValue: 'تحقّق من هذه القيمة' },
-})
-/** The validation message for a control the browser found invalid (the browser's own, else ours in the UI's language). */
-const formsMessage = (el: HTMLInputElement, t: ModuleTranslate<MessageKeyOf<typeof FORM_MESSAGES>>) =>
-  el.validationMessage || t(el.validity?.valueMissing ? (el.type === 'checkbox' ? 'tickBox' : 'required') : 'checkValue')
+/** The validation message for a control the browser found invalid (the browser's own, else ours). */
+const formsMessage = (el: HTMLInputElement) =>
+  el.validationMessage || (!el.validity?.valueMissing ? 'Check this value' : el.type === 'checkbox' ? 'Tick this box to continue' : 'This field is required')
 
 /**
  * A <form> that validates its fields and shows the messages in its FormFields, with no form library. On submit it checks
@@ -46,8 +40,6 @@ export function Form({ onSubmit, onValues, errors, validationBehavior = 'aria', 
     onSubmit?: (e: FormEvent<HTMLFormElement>) => void; onValues?: (data: FormData, e: FormEvent<HTMLFormElement>) => void
     errors?: FormErrors; validationBehavior?: 'aria' | 'native'; ref?: Ref<HTMLFormElement> }) {
   const ref = useRef<HTMLFormElement>(null)
-  const t = useMessages(FORM_MESSAGES), tRef = useRef(t)
-  useLayoutEffect(() => { tRef.current = t })
   const [native, setNative] = useState<Record<string, string>>({})
   const failedOnce = useRef(false)
   const collect = (form: HTMLFormElement) => {
@@ -55,7 +47,7 @@ export function Form({ onSubmit, onValues, errors, validationBehavior = 'aria', 
     for (const el of Array.from(form.elements) as HTMLInputElement[]) {
       const key = el.name || el.dataset?.uiField
       if (!key || out[key] || !el.willValidate || el.validity.valid) continue
-      out[key] = formsMessage(el, tRef.current)
+      out[key] = formsMessage(el)
     }
     return out
   }
@@ -64,13 +56,13 @@ export function Form({ onSubmit, onValues, errors, validationBehavior = 'aria', 
     // after the event: a state update inside a native listener would flush before React's own onChange runs and undo the keystroke
     let t: ReturnType<typeof setTimeout> | undefined
     const recheck = () => { if (failedOnce.current) { clearTimeout(t); t = setTimeout(() => setNative(collect(form))) } }
-    const invalid = (e: Event) => { const el = e.target as HTMLInputElement, key = el.name || el.dataset?.uiField; if (key) setNative(n => n[key] ? n : { ...n, [key]: formsMessage(el, tRef.current) }) }
+    const invalid = (e: Event) => { const el = e.target as HTMLInputElement, key = el.name || el.dataset?.uiField; if (key) setNative(n => n[key] ? n : { ...n, [key]: formsMessage(el) }) }
     form.addEventListener('input', recheck); form.addEventListener('change', recheck); form.addEventListener('invalid', invalid, true)
     return () => { clearTimeout(t); form.removeEventListener('input', recheck); form.removeEventListener('change', recheck); form.removeEventListener('invalid', invalid, true) }
   }, [])
   return (
     <FormsFormCtx.Provider value={{ errors: errors ?? {}, native }}>
-      <form ref={formsMergeRefs(ref, outer)} noValidate={validationBehavior === 'aria'} {...rest}
+      <form ref={composeRefs(ref, outer)} noValidate={validationBehavior === 'aria'} {...rest}
         onReset={e => { failedOnce.current = false; setNative({}); onReset?.(e) }}
         onSubmit={e => {
           const form = e.currentTarget
@@ -139,7 +131,7 @@ const formsAria = (p: Record<string, unknown>) => Object.fromEntries(Object.entr
 function useFormsToggle({ checked, defaultChecked = false, onChange, value, ref, ...p }: FormsToggleProps) {
   const btn = useRef<HTMLButtonElement>(null)
   const fc = useFormControl<boolean>({ ...p, value: checked, defaultValue: defaultChecked, onChange, serialize: on => on ? value ?? 'on' : null, filled: on => on, kind: 'checkbox', focus: () => btn.current?.focus() })
-  return { ...fc, ref: formsMergeRefs(btn, ref) }
+  return { ...fc, ref: composeRefs(btn, ref) }
 }
 
 /**
@@ -152,14 +144,13 @@ export function Switch({ label, className, ...props }: FormsToggleProps & { labe
   const on = t.value
   const [flips, setFlips] = useState(0)
   const coarse = useCoarsePointer() // touch: a larger, iOS-sized switch (52×32)
-  const dir = useDir()
   const btn = (
     <button type="button" ref={t.ref} role="switch" aria-checked={on} aria-required={t.required || undefined} aria-readonly={t.readOnly || undefined} disabled={t.disabled}
       aria-label={typeof label === 'string' ? label : undefined} aria-labelledby={label ? undefined : t.labelledBy} {...t.control} {...formsAria(props)}
       onClick={() => { if (t.readOnly) return; t.set(!on); setFlips(f => f + 1) }}
       className={cn('relative h-[22px] w-[38px] flex-none cursor-pointer rounded-full border-0 p-0 transition-colors disabled:cursor-not-allowed disabled:opacity-50 aria-readonly:cursor-default [@media(pointer:coarse)]:h-8 [@media(pointer:coarse)]:w-[52px]',
         on ? 'bg-[var(--primary)]' : 'bg-[var(--line2)]', t.invalid && 'shadow-[0_0_0_2px_var(--bad)]', !label && className)}>
-      <motion.i className="absolute top-[3px] start-[3px] block h-4 w-4 [@media(pointer:coarse)]:h-[26px] [@media(pointer:coarse)]:w-[26px]" initial={false} animate={{ x: on ? dirX(coarse ? 20 : 16, dir) : 0 }} transition={spring(0.35, 0.4)}>
+      <motion.i className="absolute top-[3px] start-[3px] block h-4 w-4 [@media(pointer:coarse)]:h-[26px] [@media(pointer:coarse)]:w-[26px]" initial={false} animate={{ x: on ? (coarse ? 20 : 16) : 0 }} transition={spring(0.35, 0.4)}>
         <motion.i key={flips} className="block h-full w-full rounded-full bg-[var(--card)] shadow-[0_1px_2px_rgba(0,0,0,.25)]"
           initial={flips ? { scaleX: 1.3 } : false} animate={{ scaleX: 1 }} transition={spring(0.35, 0.4)} />
       </motion.i>

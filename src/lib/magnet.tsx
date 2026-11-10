@@ -1,5 +1,5 @@
 /**
- * Magnets for sliders and other one-axis drags (0.5): as you drag, the thumb is pulled onto meaningful values and
+ * Magnets for sliders and other one-axis drags: as you drag, the thumb is pulled onto meaningful values and
  * sticks there a little, like snapping in Figma or Keynote and the detents of iOS sliders.
  *
  *   magnets={[0, 25, 50, 75, { value: 100, label: 'Max', strength: 1.5 }, { from: 40, to: 60, label: 'Recommended' }]}
@@ -27,7 +27,7 @@
  */
 import { useEffect, useLayoutEffect, useMemo, useRef, useState, type ReactNode } from 'react'
 import { AnimatePresence, animate, motion, useMotionValue, useReducedMotion } from 'motion/react'
-import { clamp, cn, defineMessages, isCoarsePointer, logicalArrow, useLocale, useMessages, type UIDir } from './core'
+import { clamp, cn, isCoarsePointer, fmt } from './core'
 
 /** A point magnet: a bare value, or a value with a label (announced and shown in the thumb's bubble), its own capture radius in px and a strength (scales capture and release). */
 export type MagnetPoint = { value: number; label?: string; /** capture radius, px */ radius?: number; /** 1 = normal, 1.5 = a firmer detent */ strength?: number }
@@ -173,31 +173,14 @@ export function nextMagnet(value: number, magnets: readonly Magnet[], dir: 1 | -
   return (dir > 0 ? stops.find(v => v > value + eps) : [...stops].reverse().find(v => v < value - eps)) ?? null
 }
 
-/** Which way a key jumps between marks: 1, -1, or 0 (not a jump key). PageUp / PageDown, and Ctrl or ⌘ with an arrow (← → mirror in RTL). */
-export function magnetKeyDirection(e: { key: string; ctrlKey?: boolean; metaKey?: boolean; altKey?: boolean }, dir: UIDir = 'ltr'): 1 | -1 | 0 {
+/** Which way a key jumps between marks: 1, -1, or 0 (not a jump key). PageUp / PageDown, and Ctrl or ⌘ with an arrow */
+export function magnetKeyDirection(e: { key: string; ctrlKey?: boolean; metaKey?: boolean; altKey?: boolean }): 1 | -1 | 0 {
   if (e.key === 'PageUp') return 1
   if (e.key === 'PageDown') return -1
   if (!(e.ctrlKey || e.metaKey) || e.altKey) return 0
-  const k = logicalArrow(e.key, dir)
-  // rtl-lint-ignore: `k` is logicalArrow-mapped above
+  const k = e.key
   return k === 'ArrowRight' || k === 'ArrowUp' ? 1 : k === 'ArrowLeft' || k === 'ArrowDown' ? -1 : 0
 }
-
-/** The magnet strings (machine-drafted de/ar). Override with `<UIProvider messages={{ 'magnet.snapped': … }}>`. */
-export const MAGNET_MESSAGES = defineMessages('magnet', {
-  en: {
-    snapped: 'Snapped to {label}', entered: 'In {label}', valueAt: '{value}, {label}', half: 'Half', third: 'One third', twoThirds: 'Two thirds',
-    quarter: 'Quarter', threeQuarters: 'Three quarters', collapse: 'Collapse', gap: 'Closest allowed', meet: 'Same value',
-  },
-  de: {
-    snapped: 'Eingerastet bei {label}', entered: 'Im Bereich {label}', valueAt: '{value}, {label}', half: 'Hälfte', third: 'Ein Drittel', twoThirds: 'Zwei Drittel',
-    quarter: 'Viertel', threeQuarters: 'Drei Viertel', collapse: 'Einklappen', gap: 'Kleinster Abstand', meet: 'Gleicher Wert',
-  },
-  ar: {
-    snapped: 'استقر عند {label}', entered: 'ضمن {label}', valueAt: '{value}، {label}', half: 'النصف', third: 'الثلث', twoThirds: 'الثلثان',
-    quarter: 'الربع', threeQuarters: 'ثلاثة أرباع', collapse: 'طي', gap: 'أقرب قيمة مسموح بها', meet: 'القيمة نفسها',
-  },
-})
 
 /** The modifier keys a bypass can use. */
 export type MagnetBypassKey = 'Alt' | 'Shift' | 'Meta' | 'Control'
@@ -249,9 +232,8 @@ export function useMagnet(options: UseMagnetOptions) {
   const st = useRef(MAGNET_IDLE), zoneRef = useRef<MagnetZone | null>(null)
   const touches = useRef(new Set<number>()), unlisten = useRef<(() => void) | null>(null)
   const [said, setSaid] = useState(''), timer = useRef<ReturnType<typeof setTimeout>>(undefined)
-  const m = useMessages(MAGNET_MESSAGES), { fmt } = useLocale()
-  const tr = useRef({ m, fmt })
-  useLayoutEffect(() => { tr.current = { m, fmt } })
+  const fmtRef = useRef(fmt)
+  useLayoutEffect(() => { fmtRef.current = fmt })
   useEffect(() => () => { unlisten.current?.(); clearTimeout(timer.current) }, [])
   const anchors = useMemo(() => on ? magnetAnchors(magnets!, { min, max, step }) : [], [on, magnets, min, max, step])
   const zones = useMemo(() => on ? magnets!.filter(magnetIsZone) : [], [on, magnets])
@@ -270,7 +252,7 @@ export function useMagnet(options: UseMagnetOptions) {
     addEventListener('pointerdown', down, true); addEventListener('pointerup', up, true); addEventListener('pointercancel', up, true)
     unlisten.current = () => { removeEventListener('pointerdown', down, true); removeEventListener('pointerup', up, true); removeEventListener('pointercancel', up, true); touches.current.clear() }
   }
-  const labelOf = (hit: { label?: string; value: number }) => hit.label ?? o.current.describe?.(hit.value) ?? tr.current.fmt.number(hit.value)
+  const labelOf = (hit: { label?: string; value: number }) => hit.label ?? o.current.describe?.(hit.value) ?? fmtRef.current.number(hit.value)
   const at = (value: number): { hit: MagnetHit | null; zone: MagnetZone | null; label: string | undefined } => {
     if (!on) return { hit: null, zone: null, label: undefined }
     const eps = 1e-9 * (max - min || 1), a = anchors.find(x => Math.abs(x.value - value) <= eps), zone = magnetZoneAt(zones, value)
@@ -296,12 +278,12 @@ export function useMagnet(options: UseMagnetOptions) {
       st.current = r.state
       if (r.captured && r.snapped) {
         if (opt.haptics !== false && ev?.pointerType === 'touch') magnetHaptic()
-        say(tr.current.m('snapped', { label: labelOf(r.snapped) }))
+        say(`Snapped to ${labelOf(r.snapped)}`)
         opt.onSnap?.(r.snapped, r.value)
       } else if (r.released) opt.onSnap?.(null, r.value)
       if (r.zone !== zoneRef.current) {
         zoneRef.current = r.zone
-        if (r.zone?.label && r.zone.pull === 'inside' && !r.snapped) say(tr.current.m('entered', { label: r.zone.label }))
+        if (r.zone?.label && r.zone.pull === 'inside' && !r.snapped) say(`In ${r.zone.label}`)
       }
       return r
     },
@@ -309,7 +291,7 @@ export function useMagnet(options: UseMagnetOptions) {
     reset() { st.current = MAGNET_IDLE; zoneRef.current = null; unlisten.current?.(); unlisten.current = null },
     /** the mark `value` sits on (exactly) and the zone it is in */ at,
     /** aria-valuetext for `value`: "{text}, {label}" on a labelled mark or inside a labelled zone, else `text` */
-    valueText: (value: number, text: string) => { const l = at(value).label; return l ? m('valueAt', { value: text, label: l }) : text },
+    valueText: (value: number, text: string) => { const l = at(value).label; return l ? `${text}, ${l}` : text },
     /** the mark a jump key moves to from `value` (null past the last one) */
     next: (value: number, dir: 1 | -1) => on ? nextMagnet(value, magnets!, dir, { min, max, step }) : null,
     /** the polite live region; render it once inside the control */
@@ -358,8 +340,7 @@ const MAGNET_BAND = {
 /**
  * The track decorations: a tick for each point (and each zone centre), a tinted band for each zone. Put it inside the
  * track (it fills it, absolutely positioned, aria-hidden). `inset` is the thumb's radius in px when the thumb's centre
- * stops short of the track's ends (native range inputs), so ticks line up with it. Positions are logical
- * (inset-inline-start), so they mirror with the track in RTL and stay put inside an LTR island.
+ * stops short of the track's ends (native range inputs), so ticks line up with it.
  */
 export function MagnetMarks({ magnets, min, max, value, inset = 0, tone = 'default', className }:
   { magnets?: readonly Magnet[] | null; min: number; max: number; /** highlights the tick the value sits on */ value?: number | readonly number[]; inset?: number
@@ -394,7 +375,7 @@ export function MagnetBubble({ label, show, className }: { label?: ReactNode; sh
       {show && label != null && label !== '' && (
         <motion.span key="b" aria-hidden initial={{ opacity: 0, y: 4, scale: 0.9 }} animate={{ opacity: 1, y: 0, scale: 1 }} exit={{ opacity: 0, y: 2, scale: 0.95, transition: { duration: 0.1 } }}
           transition={{ type: 'spring', stiffness: 600, damping: 32 }}
-          // rtl-lint-ignore: centred over the thumb (physical centring, the same in both directions)
+
           className={cn('pointer-events-none absolute bottom-full left-1/2 z-10 mb-2 w-max -translate-x-1/2 rounded-[var(--r-md)] bg-[var(--primary)] px-2 py-1 text-xs whitespace-nowrap text-[var(--on-primary)] shadow-[var(--shadow)]', className)}>
           {label}
         </motion.span>

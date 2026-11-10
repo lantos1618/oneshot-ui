@@ -1,61 +1,19 @@
 import { useEffect, useLayoutEffect, useRef, useState, type PointerEvent as RPointerEvent, type ReactNode } from 'react'
 import { AnimatePresence, motion, useReducedMotion } from 'motion/react'
 import { Input } from './forms'
-import { Avatar, Badge, Button, Icon, IconButton, TOUCH, cn, defineMessages, dirX, isCoarsePointer, safeColor, spring, surface, useControllable, useLocale, useMessages, useWidth } from './core'
+import { Avatar, Badge, Button, Icon, IconButton, TOUCH, cn, isCoarsePointer, safeColor, spring, surface, useControllable, useWidth, plural, fmt } from './core'
 import { play, useFrameLoop, useViewport } from './motion'
 import { AnimatedList } from './data'
 import { Collapse, TypingDots, useToast } from './feedback'
 
-/* ════════════════════════════════════════════════════════════════════════════
- * COLLABORATION: comments, anchored threads, live presence, chat inbox
- * ══════════════════════════════════════════════════════════════════════════ */
-
 export type Comment = { id: string; author: string; time: string; text: string; replies?: Comment[] }
-
-/** Comments, presence and inbox strings (machine-drafted de/ar). Conversations and comments are data: pass them translated. */
-export const COLLAB_MESSAGES = defineMessages('collab', {
-  en: {
-    you: 'You', justNow: 'Just now', now: 'now', reply: 'Reply', replyPlaceholder: 'Reply…', addComment: 'Add a comment…',
-    resolvedToast: 'Thread resolved', openThread: '{text}: open comment thread', openThreadResolved: '{text}: open comment thread (resolved)',
-    resolved: 'Resolved', reopen: 'Reopen', resolve: 'Resolve', react: 'React {emoji}', reactCount: 'React {emoji}, {n}',
-    docTitle: 'Q4 planning', peopleHere: '{n, plural, one {# person here} other {# people here}}', editing: '{title}: {names} editing',
-    typing: '{name} is typing', typingShort: 'typing…', conversations: 'Conversations', searchConversations: 'Search conversations',
-    unread: '{n} unread', youPrefix: 'You: {text}', noMatch: 'No conversations match “{q}”', call: 'Call', profile: 'Profile',
-    location: 'Location', localTime: 'Local time', sharedFiles: 'Shared files', back: 'Back to conversations', online: 'Online',
-    lastSeen: 'Last seen {when}', details: 'Conversation details', detailsPane: 'Details', closeDetails: 'Close details',
-    messagesWith: 'Messages with {name}', writeMessage: 'Write a message', message: 'Message',
-  },
-  de: {
-    you: 'Du', justNow: 'Gerade eben', now: 'jetzt', reply: 'Antworten', replyPlaceholder: 'Antworten…', addComment: 'Kommentar hinzufügen…',
-    resolvedToast: 'Thread erledigt', openThread: '{text}: Kommentar-Thread öffnen', openThreadResolved: '{text}: Kommentar-Thread öffnen (erledigt)',
-    resolved: 'Erledigt', reopen: 'Wieder öffnen', resolve: 'Erledigen', react: 'Mit {emoji} reagieren', reactCount: 'Mit {emoji} reagieren, {n}',
-    docTitle: 'Q4-Planung', peopleHere: '{n, plural, one {# Person hier} other {# Personen hier}}', editing: '{title}: {names} bearbeiten',
-    typing: '{name} schreibt', typingShort: 'schreibt…', conversations: 'Unterhaltungen', searchConversations: 'Unterhaltungen durchsuchen',
-    unread: '{n} ungelesen', youPrefix: 'Du: {text}', noMatch: 'Keine Unterhaltung passt zu „{q}“', call: 'Anrufen', profile: 'Profil',
-    location: 'Ort', localTime: 'Ortszeit', sharedFiles: 'Geteilte Dateien', back: 'Zurück zu den Unterhaltungen', online: 'Online',
-    lastSeen: 'Zuletzt gesehen {when}', details: 'Details zur Unterhaltung', detailsPane: 'Details', closeDetails: 'Details schließen',
-    messagesWith: 'Nachrichten mit {name}', writeMessage: 'Nachricht schreiben', message: 'Nachricht',
-  },
-  ar: {
-    you: 'أنت', justNow: 'الآن', now: 'الآن', reply: 'رد', replyPlaceholder: 'اكتب ردًا…', addComment: 'أضف تعليقًا…',
-    resolvedToast: 'تم حل النقاش', openThread: '{text}: فتح نقاش التعليقات', openThreadResolved: '{text}: فتح نقاش التعليقات (محلول)',
-    resolved: 'محلول', reopen: 'إعادة الفتح', resolve: 'حل', react: 'تفاعل بـ {emoji}', reactCount: 'تفاعل بـ {emoji}، {n}',
-    docTitle: 'تخطيط الربع الرابع', peopleHere: '{n, plural, one {شخص واحد هنا} two {شخصان هنا} few {# أشخاص هنا} many {# شخصًا هنا} other {# شخص هنا}}', editing: '{title}: {names} يحررون',
-    typing: '{name} يكتب', typingShort: 'يكتب…', conversations: 'المحادثات', searchConversations: 'ابحث في المحادثات',
-    unread: '{n} غير مقروءة', youPrefix: 'أنت: {text}', noMatch: 'لا توجد محادثات تطابق «{q}»', call: 'اتصال', profile: 'الملف الشخصي',
-    location: 'الموقع', localTime: 'الوقت المحلي', sharedFiles: 'الملفات المشتركة', back: 'العودة إلى المحادثات', online: 'متصل',
-    lastSeen: 'آخر ظهور {when}', details: 'تفاصيل المحادثة', detailsPane: 'التفاصيل', closeDetails: 'إغلاق التفاصيل',
-    messagesWith: 'الرسائل مع {name}', writeMessage: 'اكتب رسالة', message: 'الرسالة',
-  },
-})
 
 function CommentBox({ onSubmit, placeholder, autoFocus }: { onSubmit: (text: string) => void; placeholder: string; autoFocus?: boolean }) {
   const [t, setT] = useState('')
-  const { t: ct } = useLocale()
   return (
     <form className="flex gap-2" onSubmit={e => { e.preventDefault(); if (t.trim()) { onSubmit(t.trim()); setT('') } }}>
       <Input autoFocus={autoFocus} value={t} onChange={e => setT(e.target.value)} placeholder={placeholder} className={cn('!h-8 min-w-0 flex-1 [@media(pointer:coarse)]:!text-base', TOUCH.row)} />
-      <Button size="sm" variant="primary" type="submit" disabled={!t.trim()} className={cn('flex-none', TOUCH.row)}>{ct('common.send')}</Button>
+      <Button size="sm" variant="primary" type="submit" disabled={!t.trim()} className={cn('flex-none', TOUCH.row)}>{'Send'}</Button>
     </form>
   )
 }
@@ -63,9 +21,9 @@ function CommentBox({ onSubmit, placeholder, autoFocus }: { onSubmit: (text: str
 /** Threaded comments with inline reply boxes. */
 export function CommentThread({ comments, onChange, me: meProp, className }: { comments: Comment[]; onChange: (c: Comment[]) => void; /** your name on new comments (default "You", translated) */ me?: string; className?: string }) {
   const [replyTo, setReplyTo] = useState<string | null>(null)
-  const m = useMessages(COLLAB_MESSAGES), me = meProp ?? m('you')
+  const me = meProp ?? 'You'
   const add = (text: string, parent: string | null) => {
-    const c: Comment = { id: String(Date.now()), author: me, time: m('justNow'), text }
+    const c: Comment = { id: String(Date.now()), author: me, time: 'Just now', text }
     const ins = (list: Comment[]): Comment[] => parent === null ? [...list, c] : list.map(x => x.id === parent ? { ...x, replies: [...(x.replies ?? []), c] } : { ...x, replies: x.replies && ins(x.replies) })
     onChange(ins(comments)); setReplyTo(null)
   }
@@ -76,20 +34,18 @@ export function CommentThread({ comments, onChange, me: meProp, className }: { c
         <div className="min-w-0 flex-1 text-[13px]">
           <div><b className="font-medium">{c.author}</b> <span className="text-xs text-[var(--fg3)]">{c.time}</span></div>
           <p className="m-0 text-[var(--fg2)]">{c.text}</p>
-          {depth === 0 && <button onClick={() => setReplyTo(replyTo === c.id ? null : c.id)} className="cursor-pointer border-0 bg-transparent p-0 text-xs text-[var(--fg3)] hover:text-[var(--fg)] [@media(pointer:coarse)]:min-h-8 [@media(pointer:coarse)]:pe-3">{m('reply')}</button>}
+          {depth === 0 && <button onClick={() => setReplyTo(replyTo === c.id ? null : c.id)} className="cursor-pointer border-0 bg-transparent p-0 text-xs text-[var(--fg3)] hover:text-[var(--fg)] [@media(pointer:coarse)]:min-h-8 [@media(pointer:coarse)]:pe-3">{'Reply'}</button>}
           {c.replies && render(c.replies, depth + 1)}
-          <Collapse open={replyTo === c.id}><div className="pt-2"><CommentBox placeholder={m('replyPlaceholder')} autoFocus onSubmit={t => add(t, c.id)} /></div></Collapse>
+          <Collapse open={replyTo === c.id}><div className="pt-2"><CommentBox placeholder={'Reply…'} autoFocus onSubmit={t => add(t, c.id)} /></div></Collapse>
         </div>
       </div>
     )} />
   )
-  return <div className={cn('flex flex-col gap-3', className)}>{render(comments, 0)}<CommentBox placeholder={m('addComment')} onSubmit={t => add(t, null)} /></div>
+  return <div className={cn('flex flex-col gap-3', className)}>{render(comments, 0)}<CommentBox placeholder={'Add a comment…'} onSubmit={t => add(t, null)} /></div>
 }
 
 /** Avatar initials stay readable (≥ 11px) on touch screens, where small avatars otherwise shrink them to ~9px. */
 const COLLAB_AV = '[@media(pointer:coarse)]:!h-[30px] [@media(pointer:coarse)]:!w-[30px] [@media(pointer:coarse)]:!text-[11px]'
-
-/* ── Anchored comments ─────────────────────────────────────────────────── */
 
 export type ThreadMessage = { id: string; author: string; text: string; time: string }
 export type AnchoredThread = {
@@ -117,7 +73,7 @@ export function AnchoredComments({ doc, threads, defaultThreads = [], onChange, 
   const [pop, setPop] = useState<Record<string, number>>({})
   const cards = useRef<Record<string, HTMLDivElement | null>>({})
   const toast = useToast()
-  const m = useMessages(COLLAB_MESSAGES), { t: ct, dir, fmt } = useLocale(), fmtN = (n: number) => fmt.number(n)
+  const fmtN = (n: number) => fmt.number(n)
   const [wrap, w] = useWidth<HTMLDivElement>()
   const patch = (id: string, f: (t: AnchoredThread) => AnchoredThread) => setList(latest.current.map(t => t.id === id ? f(t) : t))
   const byId = (id: string) => list.find(t => t.id === id)
@@ -133,15 +89,15 @@ export function AnchoredComments({ doc, threads, defaultThreads = [], onChange, 
   }
   const resolve = (id: string, resolved: boolean) => {
     patch(id, x => ({ ...x, resolved }))
-    if (resolved) toast({ title: m('resolvedToast'), tone: 'ok', action: { label: ct('common.undo'), onClick: () => patch(id, x => ({ ...x, resolved: false })) } })
+    if (resolved) toast({ title: 'Thread resolved', tone: 'ok', action: { label: 'Undo', onClick: () => patch(id, x => ({ ...x, resolved: false })) } })
   }
   const reply = (id: string) => {
     const v = (drafts[id] ?? '').trim(); if (!v) return
-    patch(id, x => ({ ...x, messages: [...x.messages, { id: `${id}-${Date.now()}`, author: me, text: v, time: m('now') }] }))
+    patch(id, x => ({ ...x, messages: [...x.messages, { id: `${id}-${Date.now()}`, author: me, text: v, time: 'now' }] }))
     setDrafts(d => ({ ...d, [id]: '' }))
   }
   const focusThread = (id: string) => {
-    setHot(id); play(cards.current[id], { x: [0, dirX(-4, dir), 0] }, { duration: 0.32, ease: [0.22, 1, 0.36, 1] }) // "look here" nudge
+    setHot(id); play(cards.current[id], { x: [0, -4, 0] }, { duration: 0.32, ease: [0.22, 1, 0.36, 1] }) // "look here" nudge
     cards.current[id]?.scrollIntoView({ block: 'nearest', behavior: 'smooth' })
     // on touch, focusing the reply box would pop the keyboard over the thread you just jumped to
     if (!isCoarsePointer()) cards.current[id]?.querySelector('input')?.focus({ preventScroll: true })
@@ -156,7 +112,7 @@ export function AnchoredComments({ doc, threads, defaultThreads = [], onChange, 
               if (typeof run === 'string') return <span key={j}>{run}</span>
               const t = byId(run.thread), res = !!t?.resolved, on = hot === run.thread
               return (
-                <mark key={j} role="button" tabIndex={0} aria-label={m(res ? 'openThreadResolved' : 'openThread', { text: run.text })}
+                <mark key={j} role="button" tabIndex={0} aria-label={(res ? `${run.text}: open comment thread (resolved)` : `${run.text}: open comment thread`)}
                   onClick={() => focusThread(run.thread)} onKeyDown={e => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); focusThread(run.thread) } }}
                   onMouseEnter={() => setHot(run.thread)} onMouseLeave={() => setHot(null)} onFocus={() => setHot(run.thread)} onBlur={() => setHot(null)}
                   className={cn('cursor-pointer rounded-[var(--r-sm)] px-px transition-[background-color,color] duration-200 outline-none focus-visible:shadow-[0_0_0_2px_var(--warn)]',
@@ -188,15 +144,15 @@ export function AnchoredComments({ doc, threads, defaultThreads = [], onChange, 
             )} />
             {t.resolved ? (
               <div className="flex items-center gap-2 px-3 pb-2.5 ps-12 text-xs text-[var(--fg3)]">
-                <Icon name="check" size={12} strokeWidth={2.6} className="text-[var(--ok)]" />{m('resolved')}
-                <button onClick={() => resolve(t.id, false)} className="ms-auto cursor-pointer rounded-full border border-[var(--line)] bg-[var(--card)] px-2 py-px text-xs text-[var(--fg)] hover:bg-[var(--muted)] [@media(pointer:coarse)]:min-h-9 [@media(pointer:coarse)]:px-3.5">{m('reopen')}</button>
+                <Icon name="check" size={12} strokeWidth={2.6} className="text-[var(--ok)]" />{'Resolved'}
+                <button onClick={() => resolve(t.id, false)} className="ms-auto cursor-pointer rounded-full border border-[var(--line)] bg-[var(--card)] px-2 py-px text-xs text-[var(--fg)] hover:bg-[var(--muted)] [@media(pointer:coarse)]:min-h-9 [@media(pointer:coarse)]:px-3.5">{'Reopen'}</button>
               </div>
             ) : (<>
               <div className="flex flex-wrap items-center gap-1 px-3 pb-2 ps-12">
                 {reactions.map(e => {
                   const mine = !!t.mine?.includes(e), n = t.reactions?.[e] ?? 0
                   return (
-                    <motion.button key={`${e}${pop[t.id + e] ?? 0}`} aria-pressed={mine} aria-label={n ? m('reactCount', { emoji: e, n }) : m('react', { emoji: e })} onClick={() => react(t, e)}
+                    <motion.button key={`${e}${pop[t.id + e] ?? 0}`} aria-pressed={mine} aria-label={n ? `React ${e}, ${n}` : `React ${e}`} onClick={() => react(t, e)}
                       initial={pop[t.id + e] ? { scale: 0.8 } : false} animate={{ scale: 1 }} transition={spring(0.6, 0.35)}
                       className={cn('inline-flex h-6 cursor-pointer items-center gap-1 rounded-full border px-2 text-xs [@media(pointer:coarse)]:h-9 [@media(pointer:coarse)]:min-w-11 [@media(pointer:coarse)]:justify-center [@media(pointer:coarse)]:px-2.5 [@media(pointer:coarse)]:text-sm',
                         mine ? 'border-[var(--accent)] bg-[var(--accent-soft)]' : 'border-[var(--line)] bg-[var(--card)] hover:bg-[var(--muted)]')}>
@@ -206,14 +162,14 @@ export function AnchoredComments({ doc, threads, defaultThreads = [], onChange, 
                 })}
                 <span className="flex-1" />
                 <button onClick={() => resolve(t.id, true)} className="inline-flex h-6 cursor-pointer items-center gap-1 rounded-full border border-[var(--line)] bg-[var(--card)] px-2 text-xs hover:bg-[var(--muted)] [@media(pointer:coarse)]:h-9 [@media(pointer:coarse)]:px-3 [@media(pointer:coarse)]:text-[13px]">
-                  <Icon name="check" size={11} strokeWidth={2.6} />{m('resolve')}
+                  <Icon name="check" size={11} strokeWidth={2.6} />{'Resolve'}
                 </button>
               </div>
               <form onSubmit={e => { e.preventDefault(); reply(t.id) }} className="flex gap-1.5 border-t border-[var(--line)] bg-[color-mix(in_srgb,var(--muted)_40%,var(--card))] p-2">
                 <Input value={drafts[t.id] ?? ''} onChange={e => setDrafts(d => ({ ...d, [t.id]: e.target.value }))}
-                  placeholder={m('replyPlaceholder')} aria-label={m('reply')} className={cn('!h-[30px] min-w-0 flex-1 !px-2 [@media(pointer:coarse)]:!text-base', TOUCH.row)} onFocus={() => setHot(t.id)} />
+                  placeholder={'Reply…'} aria-label={'Reply'} className={cn('!h-[30px] min-w-0 flex-1 !px-2 [@media(pointer:coarse)]:!text-base', TOUCH.row)} onFocus={() => setHot(t.id)} />
                 {/* the input shrinks (min-w-0), so the button is never pushed out of a narrow card */}
-                <Button size="sm" variant="primary" type="submit" disabled={!(drafts[t.id] ?? '').trim()} className={cn('flex-none', TOUCH.row)}>{m('reply')}</Button>
+                <Button size="sm" variant="primary" type="submit" disabled={!(drafts[t.id] ?? '').trim()} className={cn('flex-none', TOUCH.row)}>{'Reply'}</Button>
 
               </form>
             </>)}
@@ -224,8 +180,6 @@ export function AnchoredComments({ doc, threads, defaultThreads = [], onChange, 
   )
 }
 
-/* ── Live presence ─────────────────────────────────────────────────────── */
-
 export type Collaborator = { name: string; /** a plain CSS colour (hex, rgb(), named) or token such as var(--c3), which keeps it theme-aware; anything else falls back to the accent */ color: string }
 
 const PRESENCE_PEOPLE: Collaborator[] = [{ name: 'Bea Kim', color: 'var(--c3)' }, { name: 'Chris Moe', color: 'var(--c4)' }, { name: 'Dana Ng', color: 'var(--warn)' }]
@@ -235,9 +189,9 @@ function CollabCursor({ name, color: raw, elRef, hidden }: { name: string; color
   const color = safeColor(raw, 'var(--accent)') // data → style/fill: no `;`, url() or other breakouts
   return (
     // positioned by translate(x, y) from the canvas' left edge (pointer geometry), so the anchor is physical
-    <div ref={elRef} aria-hidden className="pointer-events-none absolute top-0 left-0 z-[3] transition-opacity duration-150 will-change-transform" style={{ /* rtl-lint-ignore: pointer geometry */ opacity: hidden ? 0 : 1 }}>
+    <div ref={elRef} aria-hidden className="pointer-events-none absolute top-0 left-0 z-[3] transition-opacity duration-150 will-change-transform" style={{ opacity: hidden ? 0 : 1 }}>
       <svg width="16" height="18" viewBox="0 0 16 18"><path d="M1 1l13 7-6 1.6L5.4 16z" fill={color} stroke="#fff" strokeWidth="1.4" strokeLinejoin="round" /></svg>
-      <span /* rtl-lint-ignore: pointer geometry */ className="absolute top-3.5 left-3 rounded-[5px_5px_5px_2px] px-2 py-0.5 text-[11px] font-semibold whitespace-nowrap text-white"
+      <span className="absolute top-3.5 left-3 rounded-[5px_5px_5px_2px] px-2 py-0.5 text-[11px] font-semibold whitespace-nowrap text-white"
         style={{ background: `color-mix(in srgb, ${color} 52%, #000)` }}>{name}</span>
     </div>
   )
@@ -251,8 +205,7 @@ function CollabCursor({ name, color: raw, elRef, hidden }: { name: string; color
 export function LivePresence({ people = PRESENCE_PEOPLE, me = PRESENCE_ME, title: titleProp, actions, className }:
   { people?: Collaborator[]; me?: Collaborator; title?: string; actions?: ReactNode; className?: string }) {
   const box = useRef<HTMLDivElement>(null)
-  const m = useMessages(COLLAB_MESSAGES), { fmt } = useLocale()
-  const title = titleProp ?? m('docTitle')
+  const title = titleProp ?? 'Q4 planning'
   const els = useRef<(HTMLDivElement | null)[]>([])
   const mine = useRef<HTMLDivElement | null>(null)
   const [meOn, setMeOn] = useState(false)
@@ -291,23 +244,21 @@ export function LivePresence({ people = PRESENCE_PEOPLE, me = PRESENCE_ME, title
             </span>
           ))}
         </div>
-        <div className="flex items-center gap-2"><span className="text-xs text-[var(--fg3)]" aria-live="polite">{m('peopleHere', { n: all.length })}</span>{actions}</div>
+        <div className="flex items-center gap-2"><span className="text-xs text-[var(--fg3)]" aria-live="polite">{plural(all.length, 'person here', 'people here')}</span>{actions}</div>
       </div>
       {/* touch: tap or drag sideways to place your cursor (it stays put); vertical swipes still scroll the page */}
-      <div ref={box} onPointerMove={move} onPointerDown={move} onPointerLeave={e => e.pointerType === 'mouse' && setMeOn(false)} role="img" aria-label={m('editing', { title, names: fmt.list(all.map(p => p.name)) })}
+      <div ref={box} onPointerMove={move} onPointerDown={move} onPointerLeave={e => e.pointerType === 'mouse' && setMeOn(false)} role="img" aria-label={`${title}: ${fmt.list(all.map(p => p.name))} editing`}
         className={cn(surface.md, 'relative min-h-[200px] flex-1 cursor-none touch-pan-y overflow-hidden !bg-[var(--bg)]')}>
         <div className="absolute inset-4 flex flex-col gap-2">
           <b className="text-sm">{title}</b>
           {['92%', '92%', '64%', '92%', '64%'].map((wd, i) => <div key={i} className="h-[9px] rounded-[var(--r-sm)] bg-[var(--line)]" style={{ width: wd }} />)}
         </div>
         {people.map((p, i) => <CollabCursor key={p.name} name={p.name.split(' ')[0]} color={p.color} elRef={el => { els.current[i] = el }} />)}
-        <CollabCursor name={m('you')} color={me.color} hidden={!meOn} elRef={el => { mine.current = el }} />
+        <CollabCursor name={'You'} color={me.color} hidden={!meOn} elRef={el => { mine.current = el }} />
       </div>
     </div>
   )
 }
-
-/* ── Chat inbox ────────────────────────────────────────────────────────── */
 
 export type InboxMessage = { from: 'me' | 'them'; text: string }
 export type InboxConversation = {
@@ -322,11 +273,10 @@ const INBOX_REPLIES = ['Sounds good 👍', 'On it', 'Can we chat at 4?', 'Perfec
 const INBOX_MAX_MESSAGES = 500
 const INBOX_PINGS = ['Quick one: are we still on for the review?', 'Sent you the notes from today', 'Can you take a look when you have a sec?', 'Heads up, the build is green again']
 function InboxTyping({ name }: { name: string }) {
-  const m = useMessages(COLLAB_MESSAGES)
   return (
     <motion.div initial={{ opacity: 0, y: 6 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0, transition: { duration: 0.1 } }}
       className="flex self-start rounded-[var(--r-lg)] rounded-es-[5px] bg-[var(--muted)] px-3 py-1.5">
-      <TypingDots label={m('typing', { name })} />
+      <TypingDots label={`${name} is typing`} />
     </motion.div>
   )
 }
@@ -340,7 +290,6 @@ function InboxTyping({ name }: { name: string }) {
  */
 export function ChatInbox({ conversations, replies = INBOX_REPLIES, simulateIncoming = true, className }:
   { conversations: InboxConversation[]; replies?: string[]; simulateIncoming?: boolean; className?: string }) {
-  const m = useMessages(COLLAB_MESSAGES), { t: ct, fmt, dir: ldir } = useLocale()
   const [list, setList] = useState(conversations)
   const [cur, setCur] = useState(conversations[0]?.id)
   const [dir, setDir] = useState(0)
@@ -370,7 +319,7 @@ export function ChatInbox({ conversations, replies = INBOX_REPLIES, simulateInco
 
   const deliver = (id: string, text: string) => {
     setTyping(t => ({ ...t, [id]: false }))
-    setList(l => l.map(x => x.id === id ? { ...x, messages: [...x.messages, { from: 'them' as const, text }].slice(-INBOX_MAX_MESSAGES), last: m('now'), unread: id === curRef.current ? 0 : (x.unread ?? 0) + 1 } : x))
+    setList(l => l.map(x => x.id === id ? { ...x, messages: [...x.messages, { from: 'them' as const, text }].slice(-INBOX_MAX_MESSAGES), last: 'now', unread: id === curRef.current ? 0 : (x.unread ?? 0) + 1 } : x))
   }
   // background threads ping now and then (a few times at most) while the inbox is on screen
   useEffect(() => {
@@ -399,7 +348,7 @@ export function ChatInbox({ conversations, replies = INBOX_REPLIES, simulateInco
   const send = () => {
     const v = draft.trim(); if (!v || !c) return
     const at = c.id
-    setList(l => l.map(x => x.id === at ? { ...x, messages: [...x.messages, { from: 'me' as const, text: v }].slice(-INBOX_MAX_MESSAGES), last: m('now') } : x)); setDraft('')
+    setList(l => l.map(x => x.id === at ? { ...x, messages: [...x.messages, { from: 'me' as const, text: v }].slice(-INBOX_MAX_MESSAGES), last: 'now' } : x)); setDraft('')
     later(700, () => setTyping(t => ({ ...t, [at]: true })))
     later(2100, () => deliver(at, replies[Math.floor(Math.random() * replies.length)]))
   }
@@ -408,9 +357,9 @@ export function ChatInbox({ conversations, replies = INBOX_REPLIES, simulateInco
   const time = c && clock !== null ? fmt.time(clock, { hour: '2-digit', minute: '2-digit', timeZone: c.timeZone }) : '–'
 
   const listPane = (
-    <aside className={cn('flex min-h-0 flex-col', !narrow && 'border-e border-[var(--line)]')} aria-label={m('conversations')}>
-      <div className="border-b border-[var(--line)] p-2.5"><Input value={q} onChange={e => setQ(e.target.value)} placeholder={ct('common.search')} aria-label={m('searchConversations')} className={cn('!h-8 [@media(pointer:coarse)]:!text-base', TOUCH.row)} /></div>
-      <div className="min-h-0 flex-1 overflow-auto" role="listbox" aria-label={m('conversations')}>
+    <aside className={cn('flex min-h-0 flex-col', !narrow && 'border-e border-[var(--line)]')} aria-label={'Conversations'}>
+      <div className="border-b border-[var(--line)] p-2.5"><Input value={q} onChange={e => setQ(e.target.value)} placeholder={'Search'} aria-label={'Search conversations'} className={cn('!h-8 [@media(pointer:coarse)]:!text-base', TOUCH.row)} /></div>
+      <div className="min-h-0 flex-1 overflow-auto" role="listbox" aria-label={'Conversations'}>
         {shown.map(x => {
           const last = x.messages[x.messages.length - 1]
           return (
@@ -420,18 +369,18 @@ export function ChatInbox({ conversations, replies = INBOX_REPLIES, simulateInco
               <Avatar name={x.name} size={36} status={x.online ? 'online' : undefined} className="!border-0" />
               <div className="min-w-0 flex-1">
                 <b className="flex justify-between gap-2 text-[13px] font-semibold">{x.name}<span className="text-[11px] font-normal text-[var(--fg2)]">{x.last}</span></b>
-                <p className={cn('m-0 mt-0.5 truncate pe-6 text-xs', typing[x.id] ? 'text-[var(--accent)]' : 'text-[var(--fg2)]')}>{typing[x.id] ? m('typingShort') : last?.from === 'me' ? m('youPrefix', { text: last.text }) : last?.text ?? ''}</p>
+                <p className={cn('m-0 mt-0.5 truncate pe-6 text-xs', typing[x.id] ? 'text-[var(--accent)]' : 'text-[var(--fg2)]')}>{typing[x.id] ? 'typing…' : last?.from === 'me' ? `You: ${last.text}` : last?.text ?? ''}</p>
               </div>
               <AnimatePresence>
                 {!!x.unread && (
-                  <motion.span key={x.unread} initial={{ scale: 0.4 }} animate={{ scale: 1 }} exit={{ scale: 0, opacity: 0 }} transition={spring(0.55, 0.4)} aria-label={m('unread', { n: x.unread })}
+                  <motion.span key={x.unread} initial={{ scale: 0.4 }} animate={{ scale: 1 }} exit={{ scale: 0, opacity: 0 }} transition={spring(0.55, 0.4)} aria-label={`${x.unread} unread`}
                     className="absolute end-3 bottom-3 inline-flex"><Badge size="sm" className="min-w-[18px] justify-center !bg-[var(--accent)] font-semibold tabular-nums !text-[var(--card)]">{fmt.number(x.unread)}</Badge></motion.span>
                 )}
               </AnimatePresence>
             </div>
           )
         })}
-        {!shown.length && <p className="m-0 p-4 text-center text-xs text-[var(--fg3)]">{m('noMatch', { q })}</p>}
+        {!shown.length && <p className="m-0 p-4 text-center text-xs text-[var(--fg3)]">{`No conversations match “${q}”`}</p>}
       </div>
     </aside>
   )
@@ -441,9 +390,9 @@ export function ChatInbox({ conversations, replies = INBOX_REPLIES, simulateInco
       <Avatar name={c.name} size={64} status={c.online ? 'online' : undefined} className="!border-0" />
       <b className="mt-1 text-sm">{c.name}</b>
       <span className="text-xs text-[var(--fg3)]">{c.role}</span>
-      <div className="mt-2 flex gap-2"><Button size="sm" className={TOUCH.tap36}><Icon name="phone" size={13} />{m('call')}</Button><Button size="sm" className={TOUCH.tap36}><Icon name="user" size={13} />{m('profile')}</Button></div>
+      <div className="mt-2 flex gap-2"><Button size="sm" className={TOUCH.tap36}><Icon name="phone" size={13} />{'Call'}</Button><Button size="sm" className={TOUCH.tap36}><Icon name="user" size={13} />{'Profile'}</Button></div>
       <dl className="m-0 mt-3 w-full text-start text-xs">
-        {[[m('location'), c.location], [m('localTime'), time], [m('sharedFiles'), fmt.number(c.files?.length ?? 0)]].map(([k, v]) => (
+        {[['Location', c.location], ['Local time', time], ['Shared files', fmt.number(c.files?.length ?? 0)]].map(([k, v]) => (
           <div key={k} className="flex justify-between border-b border-[var(--line)] py-2"><dt className="text-[var(--fg3)]">{k}</dt><dd className="m-0 ui-num">{v}</dd></div>
         ))}
       </dl>
@@ -458,18 +407,18 @@ export function ChatInbox({ conversations, replies = INBOX_REPLIES, simulateInco
   const threadPane = c && (
     <div className="relative flex min-h-0 min-w-0 flex-col overflow-hidden">
       <div className="flex h-[54px] flex-none items-center gap-2.5 border-b border-[var(--line)] px-3 text-sm">
-        {narrow && <IconButton icon="chevronLeft" label={m('back')} onClick={() => setPane('list')} className={cn('ui-flip', TOUCH.tap36)} />}
+        {narrow && <IconButton icon="chevronLeft" label={'Back to conversations'} onClick={() => setPane('list')} className={TOUCH.tap36} />}
         <Avatar name={c.name} size={30} className="!border-0" />
-        <div className="min-w-0 flex-1"><b className="block truncate font-semibold">{c.name}</b><div className="text-xs text-[var(--fg3)]">{typing[c.id] ? m('typingShort') : c.online ? m('online') : m('lastSeen', { when: c.last })}</div></div>
-        {!wide && <IconButton icon="info" label={m('details')} aria-pressed={details} onClick={() => setDetails(d => !d)} className={TOUCH.tap36} />}
+        <div className="min-w-0 flex-1"><b className="block truncate font-semibold">{c.name}</b><div className="text-xs text-[var(--fg3)]">{typing[c.id] ? 'typing…' : c.online ? 'Online' : `Last seen ${c.last}`}</div></div>
+        {!wide && <IconButton icon="info" label={'Conversation details'} aria-pressed={details} onClick={() => setDetails(d => !d)} className={TOUCH.tap36} />}
       </div>
-      <motion.div key={c.id} ref={scroller} initial={dir ? { opacity: 0, x: dirX(12 * dir, ldir) } : false} animate={{ opacity: 1, x: 0 }} transition={spring(0.2, 0.3)}
-        className="flex min-h-0 flex-1 flex-col gap-1.5 overflow-auto p-3" role="log" aria-label={m('messagesWith', { name: c.name })}>
-        <div className="my-2 flex items-center gap-3 text-[11px] text-[var(--fg3)]"><span className="h-px flex-1 bg-[var(--line)]" />{ct('date.today')}<span className="h-px flex-1 bg-[var(--line)]" /></div>
+      <motion.div key={c.id} ref={scroller} initial={dir ? { opacity: 0, x: 12 * dir } : false} animate={{ opacity: 1, x: 0 }} transition={spring(0.2, 0.3)}
+        className="flex min-h-0 flex-1 flex-col gap-1.5 overflow-auto p-3" role="log" aria-label={`Messages with ${c.name}`}>
+        <div className="my-2 flex items-center gap-3 text-[11px] text-[var(--fg3)]"><span className="h-px flex-1 bg-[var(--line)]" />{'Today'}<span className="h-px flex-1 bg-[var(--line)]" /></div>
         <AnimatePresence initial={false}>
           {c.messages.map((msg, i) => (
             <motion.div key={i} initial={{ opacity: 0, y: 10, scale: 0.96 }} animate={{ opacity: 1, y: 0, scale: 1 }} transition={spring(0.3, 0.35)}
-              className={cn('rounded-[var(--r-lg)] px-3 py-2 text-[13px] leading-[1.45] [overflow-wrap:anywhere]', narrow ? 'max-w-[84%]' : 'max-w-[70%]', msg.from === 'me' ? 'origin-bottom-right self-end rounded-ee-[5px] bg-[var(--primary)] text-[var(--on-primary)] rtl:origin-bottom-left' : 'origin-bottom-left self-start rounded-es-[5px] bg-[var(--muted)] rtl:origin-bottom-right')}>
+              className={cn('rounded-[var(--r-lg)] px-3 py-2 text-[13px] leading-[1.45] [overflow-wrap:anywhere]', narrow ? 'max-w-[84%]' : 'max-w-[70%]', msg.from === 'me' ? 'origin-bottom-right self-end rounded-ee-[5px] bg-[var(--primary)] text-[var(--on-primary)]' : 'origin-bottom-left self-start rounded-es-[5px] bg-[var(--muted)]')}>
               {msg.text}
             </motion.div>
           ))}
@@ -477,18 +426,18 @@ export function ChatInbox({ conversations, replies = INBOX_REPLIES, simulateInco
         </AnimatePresence>
       </motion.div>
       <form onSubmit={e => { e.preventDefault(); send() }} className="m-2.5 flex flex-none items-center gap-1.5 rounded-full border border-[var(--line)] bg-[var(--card)] py-1 pe-1 ps-4 focus-within:border-[var(--fg3)]">
-        <input ref={composer} value={draft} onChange={e => setDraft(e.target.value)} placeholder={m('writeMessage')} aria-label={m('message')}
+        <input ref={composer} value={draft} onChange={e => setDraft(e.target.value)} placeholder={'Write a message'} aria-label={'Message'}
           className={cn('h-7 min-w-0 flex-1 border-0 bg-transparent text-[13px] text-[var(--fg)] outline-none placeholder:text-[var(--fg3)] [@media(pointer:coarse)]:h-9', TOUCH.input)} />
-        <motion.button type="submit" aria-label={ct('common.send')} disabled={!draft.trim()} whileTap={{ scale: 0.9 }}
+        <motion.button type="submit" aria-label={'Send'} disabled={!draft.trim()} whileTap={{ scale: 0.9 }}
           className="grid h-7 w-7 flex-none [@media(pointer:coarse)]:h-9 [@media(pointer:coarse)]:w-9 cursor-pointer place-items-center rounded-full border-0 bg-[var(--primary)] text-[var(--on-primary)] transition-opacity disabled:cursor-default disabled:opacity-40">
-          <Icon name="send" size={15} strokeWidth={2.5} className="ui-flip" />
+          <Icon name="send" size={15} strokeWidth={2.5} />
         </motion.button>
       </form>
       <AnimatePresence>
         {!wide && details && (
-          <motion.div key="details" initial={{ x: ldir === 'rtl' ? '-100%' : '100%' }} animate={{ x: 0 }} exit={{ x: ldir === 'rtl' ? '-100%' : '100%' }} transition={spring(0.15, 0.35)}
+          <motion.div key="details" initial={{ x: '100%' }} animate={{ x: 0 }} exit={{ x: '100%' }} transition={spring(0.15, 0.35)}
             className="absolute inset-y-0 end-0 z-10 flex w-[min(260px,85%)] flex-col border-s border-[var(--line)] bg-[var(--card)] shadow-[var(--shadow)]">
-            <div className="flex justify-end p-1.5"><IconButton icon="x" label={m('closeDetails')} onClick={() => setDetails(false)} className={TOUCH.tap36} /></div>
+            <div className="flex justify-end p-1.5"><IconButton icon="x" label={'Close details'} onClick={() => setDetails(false)} className={TOUCH.tap36} /></div>
             {detailsPane}
           </motion.div>
         )}
@@ -501,7 +450,7 @@ export function ChatInbox({ conversations, replies = INBOX_REPLIES, simulateInco
       wide ? 'grid-cols-[260px_minmax(0,1fr)_240px]' : mid ? 'grid-cols-[220px_minmax(0,1fr)]' : 'grid-cols-1', className)}>
       {(!narrow || pane === 'list') && listPane}
       {(!narrow || pane === 'thread') && threadPane}
-      {wide && <aside className="flex min-h-0 flex-col border-s border-[var(--line)]" aria-label={m('detailsPane')}>{detailsPane}</aside>}
+      {wide && <aside className="flex min-h-0 flex-col border-s border-[var(--line)]" aria-label={'Details'}>{detailsPane}</aside>}
     </div>
   )
 }

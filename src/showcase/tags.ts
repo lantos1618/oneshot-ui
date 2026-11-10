@@ -92,7 +92,7 @@ export const TAGS = [
   tagDef('capability', 'streaming', 'Streaming', 'Shows output as it arrives, token by token or line by line.', ['stream', 'tokens', 'SSE', 'incremental', 'live output']),
   tagDef('capability', 'async', 'Async', 'Loads or saves through promises, with loading and error states.', ['loading', 'fetch', 'promise', 'debounce', 'remote', 'pending', 'promise toast']),
   tagDef('capability', 'drag-and-drop', 'Drag and drop', 'Move, reorder or drop things with a pointer or finger.', ['drag', 'drop', 'dnd', 'reorder', 'sortable', 'draggable']),
-  tagDef('capability', 'i18n', 'i18n and RTL', 'Locale-aware formats, translations and right-to-left layout.', ['internationalisation', 'internationalization', 'localisation', 'localization', 'locale', 'RTL', 'right to left', 'translation', 'time zone']),
+  tagDef('capability', 'formatting', 'Locale formats', 'Numbers, dates and times formatted with Intl for any locale and time zone.', ['locale', 'intl', 'number format', 'date format', 'time zone']),
   tagDef('capability', 'animated', 'Animated', 'Motion that explains a change (and respects reduced motion).', ['animation', 'motion', 'spring', 'transition']),
   tagDef('capability', 'accessible', 'Accessibility pattern', 'Shows an accessibility technique worth copying: announcements, no colour alone, focus handling.', ['a11y', 'accessibility', 'screen reader', 'ARIA', 'WCAG', 'data table', 'accessible chart']),
   tagDef('capability', 'server-mode', 'Server mode', 'The server sorts, filters, pages or validates.', ['server-side', 'server side', 'pagination', 'remote data', 'server actions', 'API']),
@@ -144,9 +144,9 @@ export const TAG_CARDS: Readonly<Record<string, TagCard>> = {
   'Date picker dropdown': tagCard(C, ['inputs', 'forms', 'scheduling', 'keyboard'], ['date-picker'], ['calendar', 'date input', 'datepicker']),
   'Calendar constraints': tagCard(C, ['inputs', 'scheduling', 'accessible'], ['calendar', 'date-picker'], ['availability', 'booking', 'disabled dates', 'min max', 'unavailable']),
   'Date range picker': tagCard(C, ['inputs', 'scheduling', 'filtering', 'dashboards'], ['date-range-picker'], ['range', 'presets', 'from to', 'last 30 days']),
-  'Typed dates in any locale': tagCard(C, ['inputs', 'scheduling', 'keyboard', 'i18n'], ['date-field', 'time-field', 'calendar'], ['date field', 'segments', 'typing', 'locale formats']),
+  'Typed dates': tagCard(C, ['inputs', 'scheduling', 'keyboard', 'formatting'], ['date-field', 'time-field', 'calendar'], ['date field', 'segments', 'typing', 'locale formats']),
   'Time picker': tagCard(C, ['inputs', 'scheduling', 'keyboard'], ['time-picker', 'time-field'], ['clock', 'hours', 'minutes', 'time input']),
-  'Date and time with a time zone': tagCard(C, ['inputs', 'scheduling', 'i18n'], ['date-time-picker', 'time-zone-picker'], ['datetime', 'timezone', 'meeting time', 'UTC']),
+  'Date and time with a time zone': tagCard(C, ['inputs', 'scheduling', 'formatting'], ['date-time-picker', 'time-zone-picker'], ['datetime', 'timezone', 'meeting time', 'UTC']),
   'Month and year': tagCard(C, ['inputs', 'scheduling', 'checkout'], ['month-picker', 'year-picker'], ['month picker', 'year picker', 'billing period', 'card expiry']),
   'Combobox': tagCard(C, ['inputs', 'search', 'keyboard'], ['combobox'], ['autocomplete', 'typeahead', 'searchable select', 'select with search']),
   'Multi-select': tagCard(C, ['inputs', 'filtering', 'keyboard'], ['multi-select'], ['multiple select', 'select many', 'chips', 'tags']),
@@ -156,8 +156,8 @@ export const TAG_CARDS: Readonly<Record<string, TagCard>> = {
   'Colour picker': tagCard(C, ['inputs', 'theming', 'touch'], ['color-picker'], ['color picker', 'colour', 'color', 'hex', 'swatches', 'hue', 'eyedropper']),
   'File upload': tagCard(C, ['inputs', 'uploads', 'drag-and-drop'], ['file-upload'], ['dropzone', 'file input', 'attachments', 'browse files']),
   'Range slider': tagCard(C, ['inputs', 'filtering', 'checkout', 'touch'], ['slider'], ['price range', 'min max', 'two thumbs', 'dual slider', 'price filter']),
-  'Phone number': tagCard(C, ['inputs', 'forms', 'i18n'], ['phone-input'], ['tel', 'telephone', 'country code', 'international', 'E.164']),
-  'Currency input': tagCard(C, ['inputs', 'checkout', 'finance', 'i18n'], ['currency-input'], ['money', 'amount', 'price', 'money input']),
+  'Phone number': tagCard(C, ['inputs', 'forms', 'formatting'], ['phone-input'], ['tel', 'telephone', 'country code', 'international', 'E.164']),
+  'Currency input': tagCard(C, ['inputs', 'checkout', 'finance', 'formatting'], ['currency-input'], ['money', 'amount', 'price', 'money input']),
   // forms
   'Rich text editor': tagCard(C, ['forms', 'editing', 'keyboard'], ['rich-text-editor'], ['WYSIWYG', 'formatting', 'bold italic', 'contenteditable', 'document editor']),
   'Signature pad': tagCard(C, ['forms', 'legal', 'touch'], ['signature-pad'], ['sign', 'e-signature', 'draw', 'signature']),
@@ -227,7 +227,7 @@ export const TAG_CARDS: Readonly<Record<string, TagCard>> = {
   'Tree view · 10k nodes': tagCard(C, ['layout', 'hierarchy', 'virtualised'], ['tree-view'], ['file tree', 'large tree', 'performance', '10,000 nodes']),
   'Activity timeline': tagCard(C, ['data', 'collaboration', 'monitoring'], ['timeline'], ['audit log', 'history', 'activity feed', 'events']),
   'Split panes': tagCard(C, ['layout', 'devtools', 'keyboard', 'touch'], ['split-pane'], ['resizable', 'splitter', 'IDE', 'panels', 'resizer']),
-  'Calendar scheduler': tagCard(C, ['layout', 'scheduling', 'drag-and-drop', 'i18n'], ['scheduler'], ['calendar', 'week view', 'events', 'booking', 'meetings']),
+  'Calendar scheduler': tagCard(C, ['layout', 'scheduling', 'drag-and-drop', 'formatting'], ['scheduler'], ['calendar', 'week view', 'events', 'booking', 'meetings']),
   'Org chart': tagCard('diagram', ['diagrams', 'people', 'hierarchy'], ['org-chart'], ['organisation chart', 'organization chart', 'reporting lines', 'team', 'HR']),
   // collaboration
   'Comments and threads': tagCard(C, ['collaboration', 'review', 'editing'], ['anchored-comments', 'comment-thread'], ['comments', 'annotations', 'replies', 'mentions', 'resolve']),
@@ -257,7 +257,7 @@ export const TAG_CARDS: Readonly<Record<string, TagCard>> = {
   'Heatmap': tagCard('chart', ['charts', 'dashboards', 'monitoring'], ['heatmap'], ['matrix', 'grid heatmap', 'activity', 'patterns', 'punch card']),
   'Calendar heatmap': tagCard('chart', ['charts', 'dashboards', 'monitoring', 'scheduling'], ['calendar-heatmap'], ['contributions', 'streaks', 'activity calendar', 'GitHub graph']),
   'Bullet': tagCard('chart', ['charts', 'dashboards', 'monitoring'], ['bullet-chart'], ['bullet chart', 'target', 'KPI', 'progress to goal']),
-  'Bar list': tagCard('chart', ['charts', 'dashboards', 'keyboard', 'i18n'], ['bar-list'], ['top list', 'ranking', 'leaderboard', 'horizontal bars', 'top pages']),
+  'Bar list': tagCard('chart', ['charts', 'dashboards', 'keyboard', 'formatting'], ['bar-list'], ['top list', 'ranking', 'leaderboard', 'horizontal bars', 'top pages']),
   'Polar area': tagCard('chart', ['charts', 'comparison', 'dashboards'], ['donut-chart'], ['rose chart', 'coxcomb', 'polar chart']),
   'Error bars': tagCard('chart', ['charts', 'statistics', 'comparison'], ['chart'], ['confidence interval', 'A/B test', 'experiments', 'uncertainty', 'whiskers']),
   'Box and violin': tagCard('chart', ['charts', 'statistics', 'comparison'], ['box-violin-chart'], ['box plot', 'violin plot', 'quartiles', 'outliers', 'data science']),
@@ -426,7 +426,7 @@ export const TAG_MODULE_AREA: Readonly<Record<string, TagArea>> = {
 }
 /** Tags every item of a module gets (for modules no card covers yet). */
 export const TAG_MODULE_TAGS: Readonly<Record<string, readonly TagId[]>> = {
-  binary: ['devtools'], themeexport: ['devtools'], agentrun: ['agents'], locale: ['i18n'],
+  binary: ['devtools'], themeexport: ['devtools'], agentrun: ['agents'], locale: ['formatting'],
 }
 /** Items whose module's area doesn't fit (primitives that belong to one area, AI pieces that are diagrams …). */
 export const TAG_ITEM_AREA: Readonly<Record<string, TagArea>> = {
@@ -434,13 +434,13 @@ export const TAG_ITEM_AREA: Readonly<Record<string, TagArea>> = {
   badge: 'feedback', spinner: 'feedback', skeleton: 'feedback', 'status-icon': 'feedback', 'typing-dots': 'feedback', confetti: 'motion', 'animated-number': 'motion',
   avatar: 'data', kbd: 'data', chip: 'inputs', card: 'layout', 'scroll-edges': 'layout', 'spark-chart': 'charts', collapse: 'layout', 'virtual-list': 'data',
   'org-chart': 'diagrams', 'agent-transit-map': 'diagrams', banner: 'feedback', 'notification-bell': 'overlays', 'inline-edit': 'inputs',
-  'theme-toggle': 'theming', 'ui-provider': 'foundation', 'messages-de': 'foundation', 'messages-ar': 'foundation', 'locale-provider': 'foundation',
+  'theme-toggle': 'theming', 'ui-provider': 'foundation',
   'cookie-consent': 'pages', 'pricing-table': 'pages', checkout: 'pages', 'onboarding-checklist': 'pages', 'profile-card': 'pages',
   timeline: 'data', 'task-list': 'data', 'tree-view': 'layout', 'shortcut-sheet': 'data',
 }
 /** Tags for items no card demonstrates (or that do more than their cards show). */
 export const TAG_ITEM_TAGS: Readonly<Record<string, readonly TagId[]>> = {
-  'ui-provider': ['theming', 'i18n', 'accessible'], 'messages-de': ['i18n'], 'messages-ar': ['i18n'], 'locale-provider': ['i18n'], utils: ['devtools'],
+  'ui-provider': ['theming', 'accessible'], utils: ['devtools'],
   hooks: ['keyboard', 'touch', 'composable'], motion: ['animated'], 'virtual-list': ['virtualised'], icon: ['theming'], slot: ['composable'], 'ui-hosts': ['composable'],
   'ai-stream': ['streaming', 'async', 'chat', 'agents'], 'agent-run': ['agents', 'monitoring', 'streaming', 'real-time'], 'appearance-menu': ['settings'], 'appearance-panel': ['settings'], 'theme-toggle': ['settings'], 'theme-preview': ['comparison'],
   'tool-call': ['agents'], 'tool-card': ['agents'], 'approval-card': ['review', 'agents'], 'chat-approval': ['review', 'agents'], 'chat-card': ['chat'], 'chat-checklist': ['chat', 'planning'],

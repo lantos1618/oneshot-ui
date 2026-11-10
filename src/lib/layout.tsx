@@ -1,58 +1,11 @@
 import { Fragment, useEffect, useId, useLayoutEffect, useMemo, useRef, useState, type CSSProperties, type ReactNode, type RefObject, type KeyboardEvent as RKeyboardEvent, type PointerEvent as RPointerEvent } from 'react'
 import { AnimatePresence, LayoutGroup, motion } from 'motion/react'
-import { AvatarStack, Badge, DeltaBadge, Icon, type IconName, ScrollEdges, StatusIcon, type StatusIconStatus, TOUCH, type Tone, clamp, cn, defineMessages, logicalArrow, prefersReducedMotion, safeColor, spring, surface, useCoarsePointer, useControllable, useDir, useLocale, useLongPress, useMessages, usePointerDrag, useScrollEdges, useWidth, SparkChart } from './core'
+import { AvatarStack, Badge, DeltaBadge, Icon, type IconName, ScrollEdges, StatusIcon, type StatusIconStatus, TOUCH, type Tone, clamp, cn, prefersReducedMotion, safeColor, spring, surface, useCoarsePointer, useControllable, useLongPress, usePointerDrag, useScrollEdges, useWidth, SparkChart, plural, fmt } from './core'
 import { Collapse, useToast } from './feedback'
 import { useVirtual } from './virtual'
-import { MAGNET_MESSAGES, type Magnet, MagnetBubble, magnetKeyDirection, useMagnet } from './magnet'
+import { type Magnet, MagnetBubble, magnetKeyDirection, useMagnet } from './magnet'
 
-/* ════════════════════════════════════════════════════════════════════════════
- * 10. LAYOUT: drag-sort engine, kanban, sortable list, tree, timeline, split panes
- * ══════════════════════════════════════════════════════════════════════════ */
-
-/** This module's strings (machine-drafted de/ar: have a native speaker review). Override with `<UIProvider messages={{ 'layout.addCard': … }}>`. */
-const LAYOUT_MSG = defineMessages('layout', {
-  en: {
-    wipExceeded: 'WIP limit exceeded', wipBody: '{col} has more than {limit, plural, one {# card} other {# cards}}', checklistDone: 'Checklist complete',
-    boardHint: 'Arrow keys move between cards. Alt and arrow keys move this card; Alt, Shift and left or right move its column.',
-    holdToMove: 'Press and hold a card to move it', boardCount: '{total, plural, one {# card} other {# cards}} · {done} done',
-    columnLabel: '{col}, {count, plural, one {# card} other {# cards}}', dragColumns: 'Drag to reorder columns', limit: 'Limit {limit}',
-    columnCards: '{col} cards', moveCard: 'Move {card}, {col}, {pos} of {count}', cardPlaceholder: 'Card title, Enter to add', newCardIn: 'New card in {col}',
-    addCard: '+ Add card', moreColumns: 'More columns', blocked: 'Blocked', dragHandle: 'drag handle', waitingOn: 'Waiting on {what}',
-    checkPassed: 'passed', checkFailed: 'failed', checkRunning: 'running', checklist: 'Checklist {done}/{total} done',
-    priority: '{level, select, High {High priority} Med {Medium priority} Low {Low priority} other {{level} priority}}',
-    comments: '{count, plural, one {# comment} other {# comments}}', attachments: '{count, plural, one {# attachment} other {# attachments}}',
-    sortable: 'Sortable list', sortHint: 'Alt and arrow keys to move.', movedTo: 'Moved to position {pos} of {count}', dragToReorder: 'Drag to reorder',
-    files: 'Files', rename: 'Rename {name}', resizePanes: 'Resize panes',
-  },
-  de: {
-    wipExceeded: 'WIP-Limit überschritten', wipBody: '{col} hat mehr als {limit, plural, one {# Karte} other {# Karten}}', checklistDone: 'Checkliste erledigt',
-    boardHint: 'Pfeiltasten wechseln zwischen Karten. Alt und Pfeiltasten verschieben diese Karte; Alt, Umschalt und links oder rechts verschieben ihre Spalte.',
-    holdToMove: 'Karte gedrückt halten, um sie zu verschieben', boardCount: '{total, plural, one {# Karte} other {# Karten}} · {done} erledigt',
-    columnLabel: '{col}, {count, plural, one {# Karte} other {# Karten}}', dragColumns: 'Ziehen, um Spalten neu anzuordnen', limit: 'Limit {limit}',
-    columnCards: 'Karten in {col}', moveCard: '{card} verschieben, {col}, {pos} von {count}', cardPlaceholder: 'Kartentitel, Eingabe zum Hinzufügen', newCardIn: 'Neue Karte in {col}',
-    addCard: '+ Karte hinzufügen', moreColumns: 'Weitere Spalten', blocked: 'Blockiert', dragHandle: 'Ziehgriff', waitingOn: 'Wartet auf {what}',
-    checkPassed: 'bestanden', checkFailed: 'fehlgeschlagen', checkRunning: 'läuft', checklist: 'Checkliste {done}/{total} erledigt',
-    priority: '{level, select, High {Hohe Priorität} Med {Mittlere Priorität} Low {Niedrige Priorität} other {Priorität {level}}}',
-    comments: '{count, plural, one {# Kommentar} other {# Kommentare}}', attachments: '{count, plural, one {# Anhang} other {# Anhänge}}',
-    sortable: 'Sortierbare Liste', sortHint: 'Alt und Pfeiltasten zum Verschieben.', movedTo: 'Auf Position {pos} von {count} verschoben', dragToReorder: 'Ziehen zum Neuordnen',
-    files: 'Dateien', rename: '{name} umbenennen', resizePanes: 'Bereichsgröße ändern',
-  },
-  ar: {
-    wipExceeded: 'تم تجاوز حد العمل الجاري', wipBody: '{col} بها أكثر من {limit, plural, zero {# بطاقة} one {بطاقة واحدة} two {بطاقتين} few {# بطاقات} many {# بطاقة} other {# بطاقة}}', checklistDone: 'اكتملت قائمة المهام',
-    boardHint: 'تنقّل بين البطاقات بمفاتيح الأسهم. Alt مع الأسهم ينقل هذه البطاقة؛ Alt وShift مع اليمين أو اليسار ينقل عمودها.',
-    holdToMove: 'اضغط مطولًا على بطاقة لنقلها', boardCount: '{total, plural, zero {لا بطاقات} one {بطاقة واحدة} two {بطاقتان} few {# بطاقات} many {# بطاقة} other {# بطاقة}} · {done} منجزة',
-    columnLabel: '{col}، {count, plural, zero {لا بطاقات} one {بطاقة واحدة} two {بطاقتان} few {# بطاقات} many {# بطاقة} other {# بطاقة}}', dragColumns: 'اسحب لإعادة ترتيب الأعمدة', limit: 'الحد {limit}',
-    columnCards: 'بطاقات {col}', moveCard: 'نقل {card}، {col}، {pos} من {count}', cardPlaceholder: 'عنوان البطاقة، Enter للإضافة', newCardIn: 'بطاقة جديدة في {col}',
-    addCard: '+ إضافة بطاقة', moreColumns: 'أعمدة أخرى', blocked: 'محظورة', dragHandle: 'مقبض السحب', waitingOn: 'بانتظار {what}',
-    checkPassed: 'نجح', checkFailed: 'فشل', checkRunning: 'قيد التشغيل', checklist: 'قائمة المهام {done}/{total} منجزة',
-    priority: '{level, select, High {أولوية عالية} Med {أولوية متوسطة} Low {أولوية منخفضة} other {أولوية {level}}}',
-    comments: '{count, plural, zero {لا تعليقات} one {تعليق واحد} two {تعليقان} few {# تعليقات} many {# تعليقًا} other {# تعليق}}', attachments: '{count, plural, zero {لا مرفقات} one {مرفق واحد} two {مرفقان} few {# مرفقات} many {# مرفقًا} other {# مرفق}}',
-    sortable: 'قائمة قابلة للترتيب', sortHint: 'Alt ومفاتيح الأسهم للنقل.', movedTo: 'نُقل إلى الموضع {pos} من {count}', dragToReorder: 'اسحب لإعادة الترتيب',
-    files: 'الملفات', rename: 'إعادة تسمية {name}', resizePanes: 'تغيير حجم الأجزاء',
-  },
-})
-
-/* Drag-sort engine ───────────────────────────────────────────────────────────
+/*
  * Pointer-driven (mouse, pen, touch). The dragged item stays in place as a dashed slot while a
  * floating clone follows the pointer; `onMove` fires live as the slot should move, so React state is
  * the single source of truth and motion's `layout` animates everything else out of the way. */
@@ -88,7 +41,7 @@ type LySession = {
  * `data-no-drag` inside a handle never start a drag. A drag in progress is torn down if the component unmounts.
  */
 export function useDragSort({ axis = 'y', onMove, onDrop, canDrop }: DragSortOptions) {
-  const group = useId(), rtl = useDir() === 'rtl' // a row (axis x) runs right to left in RTL
+  const group = useId()
   const [drag, setDrag] = useState<{ id: string; over: string | null } | null>(null)
   const cb = useRef({ onMove, onDrop, canDrop })
   useLayoutEffect(() => { cb.current = { onMove, onDrop, canDrop } })
@@ -136,7 +89,7 @@ export function useDragSort({ axis = 'y', onMove, onDrop, canDrop }: DragSortOpt
     if (lid !== s.over) { s.over = lid; setDrag({ id: s.id, over: lid }) }
     if (!hit || !lid || (cb.current.canDrop && !cb.current.canDrop(s.id, lid))) return
     const all = itemsOf(hit), kids = all.filter(k => k !== self)
-    let i = kids.findIndex(k => { const r = lyLayoutRect(k); return axis === 'x' ? (rtl ? x > r.left + r.width / 2 : x < r.left + r.width / 2) : y < r.top + r.height / 2 })
+    let i = kids.findIndex(k => { const r = lyLayoutRect(k); return axis === 'x' ? (x < r.left + r.width / 2) : y < r.top + r.height / 2 })
     if (i < 0) i = kids.length
     if (self && all.indexOf(self) === i) return
     cb.current.onMove(s.id, lid, i)
@@ -259,8 +212,6 @@ function useLyRefocus(root: RefObject<HTMLElement | null>) {
   return (selector: string) => { pending.current = selector }
 }
 
-/* Kanban ──────────────────────────────────────────────────────────────────── */
-
 export type KanbanCard = {
   id: string; title: string; tag?: { label: string; tone: Tone }
   priority?: 'High' | 'Med' | 'Low'; due?: string; assignees?: string[]; /** @deprecated use assignees */ assignee?: string
@@ -276,7 +227,7 @@ export type KanbanCheckStatus = 'ok' | 'bad' | 'running'
 export type KanbanColumn = { id: string; title: string; color?: string; /** WIP limit */ limit?: number; cards: KanbanCard[] }
 
 const KB_PRI: Record<string, string> = { High: 'var(--bad)', Med: 'var(--warn)', Low: 'var(--fg3)' }
-const KB_CHECK: Record<KanbanCheckStatus, [StatusIconStatus, 'checkPassed' | 'checkFailed' | 'checkRunning']> = { ok: ['done', 'checkPassed'], bad: ['failed', 'checkFailed'], running: ['active', 'checkRunning'] }
+const KB_CHECK: Record<KanbanCheckStatus, [StatusIconStatus, string]> = { ok: ['done', 'passed'], bad: ['failed', 'failed'], running: ['active', 'running'] }
 
 /** Metric panel inside a card: value, change pill and a sparkline that fills the rest of the row. */
 function KanbanMetric({ m }: { m: NonNullable<KanbanCard['metric']> }) {
@@ -308,7 +259,7 @@ export function Kanban({ value, defaultValue = [], onChange, doneColumn, newCard
   const [cols, setCols] = useControllable(value, defaultValue, onChange)
   const ref = useRef(cols); ref.current = cols
   const update = (fn: (c: KanbanColumn[]) => KanbanColumn[]) => { const next = fn(ref.current); if (next !== ref.current) { ref.current = next; setCols(next) } }
-  const toast = useToast(), tm = useMessages(LAYOUT_MSG), dir = useDir()
+  const toast = useToast()
   const rootRef = useRef<HTMLDivElement>(null)
   const refocus = useLyRefocus(rootRef)
   const hint = useId()
@@ -319,7 +270,7 @@ export function Kanban({ value, defaultValue = [], onChange, doneColumn, newCard
   const moveCol = (id: string, index: number) => update(cs => { const c = cs.find(x => x.id === id)!; const rest = cs.filter(x => x.id !== id); return [...rest.slice(0, index), c, ...rest.slice(index)] })
   const checkLimit = (colId: string) => {
     const c = ref.current.find(x => x.id === colId)
-    if (c?.limit && c.cards.length > c.limit) toast({ title: tm('wipExceeded'), description: tm('wipBody', { col: c.title, limit: c.limit }), tone: 'bad' })
+    if (c?.limit && c.cards.length > c.limit) toast({ title: 'WIP limit exceeded', description: `${c.title} has more than ${plural(c.limit, 'card')}`, tone: 'bad' })
   }
   const cards = useDragSort({ onMove: moveCard, onDrop: (_, list) => list && checkLimit(list) })
   const columns = useDragSort({ axis: 'x', onMove: (id, _, i) => moveCol(id, i) })
@@ -331,11 +282,11 @@ export function Kanban({ value, defaultValue = [], onChange, doneColumn, newCard
   const anyDrag = !!(cards.dragging || columns.dragging)
 
   const onCardKey = (e: RKeyboardEvent, ci: number, ri: number, card: KanbanCard) => {
-    const col = cols[ci], arrows = ['ArrowLeft', 'ArrowRight', 'ArrowUp', 'ArrowDown'] // rtl-lint-ignore: key is logicalArrow-mapped
+    const col = cols[ci], arrows = ['ArrowLeft', 'ArrowRight', 'ArrowUp', 'ArrowDown']
     if (e.target !== e.currentTarget || !arrows.includes(e.key)) return
     e.preventDefault()
-    const key = logicalArrow(e.key, dir) // columns run in reading order: ← is the next column in RTL
-    const dx = key === 'ArrowLeft' ? -1 : key === 'ArrowRight' ? 1 : 0, dy = key === 'ArrowUp' ? -1 : key === 'ArrowDown' ? 1 : 0 // rtl-lint-ignore: key is logicalArrow-mapped
+    const key = e.key
+    const dx = key === 'ArrowLeft' ? -1 : key === 'ArrowRight' ? 1 : 0, dy = key === 'ArrowUp' ? -1 : key === 'ArrowDown' ? 1 : 0
     if (e.altKey && e.shiftKey) { if (dx && cols[ci + dx]) { moveCol(col.id, ci + dx); refocus(cardSel(card.id)) } return }
     if (e.altKey) {
       if (dx && cols[ci + dx]) { moveCard(card.id, cols[ci + dx].id, Math.min(ri, cols[ci + dx].cards.length)); checkLimit(cols[ci + dx].id) }
@@ -349,7 +300,7 @@ export function Kanban({ value, defaultValue = [], onChange, doneColumn, newCard
     ...c, cards: c.cards.map(k => {
       if (k.id !== cardId || !k.checklist) return k
       const checklist = k.checklist.map((x, j) => j === i ? { ...x, done: !x.done } : x)
-      if (checklist.every(x => x.done)) toast({ title: tm('checklistDone'), description: k.title })
+      if (checklist.every(x => x.done)) toast({ title: 'Checklist complete', description: k.title })
       return { ...k, checklist }
     }),
   })))
@@ -362,10 +313,10 @@ export function Kanban({ value, defaultValue = [], onChange, doneColumn, newCard
   return (
     <LayoutGroup>
       <div ref={rootRef} className={cn('flex flex-col gap-2', className)}>
-        <span id={hint} hidden>{tm('boardHint')}</span>
+        <span id={hint} hidden>{'Arrow keys move between cards. Alt and arrow keys move this card; Alt, Shift and left or right move its column.'}</span>
         <div className="flex flex-wrap items-baseline justify-between gap-x-3 gap-y-1 text-xs text-[var(--fg3)]">
-          <span className="hidden [@media(pointer:coarse)]:inline">{tm('holdToMove')}</span>
-          <span className="ms-auto" aria-live="polite">{tm('boardCount', { total, done: cols.find(c => c.id === done)?.cards.length ?? 0 })}</span>
+          <span className="hidden [@media(pointer:coarse)]:inline">{'Press and hold a card to move it'}</span>
+          <span className="ms-auto" aria-live="polite">{`${plural(total, 'card')} · ${cols.find(c => c.id === done)?.cards.length ?? 0} done`}</span>
         </div>
         <div className="relative">
         <div ref={board} {...columns.listProps('board')}
@@ -374,39 +325,39 @@ export function Kanban({ value, defaultValue = [], onChange, doneColumn, newCard
             const over = !!col.limit && col.cards.length > col.limit, isDragged = columns.dragging === col.id
             return (
               <motion.div key={col.id} layout="position" transition={spring(0.18, 0.4)} {...columns.itemProps(col.id)} data-sort-area=""
-                role="group" aria-label={tm('columnLabel', { col: col.title, count: col.cards.length })}
+                role="group" aria-label={`${col.title}, ${plural(col.cards.length, 'card')}`}
                 className={cn('flex min-h-[320px] snap-start flex-col gap-2 rounded-[var(--r-lg)] p-2.5 transition-[box-shadow,background-color]',
                   isDragged ? 'border-[1.5px] border-dashed border-[var(--line2)] bg-transparent [&>*]:opacity-0' : 'bg-[color-mix(in_srgb,var(--muted)_60%,var(--card))]',
                   cards.over === col.id && cards.dragging && 'shadow-[inset_0_0_0_1.5px_var(--line2)]', over && 'shadow-[inset_0_0_0_1.5px_color-mix(in_srgb,var(--bad)_50%,transparent)]')}>
-                <div {...columns.handleProps(col.id)} title={tm('dragColumns')}
+                <div {...columns.handleProps(col.id)} title={'Drag to reorder columns'}
                   className={cn('group flex cursor-grab items-center gap-2 rounded-[var(--r-md)] px-1 pt-0.5 pb-1 text-[13px] font-semibold select-none [-webkit-touch-callout:none] active:cursor-grabbing', TOUCH.tap36)}>
                   <span className="-ms-0.5 text-[var(--fg3)] opacity-35 transition-opacity group-hover:opacity-100"><Icon name="grip" size={12} strokeWidth={3.2} /></span>
                   <i className="h-2 w-2 rounded-full" style={{ background: safeColor(col.color, 'var(--fg3)') }} />{col.title}
                   <motion.span key={col.cards.length} initial={{ scale: 1.3 }} animate={{ scale: 1 }} transition={spring(0.5, 0.3)}
                     className="inline-flex"><Badge size="sm" tone={over ? 'bad' : 'neutral'} className={cn('tabular-nums', !over && '!bg-[var(--card)] !text-[var(--fg3)]')}>{col.cards.length}</Badge></motion.span>
-                  {col.limit && <span className="ms-auto text-[11px] font-normal text-[var(--fg3)]">{tm('limit', { limit: col.limit })}</span>}
+                  {col.limit && <span className="ms-auto text-[11px] font-normal text-[var(--fg3)]">{`Limit ${col.limit}`}</span>}
                 </div>
-                <div {...cards.listProps(col.id)} role="list" aria-label={tm('columnCards', { col: col.title })} className="flex min-h-10 flex-1 flex-col gap-2">
+                <div {...cards.listProps(col.id)} role="list" aria-label={`${col.title} cards`} className="flex min-h-10 flex-1 flex-col gap-2">
                   {col.cards.map((card, ri) => (
                     <KanbanCardView key={card.id} card={card} dragging={cards.dragging === card.id} sortProps={{ ...cards.itemProps(card.id), ...cards.handleProps(card.id) }}
-                      label={tm('moveCard', { card: card.title, col: col.title, pos: ri + 1, count: col.cards.length })} hint={hint} open={openChk.includes(card.id)}
+                      label={`Move ${card.title}, ${col.title}, ${ri + 1} of ${col.cards.length}`} hint={hint} open={openChk.includes(card.id)}
                       onToggleOpen={() => setOpenChk(o => o.includes(card.id) ? o.filter(x => x !== card.id) : [...o, card.id])}
                       onToggleItem={i => toggleItem(card.id, i)} onKeyDown={e => onCardKey(e, ci, ri, card)} />
                   ))}
                 </div>
                 {adding === col.id
-                  ? <textarea autoFocus rows={2} placeholder={tm('cardPlaceholder')} aria-label={tm('newCardIn', { col: col.title })}
+                  ? <textarea autoFocus rows={2} placeholder={'Card title, Enter to add'} aria-label={`New card in ${col.title}`}
                     onKeyDown={e => {
                       if (e.key === 'Escape') setAdding(null)
                       if (e.key === 'Enter' && !e.shiftKey && !e.nativeEvent.isComposing) { e.preventDefault(); const v = e.currentTarget.value.trim(); if (!v) return setAdding(null); add(col.id, v); e.currentTarget.value = '' }
                     }} onBlur={() => setTimeout(() => setAdding(a => a === col.id ? null : a), 120)}
                     className={cn('w-full resize-none rounded-[var(--r-md)] border border-[var(--line2)] bg-[var(--card)] px-2.5 py-2 text-[13px] outline-none placeholder:text-[var(--fg3)] focus:border-[var(--fg3)]', TOUCH.input)} />
-                  : <button onClick={() => setAdding(col.id)} className={cn('cursor-pointer rounded-[var(--r-md)] border-0 bg-transparent px-1.5 py-1.5 text-start text-xs font-medium text-[var(--fg3)] hover:bg-[var(--card)] hover:text-[var(--fg)] [@media(pointer:coarse)]:text-[13px]', TOUCH.row)}>{tm('addCard')}</button>}
+                  : <button onClick={() => setAdding(col.id)} className={cn('cursor-pointer rounded-[var(--r-md)] border-0 bg-transparent px-1.5 py-1.5 text-start text-xs font-medium text-[var(--fg3)] hover:bg-[var(--card)] hover:text-[var(--fg)] [@media(pointer:coarse)]:text-[13px]', TOUCH.row)}>{'+ Add card'}</button>}
               </motion.div>
             )
           })}
         </div>
-        <ScrollEdges {...edges} hint={tm('moreColumns')} at="top" className="!bottom-1" />
+        <ScrollEdges {...edges} hint={'More columns'} at="top" className="!bottom-1" />
 
         </div>
       </div>
@@ -419,9 +370,8 @@ function KanbanCardView({ card, dragging, sortProps, label, hint, open, onToggle
   { card: KanbanCard; dragging: boolean; sortProps: Record<string, unknown>; label: string; hint: string; open: boolean; onToggleOpen: () => void; onToggleItem: (i: number) => void; onKeyDown: (e: RKeyboardEvent) => void }) {
   const done = card.checklist?.filter(x => x.done).length ?? 0, total = card.checklist?.length ?? 0
   const people = card.assignees ?? (card.assignee ? [card.assignee] : [])
-  const coarse = useCoarsePointer(), tm = useMessages(LAYOUT_MSG), rtl = useDir() === 'rtl', { fmt } = useLocale()
+  const coarse = useCoarsePointer()
 
-  const [waitBefore, waitAfter = ''] = tm('waitingOn', { what: '\u0000' }).split('\u0000') // the name goes in bold where the message puts it
 
   return (
     <motion.div layout layoutId={`kb-${card.id}`} transition={spring(0.18, 0.4)} {...sortProps} role="listitem"
@@ -432,14 +382,14 @@ function KanbanCardView({ card, dragging, sortProps, label, hint, open, onToggle
       {card.cover && <div className="-mx-1 -mt-1 mb-2 h-16 rounded-[calc(var(--r-md)-3px)] opacity-90" style={{ background: `linear-gradient(135deg,${card.cover[0]},${card.cover[1]})` }} />}
       <div className="flex flex-wrap items-center gap-1.5">
         {card.tag && <Badge tone={card.tag.tone}>{card.tag.label}</Badge>}
-        {card.blocked && <Badge tone="bad"><Icon name="lock" size={10} />{tm('blocked')}</Badge>}
-        <button data-kb-card={card.id} aria-label={label} aria-describedby={hint} aria-roledescription={tm('dragHandle')} onKeyDown={onKeyDown}
+        {card.blocked && <Badge tone="bad"><Icon name="lock" size={10} />{'Blocked'}</Badge>}
+        <button data-kb-card={card.id} aria-label={label} aria-describedby={hint} aria-roledescription={'drag handle'} onKeyDown={onKeyDown}
           className="ui-hit [--hit:40px] -my-1 -me-1.5 ms-auto grid h-6 w-6 cursor-grab place-items-center rounded-[var(--r-sm)] border-0 bg-transparent p-0 text-[var(--fg3)] opacity-40 outline-none hover:bg-[var(--muted)] hover:opacity-100 focus-visible:opacity-100 active:cursor-grabbing">
           <Icon name="grip" size={12} strokeWidth={3.2} />
         </button>
       </div>
       <div className="mt-1.5 mb-2 text-[13px] leading-snug font-medium">{card.title}</div>
-      {card.blocked && <div className="-mt-1 mb-2 text-xs text-[var(--fg2)]">{waitBefore}<b className="font-medium text-[var(--fg)]">{card.blocked}</b>{waitAfter}</div>}
+      {card.blocked && <div className="-mt-1 mb-2 text-xs text-[var(--fg2)]">Waiting on <b className="font-medium text-[var(--fg)]">{card.blocked}</b></div>}
       {card.metric && <KanbanMetric m={card.metric} />}
       {card.pr && (
         <div className={cn(surface.md, '-mt-0.5 mb-2 flex flex-wrap items-center gap-1.5 bg-transparent px-2 py-1.5 text-[11px] text-[var(--fg2)]')}>
@@ -447,9 +397,9 @@ function KanbanCardView({ card, dragging, sortProps, label, hint, open, onToggle
           <b className="font-[family-name:var(--mono)] text-[11px] font-semibold text-[var(--fg)]">{card.pr.number}</b>
           <span className="flex-1" />
           {card.pr.checks.map(c => (
-            <span key={c.name} className="inline-flex items-center gap-1" title={`${c.name}: ${tm(KB_CHECK[c.status][1])}`}>
+            <span key={c.name} className="inline-flex items-center gap-1" title={`${c.name}: ${KB_CHECK[c.status][1]}`}>
               <StatusIcon status={KB_CHECK[c.status][0]} size={12} tone="ok" className={c.status === 'running' ? '!border-[var(--warn)] !border-e-transparent' : undefined} />
-              {c.name}<span className="sr-only"> {tm(KB_CHECK[c.status][1])}</span>
+              {c.name}<span className="sr-only"> {KB_CHECK[c.status][1]}</span>
             </span>
           ))}
         </div>
@@ -457,10 +407,10 @@ function KanbanCardView({ card, dragging, sortProps, label, hint, open, onToggle
       {card.checklist && (
         <>
           {/* the name reads "Checklist 2/4 done": it contains the visible "2/4" */}
-          <button onClick={onToggleOpen} aria-expanded={open} data-no-drag aria-label={tm('checklist', { done, total })}
+          <button onClick={onToggleOpen} aria-expanded={open} data-no-drag aria-label={`Checklist ${done}/${total} done`}
             className={cn('-mt-1 mb-1.5 flex min-h-6 w-full cursor-pointer items-center gap-2 border-0 bg-transparent p-0 text-[11px] font-medium tabular-nums text-[var(--fg2)]', TOUCH.tap)}>
             <span aria-hidden className="h-[5px] flex-1 overflow-hidden rounded-full bg-[var(--muted)]">
-              <motion.span className={cn('block h-full rounded-full', total && done === total ? 'bg-[var(--ok)]' : 'bg-[var(--accent)]')} initial={false} animate={{ scaleX: total ? done / total : 0 }} style={{ originX: rtl ? 1 : 0 }} transition={spring(0.2, 0.4)} />
+              <motion.span className={cn('block h-full rounded-full', total && done === total ? 'bg-[var(--ok)]' : 'bg-[var(--accent)]')} initial={false} animate={{ scaleX: total ? done / total : 0 }} style={{ originX: 0 }} transition={spring(0.2, 0.4)} />
             </span><span aria-hidden>{fmt.number(done)}/{fmt.number(total)}</span>
           </button>
           <Collapse open={open}>
@@ -477,17 +427,15 @@ function KanbanCardView({ card, dragging, sortProps, label, hint, open, onToggle
       )}
       {/* wraps (avatars drop to their own line) rather than spilling out of a narrow column */}
       <div className="flex min-w-0 flex-wrap items-center gap-x-2 gap-y-1 text-[11px] whitespace-nowrap text-[var(--fg3)]">
-        {card.priority && <span role="img" aria-label={tm('priority', { level: card.priority })} title={tm('priority', { level: card.priority })} className="h-[7px] w-[7px] flex-none rounded-[var(--r-sm)]" style={{ background: KB_PRI[card.priority] }} />}
+        {card.priority && <span role="img" aria-label={String(card.priority === 'High' ? 'High priority' : card.priority === 'Med' ? 'Medium priority' : card.priority === 'Low' ? 'Low priority' : `${card.priority} priority`)} title={String(card.priority === 'High' ? 'High priority' : card.priority === 'Med' ? 'Medium priority' : card.priority === 'Low' ? 'Low priority' : `${card.priority} priority`)} className="h-[7px] w-[7px] flex-none rounded-[var(--r-sm)]" style={{ background: KB_PRI[card.priority] }} />}
         {card.due && <span className="inline-flex items-center gap-1"><Icon name="calendar" size={11} />{card.due}</span>}
-        {!!card.comments && <span className="inline-flex items-center gap-1" title={tm('comments', { count: card.comments })}><Icon name="message" size={11} />{card.comments}</span>}
-        {!!card.attachments && <span className="inline-flex items-center gap-1" title={tm('attachments', { count: card.attachments })}><Icon name="paperclip" size={11} />{card.attachments}</span>}
+        {!!card.comments && <span className="inline-flex items-center gap-1" title={plural(card.comments, 'comment')}><Icon name="message" size={11} />{card.comments}</span>}
+        {!!card.attachments && <span className="inline-flex items-center gap-1" title={plural(card.attachments, 'attachment')}><Icon name="paperclip" size={11} />{card.attachments}</span>}
         {people.length > 0 && <AvatarStack names={people} max={3} size={coarse ? 26 : 22} spread={false} className="ms-auto !items-end [&_span[title]]:[@media(pointer:coarse)]:!text-[11px]" />}
       </div>
     </motion.div>
   )
 }
-
-/* Sortable list ──────────────────────────────────────────────────────────── */
 
 /**
  * Reorderable list. Drag the ⠿ handle (only the handle starts a drag, so text stays selectable), or focus a
@@ -495,7 +443,6 @@ function KanbanCardView({ card, dragging, sortProps, label, hint, open, onToggle
  */
 export function SortableList<T extends { id: string; color?: string }>({ items, onChange, render, ranked = true, className, label }:
   { items: T[]; onChange: (v: T[]) => void; render: (t: T) => ReactNode; ranked?: boolean; className?: string; label?: string }) {
-  const tm = useMessages(LAYOUT_MSG), { fmt } = useLocale()
   const ref = useRef(items); ref.current = items
   const root = useRef<HTMLDivElement>(null)
   const refocus = useLyRefocus(root)
@@ -509,9 +456,9 @@ export function SortableList<T extends { id: string; color?: string }>({ items, 
   const sort = useDragSort({ onMove: (id, _, i) => moveTo(id, i) })
   return (
     <div ref={root} className={cn('flex flex-col gap-1.5', className)}>
-      <span id={hint} hidden>{tm('sortHint')}</span>
+      <span id={hint} hidden>{'Alt and arrow keys to move.'}</span>
       <span role="status" className="sr-only">{said}</span>
-      <div {...sort.listProps('list')} role="list" aria-label={label ?? tm('sortable')} className="flex flex-col gap-1.5">
+      <div {...sort.listProps('list')} role="list" aria-label={label ?? 'Sortable list'} className="flex flex-col gap-1.5">
         {items.map((it, i) => (
           <motion.div key={it.id} layout="position" transition={spring(0.18, 0.4)} {...sort.itemProps(it.id)} data-sl-item={it.id} role="listitem" tabIndex={0}
             aria-describedby={hint}
@@ -519,12 +466,12 @@ export function SortableList<T extends { id: string; color?: string }>({ items, 
               if (!e.altKey || (e.key !== 'ArrowUp' && e.key !== 'ArrowDown')) return
               e.preventDefault(); const j = i + (e.key === 'ArrowUp' ? -1 : 1); if (j < 0 || j >= items.length) return
               moveTo(it.id, j); refocus(`[data-sl-item="${CSS.escape(it.id)}"]`); setLifted(it.id); setTimeout(() => setLifted(l => l === it.id ? null : l), 350)
-              setSaid(tm('movedTo', { pos: j + 1, count: items.length }))
+              setSaid(`Moved to position ${j + 1} of ${items.length}`)
             }}
             className={cn('flex items-center gap-2.5 rounded-[var(--r-md)] border px-2.5 py-2 text-[13px] outline-none select-none focus-visible:shadow-[0_0_0_2px_var(--accent)]',
               sort.dragging === it.id ? 'border-dashed border-[var(--line2)] bg-transparent [&>*]:invisible' : 'border-[var(--line)] bg-[var(--card)]',
               lifted === it.id && 'shadow-[0_0_0_2px_var(--accent),0_8px_20px_rgba(0,0,0,.12)]')}>
-            <span {...sort.handleProps(it.id)} aria-hidden title={tm('dragToReorder')}
+            <span {...sort.handleProps(it.id)} aria-hidden title={'Drag to reorder'}
               className="grid h-[22px] w-[18px] flex-none cursor-grab touch-none place-items-center rounded-[var(--r-sm)] text-[var(--fg3)] hover:bg-[var(--muted)] hover:text-[var(--fg)] active:cursor-grabbing [@media(pointer:coarse)]:-my-1.5 [@media(pointer:coarse)]:-ms-1 [@media(pointer:coarse)]:h-9 [@media(pointer:coarse)]:w-9"><Icon name="grip" size={12} strokeWidth={3.2} /></span>
             {it.color && <span className="h-2 w-2 flex-none rounded-full" style={{ background: safeColor(it.color) }} />}
             <span className="min-w-0 flex-1 truncate">{render(it)}</span>
@@ -536,8 +483,6 @@ export function SortableList<T extends { id: string; color?: string }>({ items, 
   )
 }
 
-/* Tree view ──────────────────────────────────────────────────────────────── */
-
 export type TreeNode = { id: string; label: string; /** shown on the right for files, e.g. "2.1 KB" */ size?: string; icon?: IconName; children?: TreeNode[] }
 const TREE_EXT: Record<string, string> = { tsx: 'var(--accent)', ts: 'var(--accent)', jsx: 'var(--accent)', js: 'var(--warn)', css: 'var(--c3)', json: 'var(--warn)', md: 'var(--fg2)', svg: 'var(--c4)', png: 'var(--c4)', jpg: 'var(--c4)' }
 function TreeIcon({ name, dir, open }: { name: string; dir: boolean; open: boolean }) {
@@ -548,12 +493,6 @@ function TreeIcon({ name, dir, open }: { name: string; dir: boolean; open: boole
 const treeCount = (ns: TreeNode[]): number => ns.reduce((s, n) => s + 1 + (n.children ? treeCount(n.children) : 0), 0)
 /** Trees with more nodes than this render only the rows in view. */
 const TREE_VIRTUAL_AT = 300
-/** TreeView's own strings (machine-drafted de/ar). Override with `<UIProvider messages={{ 'tree.collapseBranch': … }}>`. */
-const TREE_MSG = defineMessages('tree', {
-  en: { collapseBranch: 'Collapse {name}' },
-  de: { collapseBranch: '{name} einklappen' },
-  ar: { collapseBranch: 'طي {name}' },
-})
 type TreeFlat = {
   n: TreeNode; parent: TreeNode | null; depth: number; pos: number; size: number
   /** ancestors, root first (path[d] owns the thread line at level d) */ path: TreeNode[]
@@ -583,7 +522,7 @@ export function TreeView({ nodes, defaultExpanded = [], onSelect, onOpen, onRena
     /** render only the rows in view: true, false, or above this many nodes (default 300) */ virtualize?: boolean | number
     /** px, virtual mode: the tree scrolls inside this height */ height?: number; className?: string; 'aria-label'?: string }) {
   const [open, setOpen] = useState(() => new Set(defaultExpanded))
-  const tm = useMessages(LAYOUT_MSG), tt = useMessages(TREE_MSG), rtl = useDir() === 'rtl', ariaLabel = ariaLabelProp ?? tm('files')
+  const ariaLabel = ariaLabelProp ?? 'Files'
   const uid = useId()
   const [hot, setHot] = useState<string | null>(null) // the folder whose thread line is under the pointer
   const [names, setNames] = useState<Record<string, string>>({})
@@ -632,7 +571,7 @@ export function TreeView({ nodes, defaultExpanded = [], onSelect, onOpen, onRena
       ArrowLeft: () => { if (dir && isOpen) toggle(n.id, false); else if (parent) select(parent) },
       Enter: () => { if (dir) toggle(n.id); else onOpen?.(n) }, F2: () => setEditing(n.id),
     }
-    const key = logicalArrow(e.key, rtl ? 'rtl' : 'ltr') // → opens toward the inline end: ← in RTL
+    const key = e.key
     if (act[key]) { e.preventDefault(); act[key]() }
   }
   const { base, step } = treeIndent(compact)
@@ -648,7 +587,7 @@ export function TreeView({ nodes, defaultExpanded = [], onSelect, onOpen, onRena
     const reach = step - 7 + (f.n.children ? -1 : 10)
     const ln = 'absolute transition-colors duration-150'
     return (
-      <button key={owner.id} type="button" tabIndex={-1} aria-label={tt('collapseBranch', { name: name(owner) })}
+      <button key={owner.id} type="button" tabIndex={-1} aria-label={`Collapse ${name(owner)}`}
         onClick={e => { e.stopPropagation(); toggle(owner.id, false); select(owner) }} onDoubleClick={e => e.stopPropagation()}
         onPointerEnter={() => setHot(owner.id)} onPointerLeave={() => setHot(h => (h === owner.id ? null : h))}
         style={{ insetInlineStart: base + d * step + 7 - step / 2, width: step, '--tl': tone } as CSSProperties}
@@ -677,11 +616,11 @@ export function TreeView({ nodes, defaultExpanded = [], onSelect, onOpen, onRena
         {lines && threads(f)}
         {/* above the thread lines' widened hit areas, so a click on the chevron toggles this row */}
         <span className="relative z-[1] grid w-3.5 flex-none place-items-center text-[var(--fg3)]">
-          {dir && <motion.span initial={false} animate={{ rotate: isOpen ? (rtl ? -90 : 90) : 0 }} transition={spring(0.2, 0.25)} className="grid"><Icon name="chevronRight" size={11} strokeWidth={3} className="ui-flip" /></motion.span>}
+          {dir && <motion.span initial={false} animate={{ rotate: isOpen ? 90 : 0 }} transition={spring(0.2, 0.25)} className="grid"><Icon name="chevronRight" size={11} strokeWidth={3} /></motion.span>}
         </span>
         {n.icon ? <Icon name={n.icon} size={15} className="text-[var(--fg3)]" /> : <TreeIcon name={name(n)} dir={dir} open={isOpen} />}
         {editing === n.id
-          ? <input autoFocus defaultValue={name(n)} aria-label={tm('rename', { name: name(n) })} onClick={e => e.stopPropagation()}
+          ? <input autoFocus defaultValue={name(n)} aria-label={`Rename ${name(n)}`} onClick={e => e.stopPropagation()}
             onFocus={e => { const val = e.currentTarget.value, dot = val.lastIndexOf('.'); e.currentTarget.setSelectionRange(0, dot > 0 ? dot : val.length) }}
             onKeyDown={e => {
               e.stopPropagation()
@@ -697,7 +636,7 @@ export function TreeView({ nodes, defaultExpanded = [], onSelect, onOpen, onRena
             className={cn('w-[140px] min-w-0 rounded-[var(--r-sm)] border border-[var(--accent)] bg-[var(--card)] px-1 py-px text-[13px] text-[var(--fg)] outline-none [@media(pointer:coarse)]:flex-1', TOUCH.input)} />
           : <motion.span key={name(n)} id={`${idl}l`} initial={{ opacity: names[n.id] ? 0.3 : 1 }} animate={{ opacity: 1 }} className="truncate">{name(n)}</motion.span>}
         {/* the space keeps label and count apart in the accessible name (flex drops it visually) */}
-        {!compact && <>{' '}<span id={`${idl}c`} dir="auto" className="ms-auto ps-2 text-[11px] tabular-nums text-[var(--fg2)]">{dir ? n.children!.length : n.size}</span></>}
+        {!compact && <>{' '}<span id={`${idl}c`} className="ms-auto ps-2 text-[11px] tabular-nums text-[var(--fg2)]">{dir ? n.children!.length : n.size}</span></>}
       </div>
     )
   }
@@ -723,8 +662,6 @@ export function TreeView({ nodes, defaultExpanded = [], onSelect, onOpen, onRena
   })
   return <ul role="tree" aria-label={ariaLabel} className={cn('group/tree m-0 list-none p-0 select-none', className)}>{render(nodes, 0, null, [], [])}</ul>
 }
-
-/* Activity timeline ──────────────────────────────────────────────────────── */
 
 export type TimelineKind = 'commit' | 'comment' | 'deploy' | 'file' | 'alert'
 export type TimelineItem = {
@@ -788,8 +725,6 @@ export function Timeline({ items, className }: { items: TimelineItem[]; classNam
   )
 }
 
-/* Split panes ────────────────────────────────────────────────────────────── */
-
 /**
  * Two resizable panes, side by side or stacked (nest one inside another for IDE layouts). Drag the divider,
  * or focus it and use the arrow keys (Shift for big steps); Enter or double-click resets with a spring.
@@ -805,18 +740,17 @@ export function SplitPane({ first, second, direction = 'horizontal', defaultSize
   const [state, setState] = useState<{ size: number; spring: false | 'reset' | 'snap' }>({ size: defaultSize, spring: false })
   const [box, boxW] = useWidth<HTMLDivElement>()
   const h = direction === 'horizontal' && !(boxW > 0 && boxW < stackBelow)
-  const { dir, fmt } = useLocale(), tm = useMessages(LAYOUT_MSG), mt = useMessages(MAGNET_MESSAGES), pctText = (n: number) => fmt.percent(n / 100, 0)
+  const pctText = (n: number) => fmt.percent(n / 100, 0)
   const marks = useMemo<readonly Magnet[] | null>(() => magnets === true
-    ? [{ value: 0, label: mt('collapse') }, { value: 100 / 3, label: mt('third') }, { value: 50, label: mt('half') }, { value: 200 / 3, label: mt('twoThirds') }].filter(m => m.value <= max)
-    : magnets || null, [magnets, max, mt])
+    ? [{ value: 0, label: 'Collapse' }, { value: 100 / 3, label: 'One third' }, { value: 50, label: 'Half' }, { value: 200 / 3, label: 'Two thirds' }].filter(m => m.value <= max)
+    : magnets || null, [magnets, max])
   const mg = useMagnet({ magnets: marks, min: 0, max: 100, describe: pctText })
   const [snapLabel, setSnapLabel] = useState<string | undefined>()
   const drag = usePointerDrag({
     cursor: h ? 'col-resize' : 'row-resize',
     onMove: p => {
       const r = box.current?.getBoundingClientRect(); if (!r) return
-      // the first pane starts at the inline start: measured from the right edge in RTL
-      const raw = h ? ((dir === 'rtl' ? r.right - p.x : p.x - r.left) / r.width) * 100 : ((p.y - r.top) / r.height) * 100
+      const raw = h ? ((p.x - r.left) / r.width) * 100 : ((p.y - r.top) / r.height) * 100
       const res = mg.apply(clamp(raw, 0, 100), { px: h ? r.width : r.height, event: p.event })
       const size = clamp(res.value, 0, max), how = res.captured || res.released ? 'snap' as const : false
       if (mg.enabled) setSnapLabel(res.snapped?.label)
@@ -827,10 +761,10 @@ export function SplitPane({ first, second, direction = 'horizontal', defaultSize
   const dragging = drag.dragging
   const set = (pct: number, animate: false | 'reset' | 'snap' = false) => { const p = clamp(pct, 0, max); setState({ size: p < min && !dragging ? 0 : p, spring: animate }) }
   const onKey = (e: RKeyboardEvent) => {
-    const jump = mg.enabled ? magnetKeyDirection(e, h ? dir : 'ltr') : 0, to = jump ? mg.next(state.size, jump) : null
+    const jump = mg.enabled ? magnetKeyDirection(e) : 0, to = jump ? mg.next(state.size, jump) : null
     if (to !== null) { e.preventDefault(); set(to, 'snap'); return }
     const step = e.shiftKey ? 10 : 2, k = h ? { ArrowLeft: -step, ArrowRight: step } : { ArrowUp: -step, ArrowDown: step }
-    const d = (k as unknown as Record<string, number | undefined>)[logicalArrow(e.key, dir)]
+    const d = (k as unknown as Record<string, number | undefined>)[e.key]
     if (d !== undefined) { e.preventDefault(); set(state.size === 0 && d > 0 ? min : state.size + d) }
     if (e.key === 'Enter' || e.key === 'Home') { e.preventDefault(); set(defaultSize, 'reset') }
   }
@@ -839,7 +773,7 @@ export function SplitPane({ first, second, direction = 'horizontal', defaultSize
     <div ref={box} className={cn('relative flex min-h-0 min-w-0 overflow-hidden', h ? 'flex-row' : 'h-full flex-col', className)} style={style}>
       <motion.div className="flex min-h-0 min-w-0 flex-none flex-col overflow-hidden" initial={false} animate={{ flexBasis: `${state.size}%` }}
         transition={state.spring === 'reset' ? spring(0.15, 0.4) : state.spring === 'snap' && !prefersReducedMotion() ? spring(0.2, 0.25) : { duration: 0 }}>{first}</motion.div>
-      <div role="separator" aria-orientation={h ? 'vertical' : 'horizontal'} aria-label={label ?? tm('resizePanes')}
+      <div role="separator" aria-orientation={h ? 'vertical' : 'horizontal'} aria-label={label ?? 'Resize panes'}
  aria-valuemin={0} aria-valuemax={max} aria-valuenow={Math.round(state.size)} aria-valuetext={mg.enabled ? mg.valueText(state.size, pctText(state.size)) : undefined}
         aria-keyshortcuts={mg.enabled ? 'PageUp PageDown' : undefined} tabIndex={0}
         onPointerDown={e => { if (e.button === 0) { mg.reset(); drag.start(e) } }} onDoubleClick={() => set(defaultSize, 'reset')} onKeyDown={onKey}

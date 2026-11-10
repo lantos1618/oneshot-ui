@@ -1,10 +1,8 @@
 import { useLayoutEffect, useRef, useState } from 'react'
-import { Icon, TOUCH, clamp, cn, defineMessages, useLocale, useMessages } from './core'
+import { Icon, TOUCH, clamp, cn } from './core'
 import { useFrameLoop } from './motion'
 
 /* Shared pieces of the diagram modules (gantt, statechart, trace, network): not part of the public API. */
-
-/* Shared bits ─────────────────────────────────────────────────────────────── */
 
 /** Collapse sets overflow: hidden, which would stop sticky labels inside it; clip vertically only. */
 export const DG_COLLAPSE_STICKY = '!overflow-x-visible !overflow-y-clip'
@@ -14,21 +12,15 @@ export const dgSafeId = (s: string) => s.replace(/[^a-zA-Z0-9_-]/g, '')
 export const DG_DOTS = 'bg-[var(--bg)] [background-image:radial-gradient(circle,var(--line2)_1px,transparent_1.2px)] [background-size:18px_18px]'
 
 /** Strings shared by the diagram modules. */
-export const DG_MESSAGES = defineMessages('diagram', {
-  en: { toggle: 'Toggle {name}' },
-  de: { toggle: '{name} ein-/ausklappen' },
-  ar: { toggle: 'طي أو توسيع {name}' },
-})
 
 /**
  * Expand / collapse toggle for a group row (Gantt phases, trace spans): a chevron that turns, with a 36px touch hit area.
- * Closed, it points along the reading direction (right, or left in RTL).
+ * Closed, it points right.
  */
 export function DgChevron({ open, label, onClick, className }: { open: boolean; label: string; onClick: () => void; className?: string }) {
-  const m = useMessages(DG_MESSAGES), { dir } = useLocale()
   return (
-    <button type="button" aria-label={m('toggle', { name: label })} aria-expanded={open} onClick={onClick}
-      className={cn('grid h-[18px] w-[18px] flex-none cursor-pointer place-items-center rounded-[var(--r-sm)] border-0 bg-transparent text-[var(--fg3)] transition-transform duration-200 hover:bg-[var(--muted)] hover:text-[var(--fg)]', TOUCH.hit, !open && (dir === 'rtl' ? 'rotate-90' : '-rotate-90'), className)}>
+    <button type="button" aria-label={`Toggle ${label}`} aria-expanded={open} onClick={onClick}
+      className={cn('grid h-[18px] w-[18px] flex-none cursor-pointer place-items-center rounded-[var(--r-sm)] border-0 bg-transparent text-[var(--fg3)] transition-transform duration-200 hover:bg-[var(--muted)] hover:text-[var(--fg)]', TOUCH.hit, !open && ('-rotate-90'), className)}>
       <Icon name="chevronDown" size={11} strokeWidth={2.5} />
     </button>
   )

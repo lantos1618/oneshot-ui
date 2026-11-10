@@ -1,6 +1,6 @@
 import type { MentionCommand, MentionPerson } from '../lib/editor'
 
-/* Sample editor content for the showcase (0.4: moved out of the library; the editors start empty). */
+/* Sample editor content for the showcase (the editors start empty). */
 
 /** The showcase's sample document: pass it as RichTextEditor's `defaultValue`. */
 export const RTE_SAMPLE = '<h2>Launch notes</h2><p>We’re shipping the new <b>pricing page</b> on Thursday. The yearly plan now saves <i>20%</i>, and the toggle sits above the cards.</p><ul><li>Legal review is done</li><li>Images are final</li></ul><blockquote>Ship small, ship often.</blockquote>'

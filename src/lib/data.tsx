@@ -1,34 +1,10 @@
 import { createContext, useContext, useId, useMemo, useRef, useState, type ReactNode } from 'react'
 import { AnimatePresence, motion } from 'motion/react'
-import { AnimatedNumber, type AsChildProps, Button, Slot, DeltaBadge, Icon, IconButton, Kbd, type MessageKeyOf, type ModuleTranslate, TOUCH, cn, defineMessages, dirX, inputClass, spring, surface, useControllable, useDir, useHotkey, useLocale, useMessages, SparkChart, rowHoverClass } from './core'
+import { AnimatedNumber, type AsChildProps, Button, Slot, DeltaBadge, Icon, IconButton, Kbd, TOUCH, cn, inputClass, spring, surface, useControllable, useHotkey, SparkChart, rowHoverClass, plural, writeClipboard } from './core'
 import { shake } from './motion'
 import { Collapse, useToast } from './feedback'
 import { CheckboxBox } from './fields'
 import { Dialog } from './overlay'
-
-/* ════════════════════════════════════════════════════════════════════════════
- * 9. DATA DISPLAY
- * ══════════════════════════════════════════════════════════════════════════ */
-
-/** The data display components' own strings (machine-drafted de/ar). Override one with `<UIProvider messages={{ 'data.filterKeys': … }}>`. */
-export const DATA_MESSAGES = defineMessages('data', {
-  en: {
-    newTask: 'New task', copyPath: 'Copy path {path}', items: '{count, plural, one {# item} other {# items}}', keys: '{count, plural, one {# key} other {# keys}}',
-    pathCopied: 'Path copied', pathCopyFailed: 'Couldn’t copy the path', filterKeys: 'Filter keys', expandNode: 'Expand {path}', collapseNode: 'Collapse {path}',
-    root: 'root', shortcuts: 'Keyboard shortcuts',
-  },
-  de: {
-    newTask: 'Neue Aufgabe', copyPath: 'Pfad {path} kopieren', items: '{count, plural, one {# Eintrag} other {# Einträge}}', keys: '{count, plural, one {# Schlüssel} other {# Schlüssel}}',
-    pathCopied: 'Pfad kopiert', pathCopyFailed: 'Pfad konnte nicht kopiert werden', filterKeys: 'Schlüssel filtern', expandNode: '{path} aufklappen', collapseNode: '{path} zuklappen',
-    root: 'Wurzel', shortcuts: 'Tastenkürzel',
-  },
-  ar: {
-    newTask: 'مهمة جديدة', copyPath: 'نسخ المسار {path}', items: '{count, plural, zero {لا عناصر} one {عنصر واحد} two {عنصران} few {# عناصر} many {# عنصرًا} other {# عنصر}}',
-    keys: '{count, plural, zero {لا مفاتيح} one {مفتاح واحد} two {مفتاحان} few {# مفاتيح} many {# مفتاحًا} other {# مفتاح}}',
-    pathCopied: 'تم نسخ المسار', pathCopyFailed: 'تعذّر نسخ المسار', filterKeys: 'تصفية المفاتيح', expandNode: 'توسيع {path}', collapseNode: 'طي {path}',
-    root: 'الجذر', shortcuts: 'اختصارات لوحة المفاتيح',
-  },
-})
 
 /**
  * Responsive grid for StatCards, sized by its own width (container query), not the viewport: four tiles sit in
@@ -224,20 +200,17 @@ export const Accordion = Object.assign(AccordionConfig, { Root: AccordionRoot, I
 
 /** Any list whose items animate in, out and into new positions. */
 export function AnimatedList<T>({ items, keyOf, render, className }: { items: T[]; keyOf: (t: T) => string; render: (t: T) => ReactNode; className?: string }) {
-  const dir = useDir()
   return (
     <ul className={cn('m-0 flex list-none flex-col gap-1.5 p-0', className)}>
       <AnimatePresence initial={false}>
         {items.map(t => (
           <motion.li key={keyOf(t)} layout initial={{ opacity: 0, y: -8, scale: 0.98 }} animate={{ opacity: 1, y: 0, scale: 1 }}
-            exit={{ opacity: 0, x: dirX(24, dir), transition: { duration: 0.15 } }} transition={spring(0.25, 0.4)}>{render(t)}</motion.li>
+            exit={{ opacity: 0, x: 24, transition: { duration: 0.15 } }} transition={spring(0.25, 0.4)}>{render(t)}</motion.li>
         ))}
       </AnimatePresence>
     </ul>
   )
 }
-
-/* Task list ──────────────────────────────────────────────────────────────── */
 
 export type Task = { id: string; text: string; done?: boolean }
 
@@ -249,7 +222,7 @@ export function TaskList({ value, defaultValue = [], onChange, placeholder: ph, 
   { value?: Task[]; defaultValue?: Task[]; onChange?: (t: Task[]) => void; placeholder?: string; className?: string }) {
   const [tasks, set] = useControllable(value, defaultValue, onChange)
   const input = useRef<HTMLInputElement>(null)
-  const { t: tc } = useLocale(), tm = useMessages(DATA_MESSAGES), placeholder = ph ?? tm('newTask')
+  const placeholder = ph ?? 'New task'
   const add = () => {
     const v = input.current!.value.trim()
     if (!v) { shake(input.current, 4); input.current!.focus(); return }
@@ -265,21 +238,19 @@ export function TaskList({ value, defaultValue = [], onChange, placeholder: ph, 
             <CheckboxBox checked={!!t.done} size={16} className="[@media(pointer:coarse)]:!h-[18px] [@media(pointer:coarse)]:!w-[18px]" />
           </button>
           <span className={cn('flex-1 transition-colors [@media(pointer:coarse)]:text-sm', t.done && 'text-[var(--fg3)] line-through')}>{t.text}</span>
-          <IconButton icon="x" label={tc('common.removeItem', { name: t.text })} onClick={() => set(tasks.filter(x => x.id !== t.id))} className={cn(TOUCH.tap36, '[@media(pointer:coarse)]:!-my-1')} />
+          <IconButton icon="x" label={`Remove ${t.text}`} onClick={() => set(tasks.filter(x => x.id !== t.id))} className={cn(TOUCH.tap36, '[@media(pointer:coarse)]:!-my-1')} />
         </div>
       )} />
       <div className="flex gap-2">
         <input ref={input} placeholder={placeholder} aria-label={placeholder} onKeyDown={e => e.key === 'Enter' && !e.nativeEvent.isComposing && add()}
           className={cn(inputClass, '!h-8 min-w-0 flex-1 [@media(pointer:coarse)]:!h-11', TOUCH.input)} />
-        <Button size="sm" variant="primary" onClick={add} className="[@media(pointer:coarse)]:!h-11 [@media(pointer:coarse)]:!px-4">{tc('common.add')}</Button>
+        <Button size="sm" variant="primary" onClick={add} className="[@media(pointer:coarse)]:!h-11 [@media(pointer:coarse)]:!px-4">{'Add'}</Button>
       </div>
     </div>
   )
 }
 
-/* JSON viewer ────────────────────────────────────────────────────────────── */
-
-type JvCtx = { closed: Set<string>; toggle: (p: string) => void; q: string; copy: (p: string) => void; t: ModuleTranslate<MessageKeyOf<typeof DATA_MESSAGES>> }
+type JvCtx = { closed: Set<string>; toggle: (p: string) => void; q: string; copy: (p: string) => void }
 
 /** Stands in for a value JsonViewer won't expand: a reference back to an ancestor, a branch past the depth cap, the rest of a huge tree. */
 class JvMarker { readonly text: string; constructor(text: string) { this.text = text } }
@@ -314,7 +285,7 @@ function jvSafe(data: unknown): unknown {
 
 function JsonValue({ v }: { v: unknown }) {
   if (v instanceof JvMarker) return <span className="text-[var(--fg3)] italic">{v.text}</span>
-  if (v === null) return <span className="text-[var(--fg3)] italic">null</span> // i18n-ignore: the JSON literal
+  if (v === null) return <span className="text-[var(--fg3)] italic">null</span>
   if (typeof v === 'string') return <span className="text-[color-mix(in_srgb,var(--ok)_85%,var(--fg))]">"{v}"</span>
   if (typeof v === 'number') return <span className="text-[color-mix(in_srgb,var(--c3)_70%,var(--fg))]">{v}</span>
   return <span className="text-[color-mix(in_srgb,var(--bad)_75%,var(--fg))]">{String(v)}</span>
@@ -324,7 +295,7 @@ function JsonNode({ k, v, path, last, ctx }: { k: string | number | null; v: unk
   const isObj = jvIsObj(v), arr = Array.isArray(v)
   const hit = k !== null && !!ctx.q && String(k).toLowerCase().includes(ctx.q)
   const key = k !== null && (
-    <><button data-jv-path={path} data-hit={hit || undefined} onClick={() => ctx.copy(path)} title={ctx.t('copyPath', { path })}
+    <><button data-jv-path={path} data-hit={hit || undefined} onClick={() => ctx.copy(path)} title={`Copy path ${path}`}
       className={cn('min-w-6 cursor-pointer rounded-[var(--r-sm)] border-0 p-0 font-[inherit] text-[var(--accent)] hover:bg-[var(--accent-soft)] [@media(pointer:coarse)]:min-h-8 [@media(pointer:coarse)]:min-w-8 [@media(pointer:coarse)]:text-start', typeof k === 'number' ? 'text-end' : 'text-start', hit ? 'bg-[var(--warn-soft)]' : 'bg-transparent')}>
       {typeof k === 'number' ? k : `"${k}"`}</button><span className="text-[var(--fg2)]">: </span></>
   )
@@ -336,12 +307,12 @@ function JsonNode({ k, v, path, last, ctx }: { k: string | number | null; v: unk
   return (
     <div>
       <div className={row}>
-        <button onClick={() => ctx.toggle(path)} aria-expanded={open} aria-label={ctx.t(open ? 'collapseNode' : 'expandNode', { path: path || ctx.t('root') })}
+        <button onClick={() => ctx.toggle(path)} aria-expanded={open} aria-label={(open ? `Collapse ${path || 'root'}` : `Expand ${path || 'root'}`)}
           className="-ms-1.5 grid h-6 w-6 flex-none cursor-pointer place-items-center self-center border-0 bg-transparent p-0 text-[var(--fg3)] [@media(pointer:coarse)]:-ms-2 [@media(pointer:coarse)]:me-1 [@media(pointer:coarse)]:h-8 [@media(pointer:coarse)]:w-8">
           <motion.span initial={false} animate={{ rotate: open ? 0 : -90 }} transition={{ duration: 0.15 }} className="grid"><Icon name="chevronDown" size={10} strokeWidth={2.5} /></motion.span>
         </button>
         {key}<span className="text-[var(--fg2)]">{arr ? '[' : '{'}</span>
-        <span className="ms-1.5 text-[11px] text-[var(--fg3)]">{ctx.t(arr ? 'items' : 'keys', { count: entries.length })}</span>
+        <span className="ms-1.5 text-[11px] text-[var(--fg3)]">{(arr ? plural(entries.length, 'item') : plural(entries.length, 'key'))}</span>
         {!open && <span className="text-[var(--fg2)]"> {arr ? ']' : '}'}{!last && ','}</span>}
       </div>
       <Collapse open={open}>
@@ -369,7 +340,6 @@ export function JsonViewer({ data, defaultCollapsed = [], onCopyPath, maxHeight 
   const [q, setQ] = useState('')
   const box = useRef<HTMLDivElement>(null)
   const toast = useToast()
-  const t = useMessages(DATA_MESSAGES), { t: tc } = useLocale()
   const safe = useMemo(() => jvSafe(data), [data])
   const containers = useMemo(() => {
     const out: string[] = []
@@ -379,9 +349,8 @@ export function JsonViewer({ data, defaultCollapsed = [], onCopyPath, maxHeight 
   const allClosed = containers.length > 0 && containers.every(p => closed.has(p))
   const copy = (p: string) => {
     if (onCopyPath) return onCopyPath(p)
-    const said = (ok: boolean) => toast({ title: ok ? t('pathCopied') : t('pathCopyFailed'), description: <code className="font-[family-name:var(--mono)]">{p}</code>, tone: ok ? undefined : 'bad' })
-    if (!navigator.clipboard) return said(false)
-    navigator.clipboard.writeText(p).then(() => said(true), () => said(false))
+    const said = (ok: boolean) => toast({ title: ok ? 'Path copied' : 'Couldn’t copy the path', description: <code className="font-[family-name:var(--mono)]">{p}</code>, tone: ok ? undefined : 'bad' })
+    void writeClipboard(p).then(said)
   }
   const filter = (raw: string) => {
     const s = raw.trim().toLowerCase(); setQ(s)
@@ -399,17 +368,17 @@ export function JsonViewer({ data, defaultCollapsed = [], onCopyPath, maxHeight 
       setTimeout(() => box.current?.querySelector<HTMLElement>(`[data-jv-path="${CSS.escape(target)}"]`)?.scrollIntoView({ block: 'nearest', behavior: 'smooth' }), 340)
     }
   }
-  const ctx: JvCtx = { closed, q, copy, t, toggle: p => setClosed(c => { const n = new Set(c); if (n.has(p)) n.delete(p); else n.add(p); return n }) }
+  const ctx: JvCtx = { closed, q, copy, toggle: p => setClosed(c => { const n = new Set(c); if (n.has(p)) n.delete(p); else n.add(p); return n }) }
   return (
     <div className={cn('flex flex-col gap-2.5', className)}>
       <div className="flex gap-2">
-        <input placeholder={t('filterKeys')} aria-label={t('filterKeys')} onChange={e => filter(e.target.value)}
+        <input placeholder={'Filter keys'} aria-label={'Filter keys'} onChange={e => filter(e.target.value)}
           className={cn(inputClass, '!h-8 min-w-0 flex-1 [@media(pointer:coarse)]:!h-10', TOUCH.input)} />
-        <Button size="sm" onClick={() => setClosed(allClosed ? new Set() : new Set(containers))} className={TOUCH.row}>{allClosed ? tc('common.expandAll') : tc('common.collapseAll')}</Button>
+        <Button size="sm" onClick={() => setClosed(allClosed ? new Set() : new Set(containers))} className={TOUCH.row}>{allClosed ? 'Expand all' : 'Collapse all'}</Button>
       </div>
       {/* touch: 32px rows so every key and toggle is a finger-sized target; the box scrolls both ways */}
       {/* JSON is code: the tree reads left to right in every locale */}
-      <div ref={box} dir="ltr" className="overflow-auto overscroll-x-contain rounded-[var(--r-md)] border border-[var(--line)] bg-[color-mix(in_srgb,var(--muted)_35%,var(--card))] px-2.5 py-2 font-[family-name:var(--mono)] text-xs leading-6 [@media(pointer:coarse)]:text-[13px] [@media(pointer:coarse)]:leading-8" style={{ maxHeight }}>
+      <div ref={box} className="overflow-auto overscroll-x-contain rounded-[var(--r-md)] border border-[var(--line)] bg-[color-mix(in_srgb,var(--muted)_35%,var(--card))] px-2.5 py-2 font-[family-name:var(--mono)] text-xs leading-6 [@media(pointer:coarse)]:text-[13px] [@media(pointer:coarse)]:leading-8" style={{ maxHeight }}>
 
         {/* as wide as the widest row, so long keys and values scroll with the box instead of being clipped by a branch */}
         <div className="w-max min-w-full"><JsonNode k={null} v={safe} path="" last ctx={ctx} /></div>
@@ -417,8 +386,6 @@ export function JsonViewer({ data, defaultCollapsed = [], onCopyPath, maxHeight 
     </div>
   )
 }
-
-/* Keyboard shortcuts ─────────────────────────────────────────────────────── */
 
 export type ShortcutGroup = { title: string; items: [label: string, keys: string[]][] }
 
@@ -432,7 +399,6 @@ export function ShortcutSheet({ groups, columns, className, variant = 'inline', 
     /** 'inline' (default) or 'dialog' */ variant?: 'inline' | 'dialog'
     /** dialog only: shown, and its change */ open?: boolean; onOpenChange?: (v: boolean) => void
     /** dialog only: ? toggles it */ hotkey?: boolean; /** dialog only: its title (default "Keyboard shortcuts") */ title?: string }) {
-  const t = useMessages(DATA_MESSAGES), { t: tc } = useLocale()
   const dialog = variant === 'dialog'
   useHotkey('?', () => onOpenChange?.(!open), { enabled: dialog && hotkey, ignoreEditable: true })
   const sheet = (
@@ -443,7 +409,7 @@ export function ShortcutSheet({ groups, columns, className, variant = 'inline', 
           <div aria-hidden className="m-0 mb-1.5 text-[11px] font-semibold tracking-[.05em] text-[var(--fg3)] uppercase">{g.title}</div>
           {g.items.map(([label, keys], i) => (
             <div key={i} className="flex items-center justify-between border-b border-[var(--line)] py-1.5 text-[13px] last:border-0">
-              <span>{label}</span><span className="flex gap-1" dir="ltr">{keys.map((k, i) => <Kbd key={i}>{k}</Kbd>)}</span>
+              <span>{label}</span><span className="flex gap-1">{keys.map((k, i) => <Kbd key={i}>{k}</Kbd>)}</span>
             </div>
           ))}
         </section>
@@ -452,8 +418,8 @@ export function ShortcutSheet({ groups, columns, className, variant = 'inline', 
   )
   if (!dialog) return sheet
   return (
-    <Dialog open={open} onOpenChange={v => onOpenChange?.(v)} title={title ?? t('shortcuts')} className={cn('!max-w-[640px]', className)}
-      footer={<Button size="sm" onClick={() => onOpenChange?.(false)} data-autofocus>{tc('common.close')}</Button>}>
+    <Dialog open={open} onOpenChange={v => onOpenChange?.(v)} title={title ?? 'Keyboard shortcuts'} className={cn('!max-w-[640px]', className)}
+      footer={<Button size="sm" onClick={() => onOpenChange?.(false)} data-autofocus>{'Close'}</Button>}>
       {sheet}
     </Dialog>
   )

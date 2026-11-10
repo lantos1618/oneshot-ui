@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useState } from 'react'
 import { AnimatePresence, motion } from 'motion/react'
 import { AlertDialog, Avatar, Badge, Banner, Button, type Command, CommandPalette, CopyButton, DateRangePicker, Dialog, DropdownMenu, Field, HoldToConfirm, HoverCard, Icon, IconButton, InlineEdit, Input, Kbd, MenuItem, MenuSeparator,
-  type Notification, NotificationBell, Popover, PopoverContent, PopoverTrigger, Select, Sheet, Switch, Tooltip, Tour, type TourStep, cn, floatingSurface, menuItemClass, useToast } from '../lib'
+  type Notification, NotificationBell, Popover, PopoverContent, PopoverTrigger, Select, Sheet, Switch, Tooltip, Tour, type TourStep, cn, menuItemClass, useToast, surface } from '../lib'
 import { Row, Section, Spec, SpecPreview } from './kit'
 
 const OV_TOUR: TourStep[] = [
@@ -69,14 +69,14 @@ function OvBannerDemo() {
 
 const OV_MENU: [string, string?][] = [['Edit', 'E'], ['Duplicate', 'D'], ['Share']]
 const ovPreviewMenu = (
-  <div className={cn(floatingSurface, 'w-44 p-1')}>
+  <div className={cn(surface.floating, 'w-44 p-1')}>
     {OV_MENU.map(([t, k], i) => <div key={t} className={cn(menuItemClass, '!cursor-default !py-1.5', i === 0 && 'bg-[var(--muted)]')}>{t}{k && <Kbd>{k}</Kbd>}</div>)}
     <div className="my-1 h-px bg-[var(--line)]" />
     <div className={cn(menuItemClass, '!cursor-default !py-1.5 text-[var(--bad)]')}>Delete</div>
   </div>
 )
 const ovPreviewProfile = (
-  <div className={cn(floatingSurface, 'w-full max-w-[280px] p-3')}>
+  <div className={cn(surface.floating, 'w-full max-w-[280px] p-3')}>
     <div className="flex items-center gap-2.5"><Avatar name="Alex Lee" size={36} status="online" /><div className="min-w-0 flex-1"><b className="block text-[13px]">Alex Lee</b><span className="text-xs text-[var(--fg3)]">Design lead · Zürich</span></div><Badge tone="ok" dot size="sm">Online</Badge></div>
     <div className="mt-2.5 flex gap-4 text-xs text-[var(--fg3)]"><span><b className="text-[var(--fg)]">128</b> commits</span><span><b className="text-[var(--fg)]">24</b> reviews</span></div>
   </div>
@@ -102,7 +102,7 @@ function OvAlertDemo() {
       <AlertDialog open={open} onOpenChange={setOpen} title="Revoke the production API key?" confirmLabel="Revoke key" onConfirm={revoke}
         description={<>Apps using <code className="font-[family-name:var(--mono)] text-[var(--fg)]">sk_live_…4f2a</code> stop working immediately. This can’t be undone.</>} />
       <SpecPreview className="grid place-items-center bg-[color-mix(in_srgb,var(--fg)_14%,var(--bg))]">
-        <div className={cn(floatingSurface, 'w-full max-w-[260px] p-3')}>
+        <div className={cn(surface.floating, 'w-full max-w-[260px] p-3')}>
           <b className="block text-[13px]">Revoke the production API key?</b>
           <span className="mt-1 block text-xs leading-snug text-[var(--fg3)]">Apps using it stop working immediately.</span>
           <span className="mt-2 flex items-center gap-1 text-[11px] text-[var(--bad)]"><Icon name="alert" size={11} />Couldn’t reach the API.</span>
@@ -284,7 +284,7 @@ export function OverlaysSection({ openPalette }: { openPalette: () => void }) {
             toast({ title: 'Project deleted', description: 'Website redesign', action: { label: 'Undo', onClick: () => { setDeleted('restored'); toast({ title: 'Restored', description: 'Website redesign', tone: 'info' }) } } })
           }}>Delete</Button></>} />
         <SpecPreview className="grid place-items-center bg-[color-mix(in_srgb,var(--fg)_14%,var(--bg))]">
-          <div className={cn(floatingSurface, 'w-full max-w-[260px] p-3')}>
+          <div className={cn(surface.floating, 'w-full max-w-[260px] p-3')}>
             <b className="block text-[13px]">Delete “Website redesign”?</b>
             <span className="mt-1 block text-xs leading-snug text-[var(--fg3)]">Removes 24 files and 3 automations. Restore from trash for 30 days.</span>
             <div className="mt-3 flex justify-end gap-1.5"><Button size="xs" tabIndex={-1}>Cancel</Button><Button size="xs" variant="danger" tabIndex={-1}>Delete</Button></div>
@@ -319,7 +319,7 @@ export function OverlaysSection({ openPalette }: { openPalette: () => void }) {
             <div className="mt-3"><Switch label="Allow comments" defaultChecked /></div>
           </PopoverContent></Popover></Row>
         <SpecPreview>
-          <div className={cn(floatingSurface, 'w-full max-w-[260px] p-3')}>
+          <div className={cn(surface.floating, 'w-full max-w-[260px] p-3')}>
             <b className="text-[13px]">Share this page</b><div className="mt-0.5 mb-2 text-xs text-[var(--fg3)]">Anyone with the link can view</div>
             <div className="flex h-7 items-center rounded-[var(--r-md)] border border-[var(--line)] px-2 font-[family-name:var(--mono)] text-xs text-[var(--fg2)]">example.com/p/x7k2</div>
           </div>

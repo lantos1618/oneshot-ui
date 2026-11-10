@@ -5,8 +5,8 @@ import { dirname, join } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { test as base, expect, type Page } from '@playwright/test'
 
-/** Per-project options: the theme mode, and a showcase locale (set through the page's own switcher storage, e.g. 'ar-EG'). */
-export type ShowcaseOptions = { themeMode: 'light' | 'dark'; showcaseLocale: string | null }
+/** Per-project options: the theme mode. */
+export type ShowcaseOptions = { themeMode: 'light' | 'dark' }
 
 const ROOT = join(dirname(fileURLToPath(import.meta.url)), '..', '..')
 const AXE_PATH = createRequire(join(ROOT, 'package.json')).resolve('axe-core/axe.min.js')
@@ -41,11 +41,8 @@ const INSTRUMENT = () => {
 
 export const test = base.extend<ShowcaseOptions & { showcase: Showcase }>({
   themeMode: ['light', { option: true }],
-  showcaseLocale: [null, { option: true }],
-  showcase: async ({ page, themeMode, showcaseLocale: locale }, provide) => {
+  showcase: async ({ page, themeMode }, provide) => {
     await page.addInitScript(mode => { try { localStorage.setItem('ui-theme:v1', JSON.stringify({ mode })) } catch { /* ignore */ } }, themeMode)
-    // the showcase's language menu persists here (src/showcase/index.tsx, SHELL_LOCALE_KEY) and applies it before the first paint
-    if (locale) await page.addInitScript(locale => { try { localStorage.setItem('ui-showcase-locale', JSON.stringify({ locale, dir: 'auto' })) } catch { /* ignore */ } }, locale)
     await page.addInitScript(INSTRUMENT)
     // Web fonts are not under test and would add network flake and font-swap shifts: serve them empty.
     await page.route(/^https:\/\/fonts\.(googleapis|gstatic)\.com\//, route => route.fulfill({ status: 200, contentType: route.request().url().includes('gstatic') ? 'font/woff2' : 'text/css', body: '' }))
@@ -160,10 +157,8 @@ export class Showcase {
       const se = document.scrollingElement as HTMLElement
       const vw = document.documentElement.clientWidth
       const wide = se.scrollWidth > vw + 1
-      // both ways: in RTL the page overflows (and scrolls) to the left, with scrollX running negative
       const x0 = scrollX
-      scrollBy({ left: 200, behavior: 'instant' }); let moved = scrollX !== x0; scrollTo({ left: x0, behavior: 'instant' })
-      scrollBy({ left: -200, behavior: 'instant' }); moved ||= scrollX !== x0; scrollTo({ left: x0, behavior: 'instant' })
+      scrollBy({ left: 200, behavior: 'instant' }); const moved = scrollX !== x0; scrollTo({ left: x0, behavior: 'instant' })
       const clipped = (el: Element) => {
         for (let p = el.parentElement; p && p !== document.body; p = p.parentElement) {
           const o = getComputedStyle(p).overflowX

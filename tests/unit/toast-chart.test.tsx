@@ -3,8 +3,6 @@
 import { act, fireEvent, render, screen, within } from '@testing-library/react'
 import { useRef, type ReactNode, type RefObject } from 'react'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
-import { LocaleProvider } from '../../src/lib/core'
-import { UI_MESSAGES_DE } from '../../src/lib/provider'
 import { BarList, Chart, DonutChart, ScatterChart, ToastProvider, UIProvider, exportChart, toast, useToast, type ToastApi } from '../../src/lib'
 
 /* ── Toasts ─────────────────────────────────────────────────────────────── */
@@ -184,11 +182,10 @@ describe('chart data table', () => {
     expect(screen.getByRole('group', { name: 'Top countries' })).toHaveAccessibleDescription(/^3 items, .*870/)
   })
 
-  it("formats numbers with the provider's locale", () => {
-    render(<LocaleProvider locale="de-DE" messages={UI_MESSAGES_DE}><BarList items={ITEMS} label="Länder" /></LocaleProvider>)
-    const table = screen.getByRole('table', { name: /Länder/ })
-    expect(within(table).getAllByRole('cell')[0].textContent).toBe('4.210')
-    expect(within(table).getAllByRole('columnheader')[0].textContent).toBe('Eintrag')
+  it('formats the table numbers', () => {
+    render(<BarList items={ITEMS} label="Countries" />)
+    const table = screen.getByRole('table', { name: /Countries/ })
+    expect(within(table).getAllByRole('cell')[0].textContent).toBe('4,210')
   })
 
   it('table="toggle" adds a Show data button that reveals it as a scrollable region; "shown" shows it at once', () => {

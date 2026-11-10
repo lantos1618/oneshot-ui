@@ -1,5 +1,4 @@
-// 0.5 regressions in feedback, data and layout, in every profile (titles end in "section <id>" so the iphone-rtl
-// subset runs them too):
+// Regressions in feedback, data and layout, in every profile:
 // - Data grid · 50k rows: adjacent pinned cells touch (no gap, no overlap), before and after scrolling sideways.
 // - Offline indicator: toggling Connected and scrolling the card away and back cause no layout shift.
 // - Tree view: thread lines don't move rows when toggled, and clicking one collapses its folder.
@@ -16,7 +15,6 @@ test.describe('0.5 regressions', () => {
     await expect(table).toBeVisible()
     /** For the header and the first body rows: the gap between each pair of neighbouring cells, in reading order. */
     const gaps = () => table.evaluate(t => {
-      const rtl = getComputedStyle(t).direction === 'rtl'
       const out: string[] = []
       const rows = [t.querySelector('thead tr'), ...t.querySelectorAll('tbody tr')].slice(0, 6) as HTMLTableRowElement[]
       for (const r of rows) {
@@ -24,19 +22,19 @@ test.describe('0.5 regressions', () => {
         if (cells.length < 3) continue // group header rows span the table
         // compare each cell pinned to an inline edge with its neighbour pinned to the same edge: they must touch
         // (header cells are all sticky to the top; only an inline-start/end offset pins a column)
-        const side = (el: HTMLElement) => { const cs = getComputedStyle(el); return cs.position !== 'sticky' ? null : cs.insetInlineStart !== 'auto' ? 's' : cs.insetInlineEnd !== 'auto' ? 'e' : null }
+        const side = (el: HTMLElement) => { const cs = getComputedStyle(el); return cs.position !== 'sticky' ? null : cs.left !== 'auto' ? 's' : cs.right !== 'auto' ? 'e' : null }
         for (let i = 1; i < cells.length; i++) {
           const sd = side(cells[i]); if (!sd || side(cells[i - 1]) !== sd) continue
           const a = cells[i - 1].getBoundingClientRect(), b = cells[i].getBoundingClientRect()
-          const gap = rtl ? a.left - b.right : b.left - a.right
+          const gap = b.left - a.right
           if (Math.abs(gap) > 1) out.push(`${cells[i - 1].dataset.gk ?? cells[i - 1].dataset.ck ?? 'select'} → ${cells[i].dataset.gk ?? cells[i].dataset.ck}: ${gap.toFixed(1)}px`)
         }
       }
       return out
     })
     expect(await gaps(), 'gaps between adjacent pinned cells').toEqual([])
-    // scroll sideways (negative scrollLeft in RTL): pinned cells stick and still touch
-    await table.evaluate(t => { const s = t.parentElement!; s.scrollLeft = (getComputedStyle(s).direction === 'rtl' ? -1 : 1) * 240 })
+    // scroll sideways: pinned cells stick and still touch
+    await table.evaluate(t => { t.parentElement!.scrollLeft = 240 })
     await page.waitForTimeout(200)
     expect(await gaps(), 'gaps between adjacent pinned cells after scrolling sideways').toEqual([])
     // the table lays out at its declared column widths, which the sticky offsets are computed from

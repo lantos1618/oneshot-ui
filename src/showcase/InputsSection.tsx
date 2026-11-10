@@ -1,5 +1,5 @@
 import { useState, type ReactNode } from 'react'
-import { AnimatedNumber, Calendar, Checkbox, ColorPicker, Combobox, CurrencyInput, DateField, DatePicker, DateRangePicker, type DateRange, DateTimePicker, Field, FileUpload, Input, Label, LocaleProvider, type Magnet, type MagnetZonePull, MonthPicker, MultiSelect, NumberStepper, OTPInput, type Option, PasswordInput, PhoneInput, RadioGroup, RangeSlider, Rating, SegmentedControl, Select, Slider, Switch, TagInput, Textarea, TimeField, TimePicker, YearPicker, cn, formDate, localeDir, localeHourCycle, localeWeekStart } from '../lib'
+import { AnimatedNumber, Calendar, Checkbox, ColorPicker, Combobox, CurrencyInput, DateField, DatePicker, DateRangePicker, type DateRange, DateTimePicker, Field, FileUpload, Input, Label, type Magnet, type MagnetZonePull, MonthPicker, MultiSelect, NumberStepper, OTPInput, type Option, PasswordInput, PhoneInput, RadioGroup, RangeSlider, Rating, SegmentedControl, Select, Slider, Switch, TagInput, Textarea, TimeField, TimePicker, YearPicker, cn, formDate } from '../lib'
 import { Row, Section, Spec } from './kit'
 
 const COUNTRIES: Option[] = ([['🇦🇺', 'Australia'], ['🇦🇹', 'Austria'], ['🇧🇪', 'Belgium'], ['🇨🇦', 'Canada'], ['🇩🇰', 'Denmark'], ['🇫🇮', 'Finland'], ['🇫🇷', 'France'], ['🇩🇪', 'Germany'], ['🇮🇪', 'Ireland'], ['🇮🇹', 'Italy'], ['🇯🇵', 'Japan'], ['🇳🇱', 'Netherlands'], ['🇳🇿', 'New Zealand'], ['🇳🇴', 'Norway'], ['🇵🇹', 'Portugal'], ['🇸🇬', 'Singapore'], ['🇪🇸', 'Spain'], ['🇸🇪', 'Sweden'], ['🇨🇭', 'Switzerland'], ['🇬🇧', 'United Kingdom'], ['🇺🇸', 'United States']] as const)
@@ -66,32 +66,26 @@ function ConstraintsDemo() {
   )
 }
 
-const IN_LOCALES = ['en-GB', 'en-US', 'de-DE', 'ja-JP', 'ar-EG']
-const IN_WEEKDAY = (l: string, d: number) => new Intl.DateTimeFormat(l, { weekday: 'long', timeZone: 'UTC' }).format(Date.UTC(2024, 0, 7 + d))
-
-/** DateField, TimeField and a Calendar under a LocaleProvider: switch locale to see order, digits, clock and week start change. */
-function LocaleDemo() {
-  const [locale, setLocale] = useState('en-GB')
+/** DateField, TimeField and a Calendar: type segment by segment, switch the clock between 24 and 12 hours. */
+function TypedDatesDemo() {
+  const [clock, setClock] = useState('24-hour')
   const [date, setDate] = useState<Date | null>(new Date(2026, 10, 8))
   const [time, setTime] = useState('21:05')
-  const h12 = /h1[12]/.test(localeHourCycle(locale))
   return (
     <div className="flex flex-col gap-3">
-      <SegmentedControl aria-label="Locale" size="sm" options={IN_LOCALES} value={locale} onChange={setLocale} className="self-start" />
-      <LocaleProvider locale={locale}>
-        <div dir={localeDir(locale)} lang={locale} className="grid gap-4 md:grid-cols-[1fr_auto]">
-          <div className="flex min-w-0 flex-col gap-3">
-            <Field label="Date" htmlFor="in-loc-date"><DateField id="in-loc-date" value={date} onChange={setDate} /></Field>
-            <Field label="Time" htmlFor="in-loc-time"><TimeField id="in-loc-time" value={time} onChange={setTime} /></Field>
-            <dl className="m-0 grid grid-cols-[auto_1fr] gap-x-3 gap-y-1 text-xs" dir="ltr">
-              <dt className="text-[var(--fg3)]">Value</dt><dd className="m-0 font-[family-name:var(--mono)]">{formDate(date) || '""'} {time || '""'}</dd>
-              <dt className="text-[var(--fg3)]">Week starts</dt><dd className="m-0">{IN_WEEKDAY('en-GB', localeWeekStart(locale))}</dd>
-              <dt className="text-[var(--fg3)]">Clock</dt><dd className="m-0">{h12 ? '12-hour' : '24-hour'}</dd>
-            </dl>
-          </div>
-          <Calendar key={locale} selected={date} onSelect={setDate} month={date ?? undefined} className="justify-self-center" />
+      <SegmentedControl aria-label="Clock" size="sm" options={['24-hour', '12-hour']} value={clock} onChange={setClock} className="self-start" />
+      <div className="grid gap-4 md:grid-cols-[1fr_auto]">
+        <div className="flex min-w-0 flex-col gap-3">
+          <Field label="Date" htmlFor="in-loc-date"><DateField id="in-loc-date" value={date} onChange={setDate} /></Field>
+          <Field label="Time" htmlFor="in-loc-time"><TimeField id="in-loc-time" value={time} onChange={setTime} hourCycle={clock === '12-hour' ? 12 : 24} /></Field>
+          <dl className="m-0 grid grid-cols-[auto_1fr] gap-x-3 gap-y-1 text-xs">
+            <dt className="text-[var(--fg3)]">Value</dt><dd className="m-0 font-[family-name:var(--mono)]">{formDate(date) || '""'} {time || '""'}</dd>
+            <dt className="text-[var(--fg3)]">Week starts</dt><dd className="m-0">Monday</dd>
+            <dt className="text-[var(--fg3)]">Clock</dt><dd className="m-0">{clock}</dd>
+          </dl>
         </div>
-      </LocaleProvider>
+        <Calendar selected={date} onSelect={setDate} month={date ?? undefined} className="justify-self-center" />
+      </div>
     </div>
   )
 }
@@ -194,9 +188,9 @@ export function InputsSection() {
         <Field label="Period" htmlFor="in-period"><DateRangePicker id="in-period" defaultValue={range} numberOfMonths={2} /></Field>
         <InStates><InGrid min={150}><Field label="Disabled"><DateRangePicker disabled defaultValue={range} /></Field><Field label="Invalid" error="Choose an end date"><DateRangePicker defaultValue={[range[0], null]} /></Field></InGrid></InStates>
       </Spec>
-      <Spec title="Typed dates in any locale" desc="Segment order, separators, digits, 12/24-hour clock and the first day of the week all come from the locale" span={2}
+      <Spec title="Typed dates" desc="Type a date or time segment by segment, step it with the arrows, or paste an ISO date; 12- or 24-hour clock" span={2}
         keys={[[['0–9'], 'Type, moves on'], [['↑', '↓'], 'Step'], [['←', '→'], 'Segment'], [['⌫'], 'Clear'], [['⌘', 'V'], 'Paste 2026-11-08']]}>
-        <LocaleDemo />
+        <TypedDatesDemo />
       </Spec>
       <Spec title="Time picker" desc="Type the time, or pick from 15-minute slots behind the clock">
         <Field label="Start time" htmlFor="in-time"><TimePicker id="in-time" defaultValue="09:30" /></Field>

@@ -1,5 +1,5 @@
 // Server-render check: renders <UIProvider><Button/></UIProvider>, ThemeScript, every showcase section and the whole
-// page (also in Arabic, which must come out dir="rtl") with react-dom/server renderToString (modules loaded through Vite SSR, so the TSX sources are used as they are).
+// page with react-dom/server renderToString (modules loaded through Vite SSR, so the TSX sources are used as they are).
 // Usage: node scripts/ssr-check.mjs [SectionName …]   Exit code 1 if anything throws.
 import { createServer } from 'vite'
 import { readdirSync } from 'node:fs'
@@ -85,18 +85,6 @@ try {
     for (const [name, C] of Object.entries(mod)) if (/Section$/.test(name) && typeof C === 'function') await check(name, () => h(lib.UIProvider, null, eager(h(C))))
   }
   await check('Showcase (whole page)', async () => eager(h((await vite.ssrLoadModule('/src/showcase/index.tsx')).default)))
-  // right to left: the whole page in Arabic carries dir="rtl" and lang="ar-EG" on its .ui-root (in the server HTML)
-  {
-    const Showcase = (await vite.ssrLoadModule('/src/showcase/index.tsx')).default
-    errors.length = 0
-    let html = ''
-    try { html = renderToString(h(Showcase, { locale: 'ar-EG' })) } catch (e) { html = `threw ${e?.message ?? e}` }
-    const root = /<div[^>]*class="ui-root[^"]*"[^>]*>/.exec(html)?.[0] ?? ''
-    expect('Showcase locale="ar-EG": .ui-root has dir="rtl" lang="ar-EG"', /\sdir="rtl"/.test(root) && /\slang="ar-EG"/.test(root), root || html.slice(0, 200))
-    expect('Showcase locale="ar-EG": no console.error', !errors.length, errors[0] ?? '')
-    const small = renderToString(h(lib.UIProvider, { locale: 'ar-EG' }, h(lib.Button, null, 'x')))
-    expect('UIProvider locale="ar-EG": dir="rtl" on .ui-root', /class="ui-root"[^>]*dir="rtl"|dir="rtl"[^>]*class="ui-root"/.test(small), small.slice(0, 300))
-  }
 } finally {
   console.error = origError
   await vite.close()

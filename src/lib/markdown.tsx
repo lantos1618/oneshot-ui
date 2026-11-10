@@ -1,21 +1,8 @@
 import { Fragment, createContext, memo, useContext, useMemo, useState, type CSSProperties, type ReactNode } from 'react'
-import { Icon, ScrollEdges, cn, defineMessages, safeMediaUrl, safeUrl, useMediaQuery, useMessages, useScrollEdges } from './core'
+import { Icon, ScrollEdges, cn, safeMediaUrl, safeUrl, useMediaQuery, useScrollEdges } from './core'
 import { CopyButton } from './feedback'
 import { InlineCode } from './code'
 import { useViewport } from './motion'
-
-/* ════════════════════════════════════════════════════════════════════════════
- * Markdown: a GFM-subset renderer for model output.
- * Own parser, linear time, React nodes only (no innerHTML). Raw HTML shows as text. Links go through safeUrl,
- * images render as links unless `images="allow"`. While `streaming`, half-received syntax at the end of the text
- * (an unclosed `**`, `` ` ``, `[text](ht`, a table header without its delimiter row, an open code fence) renders as
- * what it will most likely become, and completed blocks keep their identity so only the last ones re-render.
- * Fenced code renders in a plain frame; pass `renderCode` (e.g. `markdownCodeBlock` from code) to highlight it, so the
- * highlighter is only bundled where it is wanted. Every block gets `dir="auto"` (code stays LTR), so Arabic and
- * English paragraphs each read in their own direction.
- * Not supported (shown as text): raw HTML, indented code blocks, setext headings (`---` is always a rule),
- * reference-style links and footnotes.
- * ══════════════════════════════════════════════════════════════════════════ */
 
 /** Longer input is cut to this many characters before parsing (the renderer says so under the text). */
 export const MARKDOWN_MAX_CHARS = 200_000
@@ -48,12 +35,10 @@ export type MdBlock = { range?: [number, number] } & (
   | { type: 'paragraph'; children: MdInline[] }
   /** `open`: the fence hasn't been closed (yet). */
   | { type: 'code'; lang: string; text: string; open?: boolean }
-  | { type: 'quote'; children: MdBlock[] } // rtl-lint-ignore: a block type, not an icon
+  | { type: 'quote'; children: MdBlock[] }
   | { type: 'list'; ordered: boolean; start?: number; tight: boolean; items: MdListItem[] }
   | { type: 'table'; align: MdAlign[]; head: MdInline[][]; rows: MdInline[][][] }
   | { type: 'hr' })
-
-/* ── Block helpers (hand-written scanners: no regex with nested quantifiers on unbounded input) ──────────────── */
 
 const mdBlank = (l: string) => /^\s*$/.test(l)
 /** Leading indentation in columns (tab → next multiple of 4). */
@@ -150,8 +135,6 @@ function mdTableAt(lines: string[], i: number) {
 /** A last line that is only the start of some syntax (`-`, `1.`, `--`, a backtick or two) while streaming: wait for more. */
 const MD_UNDECIDED = /^ {0,3}(?:[-+*_]{1,2}|\d{1,9}[.)]?|[`~]{1,2})$/
 
-/* ── Block parser ────────────────────────────────────────────────────────── */
-
 type MdRange = [number, number]
 /**
  * Parse `lines` into blocks. `atEof`: the last line is the end of the whole (possibly still streaming) source, so
@@ -210,7 +193,7 @@ function mdBlocks(lines: string[], atEof: boolean, streaming: boolean, depth: nu
         if (!mdBlank(l) && q.length && !mdBlank(q[q.length - 1]) && !mdInterrupts(l) && !mdFence(q[0])) { q.push(l); i++; continue } // lazy continuation
         break
       }
-      push({ type: 'quote', children: mdBlocks(q, tailAt(i - 1), streaming, depth + 1) }, from, i - 1) // rtl-lint-ignore: a block type, not an icon
+      push({ type: 'quote', children: mdBlocks(q, tailAt(i - 1), streaming, depth + 1) }, from, i - 1)
       continue
     }
 
@@ -307,8 +290,6 @@ function mdNormalize(src: string) {
 export function parseMarkdown(src: string, { streaming = false }: { streaming?: boolean } = {}): MdBlock[] {
   return mdParseTop(mdNormalize(src), streaming, 0)
 }
-
-/* ── Inline parser ───────────────────────────────────────────────────────── */
 
 type MdEmph = 'em' | 'strong' | 'del'
 /** `opens` is innermost first (each new match wraps the earlier ones); `closes` too. */
@@ -596,30 +577,6 @@ function mdInline(src: string, { partial = false, links = true }: { partial?: bo
   return root.children
 }
 
-/* ── Rendering ───────────────────────────────────────────────────────────── */
-
-/** Markdown's UI strings (machine-drafted de/ar). Override with `<UIProvider messages={{ 'md.snippet': … }}>`. */
-export const MARKDOWN_MESSAGES = defineMessages('md', {
-  en: {
-    linkRemoved: 'Link removed: unsupported address', image: 'Image', imageHidden: 'Image not shown',
-    openImage: '{title, select, none {Open image} other {Open image: {title}}} (not loaded automatically)', imageNewTab: '(image, opens in a new tab)',
-    tableScrolls: 'Table, scrolls sideways', snippet: 'snippet', codeScrolls: '{lang} code, scrolls', done: 'Done:', todo: 'To do:',
-    cutOff: 'Cut off after {n, number} characters.',
-  },
-  de: {
-    linkRemoved: 'Link entfernt: nicht unterstützte Adresse', image: 'Bild', imageHidden: 'Bild nicht angezeigt',
-    openImage: '{title, select, none {Bild öffnen} other {Bild öffnen: {title}}} (wird nicht automatisch geladen)', imageNewTab: '(Bild, öffnet in neuem Tab)',
-    tableScrolls: 'Tabelle, seitlich scrollbar', snippet: 'Ausschnitt', codeScrolls: '{lang}-Code, scrollbar', done: 'Erledigt:', todo: 'Offen:',
-    cutOff: 'Nach {n, number} Zeichen abgeschnitten.',
-  },
-  ar: {
-    linkRemoved: 'أُزيل الرابط: عنوان غير مدعوم', image: 'صورة', imageHidden: 'الصورة غير معروضة',
-    openImage: '{title, select, none {فتح الصورة} other {فتح الصورة: {title}}} (لا تُحمَّل تلقائيًا)', imageNewTab: '(صورة، تُفتح في علامة تبويب جديدة)',
-    tableScrolls: 'جدول، يمرَّر أفقيًا', snippet: 'مقتطف', codeScrolls: 'شيفرة {lang}، قابلة للتمرير', done: 'منجز:', todo: 'للإنجاز:',
-    cutOff: 'اقتُطع النص بعد {n, number} حرف.',
-  },
-})
-
 /**
  * Renders one fenced code block for Markdown (and MessageParts): `lang` is the fence's info word as written, `open`
  * is true while the fence is still streaming. Return null or undefined to use the plain frame.
@@ -636,10 +593,9 @@ const mdAbsolute = (href: string) => /^https?:/i.test(href) || href.startsWith('
 
 function MdLinkView({ href, title, pending, children }: { href: string; title?: string; pending?: boolean; children: ReactNode }) {
   const { onLinkClick } = useContext(MdContext)
-  const t = useMessages(MARKDOWN_MESSAGES)
   if (pending) return <span className={MD_LINK}>{children}</span>
   const safe = safeUrl(href, { allow: MD_SAFE_SCHEMES, fallback: '' })
-  if (!safe) return <span title={t('linkRemoved')} className="underline decoration-dotted underline-offset-2">{children}</span>
+  if (!safe) return <span title={'Link removed: unsupported address'} className="underline decoration-dotted underline-offset-2">{children}</span>
   return (
     <a href={safe} title={title} target={mdAbsolute(safe) ? '_blank' : undefined} rel="noopener noreferrer nofollow" className={MD_LINK}
       onClick={onLinkClick ? e => onLinkClick(safe, e) : undefined}>{children}</a>
@@ -649,18 +605,17 @@ function MdLinkView({ href, title, pending, children }: { href: string; title?: 
 const MD_IMAGE_CHIP = 'inline-flex max-w-full items-center gap-1 rounded-[var(--r-sm)] border border-[var(--line)] bg-[var(--muted)] px-1.5 align-baseline text-[13px] leading-[1.6] text-[var(--fg2)] no-underline'
 function MdImageView({ src, alt, title }: { src: string; alt: string; title?: string }) {
   const { images, onLinkClick } = useContext(MdContext)
-  const t = useMessages(MARKDOWN_MESSAGES)
   if (images === 'allow') {
     const u = safeMediaUrl(src)
     if (u) return <img src={u} alt={alt} title={title} loading="lazy" decoding="async" referrerPolicy="no-referrer" className="inline-block h-auto max-w-full rounded-[var(--r-md)] align-middle" />
   }
   const href = safeUrl(src, { allow: ['https:', 'http:'], fallback: '' })
-  const body = <><Icon name="image" size={13} className="flex-none text-[var(--fg3)]" /><span className="truncate">{alt || t('image')}</span></>
-  if (!href) return <span className={MD_IMAGE_CHIP} title={t('imageHidden')}>{body}</span>
+  const body = <><Icon name="image" size={13} className="flex-none text-[var(--fg3)]" /><span className="truncate">{alt || 'Image'}</span></>
+  if (!href) return <span className={MD_IMAGE_CHIP} title={'Image not shown'}>{body}</span>
   return (
-    <a href={href} target={mdAbsolute(href) ? '_blank' : undefined} rel="noopener noreferrer nofollow" title={t('openImage', { title: title || 'none' })}
+    <a href={href} target={mdAbsolute(href) ? '_blank' : undefined} rel="noopener noreferrer nofollow" title={`${(title || 'none') === 'none' ? 'Open image' : `Open image: ${title || 'none'}`} (not loaded automatically)`}
       className={cn(MD_IMAGE_CHIP, 'transition-colors hover:border-[var(--line2)] hover:text-[var(--fg)]')} onClick={onLinkClick ? e => onLinkClick(href, e) : undefined}>
-      {body}<span className="sr-only"> {t('imageNewTab')}</span>
+      {body}<span className="sr-only"> {'(image, opens in a new tab)'}</span>
     </a>
   )
 }
@@ -723,7 +678,6 @@ function MdTableView({ block, caret }: { block: Extract<MdBlock, { type: 'table'
   const [edgesRef, edges] = useScrollEdges<HTMLDivElement>()
   const scrolls = edges.left || edges.right
   const { streaming } = useContext(MdContext)
-  const t = useMessages(MARKDOWN_MESSAGES)
   const [fixed] = useState(!!streaming) // decided once, at mount
   const head = block.head
   // header-derived widths (a streaming table only appears once its header and delimiter rows are complete)
@@ -732,9 +686,9 @@ function MdTableView({ block, caret }: { block: Extract<MdBlock, { type: 'table'
   const lastRow = block.rows.length - 1
   return (
     <div className="relative overflow-hidden rounded-[var(--r-lg)] border border-[var(--line)] bg-[var(--card)]">
-      <div ref={edgesRef} tabIndex={scrolls ? 0 : undefined} role={scrolls ? 'region' : undefined} aria-label={scrolls ? t('tableScrolls') : undefined}
+      <div ref={edgesRef} tabIndex={scrolls ? 0 : undefined} role={scrolls ? 'region' : undefined} aria-label={scrolls ? 'Table, scrolls sideways' : undefined}
         className="overflow-x-auto overscroll-x-contain focus-visible:outline-2 focus-visible:-outline-offset-2 focus-visible:outline-[var(--accent)]">
-        <table dir="auto" className={cn('w-full border-collapse text-[13px] leading-[1.5] [overflow-wrap:normal]', fixed && 'table-fixed')} style={fixed ? { minWidth: `${total.toFixed(2)}em` } : undefined}>
+        <table className={cn('w-full border-collapse text-[13px] leading-[1.5] [overflow-wrap:normal]', fixed && 'table-fixed')} style={fixed ? { minWidth: `${total.toFixed(2)}em` } : undefined}>
           {fixed && <colgroup>{ems.map((w, k) => <col key={k} style={{ width: `${((w / total) * 100).toFixed(3)}%` }} />)}</colgroup>}
           <thead className="bg-[color-mix(in_srgb,var(--muted)_60%,var(--card))]">
             <tr>
@@ -761,7 +715,6 @@ function MdTableView({ block, caret }: { block: Extract<MdBlock, { type: 'table'
 
 /** A fence without a code renderer (or one it doesn't highlight): CodeBlock's frame, plain text, always left to right. */
 function MdPlainCode({ text, lang }: { text: string; lang: string }) {
-  const t = useMessages(MARKDOWN_MESSAGES)
   const [edgesRef, edges] = useScrollEdges<HTMLPreElement>()
   const phone = useMediaQuery('(max-width: 639px)')
   const scrolls = edges.left || edges.right
@@ -769,13 +722,13 @@ function MdPlainCode({ text, lang }: { text: string; lang: string }) {
   return (
     <div className="overflow-hidden rounded-[var(--r-lg)] border border-[var(--line)] bg-[color-mix(in_srgb,var(--muted)_45%,var(--card))]">
       <div className="flex min-h-10 items-center gap-2 border-b border-[var(--line)] bg-[var(--card)] py-1 pe-1.5 ps-3 text-xs [@media(pointer:coarse)]:min-h-11">
-        <span className="flex min-w-0 items-center gap-1.5 font-medium text-[var(--fg)]"><Icon name="file" size={13} className="text-[var(--fg3)]" /><span className="truncate">{t('snippet')}</span></span>
+        <span className="flex min-w-0 items-center gap-1.5 font-medium text-[var(--fg)]"><Icon name="file" size={13} className="text-[var(--fg3)]" /><span className="truncate">{'snippet'}</span></span>
         <span className="flex-none rounded-[var(--r-sm)] bg-[var(--muted)] px-1.5 py-0.5 font-[family-name:var(--mono)] text-[11px] font-medium text-[var(--fg3)] max-[420px]:hidden">{label}</span>
         <span className="flex-1" />
         <CopyButton text={() => text} size={phone ? 'icon-sm' : 'sm'} iconOnly={phone} variant="ghost"
           className={phone ? 'text-[var(--fg2)] hover:text-[var(--fg)]' : '!h-7 !gap-1 !px-2 font-medium text-[var(--fg2)] hover:text-[var(--fg)] [@media(pointer:coarse)]:!h-9'} />
       </div>
-      <pre ref={edgesRef} dir="ltr" tabIndex={scrolls ? 0 : undefined} role={scrolls ? 'region' : undefined} aria-label={scrolls ? t('codeScrolls', { lang: label }) : undefined}
+      <pre ref={edgesRef} tabIndex={scrolls ? 0 : undefined} role={scrolls ? 'region' : undefined} aria-label={scrolls ? `${label} code, scrolls` : undefined}
         className="m-0 overflow-x-auto px-3 py-2.5 font-[family-name:var(--mono)] text-xs leading-[1.65] whitespace-pre text-[var(--fg)] [overflow-wrap:normal] focus-visible:outline-2 focus-visible:-outline-offset-2 focus-visible:outline-[var(--accent)]">{text || ' '}</pre>
     </div>
   )
@@ -793,19 +746,18 @@ function MdCode({ text, lang, open }: { text: string; lang: string; open: boolea
 }
 
 function MdBlockNode({ block: b, caret }: { block: MdBlock; caret?: MdCaretKey }): ReactNode {
-  const t = useMessages(MARKDOWN_MESSAGES)
   switch (b.type) {
     case 'heading': {
       const H = `h${b.level}` as 'h1'
-      return <H dir="auto" className={cn('m-0 text-[var(--fg)]', MD_HEADING[b.level])}>{mdRenderInline(b.children)}{caret ? <MdCaret key={caret} /> : null}</H>
+      return <H className={cn('m-0 text-[var(--fg)]', MD_HEADING[b.level])}>{mdRenderInline(b.children)}{caret ? <MdCaret key={caret} /> : null}</H>
     }
-    case 'paragraph': return <p dir="auto" className="m-0">{mdRenderInline(b.children)}{caret ? <MdCaret key={caret} /> : null}</p>
+    case 'paragraph': return <p className="m-0">{mdRenderInline(b.children)}{caret ? <MdCaret key={caret} /> : null}</p>
     case 'code': return <MdCode text={b.text} lang={b.lang} open={!!b.open} />
-    case 'quote': return <blockquote dir="auto" className="m-0 border-s-2 border-[var(--line2)] ps-3 text-[var(--fg2)] [&>*+*]:mt-2"><MdBlocksView blocks={b.children} caret={caret} /></blockquote> // rtl-lint-ignore: a block type, not an icon
+    case 'quote': return <blockquote className="m-0 border-s-2 border-[var(--line2)] ps-3 text-[var(--fg2)] [&>*+*]:mt-2"><MdBlocksView blocks={b.children} caret={caret} /></blockquote>
     case 'list': {
       const L = b.ordered ? 'ol' : 'ul'
       return (
-        <L dir="auto" start={b.ordered && b.start !== 1 ? b.start : undefined}
+        <L start={b.ordered && b.start !== 1 ? b.start : undefined}
           className={cn('m-0 ps-6 marker:text-[var(--fg3)]', b.ordered ? 'list-decimal' : 'list-disc', b.tight ? '[&>li+li]:mt-1' : '[&>li+li]:mt-2.5')}>
           {b.items.map((it, k) => {
             const last = k === b.items.length - 1 ? caret : undefined, task = it.checked !== undefined
@@ -817,7 +769,7 @@ function MdBlockNode({ block: b, caret }: { block: MdBlock; caret?: MdCaretKey }
                     {it.checked && <Icon name="check" size={11} strokeWidth={3} />}
                   </span>
                 )}
-                {task && <span className="sr-only">{it.checked ? t('done') : t('todo')} </span>}
+                {task && <span className="sr-only">{it.checked ? 'Done:' : 'To do:'} </span>}
                 {it.children.length === 0 && last ? <MdCaret key={last} /> : <MdBlocksView blocks={it.children} caret={last} />}
               </li>
             )
@@ -874,7 +826,6 @@ export type MarkdownProps = {
  * don't re-render as text arrives, and unfinished syntax at the end never flashes as raw characters.
  */
 export function Markdown({ children, streaming = false, className, onLinkClick, renderCitation, renderCode, images = 'link', caret = true }: MarkdownProps) {
-  const t = useMessages(MARKDOWN_MESSAGES)
   const raw = typeof children === 'string' ? children : String(children ?? '')
   const src = useMemo(() => mdNormalize(raw), [raw])
   const blocks = useMdBlocks(src, streaming)
@@ -887,7 +838,7 @@ export function Markdown({ children, streaming = false, className, onLinkClick, 
         style={showCaret ? { '--ui-play': visible ? 'running' : 'paused' } as CSSProperties : undefined}>
         {blocks.map((b, k) => <MdTopBlock key={k} block={b} caret={showCaret && k === blocks.length - 1 ? src.length + 1 : undefined} />)}
         {showCaret && blocks.length === 0 && <p className="m-0"><MdCaret /></p>}
-        {raw.length > MARKDOWN_MAX_CHARS && <p className="m-0 text-[11px] text-[var(--fg3)]">{t('cutOff', { n: MARKDOWN_MAX_CHARS })}</p>}
+        {raw.length > MARKDOWN_MAX_CHARS && <p className="m-0 text-[11px] text-[var(--fg3)]">{`Cut off after ${MARKDOWN_MAX_CHARS} characters.`}</p>}
       </div>
     </MdContext.Provider>
   )

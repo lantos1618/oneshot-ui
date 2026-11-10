@@ -1,26 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
 
-/* ════════════════════════════════════════════════════════════════════════════
- * 11b. AGENT RUNS: one normalised model of an agent run, a streaming reducer, useAgentRun, and adapters from
- * OpenTelemetry GenAI spans, the Vercel AI SDK and LangGraph. Headless: it imports only React.
- *
- *   AgentRun    { id, name, startedAt, endedAt?, status, spans, events }        times are epoch ms
- *   AgentSpan   { id, parentId?, kind, name, model?, startMs, endMs?, status, tokens?, costUsd?, error?, attributes }
- *   AgentEvent  { id, kind: approval | handoff | error | retry | note, atMs, label, spanId?, detail? }
- *
- * A run streams as AgentRunEvents (run-start, span-start, span-update, span-end, event, run-end, snapshot), folded by
- * `applyRunEvent`. Every adapter produces those events, so a recorded run and a live one take the same path:
- *
- *   fromOtel(otlpJson)                 OTLP/JSON trace export (gen_ai.* semantic conventions; also AI SDK telemetry,
- *                                      OpenInference and OpenLLMetry attributes)
- *   fromAiSdkResult(result)            generateText / streamText results (`steps` with tool calls, results, usage)
- *   aiSdkRunMapper()                   AI SDK UI message stream parts (and this library's AiChunks), live
- *   fromLangGraphEvents(events)        LangGraph / LangChain `astream_events(version="v2")` events
- *   langGraphRunMapper()               the same, one event at a time, live
- *
- * TraceWaterfall (`run`), AgentTransitMap (`run`) and LaneGraph (`runLaneNodes(run)`) draw a run.
- * ══════════════════════════════════════════════════════════════════════════ */
-
 export type AgentSpanKind = 'agent' | 'llm' | 'tool' | 'retrieval' | 'chain' | 'human'
 export type AgentSpanStatus = 'running' | 'ok' | 'error' | 'cancelled'
 /** Token usage. `input` includes `cached` (prompt tokens served from the provider's cache). */
@@ -280,8 +259,6 @@ export async function* replayRun(source: AgentRun | readonly AgentRunEvent[], { 
   }
 }
 
-/* ── Totals, costs, lanes ─────────────────────────────────────────────────── */
-
 /** Prices in USD per million tokens, by model id (a key also matches model ids that start with it, longest key first). */
 export type AgentPricing = Record<string, { input: number; output: number; /** cached input tokens (default: input) */ cachedInput?: number }>
 /** A model call's cost from its tokens and a price table, or undefined when the model has no price. */
@@ -338,8 +315,6 @@ export function runLaneNodes(run: AgentRun, { include }: { include?: (span: Agen
     return { id: s.id, parents: done.filter(p => p.endMs! > latest || p.startMs >= latest).map(p => p.id), time: s.startMs, group: agentOf(s), span: s }
   })
 }
-
-/* ── Streams and useAgentRun ──────────────────────────────────────────────── */
 
 /**
  * Decodes a byte (or string) stream of JSON values: Server-Sent Events (`data: {…}`, events end at a blank line,
@@ -511,8 +486,6 @@ export function useAgentRun(source: AgentRunSource, { mapper, initial = null, en
   return { run, status, error, push, reset }
 }
 
-/* ── Shared adapter helpers ───────────────────────────────────────────────── */
-
 /** Sorts updates into time order (ends, then starts, then events at the same moment; ties keep their order) and folds them. */
 function arBuild(events: AgentRunEvent[]): AgentRun | null {
   const rank = (e: AgentRunEvent) => e.type === 'run-start' ? -1 : e.type === 'span-end' ? 0 : e.type === 'run-end' ? 3 : e.type === 'event' ? 2 : 1
@@ -532,8 +505,6 @@ function arUsage(u: unknown): AgentTokens | undefined {
   const cached = arNum(o.cachedInputTokens ?? o.cached_input_tokens ?? o.cache_read_input_tokens ?? details?.cache_read ?? details?.cacheReadTokens ?? details?.cached_tokens)
   return { input: input ?? 0, output: output ?? 0, ...(cached ? { cached } : {}) }
 }
-
-/* ── OpenTelemetry GenAI ──────────────────────────────────────────────────── */
 
 export type OtelAnyValue = { stringValue?: string; intValue?: number | string; doubleValue?: number | string; boolValue?: boolean; bytesValue?: string; arrayValue?: { values?: OtelAnyValue[] }; kvlistValue?: { values?: OtelKeyValue[] } }
 export type OtelKeyValue = { key: string; value?: OtelAnyValue }
@@ -689,8 +660,6 @@ export function otelToRunEvents(input: OtlpTraceExport | readonly OtelSpan[], { 
 export function fromOtel(input: OtlpTraceExport | readonly OtelSpan[], options: FromOtelOptions = {}): AgentRun {
   return arBuild(otelToRunEvents(input, options)) ?? arEmptyRun(options.traceId ?? 'trace', options.name ?? '')
 }
-
-/* ── Vercel AI SDK ────────────────────────────────────────────────────────── */
 
 type ArRec = Record<string, unknown>
 /** The parts of a `generateText` / `streamText` step this adapter reads (AI SDK 4 and 5 field names both work). */
@@ -850,8 +819,6 @@ export function fromAiSdkUIStream(parts: readonly (unknown | { at: number | stri
   }
   return runFromEvents(out) ?? arEmptyRun('run', options.name ?? 'streamText')
 }
-
-/* ── LangGraph / LangChain astream_events v2 ──────────────────────────────── */
 
 /** One `astream_events(version="v2")` event. `timestamp` isn't part of LangChain's event: add it on your server (epoch s or ms, or ISO). */
 export type LangGraphStreamEvent = {

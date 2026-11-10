@@ -1,7 +1,5 @@
 import { useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
-import {
-  AI_RICH_RENDERERS, AICanvas, CHAT_PARTS_MESSAGES, type AiChunk, type AiMessage, type AiToolPart, AgentComposer, Conversation, Message, MessageActions, PromptInput, Suggestions, aiMessageText, useAiChat, AgentPlan, AgentTransitMap, AssistantChat, Badge, Chart, ChatApproval, ChatCard, ChatChecklist, type ChatScript, SourceList, Citation, CodeBlock, sourceDomain, type ComposerModel, type ComposerAction, type ComposerReply, type ComposerSample, type ComposerSendMeta, ConfidenceField, type Connector, GhostTextInput, ModelComparison, PermissionRequest, type SlashCommand, type Source, SourcesPanel, SuggestedEdit, ThinkingSteps, VoiceInput, type StepStatus, type WorkspaceItem, sleep, useLocale, useMessages, useToast, useViewport,
-} from '../lib'
+import { AI_RICH_RENDERERS, AICanvas, type AiChunk, type AiMessage, type AiToolPart, AgentComposer, Conversation, Message, MessageActions, PromptInput, Suggestions, aiMessageText, useAiChat, AgentPlan, AgentTransitMap, AssistantChat, Badge, Chart, ChatApproval, ChatCard, ChatChecklist, type ChatScript, SourceList, Citation, CodeBlock, sourceDomain, type ComposerModel, type ComposerAction, type ComposerReply, type ComposerSample, type ComposerSendMeta, ConfidenceField, type Connector, GhostTextInput, ModelComparison, PermissionRequest, type SlashCommand, type Source, SourcesPanel, SuggestedEdit, ThinkingSteps, VoiceInput, type StepStatus, type WorkspaceItem, sleep, useToast, useViewport, fmt } from '../lib'
 import { AGENT_WORKFLOWS, AGENT_WORKFLOW_ORDER, AI_CANVAS_SAMPLE, AGENT_RUN_FIXTURES, AgentRunLanes, type AgentRunFixture } from '../examples'
 import { Button, Icon, SegmentedControl, TabsContent, TabsList, TabsRoot, TabsTrigger, TraceWaterfall, replayRun, useAgentRun, type AgentRunSource } from '../lib'
 import { Section, Spec, SpecAction } from './kit'
@@ -60,14 +58,13 @@ function respond(q: string): ChatScript {
 
 /** The "Top customers table" answer: amounts in the reader's locale. */
 function AiTopTable() {
-  const { fmt } = useLocale()
   return (
     <ChatCard>
       <div className="-mx-1 overflow-x-auto px-1 [contain:inline-size]"><table className="w-full min-w-[300px] border-collapse text-xs">
         <thead><tr className="text-start text-[var(--fg3)]">{['Company', 'Plan', 'Status'].map(h => <th key={h} className="border-b border-[var(--line)] px-1.5 py-1 text-start font-medium">{h}</th>)}<th className="border-b border-[var(--line)] px-1.5 py-1 text-end font-medium">MRR</th></tr></thead>
         <tbody>{TOP.map(([c, p, s, m]) => <tr key={c} className="[&:not(:last-child)>td]:border-b [&>td]:border-[var(--line)]"><td className="px-1.5 py-[7px]">{c}</td><td className="px-1.5">{p}</td><td className="px-1.5"><Badge tone={s === 'Active' ? 'ok' : 'accent'}>{s}</Badge></td><td className="ui-num px-1.5 text-end">{fmt.money(m, 'EUR')}</td></tr>)}</tbody>
       </table></div>
-      <a href="#data" className="mt-2 inline-flex min-h-8 items-center text-xs text-[var(--accent)] no-underline">Open in data grid <span className="ui-flip inline-block">→</span></a>
+      <a href="#data" className="mt-2 inline-flex min-h-8 items-center text-xs text-[var(--accent)] no-underline">Open in data grid <span className="inline-block">→</span></a>
     </ChatCard>
   )
 }
@@ -252,7 +249,6 @@ const LIVE_INITIAL: AiMessage[] = [
 /** Live chat wired to the fake model through useAiChat: Conversation + Message + MessageActions + Suggestions + PromptInput. */
 function LiveChatDemo({ older }: { older: number }) {
   const [model, setModel] = useState('fast')
-  const t = useMessages(CHAT_PARTS_MESSAGES)
   const chat = useAiChat({ send: liveModel, initialMessages: LIVE_INITIAL, onApprovalRequest: liveRunTool })
   const { setMessages } = chat
   useEffect(() => { // "Load 200 older": prepends history, so the log virtualises (and keeps your place if you scrolled up)
@@ -266,7 +262,7 @@ function LiveChatDemo({ older }: { older: number }) {
         {chat.messages.map((m, i) => (
           <Message key={m.id} message={m} renderers={AI_RICH_RENDERERS} onDecideTool={chat.decideTool} onRetry={chat.regenerate}
             actions={m.role === 'assistant' && <MessageActions text={() => aiMessageText(m)} stopped={m.stopped} disabled={chat.busy}
-              onRetry={i === lastA ? chat.regenerate : undefined} retryLabel={m.stopped || m.status === 'error' ? t('retry') : t('regenerate')} />} />
+              onRetry={i === lastA ? chat.regenerate : undefined} retryLabel={m.stopped || m.status === 'error' ? 'Retry' : 'Regenerate'} />} />
         ))}
       </Conversation>
       <div className="-mx-1 overflow-x-auto px-1 pb-0.5 [scrollbar-width:none]"><Suggestions items={LIVE_SUGGESTIONS} onPick={q => chat.submit(q)} disabled={chat.busy} className="!flex-nowrap [&>button]:flex-none" /></div>

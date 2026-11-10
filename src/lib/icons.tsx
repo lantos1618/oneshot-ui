@@ -3,10 +3,6 @@ import { type CSSProperties } from 'react'
 import { cn } from './helpers'
 import { uiShared } from './shared'
 
-/* ════════════════════════════════════════════════════════════════════════════
- * 3. ICONS: inline paths (24×24, stroke). Add your own to ICONS.
- * ══════════════════════════════════════════════════════════════════════════ */
-
 /**
  * Every icon path known on the page, by name. Each copy of the library (the package, each drop-in file) adds its ICONS
  * when it loads, so a drop-in that embeds only the icons it uses still draws any other name another file brought;

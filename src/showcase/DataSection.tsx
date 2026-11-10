@@ -130,7 +130,7 @@ function DataServerGrid() {
       <DataGrid aria-label="Customers (server)" server columns={DATA_BIG_COLS} rows={res.rows} rowKey={r => r.id} rowLabel={r => r.name} rowCount={res.total}
         sort={sort} onSortChange={setSort} filter={filter} onFilterChange={setFilter} onSearchChange={setQ}
         selection={selection} onSelectionChange={setSelection} loading={loading} error={error} onRetry={() => { setFail(false); failRef.current = false; setRetry(n => n + 1) }}
-        defaultPinnedColumns={{ start: ['id'], end: ['status'] }} maxHeight={380}
+        defaultPinnedColumns={{ left: ['id'], right: ['status'] }} maxHeight={380}
         {...(mode === 'pages'
           ? { page, onPageChange: setPage, pageSize, pageSizes: [25, 50, 100], onPageSizeChange: setPageSize }
           : { onLoadMore: () => load(res.rows.length, 100, true), hasMore: res.rows.length < res.total })} />
@@ -141,7 +141,7 @@ function DataBigGrid() {
   const rows = useMemo(() => dataBigRows(50_000), [])
   return (
     <DataGrid aria-label="Customers (50,000)" columns={DATA_BIG_COLS} defaultRows={rows} rowKey={r => r.id} rowLabel={r => r.name} maxHeight={440}
-      defaultPinnedColumns={{ start: ['id', 'name'], end: ['mrr'] }} defaultHiddenColumns={['seats']} groupable={['status', 'plan', 'country']} />
+      defaultPinnedColumns={{ left: ['id', 'name'], right: ['mrr'] }} defaultHiddenColumns={['seats']} groupable={['status', 'plan', 'country']} />
   )
 }
 

@@ -1,7 +1,6 @@
 /** Security helpers for model or user supplied values: safeUrl, safeMediaUrl, cssUrl, safeCssValue, safeColor. Pure; part of @lyndon/ui/core. */
 
-
-/* Security helpers ────────────────────────────────────────────────────────────
+/*
  * Use these wherever a URL, colour or CSS value comes from props, data, storage or model output. */
 
 const SAFE_URL_SCHEMES = ['http:', 'https:', 'mailto:', 'tel:']

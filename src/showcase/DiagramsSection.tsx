@@ -1,5 +1,5 @@
 import { useMemo, useState } from 'react'
-import { type DiagramState, type DiagramTransition, Gantt, type GanttPhase, Globe, type GlobeHub, type GlobeRoute, SegmentedControl, StateDiagram, StateMachine, TraceWaterfall, type TimeTag, type TimeTagKind, type TraceSpan, type WorldMapData, WorldMap, useLocale, useToast, useWorldMap, type LocaleFmt } from '../lib'
+import { type DiagramState, type DiagramTransition, Gantt, type GanttPhase, Globe, type GlobeHub, type GlobeRoute, SegmentedControl, StateDiagram, StateMachine, TraceWaterfall, type TimeTag, type TimeTagKind, type TraceSpan, type WorldMapData, WorldMap, useToast, useWorldMap, type LocaleFmt, fmt } from '../lib'
 import { AGENT_WORKFLOWS, AGENT_WORKFLOW_ORDER, type TagsDayVariant } from '../examples'
 import { Section, Spec, type SpecNotes, specLazy } from './kit'
 
@@ -154,7 +154,6 @@ function DgWorldMapDemo(p: Omit<Parameters<typeof WorldMap>[0], 'data'>) {
 
 export function DiagramsSection() {
   const toast = useToast()
-  const { fmt } = useLocale()
   const metrics = useMemo(() => mapMetrics(fmt), [fmt])
   const [variant, setVariant] = useState<TagsDayVariant>('light')
   return (

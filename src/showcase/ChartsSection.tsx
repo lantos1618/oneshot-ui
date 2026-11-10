@@ -1,8 +1,7 @@
 import { useEffect, useLayoutEffect, useMemo, useRef, useState, type ReactNode } from 'react'
 import { motion, useReducedMotion } from 'motion/react'
 import {
-  BarList, BoxViolinChart, BulletChart, Button, CalendarHeatmap, Chart, ChartWithJournal, TagGlyph, DensityHistogram, DonutChart, ForestPlot, FunnelChart, Gauge, Heatmap, RadarChart, RegressionChart, ScatterChart, SegmentedControl, Slider, SparkChart, SparkTile, StateRibbon, Swimlanes, Switch, TOUCH, Tabs, TickerTable, Treemap, cn, dayKey, useLocale, useToast, useViewport, type ChartDatum, type TickerRow, type TimeTag, type TimeTagStyle,
-} from '../lib'
+  BarList, BoxViolinChart, BulletChart, Button, CalendarHeatmap, Chart, ChartWithJournal, TagGlyph, DensityHistogram, DonutChart, ForestPlot, FunnelChart, Gauge, Heatmap, RadarChart, RegressionChart, ScatterChart, SegmentedControl, Slider, SparkChart, SparkTile, StateRibbon, Swimlanes, Switch, TOUCH, Tabs, TickerTable, Treemap, cn, dayKey, useToast, useViewport, type ChartDatum, type TickerRow, type TimeTag, type TimeTagStyle, type LocaleFmt, fmt } from '../lib'
 import { TAGS_EVENT_KINDS, TAGS_KINDS, describeSample, tagsDay, type TagsDayVariant } from '../examples'
 import { Row, Section, Spec, SpecAction } from './kit'
 
@@ -93,11 +92,10 @@ const CHART_SEG = 'self-start'
 
 // candlestick days as dates (fixed start, so server and client render the same labels)
 /** Day t of October 2026 as "3 Oct" in the page's locale. */
-const candleDate = (t: unknown, fmt: ReturnType<typeof useLocale>['fmt']) => fmt.date(Date.UTC(2026, 9, 1) + (Number(t) - 1) * 864e5, { day: 'numeric', month: 'short', timeZone: 'UTC' })
+const candleDate = (t: unknown, fmt: LocaleFmt) => fmt.date(Date.UTC(2026, 9, 1) + (Number(t) - 1) * 864e5, { day: 'numeric', month: 'short', timeZone: 'UTC' })
 const ebNote = { sd: 'Standard deviation: spread of the data', se: 'Standard error: precision of the mean', ci: 'Non-overlapping 95% CIs suggest a real difference' }
 
 export function ChartsSection() {
-  const { fmt } = useLocale()
   const fixed = (v: unknown, d: number) => fmt.number(Number(v), { minimumFractionDigits: d, maximumFractionDigits: d })
   const [range, setRange] = useState('30D')
   const [gauge, setGauge] = useState(68)
@@ -353,7 +351,6 @@ const TAGS_VIEWS: { value: string; label: string; desc: string; good: string; br
  * mounted. The day switch, the lanes switch, the width, the selection and deleted journal rows are shared across tabs.
  */
 function ChartsTagsOverTime() {
-  const { fmt } = useLocale()
   const toast = useToast()
   const [variant, setVariant] = useState<TagsDayVariant>('light')
   const [view, setView] = useState<string>('auto')

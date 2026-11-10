@@ -1,13 +1,12 @@
 /**
- * Swimlanes, state ribbons and linked event lists on a shared time axis (0.5). Tags are TimeTag (annotate.tsx): point
- * events (`at`) and spans (`at` → `end`) grouped by `kind`. Every view here is a plot: time runs left to right in every
- * locale (an LTR island), while lane labels, legends, tooltips and the journal follow the locale.
+ * Swimlanes, state ribbons and linked event lists on a shared time axis. Tags are TimeTag (annotate.tsx): point
+ * events (`at`) and spans (`at` → `end`) grouped by `kind`. Every view here is a plot: time runs left to right.
  */
 import { useEffect, useId, useLayoutEffect, useMemo, useRef, useState, type CSSProperties, type FocusEvent as ReactFocusEvent, type KeyboardEvent as ReactKeyboardEvent, type PointerEvent as ReactPointerEvent, type ReactNode, type RefObject } from 'react'
 import { motion } from 'motion/react'
-import { IconButton, cn, defineMessages, isTouch, safeColor, spring, surface, useControllable, useLocale, useMessages, useOutside, useWidth, type LocaleFmt } from './core'
+import { IconButton, cn, isTouch, safeColor, spring, surface, useControllable, useOutside, useWidth, type LocaleFmt, plural, fmt } from './core'
 import { VirtualList, type VirtualListHandle } from './virtual'
-import { PALETTE } from './charts'
+import { seriesColor } from './vizkit'
 import { TagGlyph, TagTooltip, layoutTimeTags, timeTagMs, timeTicks, type TimeTag, type TimeTagKind } from './annotate'
 
 export type { TimeTag, TimeTagKind } from './annotate'
@@ -15,53 +14,11 @@ export type { TimeTag, TimeTagKind } from './annotate'
 /** Default lane height for swimlanes, px. */
 export const TIMELINE_LANE_HEIGHT = 22
 
-/** The timeline views' own strings (Swimlanes, StateRibbon, TagJournal). de/ar are machine-drafted. */
-export const TIMELINE_MESSAGES = defineMessages('timeline', {
-  en: {
-    lanes: 'Tags by kind', ribbon: 'States over time', journal: 'Journal', roledesc: 'timeline',
-    none: 'None', empty: 'Nothing logged yet',
-    laneLabel: '{label}: {count, plural, =0 {no tags} one {# tag} other {# tags}}',
-    point: '{label}, {time}', span: '{label}, {from} to {to}, {duration}',
-    cluster: '{count, plural, one {# tag} other {# tags}}: {label}, {from} to {to}',
-    clusterMixed: '{count, plural, one {# tag} other {# tags}}, {from} to {to}',
-    mixed: 'Several short states', moreTags: '+{count} more',
-    keys: 'Arrow keys move between tags, up and down between rows. Enter selects, Escape clears.',
-    summary: '{count, plural, =0 {No tags} one {# tag} other {# tags}} from {from} to {to}.',
-    edit: 'Edit {label}', delete: 'Delete {label}', legend: 'Legend',
-  },
-  de: {
-    lanes: 'Tags nach Art', ribbon: 'Zustände im Zeitverlauf', journal: 'Journal', roledesc: 'Zeitleiste',
-    none: 'Keine', empty: 'Noch nichts erfasst',
-    laneLabel: '{label}: {count, plural, =0 {keine Tags} one {# Tag} other {# Tags}}',
-    point: '{label}, {time}', span: '{label}, {from} bis {to}, {duration}',
-    cluster: '{count, plural, one {# Tag} other {# Tags}}: {label}, {from} bis {to}',
-    clusterMixed: '{count, plural, one {# Tag} other {# Tags}}, {from} bis {to}',
-    mixed: 'Mehrere kurze Zustände', moreTags: '+{count} weitere',
-    keys: 'Pfeiltasten wechseln zwischen Tags, auf und ab zwischen Zeilen. Eingabe wählt aus, Escape hebt auf.',
-    summary: '{count, plural, =0 {Keine Tags} one {# Tag} other {# Tags}} von {from} bis {to}.',
-    edit: '{label} bearbeiten', delete: '{label} löschen', legend: 'Legende',
-  },
-  ar: {
-    lanes: 'الوسوم حسب النوع', ribbon: 'الحالات عبر الوقت', journal: 'السجل', roledesc: 'مخطط زمني',
-    none: 'لا شيء', empty: 'لم يُسجَّل شيء بعد',
-    laneLabel: '{label}: {count, plural, =0 {لا وسوم} one {وسم واحد} two {وسمان} few {# وسوم} many {# وسمًا} other {# وسم}}',
-    point: '{label}، {time}', span: '{label}، من {from} إلى {to}، {duration}',
-    cluster: '{count, plural, one {وسم واحد} two {وسمان} few {# وسوم} many {# وسمًا} other {# وسم}}: {label}، من {from} إلى {to}',
-    clusterMixed: '{count, plural, one {وسم واحد} two {وسمان} few {# وسوم} many {# وسمًا} other {# وسم}}، من {from} إلى {to}',
-    mixed: 'عدة حالات قصيرة', moreTags: '+{count} أخرى',
-    keys: 'تنقّل مفاتيح الأسهم بين الوسوم، وللأعلى والأسفل بين الصفوف. يحدد Enter، ويمسح Escape.',
-    summary: '{count, plural, =0 {لا وسوم} one {وسم واحد} two {وسمان} few {# وسوم} many {# وسمًا} other {# وسم}} من {from} إلى {to}.',
-    edit: 'تعديل {label}', delete: 'حذف {label}', legend: 'وسيلة الإيضاح',
-  },
-})
-
-/* ── Shared geometry ─────────────────────────────────────────────────────── */
-
 type TlKind = TimeTagKind & { color: string }
 /** Kind lookup with a palette colour for kinds that don't name one; kinds only seen on tags take their first tag's label. */
 function timelineKinds(kinds: TimeTagKind[] | undefined, tags: TimeTag[]) {
   const map = new Map<string, TlKind>()
-  const add = (k: TimeTagKind) => { if (!map.has(k.kind)) map.set(k.kind, { ...k, color: k.color ?? PALETTE[map.size % PALETTE.length] }) }
+  const add = (k: TimeTagKind) => { if (!map.has(k.kind)) map.set(k.kind, { ...k, color: seriesColor(map.size, k.color) }) }
   kinds?.forEach(add)
   tags.forEach(t => add({ kind: t.kind, label: t.label }))
   return map
@@ -126,33 +83,28 @@ export function ribbonSegments(states: TimeTag[], { start, end, width, minPx = 4
 /** Ticks for a plot `width` px wide (annotate's timeTicks, in the locale's clock). */
 const timelineTicks = (start: number, end: number, width: number, fmt: LocaleFmt, minPx = 64) => timeTicks(start, end, width, t => fmt.time(t), minPx)
 
-/** "1 h 35 min" (English, like fmt.duration) / "1 Std., 35 Min." from milliseconds, in the locale's units. */
+/** "1 h 35 min" from milliseconds. */
 function timelineDuration(ms: number, fmt: LocaleFmt) {
   const min = Math.max(0, Math.round(ms / 60e3)), h = Math.floor(min / 60), mm = min % 60
-  const u = (n: number, unit: string) => /^en\b/.test(fmt.locale) ? `${fmt.number(n)} ${unit === 'hour' ? 'h' : 'min'}` : fmt.number(n, { style: 'unit', unit, unitDisplay: 'short' })
-  return h ? (mm ? `${u(h, 'hour')} ${u(mm, 'minute')}` : u(h, 'hour')) : u(mm, 'minute')
+  return [h && `${fmt.number(h)} h`, (mm || !h) && `${fmt.number(mm)} min`].filter(Boolean).join(' ')
 }
 
 /** What a mark is called: one tag, a span, or a merged cluster. */
 function useTimelineText(kinds: Map<string, TlKind>) {
-  const { fmt } = useLocale()
-  const m = useMessages(TIMELINE_MESSAGES)
   const time = (t: number) => fmt.time(t)
   const tagText = (t: TimeTag) => {
     const at = timeTagMs(t.at)
-    return t.end !== undefined ? m('span', { label: t.label, from: time(at), to: time(timeTagMs(t.end)), duration: timelineDuration(timeTagMs(t.end) - at, fmt) }) : m('point', { label: t.label, time: time(at) })
+    return t.end !== undefined ? `${t.label}, ${time(at)} to ${time(timeTagMs(t.end))}, ${timelineDuration(timeTagMs(t.end) - at, fmt)}` : `${t.label}, ${time(at)}`
   }
   const markText = (mk: Pick<TimelineMark, 'tags' | 'from' | 'to'>) => {
     if (mk.tags.length === 1) return tagText(mk.tags[0])
     const one = mk.tags.every(t => t.kind === mk.tags[0].kind)
     const to = Math.max(...mk.tags.map(t => timeTagMs(t.end ?? t.at)))
-    return one ? m('cluster', { count: mk.tags.length, label: kinds.get(mk.tags[0].kind)?.label ?? mk.tags[0].label, from: time(mk.from), to: time(to) })
-      : m('clusterMixed', { count: mk.tags.length, from: time(mk.from), to: time(to) })
+    return one ? `${plural(mk.tags.length, 'tag')}: ${kinds.get(mk.tags[0].kind)?.label ?? mk.tags[0].label}, ${time(mk.from)} to ${time(to)}`
+      : `${plural(mk.tags.length, 'tag')}, ${time(mk.from)} to ${time(to)}`
   }
-  return { m, fmt, time, tagText, markText }
+  return { fmt, time, tagText, markText }
 }
-
-/* ── Glyph and tooltip ───────────────────────────────────────────────────── */
 
 /** annotate's TagGlyph in the tag's (or its kind's) colour and icon. */
 function TimelineGlyph({ tag, kind, size = 18, active, more, className }: { tag: TimeTag; kind?: TlKind; size?: number; active?: boolean; more?: number; className?: string }) {
@@ -161,7 +113,7 @@ function TimelineGlyph({ tag, kind, size = 18, active, more, className }: { tag:
 
 /** Tooltip body for one or more tags: glyph, label, time (and duration for spans), detail; long lists roll up. */
 function TimelineTipBody({ tags, kinds, extra }: { tags: TimeTag[]; kinds: Map<string, TlKind>; extra?: ReactNode }) {
-  const { fmt, m } = useTimelineText(kinds)
+  const { fmt } = useTimelineText(kinds)
   const shown = tags.slice(0, 5)
   if (tags.length === 1) {
     const t = tags[0]
@@ -180,7 +132,7 @@ function TimelineTipBody({ tags, kinds, extra }: { tags: TimeTag[]; kinds: Map<s
           </div>
         )
       })}
-      {tags.length > shown.length && <div className="text-[var(--fg3)]">{m('moreTags', { count: tags.length - shown.length })}</div>}
+      {tags.length > shown.length && <div className="text-[var(--fg3)]">{`+${tags.length - shown.length} more`}</div>}
       {extra}
     </div>
   )
@@ -189,7 +141,6 @@ function TimelineTipBody({ tags, kinds, extra }: { tags: TimeTag[]; kinds: Map<s
 /** In-box tooltip above (or below) an anchor element, clamped to the box; text follows the locale. */
 function TimelineTip({ box, anchor, children }: { box: RefObject<HTMLElement | null>; anchor: HTMLElement | null; children: ReactNode }) {
   const ref = useRef<HTMLDivElement>(null)
-  const { dir } = useLocale()
   const [pos, setPos] = useState<{ left: number; top: number } | null>(null)
   useLayoutEffect(() => {
     const b = box.current, el = ref.current
@@ -201,14 +152,12 @@ function TimelineTip({ box, anchor, children }: { box: RefObject<HTMLElement | n
   })
   if (!anchor) return null
   return (
-    <motion.div /* rtl-lint-ignore: inside the LTR plot island */ ref={ref} aria-hidden dir={dir} className={cn(surface.floating, 'pointer-events-none absolute top-0 left-0 z-20 w-max max-w-[min(280px,calc(100vw-40px))] rounded-[var(--r-md)] px-2.5 py-1.5 text-xs leading-snug text-[var(--fg)]')}
+    <motion.div ref={ref} aria-hidden className={cn(surface.floating, 'pointer-events-none absolute top-0 left-0 z-20 w-max max-w-[min(280px,calc(100vw-40px))] rounded-[var(--r-md)] px-2.5 py-1.5 text-xs leading-snug text-[var(--fg)]')}
       initial={false} animate={pos ? { x: pos.left, y: pos.top, opacity: 1 } : { opacity: 0 }} transition={pos ? spring(0.1, 0.25) : { duration: 0 }}>
       {children}
     </motion.div>
   )
 }
-
-/* ── Keyboard and pointer: rows of marks with one Tab stop ──────────────────── */
 
 type TlSource = 'hover' | 'focus' | 'tap' | null
 /**
@@ -267,8 +216,8 @@ function useTimelineNav(rows: TlRow[], active: string | null, setActive: (id: st
     }
     let next: TimelineMark | undefined
     switch (e.key) {
-      case 'ArrowRight': next = row[Math.min(row.length - 1, at.ci + 1)]; break // rtl-lint-ignore: LTR plot (→ is later)
-      case 'ArrowLeft': next = row[Math.max(0, at.ci - 1)]; break // rtl-lint-ignore: LTR plot
+      case 'ArrowRight': next = row[Math.min(row.length - 1, at.ci + 1)]; break
+      case 'ArrowLeft': next = row[Math.max(0, at.ci - 1)]; break
       case 'ArrowDown': next = nearest(1) ?? at.mk; break
       case 'ArrowUp': next = nearest(-1) ?? at.mk; break
       case 'Home': next = row[0]; break
@@ -325,18 +274,14 @@ function TimelineAxis({ ticks, start, end, className }: { ticks: { ms: number; l
   // labels centre on their tick; the ones at the very ends hug the edge instead of spilling out of the box
   return (
     <div aria-hidden className={cn('relative h-5 text-[10px] text-[var(--fg3)] ui-num', className)}>
-      {ticks.map(k => <span key={k.ms} className={cn('absolute top-1 whitespace-nowrap', f(k.ms) < 0.02 ? '' : f(k.ms) > 0.98 ? '-translate-x-full' : '-translate-x-1/2')} style={{ /* rtl-lint-ignore: inside the LTR plot island */ left: `${f(k.ms) * 100}%` }}>{k.label}</span>)}
+      {ticks.map(k => <span key={k.ms} className={cn('absolute top-1 whitespace-nowrap', f(k.ms) < 0.02 ? '' : f(k.ms) > 0.98 ? '-translate-x-full' : '-translate-x-1/2')} style={{ left: `${f(k.ms) * 100}%` }}>{k.label}</span>)}
     </div>
   )
 }
 /** Faint vertical grid lines at the ticks. */
 function TimelineGrid({ ticks, start, end }: { ticks: { ms: number }[]; start: number; end: number }) {
-  return <>{ticks.map(k => <span key={k.ms} aria-hidden className="pointer-events-none absolute inset-y-0 w-px bg-[var(--line)]" style={{ /* rtl-lint-ignore: inside the LTR plot island */ left: `${((k.ms - start) / Math.max(1, end - start)) * 100}%` }} />)}</>
+  return <>{ticks.map(k => <span key={k.ms} aria-hidden className="pointer-events-none absolute inset-y-0 w-px bg-[var(--line)]" style={{ left: `${((k.ms - start) / Math.max(1, end - start)) * 100}%` }} />)}</>
 }
-
-/* ════════════════════════════════════════════════════════════════════════════
- * Swimlanes (pattern E)
- * ══════════════════════════════════════════════════════════════════════════ */
 
 /** Props of Swimlanes. */
 export type SwimlanesProps = TimelineLinkProps & {
@@ -361,7 +306,7 @@ export type SwimlanesProps = TimelineLinkProps & {
   /** time labels under the lanes (default true; turn off when `top` is a Chart, whose own time labels sit just above) */
   axis?: boolean
   /**
-   * lane labels at the inline start: 'auto' (default) shows icon and name from 480px of width and the icon alone below
+   * lane labels on the left: 'auto' (default) shows icon and name from 480px of width and the icon alone below
    * that; 'always' keeps the name on narrow widths too, in a compact column (11px, wrapping to two lines); 'icon' never
    * shows the name (the lane's accessible name and tooltip still carry it)
    */
@@ -393,8 +338,7 @@ export function Swimlanes({ tags, kinds: kindsProp, start: startProp, end: endPr
   activeId, defaultActiveId = null, onActiveChange, onSelect, label, className }: SwimlanesProps) {
   const start = timeTagMs(startProp), end = timeTagMs(endProp), span = Math.max(1, end - start)
   const kinds = useMemo(() => timelineKinds(kindsProp, tags), [kindsProp, tags])
-  const { m, fmt, markText } = useTimelineText(kinds)
-  const { dir } = useLocale()
+  const { fmt, markText } = useTimelineText(kinds)
   const [active, setActive] = useControllable(activeId, defaultActiveId, onActiveChange)
   const [plotRef, plotW] = useWidth<HTMLDivElement>()
   const box = useRef<HTMLDivElement>(null)
@@ -432,23 +376,23 @@ export function Swimlanes({ tags, kinds: kindsProp, start: startProp, end: endPr
 
   return (
     <div className={cn('@container', className)}>
-      {/* the plot runs left to right in every locale (an LTR island); lane labels and tooltips follow the locale */}
-      <div ref={box} dir="ltr" className={cn('relative [--tl-rp:16px]', SWIM_LABEL_COL[labels] ?? SWIM_LABEL_COL.auto)}>
-        {top && <div style={{ /* rtl-lint-ignore: inside the LTR plot island */ marginLeft: `calc(var(--tl-lw) - ${insetL}px)`, marginRight: `calc(var(--tl-rp) - ${insetR}px)` }}>{top}</div>}
-        <div role="group" aria-roledescription={m('roledesc')} aria-label={label ?? m('lanes')} aria-describedby={`${ids}-sum`} {...nav.groupProps} className="relative">
-          <span id={`${ids}-sum`} className="sr-only">{m('summary', { count: tags.length, from: fmt.time(start), to: fmt.time(end) })} {m('keys')}</span>
+      {/* the plot runs left to right in every locale; lane labels and tooltips follow the locale */}
+      <div ref={box} className={cn('relative [--tl-rp:16px]', SWIM_LABEL_COL[labels] ?? SWIM_LABEL_COL.auto)}>
+        {top && <div style={{ marginLeft: `calc(var(--tl-lw) - ${insetL}px)`, marginRight: `calc(var(--tl-rp) - ${insetR}px)` }}>{top}</div>}
+        <div role="group" aria-roledescription={'timeline'} aria-label={label ?? 'Tags by kind'} aria-describedby={`${ids}-sum`} {...nav.groupProps} className="relative">
+          <span id={`${ids}-sum`} className="sr-only">{`${tags.length === 0 ? 'No tags' : tags.length === 1 ? `${tags.length} tag` : `${tags.length} tags`} from ${fmt.time(start)} to ${fmt.time(end)}.`} {'Arrow keys move between tags, up and down between rows. Enter selects, Escape clears.'}</span>
           <div ref={scroller} className={cn('relative', scrolls && 'overflow-y-auto overscroll-contain')} style={scrolls ? { maxHeight: maxLanes * laneH + 4 } : undefined}>
             <div className="relative py-0.5">
               <div className="pointer-events-none absolute inset-y-0 start-[var(--tl-lw)] end-[var(--tl-rp)]"><TimelineGrid ticks={ticks} start={start} end={end} /></div>
               {lanes.map((l, li) => (
-                <div key={l.kind.kind} role="group" aria-label={m('laneLabel', { label: l.kind.label, count: l.tags.length })}
+                <div key={l.kind.kind} role="group" aria-label={`${l.kind.label}: ${l.tags.length === 0 ? 'no tags' : l.tags.length === 1 ? `${l.tags.length} tag` : `${l.tags.length} tags`}`}
                   className="grid grid-cols-[var(--tl-lw)_minmax(0,1fr)_var(--tl-rp)] items-center [contain-intrinsic-size:auto_26px] [content-visibility:auto]" style={{ height: laneH }}>
-                  <div dir={dir} aria-hidden title={l.kind.label} className="flex min-w-0 items-center gap-1.5 pe-2 text-xs text-[var(--fg2)]">
+                  <div aria-hidden title={l.kind.label} className="flex min-w-0 items-center gap-1.5 pe-2 text-xs text-[var(--fg2)]">
                     <span className="grid h-4 w-4 flex-none place-items-center text-[13px] leading-none" style={{ color: safeColor(l.kind.color) }}>{l.kind.icon ?? <span className="h-2 w-2 rounded-full" style={{ background: safeColor(l.kind.color) }} />}</span>
                     <span className={SWIM_LABEL_TEXT[labels] ?? SWIM_LABEL_TEXT.auto}>{l.kind.label}</span>
                   </div>
                   <div className="relative h-[22px] rounded-full bg-[color-mix(in_srgb,var(--muted)_75%,transparent)]">
-                    {!l.tags.length && <span dir={dir} className="absolute inset-y-0 start-2.5 flex items-center text-[11px] text-[var(--fg3)] italic">{m('none')}</span>}
+                    {!l.tags.length && <span className="absolute inset-y-0 start-2.5 flex items-center text-[11px] text-[var(--fg3)] italic">{'None'}</span>}
                     {rows[li].marks.map(mk => {
                       const t0 = mk.tags[0], color = timelineColor(t0, kinds.get(t0.kind)), isSpan = t0.end !== undefined, n = mk.tags.length
                       const left = isSpan || !(plotW > 0) ? pct(mk.from) : (mk.x / plotW) * 100
@@ -459,7 +403,7 @@ export function Swimlanes({ tags, kinds: kindsProp, start: startProp, end: endPr
                       return (
                         <button key={mk.key} type="button" {...nav.markProps(mk)} style={style}
                           className={cn('ui-target absolute top-1/2 -translate-y-1/2 cursor-pointer border-0 p-0 transition-[box-shadow] duration-150', TL_FOCUS,
-                            /* rtl-lint-ignore: LTR plot island */ isSpan ? 'h-2.5 rounded-full' : n > 1 ? 'ui-num grid h-4 min-w-[18px] -translate-x-1/2 place-items-center rounded-full border-[1.5px] border-solid bg-[var(--card)] px-1 text-[10px] leading-none font-semibold text-[var(--fg)]' : 'h-2.5 w-2.5 -translate-x-1/2 rounded-full',
+ isSpan ? 'h-2.5 rounded-full' : n > 1 ? 'ui-num grid h-4 min-w-[18px] -translate-x-1/2 place-items-center rounded-full border-[1.5px] border-solid bg-[var(--card)] px-1 text-[10px] leading-none font-semibold text-[var(--fg)]' : 'h-2.5 w-2.5 -translate-x-1/2 rounded-full',
                             lit && TL_LIT)}>{n > 1 && <span aria-hidden>{n}</span>}<span className="sr-only">{markText(mk)}</span></button>
                       )
                     })}
@@ -480,10 +424,6 @@ export function Swimlanes({ tags, kinds: kindsProp, start: startProp, end: endPr
     </div>
   )
 }
-
-/* ════════════════════════════════════════════════════════════════════════════
- * State ribbon (pattern F)
- * ══════════════════════════════════════════════════════════════════════════ */
 
 const RIBBON_SIZE = {
   md: { strip: 'h-7', pin: 18, stack: 2, bar: 'h-2', gap: 'gap-1.5' },
@@ -526,8 +466,7 @@ export function StateRibbon({ states, pins = [], bars = [], kinds: kindsProp, st
   const start = timeTagMs(startProp), end = timeTagMs(endProp), span = Math.max(1, end - start)
   const all = useMemo(() => [...states, ...pins, ...bars], [states, pins, bars])
   const kinds = useMemo(() => timelineKinds(kindsProp, all), [kindsProp, all])
-  const { m, fmt, markText } = useTimelineText(kinds)
-  const { dir } = useLocale()
+  const { fmt, markText } = useTimelineText(kinds)
   const [active, setActive] = useControllable(activeId, defaultActiveId, onActiveChange)
   const [plotRef, w] = useWidth<HTMLDivElement>()
   const box = useRef<HTMLDivElement>(null)
@@ -562,16 +501,16 @@ export function StateRibbon({ states, pins = [], bars = [], kinds: kindsProp, st
 
   return (
     <div className={className}>
-      <div ref={box} dir="ltr" className="relative">
-        <div role="group" aria-roledescription={m('roledesc')} aria-label={label ?? m('ribbon')} aria-describedby={`${ids}-sum`} {...nav.groupProps} className={cn('relative flex flex-col', S.gap)}>
-          <span id={`${ids}-sum`} className="sr-only">{m('summary', { count: all.length, from: fmt.time(start), to: fmt.time(end) })} {m('keys')}</span>
+      <div ref={box} className="relative">
+        <div role="group" aria-roledescription={'timeline'} aria-label={label ?? 'States over time'} aria-describedby={`${ids}-sum`} {...nav.groupProps} className={cn('relative flex flex-col', S.gap)}>
+          <span id={`${ids}-sum`} className="sr-only">{`${all.length === 0 ? 'No tags' : all.length === 1 ? `${all.length} tag` : `${all.length} tags`} from ${fmt.time(start)} to ${fmt.time(end)}.`} {'Arrow keys move between tags, up and down between rows. Enter selects, Escape clears.'}</span>
           {pins.length > 0 && (
             <div className="relative" style={{ height: S.stack * pinStep + 4 }}>
               {pinMarks.map(mk => {
                 const t0 = mk.tags[0]
                 return (
-                  <button key={mk.key} type="button" {...nav.markProps(mk)} style={{ /* rtl-lint-ignore: inside the LTR plot island */ left: `${at(mk, mk.from)}%` }}
-                    className={cn(/* rtl-lint-ignore: LTR plot island */ 'ui-target absolute bottom-0 flex -translate-x-1/2 cursor-pointer flex-col items-center rounded-full border-0 bg-transparent p-0', TL_FOCUS)}>
+                  <button key={mk.key} type="button" {...nav.markProps(mk)} style={{ left: `${at(mk, mk.from)}%` }}
+                    className={cn( 'ui-target absolute bottom-0 flex -translate-x-1/2 cursor-pointer flex-col items-center rounded-full border-0 bg-transparent p-0', TL_FOCUS)}>
                     <TimelineGlyph tag={t0} kind={kinds.get(t0.kind)} size={S.pin} active={nav.activeKey === mk.key} more={mk.tags.length - 1} />
                     <span aria-hidden className="w-px bg-[var(--line2)]" style={{ height: 4 + mk.row * pinStep }} />
                     <span className="sr-only">{markText(mk)}</span>
@@ -586,10 +525,10 @@ export function StateRibbon({ states, pins = [], bars = [], kinds: kindsProp, st
               const dom = sg.mixed ? sg.tags.reduce((b, q) => (timeTagMs(q.end ?? q.at) - timeTagMs(q.at) > timeTagMs(b.end ?? b.at) - timeTagMs(b.at) ? q : b), t0) : t0
               const color = timelineColor(dom, kinds.get(dom.kind)), lit = nav.activeKey === sg.key, thin = w > 0 && sg.w < 24
               return (
-                <button key={sg.key} type="button" {...nav.markProps(sg)} aria-label={sg.mixed ? `${m('mixed')}: ${markText(sg)}` : markText(sg)}
+                <button key={sg.key} type="button" {...nav.markProps(sg)} aria-label={sg.mixed ? `Several short states: ${markText(sg)}` : markText(sg)}
                   className={cn('absolute inset-y-0 cursor-pointer border-0 p-0 transition-[box-shadow] duration-150', TL_FOCUS, thin && 'ui-hit', lit && cn('z-[2]', TL_LIT),
-                    /* rtl-lint-ignore: LTR plot island */ i === 0 && 'rounded-l-[var(--r-sm)]', i === segs.length - 1 && 'rounded-r-[var(--r-sm)]')}
-                  style={{ /* rtl-lint-ignore: inside the LTR plot island */ left: `${left}%`, width: `${width}%`, background: sg.mixed ? `repeating-linear-gradient(135deg, ${color} 0 3px, color-mix(in srgb, ${color} 40%, var(--card)) 3px 6px)` : color }} />
+ i === 0 && 'rounded-l-[var(--r-sm)]', i === segs.length - 1 && 'rounded-r-[var(--r-sm)]')}
+                  style={{ left: `${left}%`, width: `${width}%`, background: sg.mixed ? `repeating-linear-gradient(135deg, ${color} 0 3px, color-mix(in srgb, ${color} 40%, var(--card)) 3px 6px)` : color }} />
               )
             })}
           </div>
@@ -599,7 +538,7 @@ export function StateRibbon({ states, pins = [], bars = [], kinds: kindsProp, st
                 const t0 = mk.tags[0]
                 return <button key={mk.key} type="button" {...nav.markProps(mk)} aria-label={markText(mk)}
                   className={cn('ui-target absolute inset-y-0 cursor-pointer rounded-full border-0 p-0', TL_FOCUS, nav.activeKey === mk.key && TL_LIT)}
-                  style={{ /* rtl-lint-ignore: inside the LTR plot island */ left: `${pct(mk.from)}%`, width: `max(6px, ${pct(mk.to) - pct(mk.from)}%)`, background: timelineColor(t0, kinds.get(t0.kind)) }} />
+                  style={{ left: `${pct(mk.from)}%`, width: `max(6px, ${pct(mk.to) - pct(mk.from)}%)`, background: timelineColor(t0, kinds.get(t0.kind)) }} />
               })}
             </div>
           )}
@@ -607,12 +546,12 @@ export function StateRibbon({ states, pins = [], bars = [], kinds: kindsProp, st
         {axis && <TimelineAxis ticks={ticks} start={start} end={end} className="mt-0.5" />}
         {activeMark && (
           <TimelineTip box={box} anchor={nav.anchor}>
-            <TimelineTipBody tags={activeMark.tags} kinds={kinds} extra={activeSeg?.mixed ? <div className="text-[var(--fg3)]">{m('mixed')} · {timelineDuration(activeSeg.to - activeSeg.from, fmt)}</div> : undefined} />
+            <TimelineTipBody tags={activeMark.tags} kinds={kinds} extra={activeSeg?.mixed ? <div className="text-[var(--fg3)]">{'Several short states'} · {timelineDuration(activeSeg.to - activeSeg.from, fmt)}</div> : undefined} />
           </TimelineTip>
         )}
       </div>
       {legend && totals.length > 0 && (
-        <ul dir={dir} aria-label={m('legend')} className="m-0 mt-2 flex list-none flex-wrap gap-x-4 gap-y-1 p-0 text-xs text-[var(--fg2)]">
+        <ul aria-label={'Legend'} className="m-0 mt-2 flex list-none flex-wrap gap-x-4 gap-y-1 p-0 text-xs text-[var(--fg2)]">
           {totals.map(({ k, ms }) => (
             <li key={k.kind} className="flex items-center gap-1.5">
               <span aria-hidden className="h-2.5 w-2.5 rounded-[var(--r-sm)]" style={{ background: safeColor(k.color) }} />{k.label}
@@ -624,10 +563,6 @@ export function StateRibbon({ states, pins = [], bars = [], kinds: kindsProp, st
     </div>
   )
 }
-
-/* ════════════════════════════════════════════════════════════════════════════
- * Journal (pattern H)
- * ══════════════════════════════════════════════════════════════════════════ */
 
 /** Props of TagJournal. */
 export type TagJournalProps = TimelineLinkProps & {
@@ -660,8 +595,7 @@ const JOURNAL_ROW = 36, JOURNAL_HEAD = 28
  */
 export function TagJournal({ tags, kinds: kindsProp, groupBy, height, maxHeight = 320, onEdit, onDelete, empty, activeId, defaultActiveId = null, onActiveChange, onSelect, label, className }: TagJournalProps) {
   const kinds = useMemo(() => timelineKinds(kindsProp, tags), [kindsProp, tags])
-  const { m, fmt, tagText } = useTimelineText(kinds)
-  const { dir } = useLocale()
+  const { fmt, tagText } = useTimelineText(kinds)
   const [active, setActive] = useControllable(activeId, defaultActiveId, onActiveChange)
   const list = useRef<VirtualListHandle>(null)
   const box = useRef<HTMLDivElement>(null)
@@ -709,12 +643,12 @@ export function TagJournal({ tags, kinds: kindsProp, groupBy, height, maxHeight 
     else if (e.key === 'End') go(rowIds.length - 1)
     else if (e.key === 'Escape' && active !== null) { e.preventDefault(); set(null, null) }
   }
-  if (!tags.length) return <div className={cn('grid min-h-20 place-items-center text-[13px] text-[var(--fg3)]', className)}>{empty ?? m('empty')}</div>
+  if (!tags.length) return <div className={cn('grid min-h-20 place-items-center text-[13px] text-[var(--fg3)]', className)}>{empty ?? 'Nothing logged yet'}</div>
   return (
-    <div ref={box} dir={dir} className={className} onKeyDown={onKeyDown}
+    <div ref={box} className={className} onKeyDown={onKeyDown}
       onBlur={e => { if (!e.currentTarget.contains(e.relatedTarget as Node | null) && source.current === 'focus') set(null, null) }}
       onPointerLeave={e => { if (!isTouch(e) && source.current === 'hover') set(null, null) }} onPointerMove={guard.onMove}>
-      <VirtualList ref={list} count={items.length} height={h} tabIndex={-1} aria-label={label ?? m('journal')} keep={stopIndex >= 0 ? [stopIndex] : undefined}
+      <VirtualList ref={list} count={items.length} height={h} tabIndex={-1} aria-label={label ?? 'Journal'} keep={stopIndex >= 0 ? [stopIndex] : undefined}
         getItemKey={i => { const it = items[i]; return 'tag' in it ? it.tag.id : `h${it.head}` }}
         estimateSize={i => ('head' in items[i] ? JOURNAL_HEAD : JOURNAL_ROW)}
         renderItem={i => {
@@ -737,8 +671,8 @@ export function TagJournal({ tags, kinds: kindsProp, groupBy, height, maxHeight 
                   {t.detail && <span className="block truncate text-xs text-[var(--fg3)]">{t.detail}</span>}
                 </span>
               </button>
-              {onEdit && <IconButton icon="edit" size="icon-xs" label={m('edit', { label: tagText(t) })} tabIndex={tab} onClick={() => onEdit(t)} className="flex-none [@media(pointer:coarse)]:size-8" />}
-              {onDelete && <IconButton icon="trash" size="icon-xs" label={m('delete', { label: tagText(t) })} tabIndex={tab} onClick={() => onDelete(t)} className="flex-none hover:text-[var(--bad)] [@media(pointer:coarse)]:size-8" />}
+              {onEdit && <IconButton icon="edit" size="icon-xs" label={`Edit ${tagText(t)}`} tabIndex={tab} onClick={() => onEdit(t)} className="flex-none [@media(pointer:coarse)]:size-8" />}
+              {onDelete && <IconButton icon="trash" size="icon-xs" label={`Delete ${tagText(t)}`} tabIndex={tab} onClick={() => onDelete(t)} className="flex-none hover:text-[var(--bad)] [@media(pointer:coarse)]:size-8" />}
             </div>
           )
         }} />

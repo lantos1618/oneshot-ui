@@ -16,13 +16,12 @@
 // we only rewrite imports. An add-on imports from another bundle only what it uses.
 import { readFileSync, writeFileSync, mkdirSync, readdirSync } from 'node:fs'
 import { join } from 'node:path'
-import { createHash } from 'node:crypto'
-import { execFileSync } from 'node:child_process'
+import { commit, dirty, header, pkg, sha256 } from './registry/stamp.mjs'
 
 const root = new URL('..', import.meta.url).pathname
 const BUNDLES = {
   ui: ['core', 'helpers', 'shared', 'locale', 'safe', 'theme', 'hooks', 'icons', 'slot', 'primitives', 'formcontrol', 'motion', 'virtual', 'magnet', 'overlay', 'formkit', 'fields', 'select', 'inputs', 'pickers', 'upload', 'forms', 'navigation', 'feedback', 'data', 'layout', 'themeexport', 'appearance', 'provider'],
-  'ui-charts': ['annotate', 'charts', 'timeline', 'diagramkit', 'gantt', 'statechart', 'trace', 'network', 'diagrams', 'geoworld', 'geoland', 'geo'],
+  'ui-charts': ['vizkit', 'annotate', 'charts', 'timeline', 'diagramkit', 'gantt', 'statechart', 'trace', 'network', 'diagrams', 'geoworld', 'geoland', 'geo'],
   'ui-content': ['editor', 'datagrid', 'scheduler', 'code', 'markdown', 'media', 'collab', 'pages', 'lanes', 'gitgraph', 'binary'],
   'ui-ai': ['aistream', 'agentrun', 'ai', 'aichat', 'aiagent'],
 }
@@ -90,15 +89,9 @@ const examples = [...samples, 'tags.ts', 'cardHeights.ts', 'kit.tsx', ...readdir
 
 mkdirSync(join(root, 'dist-single'), { recursive: true })
 const sizes = [], sums = []
-const pkg = JSON.parse(readFileSync(join(root, 'package.json'), 'utf8'))
-const git = args => { try { return execFileSync('git', args, { cwd: root, encoding: 'utf8', stdio: ['ignore', 'pipe', 'ignore'] }).trim() } catch { return '' } }
-const commit = git(['rev-parse', '--short=12', 'HEAD']), dirty = commit && git(['status', '--porcelain', '--', 'src', 'scripts', 'package.json']) ? '+dirty' : ''
-const sha256 = text => createHash('sha256').update(text, 'utf8').digest('hex')
 // every file is a client module (hooks, effects, browser APIs): the directive lets Next.js App Router import it
 const write = (name, body, { listed = true } = {}) => {
-  const stamp = `/*! ${pkg.name} ${pkg.version} · ${name} · ${commit ? `commit ${commit}${dirty}` : 'commit unknown'} · sha256 of the text after this line: ${sha256(body)} · ` +
-    `re-copy this file on every security release: ${pkg.homepage.replace(/#readme$/, '')}/releases */\n`
-  const text = `'use client'\n` + stamp + body
+  const text = header(name, { needsProvider: false }) + body
   writeFileSync(join(root, 'dist-single', name), text)
   if (listed) sums.push(`${sha256(text)}  ${name}`) // only the published files, so `sha256sum -c` works in node_modules
   sizes.push(`${name} ${(text.length / 1024).toFixed(0)} KB`)

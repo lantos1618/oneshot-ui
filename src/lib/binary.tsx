@@ -1,28 +1,9 @@
 import { memo, useCallback, useEffect, useId, useImperativeHandle, useLayoutEffect, useMemo, useRef, useState, type CSSProperties, type KeyboardEvent as ReactKeyboardEvent, type MouseEvent as ReactMouseEvent, type PointerEvent as ReactPointerEvent, type ReactNode, type Ref } from 'react'
-import { Badge, Button, IconButton, cn, clamp, defineMessages, inputClass, rowHoverClass, useCoarsePointer, useControllable, useLocale, useMessages, useWidth } from './core'
+import { Badge, Button, IconButton, cn, clamp, inputClass, rowHoverClass, useCoarsePointer, useControllable, useWidth, plural, fmt, useResizeObserver, writeClipboard } from './core'
 import { SegmentedControl, Switch } from './fields'
 import { ContextMenu } from './overlay'
 import { Tabs } from './navigation'
 import { VIRTUAL_OVERSCAN, useVirtual } from './virtual'
-
-/* ════════════════════════════════════════════════════════════════════════════
- * BINARY: look inside bytes. Pure helpers (entropy, Hilbert curve, strings, search, number decoders) and four views
- * that share a cursor and a selection:
- *
- *   <HexEditor data />      virtualised offset · hex · text rows (100 MB scrolls like 1 KB), selection, a data
- *                           inspector, overwrite editing with undo, search, go to, copy as hex / C / Base64
- *   <EntropyMap data />     Shannon entropy per window as a strip, with an offset ruler, section bands, a threshold
- *                           and the merged high-entropy regions (packed or encrypted data stands out)
- *   <ByteMap data />        the file folded onto a Hilbert curve on a canvas (neighbouring bytes stay neighbours),
- *                           coloured by entropy, section, byte class or strings
- *   <BinaryView data />     all of them linked: a hot spot in the map or the strip moves the hex editor there
- *
- * Data is a Uint8Array or ArrayBuffer and is never copied or stringified whole: the editor keeps edits in a patch map
- * over the original bytes, and every view renders only what is on screen. Data views stay left to right in every
- * locale (offsets and bytes are read like numbers); toolbars, legends and lists mirror.
- * ══════════════════════════════════════════════════════════════════════════ */
-
-/* ── types ─────────────────────────────────────────────────────────────────── */
 
 /** Bytes the binary views accept. Never copied: views read it in place. */
 export type BinaryData = Uint8Array | ArrayBuffer
@@ -34,95 +15,6 @@ export type ByteRange = { start: number; end: number }
 export type ByteClass = 'null' | 'ascii' | 'control' | 'high'
 /** A highlighted range in the hex editor (an annotation, a hot spot from the entropy map): tinted with `color`, named `label`. */
 export type BinaryHighlight = ByteRange & { color?: string; label?: string }
-
-/* ── strings ───────────────────────────────────────────────────────────────── */
-
-/** The binary views' strings (namespace `binary`): English, plus machine-drafted German and Arabic. */
-export const BINARY_MESSAGES = defineMessages('binary', {
-  en: {
-    hexEditor: 'Hex editor', hexRole: 'hex editor',
-    hexHelp: 'Arrow keys move the cursor, Shift extends the selection, Page Up and Page Down move by a screen, Tab switches between the hex and text columns. Type hex digits or text to overwrite. Ctrl+G goes to an offset, Ctrl+F searches, Ctrl+Z undoes.',
-    hexHelpReadOnly: 'Arrow keys move the cursor, Shift extends the selection, Page Up and Page Down move by a screen, Tab switches between the hex and text columns. Ctrl+G goes to an offset, Ctrl+F searches.',
-    cursorAt: 'Offset {offset}: {hex}', offset: 'Offset', vaddr: 'Address', text: 'Text', showVaddr: 'Show addresses', showOffsets: 'Show file offsets',
-    goTo: 'Go to offset', goToPlaceholder: 'Go to 0x…', goToInvalid: 'Not an offset or address in this file',
-    search: 'Search bytes', searchHex: 'Hex', searchText: 'Text', searchMode: 'Search as', searchPlaceholderHex: '7F 45 4C 46 or 48 ?? 89', searchPlaceholderText: 'Text to find',
-    matchOf: '{index} of {count}', noMatches: 'No matches', manyMatches: '{count}+ matches', badPattern: 'Use hex pairs such as 7F 45, ?? for any byte',
-    nextMatch: 'Next match', prevMatch: 'Previous match',
-    copyHex: 'Copy as hex', copyC: 'Copy as C array', copyBase64: 'Copy as Base64', copyText: 'Copy as text', copied: 'Copied {size}', copiedPart: 'Copied the first {size}',
-    selectAll: 'Select all', selectSection: 'Select {name}', selectToHere: 'Select from cursor to here', followU32: 'Go to u32 at cursor ({value})',
-    undo: 'Undo', redo: 'Redo', revert: 'Revert all edits', edits: '{count, plural, one {# edit} other {# edits}}',
-    overwrite: 'OVR', overwriteTitle: 'Overwrite mode: typing replaces bytes', readOnly: 'Read only',
-    showText: 'Text column', inspector: 'Data inspector', byteOrder: 'Byte order', little: 'LE', big: 'BE',
-    selection: '{start}–{end}, {size}', noSection: 'no section', notEnough: 'Not enough bytes',
-    binary: 'Bits', char: 'Char', unixTime: 'Unix time', varint: 'Varint', zigzag: 'Zigzag',
-    entropyMap: 'Entropy map', entropyRole: 'entropy map', entropyAxis: 'Entropy', sections: 'Sections',
-    entropySummary: '{count, plural, one {# window} other {# windows}} of {size}; {high, plural, =0 {none above {threshold} bits} one {# region above {threshold} bits} other {# regions above {threshold} bits}}.',
-    bits: '{value} bits', threshold: 'Threshold', highEntropy: 'High entropy', highNone: 'Nothing above {threshold} bits',
-    highMore: '{count, plural, one {# more region} other {# more regions}}', hoverStrip: 'Hover or tap the strip', regionAt: '{range}, {section}, {bits}',
-    byteMap: 'Byte map', mapRole: 'byte map', mapSummary: '{size} on a Hilbert curve of {side} × {side} cells, {perCell} each.',
-    perCell: '{count, plural, one {# byte} other {# bytes}}', colourBy: 'Colour by', hoverMap: 'Hover or tap a cell', zoomHint: 'Ctrl + scroll zooms',
-    modeEntropy: 'Entropy', modeSections: 'Sections', modeClass: 'Bytes', modeStrings: 'Strings',
-    classNull: 'Zero', classAscii: 'Printable', classControl: 'Control', classHigh: 'High (≥ 80)', inString: 'In a string', notString: 'Other',
-    low: 'low', high: 'high', zoomIn: 'Zoom in', zoomOut: 'Zoom out', zoomReset: 'Whole file', showing: 'Showing {range}',
-    binaryView: 'Binary explorer', tabMap: 'Map', tabEntropy: 'Entropy', tabHex: 'Hex', showInHex: 'Show in hex', fileSummary: '{size} · {count, plural, one {# section} other {# sections}}',
-  },
-  de: {
-    hexEditor: 'Hex-Editor', hexRole: 'Hex-Editor',
-    hexHelp: 'Pfeiltasten bewegen den Cursor, Umschalt erweitert die Auswahl, Bild auf und Bild ab blättern, Tab wechselt zwischen Hex- und Textspalte. Hex-Ziffern oder Text tippen überschreibt. Strg+G springt zu einem Offset, Strg+F sucht, Strg+Z macht rückgängig.',
-    hexHelpReadOnly: 'Pfeiltasten bewegen den Cursor, Umschalt erweitert die Auswahl, Bild auf und Bild ab blättern, Tab wechselt zwischen Hex- und Textspalte. Strg+G springt zu einem Offset, Strg+F sucht.',
-    cursorAt: 'Offset {offset}: {hex}', offset: 'Offset', vaddr: 'Adresse', text: 'Text', showVaddr: 'Adressen zeigen', showOffsets: 'Datei-Offsets zeigen',
-    goTo: 'Gehe zu Offset', goToPlaceholder: 'Gehe zu 0x…', goToInvalid: 'Kein Offset und keine Adresse in dieser Datei',
-    search: 'Bytes suchen', searchHex: 'Hex', searchText: 'Text', searchMode: 'Suchen als', searchPlaceholderHex: '7F 45 4C 46 oder 48 ?? 89', searchPlaceholderText: 'Gesuchter Text',
-    matchOf: '{index} von {count}', noMatches: 'Keine Treffer', manyMatches: '{count}+ Treffer', badPattern: 'Hex-Paare wie 7F 45 verwenden, ?? für ein beliebiges Byte',
-    nextMatch: 'Nächster Treffer', prevMatch: 'Vorheriger Treffer',
-    copyHex: 'Als Hex kopieren', copyC: 'Als C-Array kopieren', copyBase64: 'Als Base64 kopieren', copyText: 'Als Text kopieren', copied: '{size} kopiert', copiedPart: 'Die ersten {size} kopiert',
-    selectAll: 'Alles auswählen', selectSection: '{name} auswählen', selectToHere: 'Vom Cursor bis hier auswählen', followU32: 'Zu u32 am Cursor springen ({value})',
-    undo: 'Rückgängig', redo: 'Wiederholen', revert: 'Alle Änderungen verwerfen', edits: '{count, plural, one {# Änderung} other {# Änderungen}}',
-    overwrite: 'ÜB', overwriteTitle: 'Überschreibmodus: Tippen ersetzt Bytes', readOnly: 'Schreibgeschützt',
-    showText: 'Textspalte', inspector: 'Dateninspektor', byteOrder: 'Byte-Reihenfolge', little: 'LE', big: 'BE',
-    selection: '{start}–{end}, {size}', noSection: 'kein Abschnitt', notEnough: 'Nicht genug Bytes',
-    binary: 'Bits', char: 'Zeichen', unixTime: 'Unix-Zeit', varint: 'Varint', zigzag: 'Zigzag',
-    entropyMap: 'Entropiekarte', entropyRole: 'Entropiekarte', entropyAxis: 'Entropie', sections: 'Abschnitte',
-    entropySummary: '{count, plural, one {# Fenster} other {# Fenster}} zu {size}; {high, plural, =0 {nichts über {threshold} Bit} one {# Bereich über {threshold} Bit} other {# Bereiche über {threshold} Bit}}.',
-    bits: '{value} Bit', threshold: 'Schwelle', highEntropy: 'Hohe Entropie', highNone: 'Nichts über {threshold} Bit',
-    highMore: '{count, plural, one {# weiterer Bereich} other {# weitere Bereiche}}', hoverStrip: 'Streifen berühren oder darüberfahren', regionAt: '{range}, {section}, {bits}',
-    byteMap: 'Byte-Karte', mapRole: 'Byte-Karte', mapSummary: '{size} auf einer Hilbert-Kurve mit {side} × {side} Zellen, je {perCell}.',
-    perCell: '{count, plural, one {# Byte} other {# Bytes}}', colourBy: 'Färben nach', hoverMap: 'Zelle berühren oder darüberfahren', zoomHint: 'Strg + Scrollen zoomt',
-    modeEntropy: 'Entropie', modeSections: 'Abschnitte', modeClass: 'Bytes', modeStrings: 'Strings',
-    classNull: 'Null', classAscii: 'Druckbar', classControl: 'Steuerzeichen', classHigh: 'Hoch (≥ 80)', inString: 'In einem String', notString: 'Andere',
-    low: 'niedrig', high: 'hoch', zoomIn: 'Vergrößern', zoomOut: 'Verkleinern', zoomReset: 'Ganze Datei', showing: 'Zeigt {range}',
-    binaryView: 'Binär-Explorer', tabMap: 'Karte', tabEntropy: 'Entropie', tabHex: 'Hex', showInHex: 'Im Hex-Editor zeigen', fileSummary: '{size} · {count, plural, one {# Abschnitt} other {# Abschnitte}}',
-  },
-  ar: {
-    hexEditor: 'محرر سداسي عشري', hexRole: 'محرر سداسي عشري',
-    hexHelp: 'تحرّك مفاتيح الأسهم المؤشر، ويوسّع Shift التحديد، وينتقل Page Up وPage Down بشاشة كاملة، ويبدّل Tab بين عمود الست عشري وعمود النص. اكتب أرقامًا ست عشرية أو نصًا للاستبدال. Ctrl+G للانتقال إلى إزاحة، وCtrl+F للبحث، وCtrl+Z للتراجع.',
-    hexHelpReadOnly: 'تحرّك مفاتيح الأسهم المؤشر، ويوسّع Shift التحديد، وينتقل Page Up وPage Down بشاشة كاملة، ويبدّل Tab بين عمود الست عشري وعمود النص. Ctrl+G للانتقال إلى إزاحة، وCtrl+F للبحث.',
-    cursorAt: 'الإزاحة {offset}: {hex}', offset: 'الإزاحة', vaddr: 'العنوان', text: 'نص', showVaddr: 'إظهار العناوين', showOffsets: 'إظهار إزاحات الملف',
-    goTo: 'الانتقال إلى إزاحة', goToPlaceholder: 'انتقل إلى 0x…', goToInvalid: 'ليست إزاحة أو عنوانًا في هذا الملف',
-    search: 'البحث في البايتات', searchHex: 'ست عشري', searchText: 'نص', searchMode: 'البحث كـ', searchPlaceholderHex: '7F 45 4C 46 أو 48 ?? 89', searchPlaceholderText: 'النص المطلوب',
-    matchOf: '{index} من {count}', noMatches: 'لا نتائج', manyMatches: 'أكثر من {count} نتيجة', badPattern: 'استخدم أزواجًا ست عشرية مثل 7F 45، و?? لأي بايت',
-    nextMatch: 'النتيجة التالية', prevMatch: 'النتيجة السابقة',
-    copyHex: 'نسخ كست عشري', copyC: 'نسخ كمصفوفة C', copyBase64: 'نسخ كـ Base64', copyText: 'نسخ كنص', copied: 'تم نسخ {size}', copiedPart: 'تم نسخ أول {size}',
-    selectAll: 'تحديد الكل', selectSection: 'تحديد {name}', selectToHere: 'التحديد من المؤشر حتى هنا', followU32: 'الانتقال إلى قيمة u32 عند المؤشر ({value})',
-    undo: 'تراجع', redo: 'إعادة', revert: 'إلغاء كل التعديلات', edits: '{count, plural, zero {لا تعديلات} one {تعديل واحد} two {تعديلان} few {# تعديلات} many {# تعديلًا} other {# تعديل}}',
-    overwrite: 'استبدال', overwriteTitle: 'وضع الاستبدال: الكتابة تستبدل البايتات', readOnly: 'للقراءة فقط',
-    showText: 'عمود النص', inspector: 'فاحص البيانات', byteOrder: 'ترتيب البايتات', little: 'LE', big: 'BE',
-    selection: '{start}–{end}، {size}', noSection: 'بلا قسم', notEnough: 'لا توجد بايتات كافية',
-    binary: 'بتات', char: 'محرف', unixTime: 'وقت يونكس', varint: 'Varint', zigzag: 'Zigzag',
-    entropyMap: 'خريطة الإنتروبيا', entropyRole: 'خريطة الإنتروبيا', entropyAxis: 'الإنتروبيا', sections: 'الأقسام',
-    entropySummary: '{count, plural, one {نافذة واحدة} other {# نافذة}} بحجم {size}؛ {high, plural, =0 {لا شيء فوق {threshold} بت} one {منطقة واحدة فوق {threshold} بت} other {# مناطق فوق {threshold} بت}}.',
-    bits: '{value} بت', threshold: 'العتبة', highEntropy: 'إنتروبيا عالية', highNone: 'لا شيء فوق {threshold} بت',
-    highMore: '{count, plural, one {منطقة أخرى} other {# مناطق أخرى}}', hoverStrip: 'مرّر فوق الشريط أو المسه', regionAt: '{range}، {section}، {bits}',
-    byteMap: 'خريطة البايتات', mapRole: 'خريطة البايتات', mapSummary: '{size} على منحنى هيلبرت من {side} × {side} خلية، {perCell} لكل خلية.',
-    perCell: '{count, plural, one {بايت واحد} other {# بايت}}', colourBy: 'التلوين حسب', hoverMap: 'مرّر فوق خلية أو المسها', zoomHint: 'Ctrl مع التمرير للتكبير',
-    modeEntropy: 'الإنتروبيا', modeSections: 'الأقسام', modeClass: 'البايتات', modeStrings: 'السلاسل',
-    classNull: 'صفر', classAscii: 'قابل للطباعة', classControl: 'تحكم', classHigh: 'مرتفع (≥ 80)', inString: 'ضمن سلسلة', notString: 'غير ذلك',
-    low: 'منخفضة', high: 'مرتفعة', zoomIn: 'تكبير', zoomOut: 'تصغير', zoomReset: 'الملف كاملًا', showing: 'يعرض {range}',
-    binaryView: 'مستكشف الملفات الثنائية', tabMap: 'الخريطة', tabEntropy: 'الإنتروبيا', tabHex: 'ست عشري', showInHex: 'إظهار في المحرر', fileSummary: '{size} · {count, plural, one {قسم واحد} other {# أقسام}}',
-  },
-})
-
-/* ── pure helpers ──────────────────────────────────────────────────────────── */
 
 /** The bytes of `data` as a Uint8Array view (no copy for Uint8Array, ArrayBuffer or other typed arrays; plain arrays are copied). */
 export function toByteArray(data: BinaryData | ArrayBufferView | ArrayLike<number>): Uint8Array {
@@ -427,8 +319,6 @@ export function parseByteOffset(input: string, { size, cursor = 0, sections }: {
   return v >= 0 && v < Math.max(1, size) ? v : null
 }
 
-/* ── colours ───────────────────────────────────────────────────────────────── */
-
 /** Default section colours (theme tokens), by section index. */
 const BIN_SECTION_PALETTE = ['var(--c2)', 'var(--c4)', 'var(--c3)', 'var(--warn)', 'var(--c-neutral)', 'var(--bad)', 'var(--c1)', 'color-mix(in srgb, var(--c2) 50%, var(--c4))']
 /** A section's colour: its own `color`, else the palette by index. */
@@ -490,10 +380,6 @@ const binSameRange = (a: ByteRange | null | undefined, b: ByteRange | null | und
 /** Bits as "7.58" (two decimals, fixed: entropy reads like a measurement). */
 const binBits = (v: number) => v.toFixed(2)
 
-/* ════════════════════════════════════════════════════════════════════════════
- * HexEditor
- * ══════════════════════════════════════════════════════════════════════════ */
-
 /** One effective edit: the byte at `offset` was `before` in the data and is now `after`. */
 export type HexEdit = { offset: number; before: number; after: number }
 
@@ -535,8 +421,8 @@ const BIN_MAX_SCROLL_PX = 8_000_000
 const BIN_COPY_MAX = 4 * 1024 * 1024
 /** Rows are positioned relative to a base row that changes every this many rows, so a row keeps its props (and memo) while scrolling. */
 const BIN_ROW_BLOCK = 1024
-/** The offset column stays pinned to the left while the grid scrolls sideways (physical: the grid is an LTR island). */
-const BIN_PIN = 'sticky left-0 z-[1]' // rtl-lint-ignore
+/** The offset column stays pinned to the left while the grid scrolls sideways. */
+const BIN_PIN = 'sticky left-0 z-[1]'
 
 type HexRowProps = {
   row: number; y: number; rowH: number; bpr: number; n: number; bytes: Uint8Array; patch: Map<number, number>; rv: number
@@ -620,7 +506,7 @@ const HexRow = memo(function HexRow({ row, y, rowH, bpr, n, bytes, patch, label,
     c = z
   }
   return (
-    // rtl-lint-ignore: rows sit in the editor's LTR island
+
     <div data-row={row} className="absolute left-0 flex w-max min-w-full items-center whitespace-nowrap" style={{ top: y, height: rowH }}>
       <span className={cn(BIN_PIN, 'inline-block w-[13ch] flex-none bg-[var(--card)] ps-3 pe-4 text-[var(--fg3)] select-none')}>{label}</span>
       <span className="flex-none">{hex}</span>
@@ -634,7 +520,7 @@ function BinInspectorRow({ label, value }: { label: string; value: ReactNode }) 
   return (
     <div className="flex min-w-0 items-baseline justify-between gap-3 py-0.5">
       <dt className="flex-none text-[11px] text-[var(--fg2)]">{label}</dt>
-      <dd dir="ltr" className="m-0 min-w-0 truncate text-end font-[family-name:var(--mono)] text-xs text-[var(--fg)] tabular-nums select-text">{value}</dd>
+      <dd className="m-0 min-w-0 truncate text-end font-[family-name:var(--mono)] text-xs text-[var(--fg)] tabular-nums select-text">{value}</dd>
     </div>
   )
 }
@@ -643,22 +529,21 @@ const binDate = (d: Date | null) => d && !Number.isNaN(d.getTime()) ? d.toISOStr
 
 /** The data inspector: every decoder for the bytes at the cursor, with a byte-order switch. */
 const BinInspector = memo(function BinInspector({ view, offset, layout, littleEndian, onEndian }: { view: Uint8Array; offset: number; layout: 'side' | 'bottom'; littleEndian: boolean; onEndian: (le: boolean) => void }) {
-  const m = useMessages(BINARY_MESSAGES)
   const d = useMemo(() => decodeBytes(view, 0, littleEndian), [view, littleEndian])
   const na = <span className="text-[var(--fg3)]">—</span>
   const show = (v: unknown) => v === null || v === undefined ? na : String(v)
   const rows: [string, ReactNode][] = [
-    [m('binary'), show(d.binary)], [m('char'), d.u8 === null ? na : binPrintable(d.u8) ? `'${String.fromCharCode(d.u8)}'` : `\\x${BIN_HEX[d.u8].toLowerCase()}`],
+    ['Bits', show(d.binary)], ['Char', d.u8 === null ? na : binPrintable(d.u8) ? `'${String.fromCharCode(d.u8)}'` : `\\x${BIN_HEX[d.u8].toLowerCase()}`],
     ['u8', show(d.u8)], ['i8', show(d.i8)], ['u16', show(d.u16)], ['i16', show(d.i16)], ['u32', show(d.u32)], ['i32', show(d.i32)],
     ['u64', show(d.u64)], ['i64', show(d.i64)], ['f32', show(binFloat(d.f32))], ['f64', show(binFloat(d.f64))],
-    [m('unixTime'), show(binDate(d.unix32))], [m('varint'), d.varint ? `${d.varint.value} (${d.varint.length} B)` : na], [m('zigzag'), show(d.zigzag)],
+    ['Unix time', show(binDate(d.unix32))], ['Varint', d.varint ? `${d.varint.value} (${d.varint.length} B)` : na], ['Zigzag', show(d.zigzag)],
   ]
   return (
-    <section aria-label={m('inspector')} className={cn('min-w-0', layout === 'side' ? 'w-[240px] flex-none border-s border-[var(--line)] ps-3' : 'border-t border-[var(--line)] pt-2')}>
+    <section aria-label={'Data inspector'} className={cn('min-w-0', layout === 'side' ? 'w-[240px] flex-none border-s border-[var(--line)] ps-3' : 'border-t border-[var(--line)] pt-2')}>
       <div className="mb-1 flex items-center justify-between gap-2">
-        <h4 className="m-0 truncate text-xs font-medium text-[var(--fg)]">{m('inspector')} <span dir="ltr" className="font-[family-name:var(--mono)] font-normal text-[var(--fg3)]">0x{hexOffset(offset)}</span></h4>
-        <SegmentedControl size="sm" aria-label={m('byteOrder')} value={littleEndian ? 'le' : 'be'} onChange={v => onEndian(v === 'le')}
-          options={[{ value: 'le', label: m('little') }, { value: 'be', label: m('big') }]} />
+        <h4 className="m-0 truncate text-xs font-medium text-[var(--fg)]">{'Data inspector'} <span className="font-[family-name:var(--mono)] font-normal text-[var(--fg3)]">0x{hexOffset(offset)}</span></h4>
+        <SegmentedControl size="sm" aria-label={'Byte order'} value={littleEndian ? 'le' : 'be'} onChange={v => onEndian(v === 'le')}
+          options={[{ value: 'le', label: 'LE' }, { value: 'be', label: 'BE' }]} />
       </div>
       <dl className={cn('m-0', layout === 'bottom' && 'grid grid-cols-1 gap-x-6 sm:grid-cols-2 lg:grid-cols-3')}>
         {rows.map(([k, v]) => <BinInspectorRow key={k} label={k} value={v} />)}
@@ -678,12 +563,10 @@ const BinInspector = memo(function BinInspector({ view, offset, layout, littleEn
  * redone with Ctrl+Shift+Z. Bytes are coloured by class or by section; `highlights` tint ranges. The data inspector
  * decodes the cursor as every integer, float, time and varint type in either byte order. Touch: tap selects a byte,
  * long-press opens the menu, the grid scrolls sideways on phones and the text column hides below 480 px (switch).
- * The grid is an LTR island in every locale.
  */
 export function HexEditor({ data, bytesPerRow = 16, sections = BIN_NO_SECTIONS, colorBy = 'class', offsets: offsetsProp, cursor: cursorProp, defaultCursor = 0, onCursorChange,
   selection: selectionProp, defaultSelection = null, onSelectionChange, readOnly = false, onChange, highlights = BIN_NO_HIGHLIGHTS, height = 360,
   inspector = 'auto', toolbar = true, label, className, ref }: HexEditorProps) {
-  const m = useMessages(BINARY_MESSAGES), { fmt } = useLocale()
   const bytes = useMemo(() => toByteArray(data), [data]), n = bytes.length
   const bpr = bytesPerRow, coarse = useCoarsePointer(), rowH = coarse ? 28 : 20, hdr = rowH
   const [cursorRaw, setCursorRaw] = useControllable(cursorProp, defaultCursor, onCursorChange)
@@ -749,13 +632,7 @@ export function HexEditor({ data, bytesPerRow = 16, sections = BIN_NO_SECTIONS, 
     top = clamp(top, 0, g.maxTop)
     setVp(v => v.st === st && v.top === top ? v : { ...v, st, top })
   }, [])
-  useLayoutEffect(() => {
-    const el = scroller.current; if (!el) return
-    const set = () => { const h = el.clientHeight || height; setVp(v => v.h === h ? v : { ...v, h }) }
-    set()
-    const ro = new ResizeObserver(set); ro.observe(el)
-    return () => ro.disconnect()
-  }, [height])
+  useResizeObserver(scroller, el => { const h = el.clientHeight || height; setVp(v => v.h === h ? v : { ...v, h }) }, [height])
   // the wheel moves by pixels even when the scroll range is scaled (native scrolling would jump `ratio` px per px)
   useEffect(() => {
     const el = scroller.current; if (!el || ratio <= 1) return
@@ -810,8 +687,8 @@ export function HexEditor({ data, bytesPerRow = 16, sections = BIN_NO_SECTIONS, 
   const announce = useCallback((o: number) => {
     if (o >= n) return
     const sec = sectionAt(sections, o)
-    say(m('cursorAt', { offset: '0x' + hexOffset(o), hex: BIN_HEX[byteAt(o)] }) + (sec ? `, ${sec.name}` : ''))
-  }, [n, sections, byteAt, m, say])
+    say(`Offset 0x${hexOffset(o)}: ${BIN_HEX[byteAt(o)]}` + (sec ? `, ${sec.name}` : ''))
+  }, [n, sections, byteAt, say])
 
   // ── search
   const [query, setQuery] = useState('')
@@ -842,8 +719,8 @@ export function HexEditor({ data, bytesPerRow = 16, sections = BIN_NO_SECTIONS, 
     if (i < 0) i = matches.length - 1
     const o = matches[i]
     setMatchIdx(i); anchor.current = o; setSel({ start: o, end: Math.min(n, o + matchLen) }); setCursorRaw(o); setNibble(0); reveal(o)
-    say(m('matchOf', { index: i + 1, count: matches.length }) + ', 0x' + hexOffset(o))
-  }, [matches, matchIdx, cursor, matchLen, n, setSel, setCursorRaw, reveal, say, m])
+    say(`${i + 1} of ${matches.length}` + ', 0x' + hexOffset(o))
+  }, [matches, matchIdx, cursor, matchLen, n, setSel, setCursorRaw, reveal, say])
 
   // ── go to
   const [gotoText, setGotoText] = useState('')
@@ -851,7 +728,7 @@ export function HexEditor({ data, bytesPerRow = 16, sections = BIN_NO_SECTIONS, 
   const goToText = (s: string) => {
     const o = parseByteOffset(s, { size: n, cursor, sections })
     setGotoBad(o === null)
-    if (o === null) { say(m('goToInvalid')); return false }
+    if (o === null) { say('Not an offset or address in this file'); return false }
     moveTo(o); announce(o); scroller.current?.focus({ preventScroll: true })
     return true
   }
@@ -875,9 +752,8 @@ export function HexEditor({ data, bytesPerRow = 16, sections = BIN_NO_SECTIONS, 
   const copy = useCallback((format: ByteCopyFormat) => {
     const r = selection ?? { start: cursor, end: Math.min(n, cursor + 1) }, z = Math.min(r.end, r.start + BIN_COPY_MAX)
     const text = formatBytesAs(viewOf(r.start, z), format)
-    void navigator.clipboard?.writeText(text).catch(() => {})
-    say(z < r.end ? m('copiedPart', { size: fmt.bytes(z - r.start) }) : m('copied', { size: fmt.bytes(z - r.start) }))
-  }, [selection, cursor, n, viewOf, say, m, fmt])
+    void writeClipboard(text).then(ok => say(!ok ? 'Couldn’t copy' : z < r.end ? `Copied the first ${fmt.bytes(z - r.start)}` : `Copied ${fmt.bytes(z - r.start)}`))
+  }, [selection, cursor, n, viewOf, say, fmt])
   const getBytes = useCallback(() => viewOf(0, n), [viewOf, n])
 
   useImperativeHandle(ref, () => ({
@@ -903,8 +779,8 @@ export function HexEditor({ data, bytesPerRow = 16, sections = BIN_NO_SECTIONS, 
     }
     let to: number | null = null
     switch (k) {
-      case 'ArrowLeft': to = cursor - 1; break // rtl-lint-ignore: the grid is an LTR island, ← is the previous byte
-      case 'ArrowRight': to = cursor + 1; break // rtl-lint-ignore
+      case 'ArrowLeft': to = cursor - 1; break
+      case 'ArrowRight': to = cursor + 1; break
       case 'ArrowUp': to = cursor - bpr; break
       case 'ArrowDown': to = cursor + bpr; break
       case 'PageUp': to = cursor - pageRows * bpr; break
@@ -926,7 +802,7 @@ export function HexEditor({ data, bytesPerRow = 16, sections = BIN_NO_SECTIONS, 
       return
     }
     if (mod || e.altKey || k.length !== 1 || !n) return
-    if (readOnly) { if (/^[\x20-\x7e]$/.test(k)) say(m('readOnly')); return }
+    if (readOnly) { if (/^[\x20-\x7e]$/.test(k)) say('Read only'); return }
     if (pane === 'hex') {
       if (!/^[0-9a-f]$/i.test(k)) return
       e.preventDefault()
@@ -948,13 +824,13 @@ export function HexEditor({ data, bytesPerRow = 16, sections = BIN_NO_SECTIONS, 
   // ── pointer: drag to select (mouse and pen), tap to place the cursor (touch), right-click / long-press for the menu
   const drag = useRef<{ id: number } | null>(null), press = useRef<{ type: string; o: number } | null>(null)
   const [menuAt, setMenuAt] = useState<number | null>(null)
-  /** The byte under a pointer: the run span it hit, then which of its `data-n` bytes by x (the grid is LTR). */
+  /** The byte under a pointer: the run span it hit, then which of its `data-n` bytes by x. */
   const cellOf = (t: EventTarget | null, clientX?: number) => {
     const el = (t as Element | null)?.closest?.('[data-o]') as HTMLElement | null
     if (!el) return null
     let o = +el.dataset.o!
     const k = +(el.dataset.n ?? 1)
-    if (k > 1 && clientX !== undefined) { const r = el.getBoundingClientRect(); if (r.width > 0) o += clamp(Math.floor(((clientX - r.left) / r.width) * k), 0, k - 1) } // rtl-lint-ignore: LTR island
+    if (k > 1 && clientX !== undefined) { const r = el.getBoundingClientRect(); if (r.width > 0) o += clamp(Math.floor(((clientX - r.left) / r.width) * k), 0, k - 1) }
     return { o, p: el.dataset.p === 't' ? 'text' as const : 'hex' as const }
   }
   const onPointerDown = (e: ReactPointerEvent<HTMLDivElement>) => {
@@ -1023,24 +899,23 @@ export function HexEditor({ data, bytesPerRow = 16, sections = BIN_NO_SECTIONS, 
   const u32 = n >= cursor + 4 ? decodeBytes(inspView, 0, le).u32 : null
   const u32Off = u32 !== null ? parseByteOffset('0x' + u32.toString(16), { size: n, sections }) : null
   const menuSec = menuAt !== null ? sectionAt(sections, menuAt) : sec
-  const matchLabel = badQuery ? m('badPattern') : !query.trim() ? '' : !matches.length ? m('noMatches') : matches.length >= 10_000 ? m('manyMatches', { count: fmt.number(10_000) })
-    : matchIdx >= 0 ? m('matchOf', { index: matchIdx + 1, count: matches.length }) : fmt.number(matches.length)
+  const matchLabel = badQuery ? 'Use hex pairs such as 7F 45, ?? for any byte' : !query.trim() ? '' : !matches.length ? 'No matches' : matches.length >= 10_000 ? `${fmt.number(10_000)}+ matches`
+    : matchIdx >= 0 ? `${matchIdx + 1} of ${matches.length}` : fmt.number(matches.length)
 
   const grid = (
     <ContextMenu.Root>
       <ContextMenu.Trigger asChild>
-        <div ref={scroller} dir="ltr" tabIndex={0} role="group" aria-roledescription={m('hexRole')} aria-label={label ?? m('hexEditor')} aria-describedby={helpId}
+        <div ref={scroller} tabIndex={0} role="group" aria-roledescription={'hex editor'} aria-label={label ?? 'Hex editor'} aria-describedby={helpId}
           onScroll={onScroll} onKeyDown={onKeyDown} onPointerDown={onPointerDown} onPointerMove={onPointerMove} onPointerUp={onPointerUp} onPointerCancel={onPointerUp}
           onClick={onClick} onContextMenu={onContextMenu}
           onFocus={e => { if (e.target === e.currentTarget) setFocused(true) }} onBlur={e => { if (e.target === e.currentTarget) setFocused(false) }}
           className="relative min-w-0 flex-[1_1_auto] overflow-auto overscroll-contain rounded-[var(--r-md)] border border-[var(--line)] bg-[var(--card)] font-[family-name:var(--mono)] text-xs tabular-nums select-none focus-visible:!ring-2 focus-visible:!ring-[var(--accent)]"
           style={{ height }}>
-          {/* rtl-lint-ignore: header and rows are physical inside the LTR island */}
           <div className="sticky top-0 z-[2] flex w-max min-w-full items-center border-b border-[var(--line)] bg-[var(--card)] whitespace-nowrap text-[var(--fg3)]" style={{ height: hdr }}>
             {hasVaddr
               ? <button type="button" tabIndex={-1} onClick={() => setOffMode(vaddrOn ? 'offset' : 'vaddr')}
-                className={cn(BIN_PIN, 'inline-block h-full w-[13ch] flex-none cursor-pointer border-0 bg-[var(--card)] ps-3 text-start text-[11px] font-medium text-[var(--fg2)] hover:text-[var(--fg)]')}>{vaddrOn ? m('vaddr') : m('offset')}<span className="sr-only">, {vaddrOn ? m('showOffsets') : m('showVaddr')}</span></button>
-              : <span className={cn(BIN_PIN, 'inline-block w-[13ch] flex-none bg-[var(--card)] ps-3 text-[11px] font-medium text-[var(--fg2)]')}>{m('offset')}</span>}
+                className={cn(BIN_PIN, 'inline-block h-full w-[13ch] flex-none cursor-pointer border-0 bg-[var(--card)] ps-3 text-start text-[11px] font-medium text-[var(--fg2)] hover:text-[var(--fg)]')}>{vaddrOn ? 'Address' : 'Offset'}<span className="sr-only">, {vaddrOn ? 'Show file offsets' : 'Show addresses'}</span></button>
+              : <span className={cn(BIN_PIN, 'inline-block w-[13ch] flex-none bg-[var(--card)] ps-3 text-[11px] font-medium text-[var(--fg2)]')}>{'Offset'}</span>}
             <span aria-hidden className="flex-none">{Array.from({ length: bpr }, (_, c) => <span key={c} className={cn('inline-block w-[3ch] text-center', c > 0 && c % 8 === 0 && 'ms-[1ch]')}>{BIN_HEX[c]}</span>)}</span>
             {showText && <span aria-hidden className="ms-[2ch] flex-none pe-3">{Array.from({ length: bpr }, (_, c) => <span key={c} className="inline-block w-[1ch] text-center">{(c % 16).toString(16).toUpperCase()}</span>)}</span>}
           </div>
@@ -1049,21 +924,21 @@ export function HexEditor({ data, bytesPerRow = 16, sections = BIN_NO_SECTIONS, 
           </div>
         </div>
       </ContextMenu.Trigger>
-      <ContextMenu.Content aria-label={m('hexEditor')}>
-        <ContextMenu.Item icon="copy" shortcut="Ctrl C" onSelect={() => copy('hex')}>{m('copyHex')}</ContextMenu.Item>
-        <ContextMenu.Item onSelect={() => copy('c')}>{m('copyC')}</ContextMenu.Item>
-        <ContextMenu.Item onSelect={() => copy('base64')}>{m('copyBase64')}</ContextMenu.Item>
-        <ContextMenu.Item onSelect={() => copy('text')}>{m('copyText')}</ContextMenu.Item>
+      <ContextMenu.Content aria-label={'Hex editor'}>
+        <ContextMenu.Item icon="copy" shortcut="Ctrl C" onSelect={() => copy('hex')}>{'Copy as hex'}</ContextMenu.Item>
+        <ContextMenu.Item onSelect={() => copy('c')}>{'Copy as C array'}</ContextMenu.Item>
+        <ContextMenu.Item onSelect={() => copy('base64')}>{'Copy as Base64'}</ContextMenu.Item>
+        <ContextMenu.Item onSelect={() => copy('text')}>{'Copy as text'}</ContextMenu.Item>
         <ContextMenu.Separator />
-        <ContextMenu.Item shortcut="Ctrl A" onSelect={() => { anchor.current = 0; setSel(n ? { start: 0, end: n } : null) }}>{m('selectAll')}</ContextMenu.Item>
-        {menuAt !== null && menuAt !== cursor && <ContextMenu.Item onSelect={() => { setSel(binRange(cursor, menuAt)); anchor.current = cursor; setCursorRaw(menuAt) }}>{m('selectToHere')}</ContextMenu.Item>}
-        {menuSec && <ContextMenu.Item onSelect={() => { anchor.current = menuSec.offset; setSel({ start: menuSec.offset, end: Math.min(n, menuSec.offset + menuSec.size) }); setCursorRaw(menuSec.offset); reveal(menuSec.offset) }}>{m('selectSection', { name: menuSec.name })}</ContextMenu.Item>}
-        {u32Off !== null && <ContextMenu.Item onSelect={() => { moveTo(u32Off); announce(u32Off) }}>{m('followU32', { value: '0x' + hexOffset(u32!) })}</ContextMenu.Item>}
+        <ContextMenu.Item shortcut="Ctrl A" onSelect={() => { anchor.current = 0; setSel(n ? { start: 0, end: n } : null) }}>{'Select all'}</ContextMenu.Item>
+        {menuAt !== null && menuAt !== cursor && <ContextMenu.Item onSelect={() => { setSel(binRange(cursor, menuAt)); anchor.current = cursor; setCursorRaw(menuAt) }}>{'Select from cursor to here'}</ContextMenu.Item>}
+        {menuSec && <ContextMenu.Item onSelect={() => { anchor.current = menuSec.offset; setSel({ start: menuSec.offset, end: Math.min(n, menuSec.offset + menuSec.size) }); setCursorRaw(menuSec.offset); reveal(menuSec.offset) }}>{`Select ${menuSec.name}`}</ContextMenu.Item>}
+        {u32Off !== null && <ContextMenu.Item onSelect={() => { moveTo(u32Off); announce(u32Off) }}>{`Go to u32 at cursor (0x${hexOffset(u32!)})`}</ContextMenu.Item>}
         {!readOnly && <>
           <ContextMenu.Separator />
-          <ContextMenu.Item shortcut="Ctrl Z" onSelect={undo}>{m('undo')}</ContextMenu.Item>
-          <ContextMenu.Item shortcut="Ctrl ⇧ Z" onSelect={redo}>{m('redo')}</ContextMenu.Item>
-          {editCount > 0 && <ContextMenu.Item danger onSelect={revert}>{m('revert')}</ContextMenu.Item>}
+          <ContextMenu.Item shortcut="Ctrl Z" onSelect={undo}>{'Undo'}</ContextMenu.Item>
+          <ContextMenu.Item shortcut="Ctrl ⇧ Z" onSelect={redo}>{'Redo'}</ContextMenu.Item>
+          {editCount > 0 && <ContextMenu.Item danger onSelect={revert}>{'Revert all edits'}</ContextMenu.Item>}
         </>}
       </ContextMenu.Content>
     </ContextMenu.Root>
@@ -1075,42 +950,41 @@ export function HexEditor({ data, bytesPerRow = 16, sections = BIN_NO_SECTIONS, 
   const toolbarEl = useMemo(() => toolbar && (
         <div className="flex flex-wrap items-center gap-2">
           <div className="flex min-w-[220px] flex-[2_1_260px] items-center gap-1">
-            <input ref={searchRef} type="search" value={query} onChange={e => setQuery(e.target.value)} aria-label={m('search')} aria-invalid={badQuery || undefined}
-              placeholder={qMode === 'hex' ? m('searchPlaceholderHex') : m('searchPlaceholderText')} spellCheck={false} autoComplete="off" dir="ltr"
+            <input ref={searchRef} type="search" value={query} onChange={e => setQuery(e.target.value)} aria-label={'Search bytes'} aria-invalid={badQuery || undefined}
+              placeholder={qMode === 'hex' ? '7F 45 4C 46 or 48 ?? 89' : 'Text to find'} spellCheck={false} autoComplete="off"
               onKeyDown={e => { if (e.key === 'Enter') { e.preventDefault(); handlers.current.jumpMatch(e.shiftKey ? -1 : 1) } else if (e.key === 'Escape') { e.preventDefault(); scroller.current?.focus({ preventScroll: true }) } }}
               className={cn(inputClass, '!h-[30px] min-w-0 flex-1 font-[family-name:var(--mono)] !text-xs [@media(pointer:coarse)]:!h-9 [@media(pointer:coarse)]:!text-base')} />
-            <SegmentedControl size="sm" aria-label={m('searchMode')} value={qMode} onChange={v => setQMode(v as 'hex' | 'text')} options={[{ value: 'hex', label: m('searchHex') }, { value: 'text', label: m('searchText') }]} />
-            <IconButton icon="chevronUp" size="icon-sm" label={m('prevMatch')} disabled={!matches.length} onClick={() => handlers.current.jumpMatch(-1)} />
-            <IconButton icon="chevronDown" size="icon-sm" label={m('nextMatch')} disabled={!matches.length} onClick={() => handlers.current.jumpMatch(1)} />
+            <SegmentedControl size="sm" aria-label={'Search as'} value={qMode} onChange={v => setQMode(v as 'hex' | 'text')} options={[{ value: 'hex', label: 'Hex' }, { value: 'text', label: 'Text' }]} />
+            <IconButton icon="chevronUp" size="icon-sm" label={'Previous match'} disabled={!matches.length} onClick={() => handlers.current.jumpMatch(-1)} />
+            <IconButton icon="chevronDown" size="icon-sm" label={'Next match'} disabled={!matches.length} onClick={() => handlers.current.jumpMatch(1)} />
           </div>
           <span role="status" className={cn('min-w-0 truncate text-[11px] tabular-nums', badQuery ? 'text-[var(--bad)]' : 'text-[var(--fg2)]')}>{matchLabel}</span>
           <div className="ms-auto flex items-center gap-1">
-            <input ref={gotoRef} value={gotoText} onChange={e => { setGotoText(e.target.value); setGotoBad(false) }} aria-label={m('goTo')} placeholder={m('goToPlaceholder')} aria-invalid={gotoBad || undefined}
-              spellCheck={false} autoComplete="off" dir="ltr" title={gotoBad ? m('goToInvalid') : undefined}
+            <input ref={gotoRef} value={gotoText} onChange={e => { setGotoText(e.target.value); setGotoBad(false) }} aria-label={'Go to offset'} placeholder={'Go to 0x…'} aria-invalid={gotoBad || undefined}
+              spellCheck={false} autoComplete="off" title={gotoBad ? 'Not an offset or address in this file' : undefined}
               onKeyDown={e => { if (e.key === 'Enter') { e.preventDefault(); handlers.current.goToText(gotoText) } else if (e.key === 'Escape') { e.preventDefault(); scroller.current?.focus({ preventScroll: true }) } }}
               className={cn(inputClass, '!h-[30px] w-[124px] font-[family-name:var(--mono)] !text-xs [@media(pointer:coarse)]:!h-9 [@media(pointer:coarse)]:!text-base')} />
             {!readOnly && <>
-              <IconButton icon="undo" size="icon-sm" label={m('undo')} disabled={!undoStack.current.length} onClick={() => handlers.current.undo()} className="ui-flip" />
-              {/* rtl-lint-ignore: redo is the undo arrow mirrored, and mirrored back in RTL */}
-              <IconButton icon="undo" size="icon-sm" label={m('redo')} disabled={!redoStack.current.length} onClick={() => handlers.current.redo()} className="-scale-x-100 rtl:scale-x-100" />
+              <IconButton icon="undo" size="icon-sm" label={'Undo'} disabled={!undoStack.current.length} onClick={() => handlers.current.undo()} />
+              <IconButton icon="undo" size="icon-sm" label={'Redo'} disabled={!redoStack.current.length} onClick={() => handlers.current.redo()} className="-scale-x-100" />
             </>}
           </div>
         </div>
-      ), [toolbar, query, qMode, matches.length, matchLabel, badQuery, gotoText, gotoBad, readOnly, ver, m]) // eslint-disable-line react-hooks/exhaustive-deps
+      ), [toolbar, query, qMode, matches.length, matchLabel, badQuery, gotoText, gotoBad, readOnly, ver]) // eslint-disable-line react-hooks/exhaustive-deps
   const statusEl = useMemo(() => (
       <div className="flex min-h-6 flex-wrap items-center gap-x-3 gap-y-1 text-[11px] text-[var(--fg2)]">
-        <span dir="ltr" className="font-[family-name:var(--mono)] tabular-nums text-[var(--fg)]">0x{hexOffset(cursor, offWidth)}</span>
+        <span className="font-[family-name:var(--mono)] tabular-nums text-[var(--fg)]">0x{hexOffset(cursor, offWidth)}</span>
         {sec && <span className="inline-flex items-center gap-1"><span aria-hidden className="h-2 w-2 rounded-full" style={{ background: binarySectionColor(sections, sections.indexOf(sec)) }} />{sec.name}</span>}
         {hl?.label && <span>{hl.label}</span>}
-        {selection && selection.end - selection.start > 1 && <span dir="ltr" className="font-[family-name:var(--mono)] tabular-nums">{m('selection', { start: '0x' + hexOffset(selection.start), end: '0x' + hexOffset(selection.end - 1), size: fmt.bytes(selection.end - selection.start) })}</span>}
+        {selection && selection.end - selection.start > 1 && <span className="font-[family-name:var(--mono)] tabular-nums">{`0x${hexOffset(selection.start)}–0x${hexOffset(selection.end - 1)}, ${fmt.bytes(selection.end - selection.start)}`}</span>}
         <span className="ms-auto inline-flex items-center gap-2">
-          {editCount > 0 && <Badge size="sm" tone="accent">{m('edits', { count: editCount })}</Badge>}
-          <span title={readOnly ? undefined : m('overwriteTitle')}><Badge size="sm">{readOnly ? m('readOnly') : m('overwrite')}</Badge></span>
-          {narrow && <Switch label={<span className="text-[11px] text-[var(--fg2)]">{m('showText')}</span>} checked={showText} onChange={v => setTextOn(v)} />}
-          {inspector === 'auto' && !inspSide && <Switch label={<span className="text-[11px] text-[var(--fg2)]">{m('inspector')}</span>} checked={inspOpen} onChange={setInspOpen} />}
+          {editCount > 0 && <Badge size="sm" tone="accent">{plural(editCount, 'edit')}</Badge>}
+          <span title={readOnly ? undefined : 'Overwrite mode: typing replaces bytes'}><Badge size="sm">{readOnly ? 'Read only' : 'OVR'}</Badge></span>
+          {narrow && <Switch label={<span className="text-[11px] text-[var(--fg2)]">{'Text column'}</span>} checked={showText} onChange={v => setTextOn(v)} />}
+          {inspector === 'auto' && !inspSide && <Switch label={<span className="text-[11px] text-[var(--fg2)]">{'Data inspector'}</span>} checked={inspOpen} onChange={setInspOpen} />}
         </span>
       </div>
-  ), [cursor, offWidth, sec, hl, selection, editCount, readOnly, narrow, showText, inspector, inspSide, inspOpen, m, fmt, sections])
+  ), [cursor, offWidth, sec, hl, selection, editCount, readOnly, narrow, showText, inspector, inspSide, inspOpen, fmt, sections])
 
   return (
     <div ref={rootRef} className={cn('flex min-w-0 flex-col gap-2', className)}>
@@ -1120,15 +994,11 @@ export function HexEditor({ data, bytesPerRow = 16, sections = BIN_NO_SECTIONS, 
         {inspShown && <BinInspector view={inspView} offset={cursor} layout={inspSide ? 'side' : 'bottom'} littleEndian={le} onEndian={setLe} />}
       </div>
       {statusEl}
-      <span id={helpId} className="sr-only">{readOnly ? m('hexHelpReadOnly') : m('hexHelp')}</span>
+      <span id={helpId} className="sr-only">{readOnly ? 'Arrow keys move the cursor, Shift extends the selection, Page Up and Page Down move by a screen, Tab switches between the hex and text columns. Ctrl+G goes to an offset, Ctrl+F searches.' : 'Arrow keys move the cursor, Shift extends the selection, Page Up and Page Down move by a screen, Tab switches between the hex and text columns. Type hex digits or text to overwrite. Ctrl+G goes to an offset, Ctrl+F searches, Ctrl+Z undoes.'}</span>
       <span className="sr-only" aria-live="polite">{said}</span>
     </div>
   )
 }
-
-/* ════════════════════════════════════════════════════════════════════════════
- * EntropyMap
- * ══════════════════════════════════════════════════════════════════════════ */
 
 /** EntropyMap props. Pass `data`, or precomputed `entropy` (from entropyWindows with the same windowSize/step) plus `length`. */
 export type EntropyMapProps = {
@@ -1160,10 +1030,10 @@ function binTicks(length: number, max: number) {
 
 /** The high-entropy regions as a virtualised list (a large file can have hundreds). */
 function BinRegionList({ regions, sections, threshold, onSelect, active }: { regions: readonly EntropyRegion[]; sections: readonly BinarySection[]; threshold: number; onSelect?: (r: ByteRange) => void; active: ByteRange | null }) {
-  const m = useMessages(BINARY_MESSAGES), { fmt } = useLocale(), coarse = useCoarsePointer(), rowH = coarse ? 44 : 32
+  const coarse = useCoarsePointer(), rowH = coarse ? 44 : 32
   const scrollRef = useRef<HTMLDivElement>(null)
   const v = useVirtual({ count: regions.length, estimateSize: rowH, scrollRef, enabled: regions.length > 40 })
-  if (!regions.length) return <p className="m-0 text-xs text-[var(--fg2)]">{m('highNone', { threshold })}</p>
+  if (!regions.length) return <p className="m-0 text-xs text-[var(--fg2)]">{`Nothing above ${threshold} bits`}</p>
   return (
     <div ref={scrollRef} className="max-h-[200px] overflow-auto overscroll-contain">
       <ul className="relative m-0 list-none p-0" style={{ height: v.totalSize }}>
@@ -1173,9 +1043,9 @@ function BinRegionList({ regions, sections, threshold, onSelect, active }: { reg
             <li key={it.key} className="absolute inset-x-0" style={{ top: it.start, height: rowH }} {...v.setAria(it.index)}>
               <button type="button" onClick={() => onSelect?.({ start: r.start, end: r.end })} aria-pressed={on} title={`0x${hexOffset(r.start)}–0x${hexOffset(r.end)}`}
                 className={cn('grid h-full w-full cursor-pointer grid-cols-[minmax(0,1.6fr)_minmax(0,0.8fr)_minmax(0,1fr)_auto] items-center gap-2 rounded-[var(--r-md)] border-0 bg-transparent px-2 text-start text-xs', rowHoverClass, on && '!bg-[var(--accent-soft)]')}>
-                <span dir="ltr" className="truncate text-start font-[family-name:var(--mono)] tabular-nums text-[var(--fg)]">{hexOffset(r.start)}–{hexOffset(r.end)}</span>
+                <span className="truncate text-start font-[family-name:var(--mono)] tabular-nums text-[var(--fg)]">{hexOffset(r.start)}–{hexOffset(r.end)}</span>
                 <span className="truncate tabular-nums text-[var(--fg2)]">{fmt.bytes(r.size)}</span>
-                <span className="truncate text-[var(--fg2)]">{s?.name ?? m('noSection')}</span>
+                <span className="truncate text-[var(--fg2)]">{s?.name ?? 'no section'}</span>
                 <span className="inline-flex items-center gap-1.5 font-[family-name:var(--mono)] tabular-nums text-[var(--fg)]">
                   <span aria-hidden className="h-2 w-2 rounded-full" style={{ background: entropyColor(r.mean) }} />{binBits(r.mean)}
                 </span>
@@ -1196,11 +1066,10 @@ function BinRegionList({ regions, sections, threshold, onSelect, active }: { reg
  * reads out offset, section and entropy; click, drag or Enter selects a range (`onSelect`); a click inside a
  * high-entropy region selects the whole region. Keyboard: one Tab stop, ↑/↓ (←/→ when horizontal) step, Shift extends,
  * Page Up/Down jump, Home/End, Enter selects, Escape clears. `orientation="horizontal"` lays it out as a band. The
- * strip is an LTR island; the list and readout follow the locale.
+ * strip.
  */
 export function EntropyMap({ data, entropy: entropyProp, length: lengthProp, windowSize = 512, step: stepProp, sections = BIN_NO_SECTIONS, threshold = 7.2,
   orientation = 'vertical', size, selection: selectionProp, onSelect, cursor, onHover, list = true, label, className }: EntropyMapProps) {
-  const m = useMessages(BINARY_MESSAGES), { fmt, dir } = useLocale()
   const bytes = useMemo(() => (data ? toByteArray(data) : null), [data])
   const step = stepProp ?? windowSize
   const computed = useMemo(() => (entropyProp || !bytes ? null : entropyWindows(bytes, windowSize, step)), [entropyProp, bytes, windowSize, step])
@@ -1232,7 +1101,7 @@ export function EntropyMap({ data, entropy: entropyProp, length: lengthProp, win
   const pct = (o: number) => (length ? (o / length) * 100 : 0)
   const offsetAt = (e: { clientX: number; clientY: number }) => {
     const r = plotBox.current!.getBoundingClientRect()
-    const f = vertical ? (e.clientY - r.top) / r.height : (e.clientX - r.left) / r.width // rtl-lint-ignore: LTR plot
+    const f = vertical ? (e.clientY - r.top) / r.height : (e.clientX - r.left) / r.width
     return clamp(Math.floor(f * length), 0, Math.max(0, length - 1))
   }
   const windowRange = (o: number): ByteRange => { const i = Math.floor(o / step); return { start: i * step, end: Math.min(length, i * step + windowSize) } }
@@ -1242,7 +1111,7 @@ export function EntropyMap({ data, entropy: entropyProp, length: lengthProp, win
   const setHov = (o: number | null) => { setHover(o); onHover?.(o) }
   const shown = hover ?? (active !== null ? buckets[active]?.a ?? null : null)
   const readSec = shown !== null ? sectionAt(sections, shown) : undefined
-  const describe = (o: number) => m('regionAt', { range: '0x' + hexOffset(o), section: sectionAt(sections, o)?.name ?? m('noSection'), bits: m('bits', { value: binBits(bitsAt(o)) }) })
+  const describe = (o: number) => `0x${hexOffset(o)}, ${sectionAt(sections, o)?.name ?? 'no section'}, ${binBits(bitsAt(o))} bits`
   const [said, setSaid] = useState('')
   const goBucket = (j: number, extend: boolean) => {
     const k = clamp(j, 0, cols - 1)
@@ -1252,7 +1121,7 @@ export function EntropyMap({ data, entropy: entropyProp, length: lengthProp, win
     setSaid(describe(buckets[k].a))
   }
   const onKeyDown = (e: ReactKeyboardEvent<HTMLDivElement>) => {
-    const prev = vertical ? 'ArrowUp' : 'ArrowLeft', next = vertical ? 'ArrowDown' : 'ArrowRight', cur = active ?? -1, big = Math.max(1, Math.round(cols / 10)) // rtl-lint-ignore: LTR island, → is later
+    const prev = vertical ? 'ArrowUp' : 'ArrowLeft', next = vertical ? 'ArrowDown' : 'ArrowRight', cur = active ?? -1, big = Math.max(1, Math.round(cols / 10))
     let j: number | null = null
     if (e.key === next) j = cur + 1
     else if (e.key === prev) j = cur < 0 ? 0 : cur - 1
@@ -1288,20 +1157,20 @@ export function EntropyMap({ data, entropy: entropyProp, length: lengthProp, win
     if (d.moved && dragSel) { select(dragSel); setDragSel(null) } else pick(offsetAt(e))
   }
   const ticks = binTicks(length, vertical ? Math.max(2, Math.floor(plotH / 44)) : Math.max(2, Math.floor(plotLen / 72)))
-  const summary = m('entropySummary', { count: W, size: fmt.bytes(windowSize), high: regions.length, threshold })
+  const summary = `${plural(W, 'window')} of ${fmt.bytes(windowSize)}; ${regions.length === 0 ? `none above ${threshold} bits` : regions.length === 1 ? `${regions.length} region above ${threshold} bits` : `${regions.length} regions above ${threshold} bits`}.`
   const shownSel = dragSel ?? sel
   const thrPct = (threshold / 8) * 100
   const bandLen = (s: BinarySection) => (pct(Math.min(length, s.offset + s.size)) - pct(s.offset)) / 100 * plotLen
 
-  // physical geometry inside the LTR island: vertical strips grow along y, horizontal along x
-  const along = (a: number, z: number): CSSProperties => vertical ? { top: `${pct(a)}%`, height: `${Math.max(0.15, pct(z) - pct(a))}%` } : { left: `${pct(a)}%`, width: `${Math.max(0.15, pct(z) - pct(a))}%` } // rtl-lint-ignore
-  const at = (o: number): CSSProperties => vertical ? { top: `${pct(o)}%` } : { left: `${pct(o)}%` } // rtl-lint-ignore
+  // vertical strips grow along y, horizontal along x
+  const along = (a: number, z: number): CSSProperties => vertical ? { top: `${pct(a)}%`, height: `${Math.max(0.15, pct(z) - pct(a))}%` } : { left: `${pct(a)}%`, width: `${Math.max(0.15, pct(z) - pct(a))}%` }
+  const at = (o: number): CSSProperties => vertical ? { top: `${pct(o)}%` } : { left: `${pct(o)}%` }
 
   const plot = (
     <div ref={plotBox} className={cn('relative min-w-0', vertical ? 'h-full' : 'w-full')} onPointerDown={onPointerDown} onPointerMove={onPointerMove} onPointerUp={onPointerUp} onPointerCancel={() => { drag.current = null; setDragSel(null) }}
       onPointerLeave={e => { if (e.pointerType === 'mouse') setHov(null) }} style={{ touchAction: vertical ? 'pan-y' : 'pan-x' }}>
       {/* guides at 2, 4, 6 bits, the threshold, then the bars */}
-      {[2, 4, 6].map(b => <span key={b} aria-hidden className={cn('pointer-events-none absolute bg-[var(--line)]', vertical ? 'inset-y-0 w-px' : 'inset-x-0 h-px')} style={vertical ? { left: `${(b / 8) * 100}%` } : { bottom: `${(b / 8) * 100}%` }} />)} {/* rtl-lint-ignore */}
+      {[2, 4, 6].map(b => <span key={b} aria-hidden className={cn('pointer-events-none absolute bg-[var(--line)]', vertical ? 'inset-y-0 w-px' : 'inset-x-0 h-px')} style={vertical ? { left: `${(b / 8) * 100}%` } : { bottom: `${(b / 8) * 100}%` }} />)} 
       <svg aria-hidden className="absolute inset-0 h-full w-full" viewBox={vertical ? '0 0 100 10000' : '0 0 10000 100'} preserveAspectRatio="none" shapeRendering="crispEdges">
         {/* offsets scaled to 0–10 000 user units (huge coordinates lose precision in the renderer); a pixel holding several
             windows draws their mean as the bar and their highest as a tick, so packed runs show at any size */}
@@ -1319,9 +1188,8 @@ export function EntropyMap({ data, entropy: entropyProp, length: lengthProp, win
       {regions.map(r => (pct(r.end) - pct(r.start)) / 100 * plotLen >= 3
         ? <span key={r.start} aria-hidden className={cn('pointer-events-none absolute border-[var(--bad)] bg-[color-mix(in_srgb,var(--bad)_10%,transparent)]', vertical ? 'inset-x-0 border-y' : 'inset-y-0 border-x')} style={along(r.start, r.end)} />
         : <span key={r.start} aria-hidden className={cn('pointer-events-none absolute bg-[var(--bad)]', vertical ? 'end-0 w-1' : 'top-0 h-1')} style={{ ...along(r.start, r.end), ...(vertical ? { minHeight: 1 } : { minWidth: 1 }) }} />)}
-      <span aria-hidden className={cn('pointer-events-none absolute border-dashed border-[var(--fg2)]', vertical ? 'inset-y-0 border-s' : 'inset-x-0 border-t')} style={vertical ? { left: `${thrPct}%` } : { bottom: `${thrPct}%` }} /> {/* rtl-lint-ignore */}
+      <span aria-hidden className={cn('pointer-events-none absolute border-dashed border-[var(--fg2)]', vertical ? 'inset-y-0 border-s' : 'inset-x-0 border-t')} style={vertical ? { left: `${thrPct}%` } : { bottom: `${thrPct}%` }} /> 
       {shownSel && <span aria-hidden className={cn('pointer-events-none absolute border-[var(--accent)] bg-[color-mix(in_srgb,var(--accent)_16%,transparent)]', vertical ? 'inset-x-0 border-y-2' : 'inset-y-0 border-x-2')} style={along(shownSel.start, shownSel.end)} />}
-      {/* rtl-lint-ignore: physical geometry in the LTR island */}
       {cursor !== undefined && length > 0 && <span aria-hidden className={cn('pointer-events-none absolute bg-[var(--accent)]', vertical ? 'inset-x-0 h-0.5 -translate-y-1/2' : 'inset-y-0 w-0.5 -translate-x-1/2')} style={at(cursor)} />}
       {shown !== null && <span aria-hidden className={cn('pointer-events-none absolute bg-[var(--fg)]', vertical ? 'inset-x-0 h-px' : 'inset-y-0 w-px')} style={at(shown)} />}
     </div>
@@ -1330,7 +1198,7 @@ export function EntropyMap({ data, entropy: entropyProp, length: lengthProp, win
   const rulerW: CSSProperties | undefined = vertical ? { width: `${Math.max(6, hexOffset(ticks[ticks.length - 1] ?? 0).length) + 1}ch` } : undefined
   const ruler = (
     <div aria-hidden className={cn('relative font-[family-name:var(--mono)] text-[10px] text-[var(--fg3)] tabular-nums', vertical ? 'h-full flex-none' : 'h-4 w-full')} style={rulerW}>
-      {ticks.map(t => <span key={t} className={cn('absolute font-[family-name:var(--mono)] whitespace-nowrap', vertical ? cn('right-1', t > 0 && '-translate-y-1/2') : t > 0 && '-translate-x-1/2')} style={at(t)}>{hexOffset(t)}</span>)} {/* rtl-lint-ignore */}
+      {ticks.map(t => <span key={t} className={cn('absolute font-[family-name:var(--mono)] whitespace-nowrap', vertical ? cn('right-1', t > 0 && '-translate-y-1/2') : t > 0 && '-translate-x-1/2')} style={at(t)}>{hexOffset(t)}</span>)} 
     </div>
   )
   const bands = (
@@ -1351,24 +1219,24 @@ export function EntropyMap({ data, entropy: entropyProp, length: lengthProp, win
     <div className={cn('flex min-w-0 flex-col gap-2', className)}>
       <div className="flex h-5 min-w-0 items-center gap-2 text-xs text-[var(--fg2)]" aria-hidden>
         {shown !== null ? <>
-          <span dir="ltr" className="font-[family-name:var(--mono)] tabular-nums text-[var(--fg)]">0x{hexOffset(shown)}</span>
-          <span className="truncate">{readSec?.name ?? m('noSection')}</span>
+          <span className="font-[family-name:var(--mono)] tabular-nums text-[var(--fg)]">0x{hexOffset(shown)}</span>
+          <span className="truncate">{readSec?.name ?? 'no section'}</span>
           <span className="ms-auto inline-flex flex-none items-center gap-1.5">
             <span className="relative h-1.5 w-10 overflow-hidden rounded-full bg-[var(--muted)]"><span className="absolute inset-y-0 start-0 rounded-full" style={{ width: `${(bitsAt(shown) / 8) * 100}%`, background: entropyColor(bitsAt(shown)) }} /></span>
-            <span className="font-[family-name:var(--mono)] tabular-nums text-[var(--fg)]">{m('bits', { value: binBits(bitsAt(shown)) })}</span>
+            <span className="font-[family-name:var(--mono)] tabular-nums text-[var(--fg)]">{`${binBits(bitsAt(shown))} bits`}</span>
           </span>
-        </> : <span className="truncate">{m('hoverStrip')}</span>}
+        </> : <span className="truncate">{'Hover or tap the strip'}</span>}
       </div>
-      <div dir="ltr" tabIndex={0} role="group" aria-roledescription={m('entropyRole')} aria-label={label ?? m('entropyMap')} onKeyDown={onKeyDown}
+      <div tabIndex={0} role="group" aria-roledescription={'entropy map'} aria-label={label ?? 'Entropy map'} onKeyDown={onKeyDown}
         onBlur={e => { if (!e.currentTarget.contains(e.relatedTarget as Node | null)) { setActive(null); kAnchor.current = null } }}
         className="rounded-[var(--r-md)] outline-none focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[var(--accent)]">
         <span className="sr-only">{summary}</span>
         <span className="sr-only" aria-live="polite">{said}</span>
         {vertical ? <>
           <div aria-hidden className="mb-1 flex text-[10px] text-[var(--fg3)]">
-            <span className="flex-none font-[family-name:var(--mono)]" style={rulerW}><span className="font-[family-name:var(--font)]">{m('offset')}</span></span>
+            <span className="flex-none font-[family-name:var(--mono)]" style={rulerW}><span className="font-[family-name:var(--font)]">{'Offset'}</span></span>
             <span className="relative flex-1">0<span className="absolute end-0">8</span></span>
-            <span className="w-[96px] flex-none ps-2">{m('sections')}</span>
+            <span className="w-[96px] flex-none ps-2">{'Sections'}</span>
           </div>
           <div className="flex gap-2" style={{ height: plotH }}>
             {ruler}
@@ -1382,11 +1250,11 @@ export function EntropyMap({ data, entropy: entropyProp, length: lengthProp, win
         </>}
       </div>
       {list && (
-        <div dir={dir} className="flex min-w-0 flex-col gap-1">
+        <div className="flex min-w-0 flex-col gap-1">
           <div className="flex items-center gap-2">
-            <h4 className="m-0 text-[11px] font-medium tracking-wide text-[var(--fg2)] uppercase">{m('highEntropy')}</h4>
+            <h4 className="m-0 text-[11px] font-medium tracking-wide text-[var(--fg2)] uppercase">{'High entropy'}</h4>
             <Badge size="sm" tone={regions.length ? 'bad' : 'neutral'}>{fmt.number(regions.length)}</Badge>
-            <span className="ms-auto inline-flex items-center gap-1 text-[11px] text-[var(--fg3)]"><span aria-hidden className="inline-block h-0 w-3 border-t border-dashed border-[var(--fg2)]" />{m('threshold')} {threshold}</span>
+            <span className="ms-auto inline-flex items-center gap-1 text-[11px] text-[var(--fg3)]"><span aria-hidden className="inline-block h-0 w-3 border-t border-dashed border-[var(--fg2)]" />{'Threshold'} {threshold}</span>
           </div>
           <BinRegionList regions={regions} sections={sections} threshold={threshold} onSelect={select} active={sel} />
         </div>
@@ -1394,10 +1262,6 @@ export function EntropyMap({ data, entropy: entropyProp, length: lengthProp, win
     </div>
   )
 }
-
-/* ════════════════════════════════════════════════════════════════════════════
- * ByteMap (Hilbert curve)
- * ══════════════════════════════════════════════════════════════════════════ */
 
 /** ByteMap colour modes. */
 export type ByteMapMode = 'entropy' | 'sections' | 'class' | 'strings'
@@ -1429,11 +1293,10 @@ export type ByteMapProps = {
  * byte class (zero, printable, control, high) or strings. Hover or tap reads out offset → address, section and an
  * entropy bar; click or Enter selects (`onSelect` with the cell's first byte); `cursor` and `selection` are drawn.
  * Keyboard: ←/→ follow the curve, ↑/↓ move by a row, Home/End, Enter. Ctrl/⌘ + wheel or the buttons zoom into a part
- * of the file (the curve is laid over that range). The map is an LTR island; legend and readout follow the locale.
+ * of the file (the curve is laid over that range).
  */
 export function ByteMap({ data, sections = BIN_NO_SECTIONS, order: orderProp = 7, bytesPerCell, mode: modeProp, defaultMode = 'entropy', onModeChange, entropyWindow, cursor, selection,
   onSelect, onHover, size = 320, modes = true, legend = true, zoomable = true, label, className }: ByteMapProps) {
-  const m = useMessages(BINARY_MESSAGES), { fmt, dir } = useLocale()
   const bytes = useMemo(() => toByteArray(data), [data]), n = bytes.length
   const order = clamp(Math.round(orderProp), 1, 9), side = 2 ** order, cells = side * side
   const [mode, setMode] = useControllable<ByteMapMode>(modeProp, defaultMode, onModeChange)
@@ -1446,13 +1309,7 @@ export function ByteMap({ data, sections = BIN_NO_SECTIONS, order: orderProp = 7
   const canvas = useRef<HTMLCanvasElement>(null), box = useRef<HTMLDivElement>(null)
   const theme = useBinThemeTick(box)
   const [px, setPx] = useState({ w: 0, dpr: 1 })
-  useLayoutEffect(() => {
-    const el = box.current; if (!el) return
-    const set = () => setPx(p => { const w = el.clientWidth, dpr = window.devicePixelRatio || 1; return p.w === w && p.dpr === dpr ? p : { w, dpr } })
-    set()
-    const ro = new ResizeObserver(set); ro.observe(el)
-    return () => ro.disconnect()
-  }, [])
+  useResizeObserver(box, el => setPx(p => { const w = el.clientWidth, dpr = window.devicePixelRatio || 1; return p.w === w && p.dpr === dpr ? p : { w, dpr } }))
 
   // per-cell metrics for the current mode (computed once per data, zoom and mode)
   const metric = useMemo(() => {
@@ -1552,7 +1409,7 @@ export function ByteMap({ data, sections = BIN_NO_SECTIONS, order: orderProp = 7
 
   const cellAt = (e: { clientX: number; clientY: number }) => {
     const r = canvas.current!.getBoundingClientRect(), k = px.dpr
-    const x = Math.floor(((e.clientX - r.left) * k - pad) / cellPx), y = Math.floor(((e.clientY - r.top) * k - pad) / cellPx) // rtl-lint-ignore: canvas pixels
+    const x = Math.floor(((e.clientX - r.left) * k - pad) / cellPx), y = Math.floor(((e.clientY - r.top) * k - pad) / cellPx)
     if (x < 0 || y < 0 || x >= side || y >= side) return null
     const d = hilbertXY2D(order, x, y)
     return d < used ? d : null
@@ -1577,14 +1434,14 @@ export function ByteMap({ data, sections = BIN_NO_SECTIONS, order: orderProp = 7
     return () => el.removeEventListener('wheel', wheel)
   }) // re-bound every render: it reads the current zoom and geometry
   const [said, setSaid] = useState('')
-  const describe = (d: number) => { const o = offOf(d), s = sectionAt(sections, o); return `0x${hexOffset(o)}${s ? `, ${s.name}` : ''}, ${m('bits', { value: binBits(shannonEntropy(bytes, o - 256, o + 256)) })}` }
+  const describe = (d: number) => { const o = offOf(d), s = sectionAt(sections, o); return `0x${hexOffset(o)}${s ? `, ${s.name}` : ''}, ${binBits(shannonEntropy(bytes, o - 256, o + 256))} bits` }
   const onKeyDown = (e: ReactKeyboardEvent<HTMLDivElement>) => {
     const cur = active ?? (cursor !== undefined && cellOfOffset(cursor) >= 0 ? cellOfOffset(cursor) : -1)
     let d: number | null = null
     const xy = cur >= 0 ? [lut[cur * 2], lut[cur * 2 + 1]] : [0, 0]
     switch (e.key) {
-      case 'ArrowRight': d = cur + 1; break // rtl-lint-ignore: LTR island, → follows the curve forward
-      case 'ArrowLeft': d = cur - 1; break // rtl-lint-ignore
+      case 'ArrowRight': d = cur + 1; break
+      case 'ArrowLeft': d = cur - 1; break
       case 'ArrowDown': d = cur < 0 ? 0 : xy[1] < side - 1 ? hilbertXY2D(order, xy[0], xy[1] + 1) : cur; break
       case 'ArrowUp': d = cur < 0 ? 0 : xy[1] > 0 ? hilbertXY2D(order, xy[0], xy[1] - 1) : cur; break
       case 'Home': d = 0; break
@@ -1605,50 +1462,50 @@ export function ByteMap({ data, sections = BIN_NO_SECTIONS, order: orderProp = 7
   const shownOff = shownCell !== null ? offOf(shownCell) : null
   const shownSec = shownOff !== null ? sectionAt(sections, shownOff) : undefined
   const shownBits = shownOff !== null ? shannonEntropy(bytes, shownOff - 256, shownOff + 256) : 0
-  const modeOpts: { value: ByteMapMode; label: string }[] = [{ value: 'entropy', label: m('modeEntropy') }, { value: 'sections', label: m('modeSections') }, { value: 'class', label: m('modeClass') }, { value: 'strings', label: m('modeStrings') }]
+  const modeOpts: { value: ByteMapMode; label: string }[] = [{ value: 'entropy', label: 'Entropy' }, { value: 'sections', label: 'Sections' }, { value: 'class', label: 'Bytes' }, { value: 'strings', label: 'Strings' }]
   const chip = (color: string, text: string, key?: string) => <span key={key ?? text} className="inline-flex min-w-0 items-center gap-1.5"><span aria-hidden className="h-2.5 w-2.5 flex-none rounded-[var(--r-sm)]" style={{ background: color }} /><span className="truncate">{text}</span></span>
 
   return (
     <div className={cn('flex min-w-0 flex-col gap-2', className)} style={{ maxWidth: size }}>
-      {modes && <div className="min-w-0 overflow-x-auto"><SegmentedControl size="sm" aria-label={m('colourBy')} value={mode} onChange={v => setMode(v as ByteMapMode)} options={modeOpts} /></div>}
-      <div ref={box} dir="ltr" tabIndex={0} role="group" aria-roledescription={m('mapRole')} aria-label={label ?? m('byteMap')} onKeyDown={onKeyDown}
+      {modes && <div className="min-w-0 overflow-x-auto"><SegmentedControl size="sm" aria-label={'Colour by'} value={mode} onChange={v => setMode(v as ByteMapMode)} options={modeOpts} /></div>}
+      <div ref={box} tabIndex={0} role="group" aria-roledescription={'byte map'} aria-label={label ?? 'Byte map'} onKeyDown={onKeyDown}
         onBlur={() => { if (active !== null) { setActive(null); onHover?.(null) } }}
         className="relative aspect-square w-full touch-pan-y rounded-[var(--r-md)] bg-[var(--card)] outline-none focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[var(--accent)]">
         <canvas ref={canvas} aria-hidden className="absolute inset-0 h-full w-full cursor-crosshair rounded-[var(--r-sm)]"
           onPointerMove={e => setHov(cellAt(e))} onPointerLeave={e => { if (e.pointerType === 'mouse') setHov(null) }}
           onPointerDown={e => { if (e.pointerType !== 'mouse') setHov(cellAt(e)) }}
           onClick={e => { const d = cellAt(e); if (d !== null) { setActive(null); onSelect?.(offOf(d)) } }} />
-        <span className="sr-only">{m('mapSummary', { size: fmt.bytes(len), side, perCell: m('perCell', { count: bpc }) })}</span>
+        <span className="sr-only">{`${fmt.bytes(len)} on a Hilbert curve of ${side} × ${side} cells, ${plural(bpc, 'byte')} each.`}</span>
         <span className="sr-only" aria-live="polite">{said}</span>
       </div>
-      <div dir={dir} className="flex h-9 min-w-0 flex-col justify-center text-xs text-[var(--fg2)]" aria-hidden>
+      <div className="flex h-9 min-w-0 flex-col justify-center text-xs text-[var(--fg2)]" aria-hidden>
         {shownOff !== null ? <>
           <div className="flex min-w-0 items-center gap-2">
-            <span dir="ltr" className="truncate font-[family-name:var(--mono)] tabular-nums text-[var(--fg)]">0x{hexOffset(shownOff)}{shownSec?.vaddr !== undefined && <span className="text-[var(--fg2)]"> → 0x{hexOffset(shownSec.vaddr + shownOff - shownSec.offset)}</span>}</span>
+            <span className="truncate font-[family-name:var(--mono)] tabular-nums text-[var(--fg)]">0x{hexOffset(shownOff)}{shownSec?.vaddr !== undefined && <span className="text-[var(--fg2)]"> → 0x{hexOffset(shownSec.vaddr + shownOff - shownSec.offset)}</span>}</span>
             {shownSec && <span className="ms-auto inline-flex min-w-0 items-center gap-1"><span className="h-2 w-2 flex-none rounded-full" style={{ background: binarySectionColor(sections, sections.indexOf(shownSec)) }} /><span className="truncate font-[family-name:var(--mono)]">{shownSec.name}</span></span>}
           </div>
           <div className="flex items-center gap-2">
             <span className="relative h-1.5 min-w-0 flex-1 overflow-hidden rounded-full bg-[var(--muted)]"><span className="absolute inset-y-0 start-0 rounded-full" style={{ width: `${(shownBits / 8) * 100}%`, background: entropyColor(shownBits) }} /></span>
-            <span className="flex-none font-[family-name:var(--mono)] tabular-nums text-[var(--fg)]">{m('bits', { value: binBits(shownBits) })}</span>
+            <span className="flex-none font-[family-name:var(--mono)] tabular-nums text-[var(--fg)]">{`${binBits(shownBits)} bits`}</span>
           </div>
-        </> : <span className="truncate">{m('hoverMap')}</span>}
+        </> : <span className="truncate">{'Hover or tap a cell'}</span>}
       </div>
       {(legend || zoomable) && (
-        <div dir={dir} className="flex min-w-0 flex-wrap items-center gap-x-3 gap-y-1 text-[11px] text-[var(--fg2)]">
+        <div className="flex min-w-0 flex-wrap items-center gap-x-3 gap-y-1 text-[11px] text-[var(--fg2)]">
           {legend && mode === 'entropy' && <div className="flex w-full min-w-0 items-center gap-2">
             <span className="flex-none">0</span>
-            <span dir="ltr" aria-hidden className="h-2 min-w-0 flex-1 rounded-full" style={{ background: binEntropyGradient('to right') }} />
-            <span className="flex-none">{m('bits', { value: 8 })}</span>
+            <span aria-hidden className="h-2 min-w-0 flex-1 rounded-full" style={{ background: binEntropyGradient('to right') }} />
+            <span className="flex-none">{`${8} bits`}</span>
           </div>}
           {legend && mode === 'sections' && sections.map((s, i) => chip(binarySectionColor(sections, i), s.name, s.name + s.offset))}
-          {legend && mode === 'class' && BIN_CLASSES.map(k => chip(BIN_CLASS_FILL[k], m(k === 'null' ? 'classNull' : k === 'ascii' ? 'classAscii' : k === 'control' ? 'classControl' : 'classHigh'), k))}
-          {legend && mode === 'strings' && <>{chip('var(--c2)', m('inString'))}{chip('var(--muted)', m('notString'))}</>}
+          {legend && mode === 'class' && BIN_CLASSES.map(k => chip(BIN_CLASS_FILL[k], (k === 'null' ? 'Zero' : k === 'ascii' ? 'Printable' : k === 'control' ? 'Control' : 'High (≥ 80)'), k))}
+          {legend && mode === 'strings' && <>{chip('var(--c2)', 'In a string')}{chip('var(--muted)', 'Other')}</>}
           <span className="ms-auto inline-flex items-center gap-1 text-[var(--fg3)]">
-            {zoom && <button type="button" onClick={() => setZoom(null)} className="me-1 cursor-pointer border-0 bg-transparent p-0 text-[11px] text-[var(--accent)] underline-offset-2 hover:underline">{m('zoomReset')}</button>}
-            <span className="me-1">{m('perCell', { count: bpc })}</span>
+            {zoom && <button type="button" onClick={() => setZoom(null)} className="me-1 cursor-pointer border-0 bg-transparent p-0 text-[11px] text-[var(--accent)] underline-offset-2 hover:underline">{'Whole file'}</button>}
+            <span className="me-1">{plural(bpc, 'byte')}</span>
             {zoomable && <>
-              <IconButton icon="zoomIn" size="icon-xs" label={m('zoomIn')} disabled={len <= cells} onClick={() => zoomAround(cursor !== undefined && cursor >= vs && cursor < ve ? cursor : vs + len / 2, 4)} />
-              <IconButton icon="minus" size="icon-xs" label={m('zoomOut')} disabled={!zoom} onClick={() => zoomAround(vs + len / 2, 0.25)} />
+              <IconButton icon="zoomIn" size="icon-xs" label={'Zoom in'} disabled={len <= cells} onClick={() => zoomAround(cursor !== undefined && cursor >= vs && cursor < ve ? cursor : vs + len / 2, 4)} />
+              <IconButton icon="minus" size="icon-xs" label={'Zoom out'} disabled={!zoom} onClick={() => zoomAround(vs + len / 2, 0.25)} />
             </>}
           </span>
         </div>
@@ -1657,21 +1514,16 @@ export function ByteMap({ data, sections = BIN_NO_SECTIONS, order: orderProp = 7
   )
 }
 
-/* ════════════════════════════════════════════════════════════════════════════
- * Sections list and BinaryView
- * ══════════════════════════════════════════════════════════════════════════ */
-
 /**
  * The file's sections as a list: colour dot, name, size and a bar (size relative to the largest). The section at
  * `cursor` is marked current; a click selects one (`onSelect`).
  */
 export function BinarySectionList({ sections, cursor, selection, onSelect, className }:
   { sections: readonly BinarySection[]; cursor?: number; selection?: ByteRange | null; onSelect?: (s: BinarySection) => void; className?: string }) {
-  const m = useMessages(BINARY_MESSAGES), { fmt } = useLocale()
   const big = Math.max(1, ...sections.map(s => s.size))
   const cur = cursor !== undefined ? sectionAt(sections, cursor) : undefined
   return (
-    <ul aria-label={m('sections')} className={cn('m-0 flex list-none flex-col p-0', className)}>
+    <ul aria-label={'Sections'} className={cn('m-0 flex list-none flex-col p-0', className)}>
       {sections.map((s, i) => {
         const on = !!selection && selection.start === s.offset && selection.end === s.offset + s.size
         return (
@@ -1714,13 +1566,12 @@ export type BinaryViewProps = {
  */
 export function BinaryView({ data, sections = BIN_NO_SECTIONS, cursor: cursorProp, defaultCursor = 0, onCursorChange, selection: selectionProp, onSelectionChange, readOnly, onChange,
   layout = 'auto', windowSize = 512, threshold = 7.2, mapOrder = 7, hexHeight = 360, label, className }: BinaryViewProps) {
-  const m = useMessages(BINARY_MESSAGES), { fmt } = useLocale()
   const bytes = useMemo(() => toByteArray(data), [data])
   const [cursor, setCursor] = useControllable(cursorProp, defaultCursor, onCursorChange)
   const [selection, setSelection] = useControllable<ByteRange | null>(selectionProp, null, onSelectionChange)
   const entropy = useMemo(() => entropyWindows(bytes, windowSize), [bytes, windowSize])
   const regions = useMemo(() => highEntropyRegions(entropy, { windowSize, threshold, length: bytes.length }), [entropy, windowSize, threshold, bytes.length])
-  const highlights = useMemo<BinaryHighlight[]>(() => regions.slice(0, 2000).map(r => ({ start: r.start, end: r.end, color: 'var(--bad)', label: m('highEntropy') })), [regions, m])
+  const highlights = useMemo<BinaryHighlight[]>(() => regions.slice(0, 2000).map(r => ({ start: r.start, end: r.end, color: 'var(--bad)', label: 'High entropy' })), [regions])
   const [ref, width] = useWidth<HTMLDivElement>()
   const tabs = layout === 'tabs' || (layout === 'auto' && width > 0 && width < 900)
   const [tab, setTab] = useState('map')
@@ -1731,24 +1582,24 @@ export function BinaryView({ data, sections = BIN_NO_SECTIONS, cursor: cursorPro
   const map = <ByteMap data={bytes} sections={sections} order={mapOrder} cursor={cursor} selection={selection} onSelect={o => jump(null, o)} />
   const list = <BinarySectionList sections={sections} cursor={cursor} selection={selection} onSelect={selectSection} />
   const strip = (len: number) => <EntropyMap entropy={entropy} length={bytes.length} windowSize={windowSize} threshold={threshold} sections={sections} size={len} cursor={cursor} selection={selection} onSelect={r => jump(r, r.start)} />
-  const summary = <p className="m-0 text-xs text-[var(--fg2)]">{m('fileSummary', { size: fmt.bytes(bytes.length), count: sections.length })}</p>
+  const summary = <p className="m-0 text-xs text-[var(--fg2)]">{`${fmt.bytes(bytes.length)} · ${plural(sections.length, 'section')}`}</p>
   return (
-    <section ref={ref} aria-label={label ?? m('binaryView')} className={cn('min-w-0', className)}>
+    <section ref={ref} aria-label={label ?? 'Binary explorer'} className={cn('min-w-0', className)}>
       {tabs ? (
         <Tabs.Root value={tab} onValueChange={setTab}>
-          <Tabs.List aria-label={label ?? m('binaryView')}>
-            <Tabs.Trigger value="map">{m('tabMap')}</Tabs.Trigger>
-            <Tabs.Trigger value="entropy">{m('tabEntropy')}</Tabs.Trigger>
-            <Tabs.Trigger value="hex">{m('tabHex')}</Tabs.Trigger>
+          <Tabs.List aria-label={label ?? 'Binary explorer'}>
+            <Tabs.Trigger value="map">{'Map'}</Tabs.Trigger>
+            <Tabs.Trigger value="entropy">{'Entropy'}</Tabs.Trigger>
+            <Tabs.Trigger value="hex">{'Hex'}</Tabs.Trigger>
           </Tabs.List>
           <Tabs.Content value="map" className="flex flex-col gap-3 pt-3">
             <div className="mx-auto w-full max-w-[360px]">{map}</div>
-            <div className="flex items-center justify-between gap-2">{summary}<Button size="sm" onClick={() => setTab('hex')}>{m('showInHex')}</Button></div>
+            <div className="flex items-center justify-between gap-2">{summary}<Button size="sm" onClick={() => setTab('hex')}>{'Show in hex'}</Button></div>
             {list}
           </Tabs.Content>
           <Tabs.Content value="entropy" className="flex flex-col gap-3 pt-3">
             {strip(340)}
-            <Button size="sm" className="self-end" onClick={() => setTab('hex')}>{m('showInHex')}</Button>
+            <Button size="sm" className="self-end" onClick={() => setTab('hex')}>{'Show in hex'}</Button>
           </Tabs.Content>
           <Tabs.Content value="hex" className="pt-3">{hex}</Tabs.Content>
         </Tabs.Root>
@@ -1756,7 +1607,7 @@ export function BinaryView({ data, sections = BIN_NO_SECTIONS, cursor: cursorPro
         <div className="grid grid-cols-[minmax(240px,300px)_minmax(0,1fr)_minmax(200px,240px)] gap-x-5 gap-y-4">
           <div className="min-w-0">{map}</div>
           <div className="flex min-w-0 flex-col gap-2">
-            <h4 className="m-0 text-[11px] font-medium tracking-wide text-[var(--fg2)] uppercase">{m('sections')}</h4>
+            <h4 className="m-0 text-[11px] font-medium tracking-wide text-[var(--fg2)] uppercase">{'Sections'}</h4>
             {list}
             {summary}
           </div>

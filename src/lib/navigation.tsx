@@ -1,28 +1,8 @@
 import { createContext, useCallback, useContext, useEffect, useId, useLayoutEffect, useMemo, useRef, useState, type ButtonHTMLAttributes, type HTMLAttributes, type ReactNode, type Ref, type KeyboardEvent as RKeyboardEvent, type MouseEvent as ReactMouseEvent } from 'react'
 import { AnimatePresence, motion, type Variants } from 'motion/react'
-import { type AsChildProps, Avatar, Button, type ButtonProps, Icon, IconButton, type IconName, ScrollEdges, Slot, StatusIcon, cn, defineMessages, dirX, logicalArrow, prefersReducedMotion, safeUrl, spring, useCoarsePointer, useComposedRefs, useControllable, useDir, useHotkey, useLocale, useMessages, useOutside, useScrollEdges } from './core'
+import { type AsChildProps, Avatar, Button, type ButtonProps, Icon, IconButton, type IconName, ScrollEdges, Slot, StatusIcon, cn, prefersReducedMotion, safeUrl, spring, useCoarsePointer, useComposedRefs, useControllable, useHotkey, useOutside, useScrollEdges, fmt, useResizeObserver } from './core'
 import { ActiveIndicator } from './forms'
 import { Tooltip } from './overlay'
-
-/* ════════════════════════════════════════════════════════════════════════════
- * 7. NAVIGATION
- * ══════════════════════════════════════════════════════════════════════════ */
-
-/** This module's strings (machine-drafted de/ar: have a native speaker review). Override with `<UIProvider messages={{ 'nav.tabs': … }}>`. */
-const NAV_MSG = defineMessages('nav', {
-  en: {
-    sidebar: '{name} navigation', expand: 'Expand', collapse: 'Collapse', expandSidebar: 'Expand sidebar', collapseSidebar: 'Collapse sidebar',
-    tabs: 'Tabs', newAction: 'New', newCount: ', {count} new', main: 'Main', breadcrumb: 'Breadcrumb', startOver: 'Start over',
-  },
-  de: {
-    sidebar: 'Navigation: {name}', expand: 'Ausklappen', collapse: 'Einklappen', expandSidebar: 'Seitenleiste ausklappen', collapseSidebar: 'Seitenleiste einklappen',
-    tabs: 'Tabs', newAction: 'Neu', newCount: ', {count} neu', main: 'Hauptmenü', breadcrumb: 'Brotkrumen', startOver: 'Von vorn beginnen',
-  },
-  ar: {
-    sidebar: 'تنقّل {name}', expand: 'توسيع', collapse: 'طي', expandSidebar: 'توسيع الشريط الجانبي', collapseSidebar: 'طي الشريط الجانبي',
-    tabs: 'علامات التبويب', newAction: 'جديد', newCount: '، {count} جديدة', main: 'الرئيسية', breadcrumb: 'مسار التنقل', startOver: 'البدء من جديد',
-  },
-})
 
 /**
  * Values registered by the items of a composite (tabs, toggle group) in mount order, with their disabled flag, so the
@@ -49,8 +29,6 @@ function navStep(items: HTMLElement[], key: string, prev: string, next: string, 
   return items[n] ?? null
 }
 const navIdPart = (v: string) => v.replace(/[^\w-]/g, '_')
-
-/* Tabs ─────────────────────────────────────────────────────────────────────── */
 
 export type TabItem = { value: string; label: ReactNode; content?: ReactNode; badge?: ReactNode }
 
@@ -95,7 +73,7 @@ export function TabsRoot({ value, defaultValue = '', onValueChange, onChange, or
  * colour behind it ('card' or 'bg').
  */
 export function TabsList({ className, children, fade = 'card', 'aria-label': ariaLabel }: { className?: string; children: ReactNode; fade?: 'card' | 'bg'; 'aria-label'?: string }) {
-  const c = useTabs('List'), vertical = c.orientation === 'vertical', dir = useDir()
+  const c = useTabs('List'), vertical = c.orientation === 'vertical'
   const list = useRef<HTMLDivElement>(null)
   const [edgeRef, edges] = useScrollEdges<HTMLDivElement>()
   const ref = useComposedRefs<HTMLDivElement>(list, edgeRef)
@@ -104,7 +82,7 @@ export function TabsList({ className, children, fade = 'card', 'aria-label': ari
     if (!el || vertical || el.scrollWidth <= el.clientWidth + 1) return
     const tab = [...el.querySelectorAll<HTMLElement>('[role=tab]')].find(t => t.getAttribute('aria-selected') === 'true')
     if (!tab) return
-    // scroll by the visible overflow (a physical delta, so it works the same when the list runs right to left)
+    // scroll by the visible overflow
     const er = el.getBoundingClientRect(), tr = tab.getBoundingClientRect(), pad = 24
     const by = tr.left - pad < er.left ? tr.left - pad - er.left : tr.right + pad > er.right ? tr.right + pad - er.right : 0
     if (by) el.scrollBy?.({ left: by, behavior: prefersReducedMotion() ? 'auto' : 'smooth' })
@@ -112,7 +90,7 @@ export function TabsList({ className, children, fade = 'card', 'aria-label': ari
   const onKeyDown = (e: RKeyboardEvent<HTMLDivElement>) => {
     if (e.key === 'Enter' || (e.target as Element).closest('[role=tablist]') !== e.currentTarget) return
     const tabs = [...e.currentTarget.querySelectorAll<HTMLElement>('[role=tab]')].filter(t => t.closest('[role=tablist]') === e.currentTarget && !(t as HTMLButtonElement).disabled)
-    const to = navStep(tabs, vertical ? e.key : logicalArrow(e.key, dir), vertical ? 'ArrowUp' : 'ArrowLeft', vertical ? 'ArrowDown' : 'ArrowRight')
+    const to = navStep(tabs, vertical ? e.key : e.key, vertical ? 'ArrowUp' : 'ArrowLeft', vertical ? 'ArrowDown' : 'ArrowRight')
     if (!to) return
     e.preventDefault(); to.focus()
     if (!c.manual && to.dataset.value !== undefined) c.select(to.dataset.value)
@@ -151,7 +129,7 @@ export function TabsTrigger({ value, disabled = false, asChild, className, child
       on ? 'text-[var(--fg)]' : 'text-[var(--fg2)] hover:text-[var(--fg)]', vertical && !on && 'hover:bg-[var(--muted)]', className),
   }
   const bar = on && <ActiveIndicator group={c.group} className={vertical ? 'start-auto -end-px w-0.5 rounded-full bg-[var(--fg)]' : 'top-auto -bottom-px h-0.5 rounded-full bg-[var(--fg)]'} />
-  if (asChild) return <Slot {...(props as HTMLAttributes<HTMLElement>)} aria-disabled={disabled || undefined}>{children}</Slot>
+  if (asChild) return <Slot {...props} aria-disabled={disabled || undefined}>{children}</Slot>
   return <button type="button" disabled={disabled} {...props}>{children}{bar}</button>
 }
 
@@ -213,8 +191,6 @@ export function NavList({ items, value, defaultValue, onChange, collapsed, class
   )
 }
 
-/* Collapsible sidebar ──────────────────────────────────────────────────────── */
-
 /** A sidebar row: a nav item (badge may be a count) or a section heading. */
 export type SidebarEntry = (NavItem & { count?: number }) | { heading: string }
 const isHeading = (e: SidebarEntry): e is { heading: string } => 'heading' in e
@@ -239,7 +215,7 @@ const sbFade = { duration: 0.15 }
  * it starts folded when the frame is narrower than 440px; in a frame that narrow, expanding it slides it over the
  * main pane (tap outside or pick an item to fold it again).
  */
-// i18n-ignore: a sample brand name (pass `title`)
+
 export function CollapsibleSidebar({ items, title = 'Northwind', user, value, defaultValue, onChange, collapsed, defaultCollapsed, onCollapsedChange, hotkey = '[', children, className }:
   { items: SidebarEntry[]; title?: string; user?: { name: string; detail?: string }; value?: string; defaultValue?: string; onChange?: (v: string) => void
     collapsed?: boolean; defaultCollapsed?: boolean; onCollapsedChange?: (v: boolean) => void; hotkey?: string | false
@@ -253,19 +229,14 @@ export function CollapsibleSidebar({ items, title = 'Northwind', user, value, de
   const coarse = useCoarsePointer() // touch: the toggle's tooltip would only repeat its label and the keyboard hint
   // narrow frame (phones): the expanded sidebar slides over the main pane instead of squeezing it
   const [over, setOver] = useState(false)
-  useLayoutEffect(() => {
-    const el = frame.current; if (!el) return
-    const ro = new ResizeObserver(() => setOver(el.offsetWidth < 440)); ro.observe(el)
-    return () => ro.disconnect()
-  }, [])
+  useResizeObserver(frame, el => setOver(el.offsetWidth < 440))
   const toggle = useCallback(() => setCol(!col), [col, setCol])
   useHotkey(hotkey || '', () => { // only the sidebar that is on screen answers
     const r = frame.current?.getBoundingClientRect()
     if (r && r.bottom > 0 && r.top < innerHeight) toggle()
   }, { enabled: !!hotkey, ignoreEditable: true })
   const current = navItems.find(n => n.value === v) ?? navItems[0]
-  const beside = useDir() === 'rtl' ? 'left' : 'right' // tooltips open away from the sidebar's edge
-  const tm = useMessages(NAV_MSG)
+  const beside = 'right' // tooltips open away from the sidebar's edge
   return (
     <div ref={frame} className={cn('relative flex h-[400px] overflow-hidden rounded-[var(--r-lg)] border border-[var(--line)] bg-[var(--bg)]', className)}>
       {over && <div aria-hidden className="w-[60px] flex-none" />}
@@ -273,14 +244,14 @@ export function CollapsibleSidebar({ items, title = 'Northwind', user, value, de
         {over && !col && <motion.div key="scrim" aria-hidden onClick={toggle} className="absolute inset-0 z-[5] bg-black/25"
           initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} transition={{ duration: 0.2 }} />}
       </AnimatePresence>
-      <motion.aside initial={false} animate={{ width: col ? 60 : 220 }} transition={spring(0.12, 0.4)} aria-label={tm('sidebar', { name: title })}
+      <motion.aside initial={false} animate={{ width: col ? 60 : 220 }} transition={spring(0.12, 0.4)} aria-label={`${title} navigation`}
         className={cn('flex flex-none flex-col gap-1.5 overflow-hidden border-e border-[var(--line)] bg-[var(--card)] p-2.5',
           over && 'absolute inset-y-0 start-0 z-10', over && !col && 'shadow-[var(--shadow)]')}>
         <div className="flex h-9 items-center gap-2 px-1 whitespace-nowrap">
           <motion.span initial={false} animate={{ opacity: col ? 0 : 1, width: col ? 0 : 22 }} transition={sbFade} className="h-[22px] flex-none rounded-[var(--r-md)] bg-[linear-gradient(135deg,var(--accent),var(--c4))]" />
           <motion.b initial={false} animate={{ opacity: col ? 0 : 1 }} transition={sbFade} className="min-w-0 flex-1 truncate text-sm font-semibold">{title}</motion.b>
-          <Tooltip content={<>{col ? tm('expand') : tm('collapse')} <kbd className="font-[family-name:var(--mono)] opacity-70 [@media(hover:none)]:hidden">{hotkey || ''}</kbd></>} placement={col ? beside : 'bottom-center'} portal delay={300} disabled={coarse}>
-            <IconButton icon="panel" label={col ? tm('expandSidebar') : tm('collapseSidebar')} aria-expanded={!col} onClick={toggle} />
+          <Tooltip content={<>{col ? 'Expand' : 'Collapse'} <kbd className="font-[family-name:var(--mono)] opacity-70 [@media(hover:none)]:hidden">{hotkey || ''}</kbd></>} placement={col ? beside : 'bottom-center'} portal delay={300} disabled={coarse}>
+            <IconButton icon="panel" label={col ? 'Expand sidebar' : 'Collapse sidebar'} aria-expanded={!col} onClick={toggle} />
           </Tooltip>
         </div>
         <nav className="mt-1.5 flex flex-1 flex-col gap-0.5">
@@ -326,8 +297,6 @@ export function CollapsibleSidebar({ items, title = 'Northwind', user, value, de
   )
 }
 
-/* Mobile tab bar ───────────────────────────────────────────────────────────── */
-
 /** A tab in MobileTabBar. `count` shows a red badge (set it to 0 to clear it with an exit pop). */
 export type TabBarItem = NavItem & { count?: number }
 
@@ -337,19 +306,18 @@ export type TabBarItem = NavItem & { count?: number }
  */
 export function MobileTabBar({ items, value, defaultValue, onChange, onAction, actionLabel, actionIcon = 'plus', className }:
   { items: TabBarItem[]; value?: string; defaultValue?: string; onChange?: (v: string) => void; onAction?: () => void; actionLabel?: string; actionIcon?: IconName; className?: string }) {
-  const tm = useMessages(NAV_MSG)
   const [v, set] = useControllable(value, defaultValue ?? items[0].value, onChange)
   const group = useId(), touched = useRef(false)
   const [spin, setSpin] = useState(0)
   const mid = Math.ceil(items.length / 2)
   const cells: (TabBarItem | null)[] = onAction ? [...items.slice(0, mid), null, ...items.slice(mid)] : items
   return (
-    <nav aria-label={tm('tabs')} className={cn('grid h-[calc(64px+env(safe-area-inset-bottom,0px))] items-center border-t border-[var(--line)] bg-[color-mix(in_srgb,var(--card)_92%,transparent)] pb-[max(6px,env(safe-area-inset-bottom))] backdrop-blur-md', className)}
+    <nav aria-label={'Tabs'} className={cn('grid h-[calc(64px+env(safe-area-inset-bottom,0px))] items-center border-t border-[var(--line)] bg-[color-mix(in_srgb,var(--card)_92%,transparent)] pb-[max(6px,env(safe-area-inset-bottom))] backdrop-blur-md', className)}
       style={{ gridTemplateColumns: `repeat(${cells.length}, minmax(0, 1fr))` }}>
       {cells.map(it => it === null ? (
         <span key="action" className="grid place-items-center">
           {/* the replay key sits on the icon, not the button, so pressing it keeps keyboard focus */}
-          <motion.button aria-label={actionLabel ?? tm('newAction')} onClick={() => { setSpin(s => s + 1); onAction?.() }} whileTap={{ scale: 0.92 }}
+          <motion.button aria-label={actionLabel ?? 'New'} onClick={() => { setSpin(s => s + 1); onAction?.() }} whileTap={{ scale: 0.92 }}
             className="-mt-5 grid h-11 w-11 cursor-pointer place-items-center rounded-full border-0 bg-[var(--primary)] text-[var(--on-primary)] shadow-[0_6px_16px_rgba(0,0,0,.2)]">
             <motion.span key={spin} className="grid" initial={false} animate={spin ? { rotate: [0, 90], scale: [1, 0.9, 1] } : undefined} transition={{ duration: 0.35, ease: 'easeOut' }}>
               <Icon name={actionIcon} size={20} />
@@ -374,16 +342,12 @@ export function MobileTabBar({ items, value, defaultValue, onChange, onAction, a
             </AnimatePresence>
           </span>
           {/* the name is the visible label plus the count ("Inbox, 3 new"), so it matches what is on screen */}
-          <span>{it.label}{(it.count ?? 0) > 0 && <span className="sr-only">{tm('newCount', { count: it.count ?? 0 })}</span>}</span>
+          <span>{it.label}{(it.count ?? 0) > 0 && <span className="sr-only">{`, ${it.count ?? 0} new`}</span>}</span>
         </button>
       ))}
     </nav>
   )
 }
-
-
-
-/* Mega menu ────────────────────────────────────────────────────────────────── */
 
 export type MegaMenuItem = { label: string; content?: ReactNode; href?: string }
 
@@ -409,7 +373,7 @@ function megaStep(items: HTMLElement[], from: HTMLElement, key: string): HTMLEle
     const b = el.getBoundingClientRect(), x = b.left + b.width / 2, y = b.top + b.height / 2
     const sameRow = b.top < r.bottom - 2 && b.bottom > r.top + 2
     const ok = key === 'ArrowDown' ? b.top >= r.bottom - 2 : key === 'ArrowUp' ? b.bottom <= r.top + 2
-      : key === 'ArrowRight' ? x > cx + 1 && b.left >= r.left + 4 && (sameRow || b.left >= r.right - 2) : x < cx - 1 && b.right <= r.right - 4 && (sameRow || b.right <= r.left + 2) // rtl-lint-ignore: spatial (screen sides)
+      : key === 'ArrowRight' ? x > cx + 1 && b.left >= r.left + 4 && (sameRow || b.left >= r.right - 2) : x < cx - 1 && b.right <= r.right - 4 && (sameRow || b.right <= r.left + 2)
     if (!ok) continue
     const vertical = key === 'ArrowDown' || key === 'ArrowUp'
     const s = vertical ? Math.abs(y - cy) + 2 * Math.abs(b.left - r.left) : Math.abs(x - cx) + 2 * Math.abs(y - cy)
@@ -452,9 +416,8 @@ export function MegaMenu({ items, brand, actions, children, closeDelay = 160, de
   const [sizes, setSizes] = useState<{ w: number; h: number }[]>([])
   const [hostW, setHostW] = useState(0), [hostH, setHostH] = useState(0)
   const [edges, setEdges] = useState<{ l: number; r: number }[]>([])
-  const rtl = useDir() === 'rtl'
   const wasOpen = useRef(false), closeT = useRef<ReturnType<typeof setTimeout>>(undefined)
-  const pid = useId(), tm = useMessages(NAV_MSG)
+  const pid = useId()
 
   const measure = useCallback(() => {
     const h = host.current
@@ -490,7 +453,7 @@ export function MegaMenu({ items, brand, actions, children, closeDelay = 160, de
     if (i === cur) return
     measure()
     wasOpen.current = cur >= 0; openedAt.current = Date.now()
-    setDir(dirX(cur >= 0 && i < cur ? -1 : 1, rtl ? 'rtl' : 'ltr')); setCur(i); setShown(i)
+    setDir((cur >= 0 && i < cur ? -1 : 1)); setCur(i); setShown(i)
   }
   const close = (now = false) => {
     clearTimeout(closeT.current)
@@ -506,9 +469,9 @@ export function MegaMenu({ items, brand, actions, children, closeDelay = 160, de
     notify.current = echo
   }, [openProp]) // eslint-disable-line react-hooks/exhaustive-deps
   const size = sizes[shown] ?? { w: 0, h: 0 }
-  // the panel lines up with its trigger's start edge (the right edge in RTL), clamped inside the frame
+  // the panel lines up with its trigger's start edge, clamped inside the frame
   const edge = edges[shown] ?? { l: 0, r: 0 }
-  const left = shown >= 0 ? Math.max(8, Math.min(hostW - size.w - 8, rtl ? edge.r + 20 - size.w : edge.l - 20)) : 0
+  const left = shown >= 0 ? Math.max(8, Math.min(hostW - size.w - 8, (edge.l - 20))) : 0
   const morph = wasOpen.current ? spring(0.12, 0.4) : { duration: 0 }
   const maxW = Math.max(200, hostW - 16)
   const topItems = () => [...(host.current?.querySelectorAll<HTMLElement>('[data-mega-top]') ?? [])]
@@ -520,15 +483,15 @@ export function MegaMenu({ items, brand, actions, children, closeDelay = 160, de
   const onTopKey = (e: React.KeyboardEvent<HTMLElement>, i: number) => {
     const tops = topItems(), at = tops.indexOf(e.currentTarget)
     const go = (n: number) => { e.preventDefault(); tops[(n + tops.length) % tops.length]?.focus() }
-    const key = logicalArrow(e.key, rtl ? 'rtl' : 'ltr')
-    if (key === 'ArrowRight') go(at + 1) // rtl-lint-ignore: key is logicalArrow-mapped above
-    else if (key === 'ArrowLeft') go(at - 1) // rtl-lint-ignore: key is logicalArrow-mapped above
+    const key = e.key
+    if (key === 'ArrowRight') go(at + 1)
+    else if (key === 'ArrowLeft') go(at - 1)
     else if (e.key === 'Home') go(0)
     else if (e.key === 'End') go(tops.length - 1)
     else if (items[i]?.content && (e.key === 'ArrowDown' || e.key === 'ArrowUp')) { e.preventDefault(); enterPanel(i, e.key === 'ArrowUp') }
   }
   const onPanelKey = (e: React.KeyboardEvent) => {
-    if (cur < 0 || !['ArrowDown', 'ArrowUp', 'ArrowLeft', 'ArrowRight', 'Home', 'End'].includes(e.key)) return // rtl-lint-ignore: spatial (screen sides)
+    if (cur < 0 || !['ArrowDown', 'ArrowUp', 'ArrowLeft', 'ArrowRight', 'Home', 'End'].includes(e.key)) return
     const all = megaFocusables(content()), from = document.activeElement as HTMLElement | null
     if (!all.length || !from || !all.includes(from)) return
     e.preventDefault()
@@ -536,9 +499,9 @@ export function MegaMenu({ items, brand, actions, children, closeDelay = 160, de
     const next = megaStep(all, from, e.key) // spatial: ← and → go to the item on that side of the screen in either direction
     if (next) return next.focus()
     if (e.key === 'ArrowUp') return triggers.current[cur]?.focus()
-    if (e.key === 'ArrowLeft' || e.key === 'ArrowRight') { // at the edge: the neighbouring top item // rtl-lint-ignore: spatial (screen sides)
+    if (e.key === 'ArrowLeft' || e.key === 'ArrowRight') { // at the edge: the neighbouring top item
       const tops = topItems(), at = tops.indexOf(triggers.current[cur] as HTMLElement)
-      tops[(at + (logicalArrow(e.key, rtl ? 'rtl' : 'ltr') === 'ArrowRight' ? 1 : -1) + tops.length) % tops.length]?.focus()
+      tops[(at + (e.key === 'ArrowRight' ? 1 : -1) + tops.length) % tops.length]?.focus()
     }
   }
 
@@ -547,7 +510,7 @@ export function MegaMenu({ items, brand, actions, children, closeDelay = 160, de
       onBlur={e => { if (e.relatedTarget && !e.currentTarget.contains(e.relatedTarget as Node)) close(true) }}>
       <div className="relative z-[3] flex h-14 items-center gap-2 border-b border-[var(--line)] bg-[var(--card)] px-4">
         {brand && <span className="me-3 hidden flex-none items-center gap-2 text-sm font-semibold sm:flex">{brand}</span>}
-        <nav aria-label={tm('main')} className="flex min-w-0 gap-0.5 overflow-x-auto [scrollbar-width:none]">
+        <nav aria-label={'Main'} className="flex min-w-0 gap-0.5 overflow-x-auto [scrollbar-width:none]">
           {items.map((it, i) => it.content ? (
             <button key={it.label} ref={el => { triggers.current[i] = el }} aria-expanded={cur === i} aria-controls={pid}
               onPointerEnter={e => { if (e.pointerType === 'mouse') open(i) }} onPointerLeave={e => { if (e.pointerType === 'mouse') close() }}
@@ -590,20 +553,17 @@ export function MegaMenu({ items, brand, actions, children, closeDelay = 160, de
   )
 }
 
-/* Breadcrumbs, pagination, steps ───────────────────────────────────────────── */
-
 /** Trail of links to the current page (the last item, marked aria-current). Wraps on narrow screens; links grow their tap area on touch. Hrefs pass through safeUrl. */
 export function Breadcrumbs({ items, className }: { items: { label: string; href?: string; onClick?: () => void }[]; className?: string }) {
-  const tm = useMessages(NAV_MSG)
   return (
-    <nav aria-label={tm('breadcrumb')} className={cn('flex flex-wrap items-center gap-1.5 text-[13px] text-[var(--fg3)]', className)}>
+    <nav aria-label={'Breadcrumb'} className={cn('flex flex-wrap items-center gap-1.5 text-[13px] text-[var(--fg3)]', className)}>
       {items.map((it, i) => {
         const last = i === items.length - 1
         return (
           <span key={i} className="flex items-center gap-1.5">
             {last ? <b aria-current="page" className="font-medium text-[var(--fg)]">{it.label}</b>
               : <a href={safeUrl(it.href)} onClick={e => { if (it.onClick) { e.preventDefault(); it.onClick() } }} className="text-[var(--fg2)] no-underline hover:text-[var(--fg)] [@media(pointer:coarse)]:-my-2 [@media(pointer:coarse)]:-mx-1 [@media(pointer:coarse)]:px-1 [@media(pointer:coarse)]:py-2">{it.label}</a>}
-            {!last && <Icon name="chevronRight" size={12} className="ui-flip" />}
+            {!last && <Icon name="chevronRight" size={12} />}
           </span>
         )
       })}
@@ -621,19 +581,19 @@ export function Pagination({ page, total, onChange, className, 'aria-label': ari
     if (p === 1 || p === total || Math.abs(p - page) <= 1) nums.push(p)
     else if (nums[nums.length - 1] !== '…') nums.push('…')
   }
-  const group = useId(), { t, fmt } = useLocale()
+  const group = useId()
   const cell = 'relative grid h-8 min-w-8 cursor-pointer place-items-center rounded-[var(--r-md)] border-0 bg-transparent px-1 text-[13px] hover:bg-[var(--muted)] disabled:opacity-40 disabled:cursor-default'
   return (
-    <nav aria-label={ariaLabel ?? t('paging.pagination')} className={cn('flex items-center gap-1', className)}>
+    <nav aria-label={ariaLabel ?? 'Pagination'} className={cn('flex items-center gap-1', className)}>
 
-      <button className={cell} aria-label={t('paging.previousPage')} disabled={page <= 1} onClick={() => onChange(page - 1)}><Icon name="chevronLeft" size={14} className="ui-flip" /></button>
+      <button className={cell} aria-label={'Previous page'} disabled={page <= 1} onClick={() => onChange(page - 1)}><Icon name="chevronLeft" size={14} /></button>
       {nums.map((n, i) => n === '…' ? <span key={`e${i}`} className="px-1 text-[var(--fg3)]">…</span> : (
         <button key={n} className={cn(cell, n === page && 'font-semibold')} aria-current={n === page ? 'page' : undefined} onClick={() => onChange(n)}>
           {n === page && <ActiveIndicator group={group} className="rounded-[var(--r-md)] border border-[var(--line)] bg-[var(--card)]" />}
           <span className="relative">{fmt.number(n)}</span>
         </button>
       ))}
-      <button className={cell} aria-label={t('paging.nextPage')} disabled={page >= total} onClick={() => onChange(page + 1)}><Icon name="chevronRight" size={14} className="ui-flip" /></button>
+      <button className={cell} aria-label={'Next page'} disabled={page >= total} onClick={() => onChange(page + 1)}><Icon name="chevronRight" size={14} /></button>
     </nav>
   )
 }
@@ -652,8 +612,7 @@ export function Steps({ steps, current, className }: { steps: string[]; current:
           </span>
           {i < steps.length - 1 && (
             <span className="relative h-0.5 min-w-4 flex-1 overflow-hidden rounded-full bg-[var(--line)]">
-              {/* rtl-lint-ignore: has its rtl: twin */}
-              <motion.b className="absolute inset-0 origin-left bg-[var(--primary)] rtl:origin-right" initial={false} animate={{ scaleX: i < current ? 1 : 0 }} transition={spring(0.1, 0.4)} />
+              <motion.b className="absolute inset-0 origin-left bg-[var(--primary)]" initial={false} animate={{ scaleX: i < current ? 1 : 0 }} transition={spring(0.1, 0.4)} />
             </span>
           )}
         </li>
@@ -672,8 +631,8 @@ export function Wizard({ steps, value, defaultValue = 0, onChange, onFinish, res
   { steps: WizardStep[]; value?: number; defaultValue?: number; onChange?: (step: number) => void; onFinish?: () => void; restartLabel?: string; className?: string }) {
   const [i, set] = useControllable(value, defaultValue, onChange)
   const last = i === steps.length - 1
-  const [dir, setDir] = useState(1), rtl = useDir() === 'rtl', tm = useMessages(NAV_MSG), { t } = useLocale()
-  const go = (n: number) => { setDir(dirX(n > i ? 1 : -1, rtl ? 'rtl' : 'ltr')); set(n) }
+  const [dir, setDir] = useState(1)
+  const go = (n: number) => { setDir((n > i ? 1 : -1)); set(n) }
   useEffect(() => { if (last) onFinish?.() }, [last]) // eslint-disable-line react-hooks/exhaustive-deps
   return (
     <div className={cn('flex flex-col gap-3', className)}>
@@ -685,15 +644,13 @@ export function Wizard({ steps, value, defaultValue = 0, onChange, onFinish, res
         </AnimatePresence>
       </div>
       <div className="flex items-center justify-between">
-        <Button size="sm" onClick={() => go(Math.max(0, i - 1))} className={cn((i === 0 || last) && 'invisible')} aria-hidden={i === 0 || last} tabIndex={i === 0 || last ? -1 : 0}>{t('common.back')}</Button>
-        <Button size="sm" variant="primary" onClick={() => go(last ? 0 : i + 1)}>{last ? restartLabel ?? tm('startOver') : t('common.continue')}</Button>
+        <Button size="sm" onClick={() => go(Math.max(0, i - 1))} className={cn((i === 0 || last) && 'invisible')} aria-hidden={i === 0 || last} tabIndex={i === 0 || last ? -1 : 0}>{'Back'}</Button>
+        <Button size="sm" variant="primary" onClick={() => go(last ? 0 : i + 1)}>{last ? restartLabel ?? 'Start over' : 'Continue'}</Button>
 
       </div>
     </div>
   )
 }
-
-/* Toggle, toggle group, toolbar ─────────────────────────────────────────────── */
 
 const TOGGLE_SIZE = {
   sm: 'h-[30px] min-w-[30px] px-2 text-xs [@media(pointer:coarse)]:h-8', md: 'h-9 min-w-9 px-2.5 text-[13px]',
@@ -728,7 +685,7 @@ export function Toggle({ pressed, defaultPressed = false, onPressedChange, varia
     ...p, 'aria-pressed': on, 'data-state': on ? 'on' : 'off', 'data-toolbar-item': inToolbar ? '' : undefined, className: toggleClass(variant, size, className),
     onClick: (e: ReactMouseEvent<HTMLButtonElement>) => { onClick?.(e); if (!e.defaultPrevented) set(!on) },
   }
-  if (asChild) return <Slot {...(props as HTMLAttributes<HTMLElement>)} ref={ref as Ref<HTMLElement>}>{children}</Slot>
+  if (asChild) return <Slot<HTMLButtonElement> {...props} ref={ref}>{children}</Slot>
   return <button type="button" ref={ref} {...props}>{children}</button>
 }
 
@@ -766,12 +723,11 @@ export function ToggleGroupRoot(props: ToggleGroupProps) {
     else setValue(on ? value.filter(x => x !== v) : [...value, v])
   }, [value, single, setValue, props.deselectable])
   const ctx: TgCtxV = { single, value, toggle, variant, size, disabled, inToolbar, tabStop, setFocused, register }
-  const dir = useDir()
   const onKeyDown = (e: RKeyboardEvent<HTMLDivElement>) => {
     if (inToolbar) return
     const own = [...e.currentTarget.querySelectorAll<HTMLElement>('[data-tg-item]')].filter(el => el.closest('[data-tg-root]') === e.currentTarget && !(el as HTMLButtonElement).disabled)
     const v = orientation === 'vertical'
-    const to = navStep(own, v ? e.key : logicalArrow(e.key, dir), v ? 'ArrowUp' : 'ArrowLeft', v ? 'ArrowDown' : 'ArrowRight', loop)
+    const to = navStep(own, v ? e.key : e.key, v ? 'ArrowUp' : 'ArrowLeft', v ? 'ArrowDown' : 'ArrowRight', loop)
     if (!to) return
     e.preventDefault(); to.focus()
     if (single && to.dataset.value !== undefined) setValue([to.dataset.value]) // radio: arrows select
@@ -800,7 +756,7 @@ export function ToggleGroupItem({ value, disabled: own, asChild, className, chil
     onFocus: () => g.setFocused(value),
     onClick: (e: ReactMouseEvent<HTMLButtonElement>) => { p.onClick?.(e); if (!e.defaultPrevented && !disabled) g.toggle(value) },
   }
-  if (asChild) return <Slot {...(props as HTMLAttributes<HTMLElement>)} aria-disabled={disabled || undefined}>{children}</Slot>
+  if (asChild) return <Slot {...props} aria-disabled={disabled || undefined}>{children}</Slot>
   return <button type="button" disabled={disabled} {...props}>{children}</button>
 }
 /** Toggle buttons sharing one value (single, a radio group) or a set (multiple). Parts: ToggleGroup.Root (= ToggleGroup) and ToggleGroup.Item. */
@@ -814,7 +770,7 @@ const TOOLBAR_ITEM = '[data-toolbar-item]'
  */
 export function ToolbarRoot({ orientation = 'horizontal', loop = true, className, children, 'aria-label': ariaLabel, 'aria-labelledby': labelledBy }:
   { orientation?: 'horizontal' | 'vertical'; loop?: boolean; className?: string; children: ReactNode; 'aria-label'?: string; 'aria-labelledby'?: string }) {
-  const ref = useRef<HTMLDivElement>(null), active = useRef(0), dir = useDir()
+  const ref = useRef<HTMLDivElement>(null), active = useRef(0)
   const items = () => [...(ref.current?.querySelectorAll<HTMLElement>(TOOLBAR_ITEM) ?? [])]
     .filter(el => el.closest('[role=toolbar]') === ref.current && !(el as HTMLButtonElement).disabled && el.getAttribute('aria-disabled') !== 'true')
   const sync = () => { const all = items(); const i = Math.min(active.current, all.length - 1); all.forEach((el, k) => { el.tabIndex = k === i ? 0 : -1 }) }
@@ -827,7 +783,7 @@ export function ToolbarRoot({ orientation = 'horizontal', loop = true, className
         onKeyDown={e => {
           if ((e.target as Element).closest('[role=toolbar]') !== e.currentTarget || (e.target as Element).matches('input,textarea,select,[contenteditable="true"]')) return
           const v = orientation === 'vertical'
-          const to = navStep(items(), v ? e.key : logicalArrow(e.key, dir), v ? 'ArrowUp' : 'ArrowLeft', v ? 'ArrowDown' : 'ArrowRight', loop)
+          const to = navStep(items(), v ? e.key : e.key, v ? 'ArrowUp' : 'ArrowLeft', v ? 'ArrowDown' : 'ArrowRight', loop)
 
           if (to) { e.preventDefault(); to.focus() }
         }}
