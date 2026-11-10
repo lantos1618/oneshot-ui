@@ -27,7 +27,7 @@ export type VirtualScrollOptions = { align?: VirtualAlign; behavior?: ScrollBeha
  *   A new `estimateSize` function re-lays out the list (O(count)), so memoise it (useCallback/useMemo) and change it
  *   when what it depends on changes (rows grouped differently, a denser mode).
  * - `scrollRef`: the scrolling element, or `'window'` to follow the page scroll (then pass `scrollMargin`, the list's
- *   distance from the top of the document; VirtualList works it out itself).
+ *   distance from the top of the document, or a function that measures it, read on every scroll; VirtualList does this itself).
  * - `paddingStart` / `paddingEnd`: space before the first / after the last item inside the scroll content (a header).
  * - `scrollPaddingStart` / `scrollPaddingEnd`: parts of the viewport covered by sticky things; scrollToIndex keeps items clear of them.
  * - `initialOffset`: scroll position to start at. `initialRect`: viewport assumed until measured (server render, jsdom).
@@ -49,7 +49,7 @@ export type VirtualOptions = {
   paddingEnd?: number
   scrollPaddingStart?: number
   scrollPaddingEnd?: number
-  scrollMargin?: number
+  scrollMargin?: number | (() => number)
   initialOffset?: number
   initialRect?: { width: number; height: number }
   anchor?: 'start' | 'end'
@@ -199,15 +199,15 @@ export function useVirtual(options: VirtualOptions): Virtualizer {
 
   /* ---- DOM access (effects and handlers only) ---- */
   const getEl = (): HTMLElement | null => scrollRef === 'window' ? null : scrollRef.current
+  const marginOf = () => { const m = opts.current.scrollMargin; return (typeof m === 'function' ? m() : m) ?? 0 }
   const readOffset = () => {
-    // horizontal offsets are distances from the start edge:
-    if (scrollRef === 'window') return (horizontal ? Math.abs(scrollX) : scrollY) - (opts.current.scrollMargin ?? 0)
-    const el = getEl(); return el ? (horizontal ? Math.abs(el.scrollLeft) : el.scrollTop) : st.current!.offset
+    if (scrollRef === 'window') return (horizontal ? scrollX : scrollY) - marginOf()
+    const el = getEl(); return el ? (horizontal ? el.scrollLeft : el.scrollTop) : st.current!.offset
   }
   const writeOffset = (to: number, behavior?: ScrollBehavior) => {
     const hz = opts.current.horizontal
     if (opts.current.scrollRef === 'window') {
-      const abs = to + (opts.current.scrollMargin ?? 0)
+      const abs = to + marginOf()
       window.scrollTo(hz ? { left: abs, behavior } : { top: abs, behavior })
       return
     }
@@ -293,8 +293,11 @@ export function useVirtual(options: VirtualOptions): Virtualizer {
     const target: HTMLElement | Window = win ? window : el!
     target.addEventListener('scroll', onScroll, { passive: true })
     let ro: ResizeObserver | null = null
-    if (win) addEventListener('resize', onSize)
-    else if (typeof ResizeObserver !== 'undefined') { ro = new ResizeObserver(onSize); ro.observe(el!) }
+    if (win) {
+      addEventListener('resize', onSize)
+      // content above the list can grow or shrink without a scroll event (an image loads, a banner opens): re-read the offset
+      if (typeof ResizeObserver !== 'undefined') { ro = new ResizeObserver(onScroll); ro.observe(document.documentElement) }
+    } else if (typeof ResizeObserver !== 'undefined') { ro = new ResizeObserver(onSize); ro.observe(el!) }
     const focusRoot: HTMLElement | Document = el ?? document
     const onFocusIn = (e: Event) => {
       const t = e.target instanceof Element ? e.target.closest('[data-index]') : null
@@ -402,16 +405,15 @@ export function VirtualList({ count, estimateSize, renderItem, getItemKey, overs
     onEndReached?: () => void; endReachedThreshold?: number; initialRect?: { width: number; height: number }; keep?: readonly number[]; tabIndex?: number
     ref?: Ref<VirtualListHandle>; id?: string } & { [k: `aria-${string}`]: string | number | boolean | undefined }) {
   const box = useRef<HTMLDivElement>(null), inner = useRef<HTMLDivElement>(null)
-  const [margin, setMargin] = useReducer((_: number, v: number) => v, 0)
-  useVirtualLayoutEffect(() => { // window mode: where the list starts on the page
-    if (!useWindow) return
-    const read = () => { const r = inner.current?.getBoundingClientRect(); if (r) setMargin(Math.round(horizontal ? r.left + scrollX : r.top + scrollY)) }
-    read(); addEventListener('resize', read); return () => removeEventListener('resize', read)
-  }, [useWindow, horizontal])
-  const v = useVirtual({ count, estimateSize, getItemKey, overscan, horizontal, anchor, scrollRef: useWindow ? 'window' : box, scrollMargin: margin, onEndReached, endReachedThreshold, initialRect, keep })
+  // window mode: where the list starts on the page, measured on every read so content growing above it never leaves it stale
+  const pageOffset = useCallback(() => {
+    const r = inner.current?.getBoundingClientRect()
+    return r ? Math.round(horizontal ? r.left + scrollX : r.top + scrollY) : 0
+  }, [horizontal])
+  const v = useVirtual({ count, estimateSize, getItemKey, overscan, horizontal, anchor, scrollRef: useWindow ? 'window' : box, scrollMargin: useWindow ? pageOffset : undefined, onEndReached, endReachedThreshold, initialRect, keep })
   useImperativeHandle(ref, () => ({ scrollToIndex: v.scrollToIndex, scrollToOffset: v.scrollToOffset, measure: v.measure, getScrollOffset: v.getScrollOffset, element: box.current }), [v.scrollToIndex, v.scrollToOffset, v.measure, v.getScrollOffset])
   const ir = itemRole ?? VIRTUAL_ITEM_ROLE[role]
-  const set = !!ir && ['listitem', 'option', 'treeitem', 'article', 'menuitem'].includes(ir)
+  const set = !!ir && Object.values(VIRTUAL_ITEM_ROLE).includes(ir)
   const end = anchor === 'end'
   return (
     <div ref={box} role={role} tabIndex={tabIndex} {...aria}

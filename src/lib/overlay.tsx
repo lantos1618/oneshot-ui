@@ -1,7 +1,7 @@
 import { Fragment, createContext, isValidElement, useCallback, useContext, useEffect, useId, useLayoutEffect, useMemo, useRef, useState, type CSSProperties, type HTMLAttributes, type ReactNode, type Ref, type RefObject, type KeyboardEvent as RKeyboardEvent, type MouseEvent as ReactMouseEvent, type PointerEvent as ReactPointerEvent } from 'react'
 import { createPortal } from 'react-dom'
-import { AnimatePresence, motion, useDragControls, type Variants } from 'motion/react'
-import { type AsChildProps, Button, type ButtonProps, FOCUSABLE, Icon, IconButton, type IconName, Kbd, Slot, cn, isTouch, menuItemClass, prefersReducedMotion, spring, useControllable, useFocusTrap, useLongPress, useMediaQuery, useOutside, useRoving, AnimatedNumber, Spinner, TOUCH, uiShared, surface, focusStep, useRequiredContext, PartButton } from './core'
+import { AnimatePresence, motion, useDragControls, type HTMLMotionProps, type Variants } from 'motion/react'
+import { type AsChildProps, Button, type ButtonProps, Icon, IconButton, type IconName, Kbd, Slot, cn, isTouch, menuItemClass, prefersReducedMotion, spring, useControllable, useFocusTrap, useLongPress, useMediaQuery, useOutside, useRoving, AnimatedNumber, Spinner, TOUCH, uiShared, surface, focusStep, useRequiredContext, PartButton, FOCUSABLE, Z, haptic, isEditableTarget, plural, useCoarsePointer, useLatest, useTypeahead, typeaheadIndex } from './core'
 import { EmptyState } from './feedback'
 import { shake } from './motion'
 import { useVirtual, virtualSetAria } from './virtual'
@@ -9,6 +9,7 @@ import { useVirtual, virtualSetAria } from './virtual'
 type PopCtx = { open: boolean; setOpen: (v: boolean) => void; triggerRef: RefObject<HTMLButtonElement | null>; id: string }
 const PopoverCtx = createContext<PopCtx | null>(null)
 export const usePopover = () => useRequiredContext(PopoverCtx, 'usePopover', '<Popover>')
+const usePopoverPart = (part: string) => useRequiredContext(PopoverCtx, `<${part}>`, `<${part.split('.')[0]}.Root>`)
 
 /** Popover.Root (also plain `<Popover>`): anchored panel state. Closes on outside click and Escape; springs in from its trigger. Controlled (`open`) or uncontrolled (`defaultOpen`). */
 export function PopoverRoot({ open: o, defaultOpen = false, onOpenChange, children, className }:
@@ -20,59 +21,61 @@ export function PopoverRoot({ open: o, defaultOpen = false, onOpenChange, childr
   return (
     <PopoverCtx.Provider value={ctx}>
       <div ref={wrap} className={cn('relative inline-block', className)}
-        onKeyDown={e => { if (e.key === 'Escape' && open) { e.stopPropagation(); setOpen(false); triggerRef.current?.focus() } }}>
+        onKeyDown={e => { if (e.key === 'Escape' && open && !e.defaultPrevented) { e.stopPropagation(); setOpen(false); triggerRef.current?.focus() } }}>
         {children}
       </div>
     </PopoverCtx.Provider>
   )
 }
 
-/**
- * A Button (or, with `asChild`, your element) that runs `action` on click. The caller's own onClick runs first; calling
- * `e.preventDefault()` there skips the action. The building block of every Trigger and Close part.
- */
+/** The part-button click contract: the caller's onClick runs first, and `e.preventDefault()` there skips the action. */
+const partClick = <E extends { defaultPrevented: boolean }>(onClick: ((e: E) => void) | undefined, action: () => void) =>
+  (e: E) => { onClick?.(e); if (!e.defaultPrevented) action() }
+
+/** A Button (or, with `asChild`, your element) that runs `action` on click (see partClick). The building block of every Trigger and Close part. */
 function OverlayPartButton({ asChild, onClick, action, children, ...p }: ButtonProps & { action: () => void }) {
-  const click = (e: ReactMouseEvent<HTMLButtonElement>) => { onClick?.(e); if (!e.defaultPrevented) action() }
+  const click = partClick(onClick, action)
   if (asChild) return <Slot<HTMLButtonElement> {...p} onClick={click}>{children}</Slot>
   return <Button {...p} onClick={click}>{children}</Button>
 }
 
 /** Popover.Trigger: toggles the popover. Takes all Button props, or `asChild` to make your own element the trigger. */
 export function PopoverTrigger({ children, ...p }: ButtonProps) {
-  const { open, setOpen, triggerRef, id } = usePopover()
-  return <OverlayPartButton ref={triggerRef} aria-expanded={open} aria-haspopup="dialog" aria-controls={id} {...p} action={() => setOpen(!open)}>{children}</OverlayPartButton>
+  const { open, setOpen, triggerRef, id } = usePopoverPart('Popover.Trigger')
+  return <OverlayPartButton ref={triggerRef} aria-expanded={open} aria-haspopup="dialog" aria-controls={open ? id : undefined} {...p} action={() => setOpen(!open)}>{children}</OverlayPartButton>
 }
 
 /** Popover.Close: closes the popover (focus goes back to its trigger). Button props, or `asChild`. */
 export function PopoverClose({ children, ...p }: ButtonProps) {
-  const { setOpen } = usePopover()
+  const { setOpen } = usePopoverPart('Popover.Close')
   return <OverlayPartButton {...p} action={() => setOpen(false)}>{children}</OverlayPartButton>
 }
 
-/** Panel placement: the side (`top`/`bottom`/`left`/`right`), then the alignment (`-start` = left or top edge, `-end` = right or bottom). */
+/** Default gap between a trigger and its floating panel in px: a little tighter below it. */
+export const FLOAT_GAP = { bottom: 6, other: 8 } as const
+/** How far floating panels keep inside the viewport edges, in px. */
+export const VIEWPORT_MARGIN = 8
+
+/** Panel placement: the side (`top`/`bottom`/`left`/`right`), then the alignment (`-start` = left or top edge, `-end` = right or bottom). The gap is a margin (floatGap). */
 const SIDE = {
-  'bottom-start': 'top-[calc(100%+6px)] start-0 origin-top-left', 'bottom-end': 'top-[calc(100%+6px)] end-0 origin-top-right',
-  'bottom-center': 'top-[calc(100%+6px)] left-1/2 -translate-x-1/2 origin-top', 'top-start': 'bottom-[calc(100%+8px)] start-0 origin-bottom-left',
-  'top-center': 'bottom-[calc(100%+8px)] left-1/2 -translate-x-1/2 origin-bottom', 'top-end': 'bottom-[calc(100%+8px)] end-0 origin-bottom-right',
-  right: 'left-[calc(100%+8px)] top-1/2 -translate-y-1/2 origin-left', left: 'right-[calc(100%+8px)] top-1/2 -translate-y-1/2 origin-right',
-  'right-start': 'left-[calc(100%+8px)] top-0 origin-top-left', 'right-end': 'left-[calc(100%+8px)] bottom-0 origin-bottom-left',
-  'left-start': 'right-[calc(100%+8px)] top-0 origin-top-right', 'left-end': 'right-[calc(100%+8px)] bottom-0 origin-bottom-right',
+  'bottom-start': 'top-full left-0 origin-top-left', 'bottom-end': 'top-full right-0 origin-top-right',
+  'bottom-center': 'top-full left-1/2 -translate-x-1/2 origin-top', 'top-start': 'bottom-full left-0 origin-bottom-left',
+  'top-center': 'bottom-full left-1/2 -translate-x-1/2 origin-bottom', 'top-end': 'bottom-full right-0 origin-bottom-right',
+  right: 'left-full top-1/2 -translate-y-1/2 origin-left', left: 'right-full top-1/2 -translate-y-1/2 origin-right',
+  'right-start': 'left-full top-0 origin-top-left', 'right-end': 'left-full bottom-0 origin-bottom-left',
+  'left-start': 'right-full top-0 origin-top-right', 'left-end': 'right-full bottom-0 origin-bottom-right',
 } as const
 export type Placement = keyof typeof SIDE
-const FLIP_SIDE: Partial<Record<Placement, Placement>> = {
-  'bottom-start': 'top-start', 'bottom-end': 'top-end', 'bottom-center': 'top-center', 'top-start': 'bottom-start', 'top-end': 'bottom-end', 'top-center': 'bottom-center',
-  right: 'left', left: 'right', 'right-start': 'left-start', 'right-end': 'left-end', 'left-start': 'right-start', 'left-end': 'right-end',
-}
 
-/** Which side of its trigger a floating part opens on. Physical: `right` is the right. */
+/** Which side of its trigger a floating part opens on. */
 export type FloatSide = 'top' | 'right' | 'bottom' | 'left'
-/** How a floating part lines up along that side. Logical on top/bottom: `start` is the right edge. */
+/** How a floating part lines up along that side: `start` is the left (or top) edge, `end` the right (or bottom). */
 export type FloatAlign = 'start' | 'center' | 'end'
 /** Positioning props of the floating content parts (Popover, DropdownMenu, HoverCard, Tooltip). */
 export type FloatProps = {
   /** side of the trigger; flips to the opposite side when there is no room */ side?: FloatSide
   /** alignment along that side */ align?: FloatAlign
-  /** gap between trigger and panel in px (default 6 below the trigger, 8 elsewhere) */ sideOffset?: number
+  /** gap between trigger and panel in px (default FLOAT_GAP: 6 below the trigger, 8 elsewhere) */ sideOffset?: number
   /** the single-string form ('bottom-start', 'top-center', 'right'…); `side`/`align` win when given */ placement?: Placement
   /** a small arrow pointing back at the trigger */ arrow?: boolean
 }
@@ -84,41 +87,77 @@ export function floatPlacement(side?: FloatSide, align?: FloatAlign, fallback: P
   return (s === 'left' || s === 'right') && a === 'center' ? s : `${s}-${a}` as Placement
 }
 const floatSideOf = (p: Placement) => p.split('-')[0] as FloatSide
-/** Margin that turns the default 6/8px gap into `offset`. */
-function floatGap(p: Placement, offset: number | undefined): CSSProperties | undefined {
-  if (offset === undefined) return undefined
-  const s = floatSideOf(p), gap = offset - (s === 'bottom' ? 6 : 8)
+const floatAlignOf = (p: Placement) => (p.split('-')[1] ?? 'center') as FloatAlign
+const FLIP: Record<FloatSide, FloatSide> = { top: 'bottom', bottom: 'top', left: 'right', right: 'left' }
+const flipPlacement = (p: Placement) => floatPlacement(FLIP[floatSideOf(p)], floatAlignOf(p), p)
+/** The gap on `side`: `offset` when given, else FLOAT_GAP. */
+const gapOf = (side: FloatSide, offset?: number) => offset ?? (side === 'bottom' ? FLOAT_GAP.bottom : FLOAT_GAP.other)
+/** The margin that puts the panel `gapOf(side, offset)` away from its trigger. */
+function floatGap(p: Placement, offset: number | undefined): CSSProperties {
+  const s = floatSideOf(p), gap = gapOf(s, offset)
   return s === 'bottom' ? { marginTop: gap } : s === 'top' ? { marginBottom: gap } : s === 'right' ? { marginLeft: gap } : { marginRight: gap }
 }
-/* Arrow classes: which edge it sits on (and which two borders draw it), then where along that edge. */
+
+/** The layout viewport in px (clientWidth/clientHeight: without a classic scrollbar, and right on zoomed phones where innerWidth is not). */
+export function viewportSize(): { w: number; h: number } {
+  const d = document.documentElement
+  return { w: d.clientWidth || innerWidth, h: d.clientHeight || innerHeight }
+}
+/** Where a box of `size` starting at `start` must start to stay `margin` inside `[0, extent]`; pinned to the start when it can't fit. */
+export const fitInside = (start: number, size: number, extent: number, margin = VIEWPORT_MARGIN) => Math.max(margin, Math.min(extent - size - margin, start))
+
+/** The anchor of fitPanel: a rect, or a point (left = right, top = bottom). */
+export type FitAnchor = { left: number; top: number; right: number; bottom: number }
+/**
+ * Where a fixed panel goes next to `anchor`: on `side` (flipped to the opposite side when it doesn't fit there and does
+ * on the other, or has more room), lined up by `align`, `gap` px away, and slid along the other axis to stay `margin` px
+ * inside `bounds` (default: the viewport). `fits` is false when neither side had room. Pure, so it is testable without layout.
+ */
+export function fitPanel({ anchor, size, side, align = 'center', gap, bounds = viewportSize(), margin = VIEWPORT_MARGIN }:
+  { anchor: FitAnchor; size: { w: number; h: number }; side: FloatSide; align?: FloatAlign; gap: number; bounds?: { w: number; h: number }; margin?: number }) {
+  const vertical = side === 'top' || side === 'bottom'
+  const room = (s: FloatSide) => s === 'bottom' ? bounds.h - anchor.bottom - margin : s === 'top' ? anchor.top - margin : s === 'right' ? bounds.w - anchor.right - margin : anchor.left - margin
+  const need = (vertical ? size.h : size.w) + gap, alt = FLIP[side]
+  const fitsHere = need <= room(side), fitsAlt = need <= room(alt)
+  const s = fitsHere ? side : fitsAlt || room(alt) > room(side) ? alt : side
+  const along = (lo: number, hi: number, len: number) => align === 'start' ? lo : align === 'end' ? hi - len : (lo + hi - len) / 2
+  if (vertical) {
+    const left = fitInside(along(anchor.left, anchor.right, size.w), size.w, bounds.w, margin)
+    return { left, top: s === 'bottom' ? anchor.bottom + gap : anchor.top - gap - size.h, side: s, fits: fitsHere || fitsAlt }
+  }
+  const top = fitInside(along(anchor.top, anchor.bottom, size.h), size.h, bounds.h, margin)
+  return { left: s === 'right' ? anchor.right + gap : anchor.left - gap - size.w, top, side: s, fits: fitsHere || fitsAlt }
+}
+
 /** Arrow positions for a panel's bordered 10px square and a tooltip's filled 8px one: the edge it sits on, and where along it. */
 const FLOAT_ARROW = {
   panel: {
     edge: { bottom: '-top-[5px] border-t border-l', top: '-bottom-[5px] border-b border-r', right: '-left-[5px] border-b border-l', left: '-right-[5px] border-t border-r' },
-    x: { start: 'start-4', center: 'left-[calc(50%-5px)]', end: 'end-4' }, y: { start: 'top-3', center: 'top-[calc(50%-5px)]', end: 'bottom-3' },
+    x: { start: 'left-4', center: 'left-[calc(50%-5px)]', end: 'right-4' }, y: { start: 'top-3', center: 'top-[calc(50%-5px)]', end: 'bottom-3' },
   },
   tip: {
     edge: { top: '-bottom-1', bottom: '-top-1', right: '-left-1', left: '-right-1' },
-    x: { start: 'start-3', center: 'left-[calc(50%-4px)]', end: 'end-3' }, y: { start: 'top-2', center: 'top-[calc(50%-4px)]', end: 'bottom-2' },
+    x: { start: 'left-3', center: 'left-[calc(50%-4px)]', end: 'right-3' }, y: { start: 'top-2', center: 'top-[calc(50%-4px)]', end: 'bottom-2' },
   },
 } as const
-/** The arrow classes for placement `p` (`center` ignores the alignment, for portalled tooltips). */
-const floatArrowClass = (p: Placement, kind: keyof typeof FLOAT_ARROW = 'panel', center = false) => {
-  const s = floatSideOf(p), a = (center ? 'center' : p.split('-')[1] ?? 'center') as FloatAlign, t = FLOAT_ARROW[kind]
-  return cn(t.edge[s], t[s === 'top' || s === 'bottom' ? 'x' : 'y'][a])
+/** The arrow classes for placement `p`. */
+const floatArrowClass = (p: Placement, kind: keyof typeof FLOAT_ARROW = 'panel') => {
+  const s = floatSideOf(p), t = FLOAT_ARROW[kind]
+  return cn(t.edge[s], t[s === 'top' || s === 'bottom' ? 'x' : 'y'][floatAlignOf(p)])
 }
 
 /**
  * Absolutely positioned panel next to its (relative) parent. Flips to the other side when it would
  * run off the bottom (or top) of the viewport and there is more room there (`flip={false}` pins it), and
- * slides sideways to stay 8px inside the screen edges on narrow (phone) viewports. Never wider than the screen.
+ * slides sideways to stay VIEWPORT_MARGIN inside the screen edges on narrow (phone) viewports. Never wider than the screen.
  * Left/right placements flip horizontally the same way. The side is chosen once, when it opens, and stays locked while
  * it is open, so content that shrinks or grows (a filtered list) never makes it jump to the other side. `flip="scroll"` never flips: when the panel doesn't fit on its
  * side the page scrolls just enough to show it (for type-to-filter lists, whose height changes as you type: above the
  * field they would shrink from the top and cover the label). `offset` sets the gap in px, `arrow` draws a pointer.
+ * `inline` renders spans instead of divs, so the panel is valid inside a `<p>` (hover cards on links in text).
  */
-export function FloatingPanel({ open, placement = 'bottom-start', flip = true, matchWidth, offset, arrow, className, children, role = 'dialog', id, ...p }:
-  { open: boolean; placement?: Placement; flip?: boolean | 'scroll'; matchWidth?: boolean; offset?: number; arrow?: boolean; className?: string; children: ReactNode; role?: string; id?: string } & Omit<HTMLAttributes<HTMLDivElement>, 'onAnimationStart' | 'onDrag' | 'onDragStart' | 'onDragEnd'>) {
+export function FloatingPanel({ open, placement = 'bottom-start', flip = true, matchWidth, offset, arrow, inline, className, children, role = 'dialog', id, ...p }:
+  { open: boolean; placement?: Placement; flip?: boolean | 'scroll'; matchWidth?: boolean; offset?: number; arrow?: boolean; inline?: boolean; className?: string; children: ReactNode; role?: string; id?: string } & Omit<HTMLAttributes<HTMLDivElement>, 'onAnimationStart' | 'onDrag' | 'onDragStart' | 'onDragEnd'>) {
   const [side, setSide] = useState<Placement>(placement)
   const [shift, setShift] = useState(0)
   const ref = useRef<HTMLDivElement>(null), shiftRef = useRef(0)
@@ -127,50 +166,49 @@ export function FloatingPanel({ open, placement = 'bottom-start', flip = true, m
     if (!open || horizontal(side)) { shiftRef.current = 0; setShift(0); return }
     const el = ref.current, inner = el?.firstElementChild as HTMLElement | null
     if (!el || !inner || getComputedStyle(inner).position === 'fixed') return
-    const left = el.getBoundingClientRect().left - shiftRef.current, right = left + inner.offsetWidth
-    let dx = right > innerWidth - 8 ? innerWidth - 8 - right : 0
-    if (left + dx < 8) dx = 8 - left
+    const left = el.getBoundingClientRect().left - shiftRef.current
+    const dx = fitInside(left, inner.offsetWidth, viewportSize().w) - left
     shiftRef.current = dx; setShift(dx)
   }, [open, side])
   useLayoutEffect(() => {
     if (!open) return
-    const el = ref.current, alt = FLIP_SIDE[placement]
-    if (!el || !flip || !alt) { setSide(placement); return }
+    const el = ref.current
+    if (!el || !flip) { setSide(placement); return }
     const anchor = ((el.offsetParent as HTMLElement | null) ?? el.parentElement)?.getBoundingClientRect()
     if (!anchor) return
+    const vp = viewportSize(), s = floatSideOf(placement), alt = flipPlacement(placement)
+    const room = (k: FloatSide) => k === 'bottom' ? vp.h - anchor.bottom - VIEWPORT_MARGIN : k === 'top' ? anchor.top - VIEWPORT_MARGIN : k === 'right' ? vp.w - anchor.right - VIEWPORT_MARGIN : anchor.left - VIEWPORT_MARGIN
+    const fits = (k: FloatSide) => (horizontal(placement) ? el.offsetWidth : el.offsetHeight) + gapOf(k, offset) <= room(k)
     if (horizontal(placement)) { // left/right: flip across when it doesn't fit and the other side has more room
-      const w = el.offsetWidth, roomR = innerWidth - anchor.right - 8, roomL = anchor.left - 8
-      setSide((placement.startsWith('left') ? w + 8 > roomL && roomR > roomL : w + 8 > roomR && roomL > roomR) ? alt : placement)
+      setSide(!fits(s) && room(FLIP[s]) > room(s) ? alt : placement)
       return
     }
-    const h = el.offsetHeight, below = innerHeight - anchor.bottom - 8, above = anchor.top - 8
-    const wantsUp = placement.startsWith('top'), fitsDown = h + 6 <= below, fitsUp = h + 8 <= above
+    const wantsUp = s === 'top', fitsDown = fits('bottom'), fitsUp = fits('top')
     // flip only to a side where it fits; when it fits neither (tall panel, short phone screen) open downward and
     // scroll the page so the panel is in view, instead of hanging off the top of the screen
-    const flipIt = flip !== 'scroll' && (wantsUp ? !fitsUp && (fitsDown || below > above) : !fitsDown && fitsUp)
+    const flipIt = flip !== 'scroll' && (wantsUp ? !fitsUp && (fitsDown || room('bottom') > room('top')) : !fitsDown && fitsUp)
     setSide(flipIt ? alt : placement)
     if (flip === 'scroll' ? !(wantsUp ? fitsUp : fitsDown) : !fitsDown && !fitsUp) {
       const r = requestAnimationFrame(() => el.scrollIntoView({ block: 'nearest', behavior: prefersReducedMotion() ? 'auto' : 'smooth' }))
       return () => cancelAnimationFrame(r)
     }
-  }, [open, placement, flip])
+  }, [open, placement, flip, offset])
   const up = side.startsWith('top')
-  const gap = floatGap(side, offset)
   // a right-anchored panel moves with margin-right; the others with margin-left
-  const rightAnchored = !side.endsWith('center') && side.endsWith('end') !== false
-  const style = gap || shift ? { ...gap, ...(shift ? rightAnchored ? { marginRight: -shift } : { marginLeft: shift } : null) } : undefined
+  const style = { ...floatGap(side, offset), ...(shift ? side.endsWith('-end') ? { marginRight: -shift } : { marginLeft: shift } : null) }
+  const Box = inline ? 'span' : 'div', Panel = (inline ? motion.span : motion.div) as typeof motion.div
   return (
     <AnimatePresence>
       {open && (
-        <div ref={ref} className={cn('absolute z-50', SIDE[side], matchWidth && 'w-full')} style={style}>
-          <motion.div id={id} role={role} initial={{ opacity: 0, y: up ? 4 : -4, scale: 0.97 }} animate={{ opacity: 1, y: 0, scale: 1 }}
+        <Box ref={ref} data-side={floatSideOf(side)} className={cn('absolute', Z.popover, SIDE[side], matchWidth && 'w-full', inline && 'block')} style={style}>
+          <Panel id={id} role={role} initial={{ opacity: 0, y: up ? 4 : -4, scale: 0.97 }} animate={{ opacity: 1, y: 0, scale: 1 }}
             exit={{ opacity: 0, scale: 0.97, transition: { duration: 0.12 } }} transition={spring(0.25, 0.3)}
-            className={cn(surface.floating, 'max-w-[calc(100vw-16px)] min-w-[min(180px,calc(100vw-16px))] p-1', className)} {...p}>
+            className={cn(surface.floating, 'max-w-[calc(100vw-16px)] min-w-[min(180px,calc(100vw-16px))] p-1', inline && 'block', className)} {...p}>
             {children}
-          </motion.div>
+          </Panel>
           {arrow && <motion.span aria-hidden initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0, transition: { duration: 0.1 } }}
             className={cn('pointer-events-none absolute h-2.5 w-2.5 rotate-45 border-[var(--line)] bg-[var(--card)]', floatArrowClass(side))} />}
-        </div>
+        </Box>
       )}
     </AnimatePresence>
   )
@@ -179,12 +217,12 @@ export function FloatingPanel({ open, placement = 'bottom-start', flip = true, m
 /**
  * Popover.Content: the panel of a Popover. Position it with `side`/`align`/`sideOffset` (or `placement`), add `arrow`.
  * On open it moves focus inside: to an element marked `data-autofocus`, else the first
- * focusable one, else the panel itself (unless a child already took focus, e.g. a Calendar's selected day).
+ * focusable one, else the panel itself (unless a child already took focus, e.g. a Calendar's selected day or a menu's first item).
  * On close it hands focus back to the trigger when focus was inside the panel (or nowhere).
  */
 export function PopoverContent({ placement, side, align, sideOffset, arrow, className, children, role, 'aria-label': ariaLabel, 'aria-labelledby': labelledBy }:
   FloatProps & { className?: string; children: ReactNode; role?: string; /** names the panel (a dialog needs a name) */ 'aria-label'?: string; 'aria-labelledby'?: string }) {
-  const { open, id, triggerRef } = usePopover()
+  const { open, id, triggerRef } = usePopoverPart('Popover.Content')
   const wasOpen = useRef(false)
   useEffect(() => {
     const panel = document.getElementById(id)
@@ -212,15 +250,44 @@ export function PopoverContent({ placement, side, align, sideOffset, arrow, clas
  */
 export const Popover = Object.assign(PopoverRoot, { Root: PopoverRoot, Trigger: PopoverTrigger, Content: PopoverContent, Close: PopoverClose })
 
+/** Hover and touch timings (ms): tooltip open delay, hover-card open and close delays, how long a tapped tooltip stays, submenu open and close on hover. */
+const HOVER = { tooltipDelay: 400, cardOpen: 300, cardClose: 150, touchHide: 2500, subOpen: 90, subClose: 220 } as const
+
+/** Controlled-or-uncontrolled open flag whose setter ignores no-op calls, so `onOpenChange` fires once per change: `[open, setOpen, openRef]`. */
+function useOpenState({ open, defaultOpen = false, onOpenChange }: { open?: boolean; defaultOpen?: boolean; onOpenChange?: (open: boolean) => void }) {
+  const [inner, setInner] = useState(defaultOpen)
+  const controlled = open !== undefined, value = controlled ? open : inner
+  const now = useRef(value); now.current = value
+  const notify = useLatest(onOpenChange)
+  const setOpen = useCallback((v: boolean) => {
+    if (v === now.current) return
+    now.current = v
+    if (!controlled) setInner(v)
+    notify.current?.(v)
+  }, [controlled, notify])
+  return [value, setOpen, now] as const
+}
+
+/** One cancellable timer that opens or closes after a delay: `{ openIn(ms), closeIn(ms), cancel }`. Cleared on unmount. */
+function useDelayedToggle(setOpen: (open: boolean) => void) {
+  const t = useRef<ReturnType<typeof setTimeout>>(undefined), set = useLatest(setOpen)
+  useEffect(() => () => clearTimeout(t.current), [])
+  return useMemo(() => {
+    const cancel = () => clearTimeout(t.current)
+    const after = (v: boolean) => (ms: number) => { cancel(); t.current = setTimeout(() => set.current(v), ms) }
+    return { openIn: after(true), closeIn: after(false), cancel }
+  }, [set])
+}
+
 /** Variants for a menu's item list: items slide in one after another. */
 export const menuListVariants: Variants = { hidden: {}, show: { transition: { staggerChildren: 0.03 } } }
 /** Each item slides in from the left. */
 const menuItemVariants: Variants = { hidden: { opacity: 0, x: -6 }, show: { opacity: 1, x: 0, transition: { duration: 0.2 } } }
 
-/** What the items of a menu (DropdownMenu or ContextMenu content) need from it: close it, focus back on its trigger. */
+/** What the items of a menu (DropdownMenu, ContextMenu or Menu.List) need from it: close it, focus back on its trigger. */
 type MenuCtxV = { close: (refocus?: boolean) => void }
 const MenuCtx = createContext<MenuCtxV | null>(null)
-/** Close the menu around an item: a DropdownMenu, a ContextMenu, or (older usage) a plain Popover. */
+/** Close the menu around an item: a DropdownMenu, a ContextMenu, a Menu.List, or (older usage) a plain Popover. */
 function useMenuClose() {
   const menu = useContext(MenuCtx), pop = useContext(PopoverCtx)
   return (refocus = true) => {
@@ -239,34 +306,63 @@ const MENU_ITEM_SEL = '[role=menuitem],[role=menuitemcheckbox],[role=menuitemrad
 /** The enabled items of one menu list (not those of a submenu nested inside it). */
 const menuItemsOf = (list: Element | null | undefined) => list ? [...list.querySelectorAll<HTMLElement>(MENU_ITEM_SEL)]
   .filter(el => el.closest('[data-menu-list]') === list && !(el as HTMLButtonElement).disabled && el.getAttribute('aria-disabled') !== 'true') : []
+const menuLabel = (el: HTMLElement) => (el.dataset.textValue ?? el.textContent ?? '').trim()
 /** Pointer hover moves focus to the item (so arrows carry on from where the mouse is). */
 const menuHoverFocus = (e: ReactPointerEvent<HTMLElement>) => { if (e.pointerType === 'mouse' && document.activeElement !== e.currentTarget) e.currentTarget.focus({ preventScroll: true }) }
 
 /**
- * Keyboard for one menu list: ↑/↓ move (wrapping), Home/End jump, and typing a letter or a word jumps to the next item
- * whose label (or `textValue`) starts with it (typeahead; repeating one letter cycles). Only acts for the list that owns
- * the focused item, so a submenu's keys don't move its parent.
+ * One menu's item list: ↑/↓ move (wrapping), Home/End jump, and typing a letter or a word jumps to the next item whose
+ * label (or `textValue`) starts with it (repeating one letter cycles). Arrows and typeahead only act for the list that
+ * owns the focused item, so a submenu's keys don't move its parent. While `open`, the first enabled item takes focus
+ * (`autoFocus`). `onEscape` and `onTab` handle those keys (Tab from a nested submenu too). Put `ref` and `props` on the list.
  */
-function useMenuKeys() {
-  const buf = useRef({ s: '', t: 0 })
-  return useCallback((e: RKeyboardEvent<HTMLElement>) => {
+export function useMenuList<T extends HTMLElement = HTMLDivElement>({ open = true, autoFocus = true, onEscape, onTab }:
+  { open?: boolean; autoFocus?: boolean; onEscape?: () => void; onTab?: (e: RKeyboardEvent<HTMLElement>) => void } = {}) {
+  const ref = useRef<T>(null), type = useTypeahead(), on = useLatest({ onEscape, onTab })
+  useLayoutEffect(() => {
+    if (!open || !autoFocus) return
+    const focusFirst = () => {
+      const list = ref.current
+      if (!list || list.contains(document.activeElement)) return true
+      const first = menuItemsOf(list)[0]
+      first?.focus({ preventScroll: true })
+      return !first || document.activeElement === first
+    }
+    // a panel that is still hidden while it measures its place (ContextMenu) can't take focus yet: try again next frame
+    if (focusFirst()) return
+    const r = requestAnimationFrame(focusFirst)
+    return () => cancelAnimationFrame(r)
+  }, [open, autoFocus])
+  const onKeyDown = useCallback((e: RKeyboardEvent<HTMLElement>) => {
+    const { onEscape, onTab } = on.current
+    if (e.key === 'Escape' && onEscape) { e.preventDefault(); e.stopPropagation(); onEscape(); return }
+    if (e.key === 'Tab' && onTab) { onTab(e); return }
     const list = e.currentTarget
     if ((e.target as Element).closest?.('[data-menu-list]') !== list) return
     const items = menuItemsOf(list)
     if (!items.length) return
     const next = focusStep(items, e.key)
-    if (next) { e.preventDefault(); next.focus() }
-    else if (e.key.length === 1 && e.key !== ' ' && !e.ctrlKey && !e.metaKey && !e.altKey) {
-      const b = buf.current, now = Date.now(), k = e.key.toLowerCase()
-      b.s = now - b.t > 700 ? k : b.s + k; b.t = now
-      const same = [...b.s].every(c => c === b.s[0]), q = same ? b.s[0] : b.s, i = items.indexOf(document.activeElement as HTMLElement)
-      const from = same ? i + 1 : Math.max(i, 0)
-      const order = [...items.slice(from), ...items.slice(0, from)]
-      const label = (el: HTMLElement) => (el.dataset.textValue ?? el.textContent ?? '').trim().toLowerCase()
-      const hit = order.find(el => label(el).startsWith(q))
-      if (hit) { e.preventDefault(); hit.focus() }
-    }
-  }, [])
+    if (next) { e.preventDefault(); next.focus(); return }
+    if (e.key === ' ' || e.ctrlKey || e.metaKey || e.altKey) return
+    const typed = type(e.key)
+    const i = typed ? typeaheadIndex(items.map(menuLabel), typed, items.indexOf(document.activeElement as HTMLElement)) : -1
+    if (i >= 0) { e.preventDefault(); items[i].focus() }
+  }, [on, type])
+  return { ref, props: { 'data-menu-list': '', onKeyDown } }
+}
+
+/**
+ * Menu.List: a menu's item list without a trigger or panel, for composite widgets that bring their own (a composer's
+ * slash-command popup). Arrows, Home/End and typeahead move between the items, the first one takes focus (`autoFocus`),
+ * and choosing an item or pressing Escape calls `onClose`; `onTab` handles Tab. A `role="menu"` div unless `role` says otherwise.
+ */
+export function MenuList({ children, onClose, onTab, autoFocus = true, role = 'menu', className, ...aria }:
+  { children: ReactNode; onClose?: () => void; onTab?: (e: RKeyboardEvent<HTMLElement>) => void; autoFocus?: boolean; role?: string; className?: string
+    id?: string; 'aria-label'?: string; 'aria-labelledby'?: string }) {
+  const { ref, props } = useMenuList({ autoFocus, onEscape: onClose, onTab })
+  const close = useLatest(onClose)
+  const menu = useMemo<MenuCtxV>(() => ({ close: () => close.current?.() }), [close])
+  return <MenuCtx.Provider value={menu}><div ref={ref} role={role} className={className} {...aria} {...props}>{children}</div></MenuCtx.Provider>
 }
 
 type MenuItemBase = {
@@ -277,6 +373,19 @@ type MenuItemBase = {
 const menuRowClass = (danger?: boolean, disabled?: boolean, inset?: boolean, className?: string) =>
   cn(menuItemClass, danger && 'text-[var(--bad)]', disabled && 'cursor-default opacity-50', inset && '!ps-8', className)
 
+/** The body every menu row shares: a button that arrows reach (not a Tab stop), with a leading slot, the label and a trailing slot. */
+function MenuRow({ leading, trailing, danger, disabled, inset, textValue, className, children, ...p }: Omit<MenuItemBase, 'children'> &
+  { leading?: ReactNode; trailing?: ReactNode; danger?: boolean; children?: ReactNode } & Omit<HTMLMotionProps<'button'>, 'children' | 'className' | 'disabled'>) {
+  const inMenu = useContext(MenuCtx) !== null
+  return (
+    <motion.button type="button" variants={menuItemVariants} tabIndex={-1} disabled={disabled} data-text-value={textValue}
+      className={menuRowClass(danger, disabled, inset, className)} onPointerMove={inMenu ? menuHoverFocus : undefined} {...p}>
+      <span className="flex min-w-0 flex-1 items-center gap-2">{leading}{children}</span>
+      {trailing}
+    </motion.button>
+  )
+}
+
 /**
  * One row in a menu (DropdownMenu.Item / ContextMenu.Item). Not a Tab stop (arrows and typeahead move between rows); choosing
  * it calls `onSelect` and closes the menu, returning focus to the trigger (`closeOnSelect={false}` or `e.preventDefault()`
@@ -285,21 +394,18 @@ const menuRowClass = (danger?: boolean, disabled?: boolean, inset?: boolean, cla
 export function MenuItem({ children, shortcut, icon, danger, disabled, onSelect, closeOnSelect = true, textValue, inset, asChild, className }: MenuItemBase & AsChildProps &
   { shortcut?: string; icon?: IconName; danger?: boolean; onSelect?: (e: MenuSelectEvent) => void; closeOnSelect?: boolean }) {
   const close = useMenuClose(), inMenu = useContext(MenuCtx) !== null
-  const props = {
-    role: 'menuitem', tabIndex: -1, 'data-text-value': textValue, className: menuRowClass(danger, disabled, inset, className),
-    onPointerMove: inMenu ? menuHoverFocus : undefined,
-    onClick: (e: ReactMouseEvent<HTMLElement>) => {
-      if (disabled) { e.preventDefault(); return }
-      const ev = menuSelectEvent(e); onSelect?.(ev)
-      if (closeOnSelect && !ev.defaultPrevented) close()
-    },
+  const onClick = (e: ReactMouseEvent<HTMLElement>) => {
+    if (disabled) { e.preventDefault(); return }
+    const ev = menuSelectEvent(e); onSelect?.(ev)
+    if (closeOnSelect && !ev.defaultPrevented) close()
   }
-  if (asChild) return <Slot {...props} aria-disabled={disabled || undefined}>{children}</Slot>
+  if (asChild) return (
+    <Slot role="menuitem" tabIndex={-1} data-text-value={textValue} aria-disabled={disabled || undefined} className={menuRowClass(danger, disabled, inset, className)}
+      onPointerMove={inMenu ? menuHoverFocus : undefined} onClick={onClick}>{children}</Slot>
+  )
   return (
-    <motion.button type="button" variants={menuItemVariants} disabled={disabled} {...props}>
-      <span className="flex min-w-0 flex-1 items-center gap-2">{icon && <Icon name={icon} size={15} className={danger ? '' : 'text-[var(--fg3)]'} />}{children}</span>
-      {shortcut && <Kbd>{shortcut}</Kbd>}
-    </motion.button>
+    <MenuRow role="menuitem" danger={danger} disabled={disabled} inset={inset} textValue={textValue} className={className} onClick={onClick}
+      leading={icon && <Icon name={icon} size={15} className={danger ? '' : 'text-[var(--fg3)]'} />} trailing={shortcut && <Kbd>{shortcut}</Kbd>}>{children}</MenuRow>
   )
 }
 /** Thin rule between groups of menu rows. */
@@ -331,17 +437,14 @@ function MenuIndicator({ on, kind }: { on: boolean; kind: 'check' | 'dot' }) {
  * A menu row that toggles (role=menuitemcheckbox, aria-checked): `checked` + `onCheckedChange`, or `defaultChecked`.
  * Stays open when toggled, so several can be flipped in a row (`closeOnSelect` closes it).
  */
-export function MenuCheckboxItem({ checked, defaultChecked = false, onCheckedChange, onSelect, closeOnSelect = false, shortcut, children, disabled, textValue, className }: MenuItemBase &
+export function MenuCheckboxItem({ checked, defaultChecked = false, onCheckedChange, onSelect, closeOnSelect = false, shortcut, children, disabled, textValue, className }: Omit<MenuItemBase, 'inset'> &
   { checked?: boolean; defaultChecked?: boolean; onCheckedChange?: (checked: boolean) => void; onSelect?: (e: MenuSelectEvent) => void; closeOnSelect?: boolean; shortcut?: string }) {
   const [on, set] = useControllable(checked, defaultChecked, onCheckedChange)
   const close = useMenuClose()
   return (
-    <motion.button type="button" variants={menuItemVariants} role="menuitemcheckbox" aria-checked={on} tabIndex={-1} disabled={disabled} data-text-value={textValue}
-      className={menuRowClass(false, disabled, false, className)} onPointerMove={menuHoverFocus}
-      onClick={e => { const ev = menuSelectEvent(e); onSelect?.(ev); if (ev.defaultPrevented) return; set(!on); if (closeOnSelect) close() }}>
-      <span className="flex min-w-0 flex-1 items-center gap-2"><MenuIndicator on={on} kind="check" />{children}</span>
-      {shortcut && <Kbd>{shortcut}</Kbd>}
-    </motion.button>
+    <MenuRow role="menuitemcheckbox" aria-checked={on} disabled={disabled} textValue={textValue} className={className}
+      leading={<MenuIndicator on={on} kind="check" />} trailing={shortcut && <Kbd>{shortcut}</Kbd>}
+      onClick={e => { const ev = menuSelectEvent(e); onSelect?.(ev); if (ev.defaultPrevented) return; set(!on); if (closeOnSelect) close() }}>{children}</MenuRow>
   )
 }
 
@@ -351,29 +454,26 @@ const MenuRadioCtx = createContext<MenuRadioCtxV | null>(null)
 export function MenuRadioGroup({ value, defaultValue, onValueChange, children, 'aria-label': label, className }:
   { value?: string; defaultValue?: string; onValueChange?: (value: string) => void; children: ReactNode; 'aria-label'?: string; className?: string }) {
   const [v, set] = useControllable<string | undefined>(value, defaultValue, onValueChange as (v: string | undefined) => void)
-  return <MenuRadioCtx.Provider value={{ value: v, set }}><div role="group" aria-label={label} className={className}>{children}</div></MenuRadioCtx.Provider>
+  const ctx = useMemo(() => ({ value: v, set }), [v, set])
+  return <MenuRadioCtx.Provider value={ctx}><div role="group" aria-label={label} className={className}>{children}</div></MenuRadioCtx.Provider>
 }
 /** One choice in a MenuRadioGroup (role=menuitemradio, aria-checked). Stays open when picked unless `closeOnSelect`. */
-export function MenuRadioItem({ value, onSelect, closeOnSelect = false, shortcut, children, disabled, textValue, className }: MenuItemBase &
+export function MenuRadioItem({ value, onSelect, closeOnSelect = false, shortcut, children, disabled, textValue, className }: Omit<MenuItemBase, 'inset'> &
   { value: string; onSelect?: (e: MenuSelectEvent) => void; closeOnSelect?: boolean; shortcut?: string }) {
   const g = useRequiredContext(MenuRadioCtx, '<RadioItem>', 'a menu <RadioGroup>')
   const close = useMenuClose(), on = g.value === value
   return (
-    <motion.button type="button" variants={menuItemVariants} role="menuitemradio" aria-checked={on} tabIndex={-1} disabled={disabled} data-text-value={textValue}
-      className={menuRowClass(false, disabled, false, className)} onPointerMove={menuHoverFocus}
-      onClick={e => { const ev = menuSelectEvent(e); onSelect?.(ev); if (ev.defaultPrevented) return; g.set(value); if (closeOnSelect) close() }}>
-      <span className="flex min-w-0 flex-1 items-center gap-2"><MenuIndicator on={on} kind="dot" />{children}</span>
-      {shortcut && <Kbd>{shortcut}</Kbd>}
-    </motion.button>
+    <MenuRow role="menuitemradio" aria-checked={on} disabled={disabled} textValue={textValue} className={className}
+      leading={<MenuIndicator on={on} kind="dot" />} trailing={shortcut && <Kbd>{shortcut}</Kbd>}
+      onClick={e => { const ev = menuSelectEvent(e); onSelect?.(ev); if (ev.defaultPrevented) return; g.set(value); if (closeOnSelect) close() }}>{children}</MenuRow>
   )
 }
 
 /* Submenus ─ */
 
-type MenuSubCtxV = { open: boolean; setOpen: (v: boolean) => void; hover: () => void; triggerRef: RefObject<HTMLButtonElement | null>; id: string }
+type MenuSubCtxV = { open: boolean; focusFirst: boolean; setOpen: (v: boolean, focusFirst?: boolean) => void; hover: () => void; triggerRef: RefObject<HTMLButtonElement | null>; id: string }
 const MenuSubCtx = createContext<MenuSubCtxV | null>(null)
 const useMenuSub = (part: string) => useRequiredContext(MenuSubCtx, `<${part}>`, 'a menu <Sub>')
-const menuFirstItem = (id: string) => requestAnimationFrame(() => menuItemsOf(document.getElementById(id))[0]?.focus({ preventScroll: true }))
 
 /**
  * A nested menu (DropdownMenu.Sub / ContextMenu.Sub): wraps a SubTrigger and a SubContent. Opens on hover (mouse), click
@@ -381,18 +481,20 @@ const menuFirstItem = (id: string) => requestAnimationFrame(() => menuItemsOf(do
  * `open` + `onOpenChange` to control it.
  */
 export function MenuSub({ open, defaultOpen = false, onOpenChange, children }: { open?: boolean; defaultOpen?: boolean; onOpenChange?: (open: boolean) => void; children: ReactNode }) {
-  const [o, setO] = useControllable(open, defaultOpen, onOpenChange)
-  const now = useRef(o); now.current = o
-  const triggerRef = useRef<HTMLButtonElement>(null), id = useId(), t = useRef<ReturnType<typeof setTimeout>>(undefined)
-  useEffect(() => () => clearTimeout(t.current), [])
-  const value = useMemo<MenuSubCtxV>(() => {
-    const setOpen = (v: boolean) => { clearTimeout(t.current); if (v !== now.current) { now.current = v; setO(v) } }
-    return { open: o, setOpen, triggerRef, id, hover: () => { clearTimeout(t.current); if (!now.current) t.current = setTimeout(() => setOpen(true), 90) } }
-  }, [o, setO, id])
+  const [o, setO, now] = useOpenState({ open, defaultOpen, onOpenChange })
+  const timer = useDelayedToggle(setO)
+  // opened by click or key: its first item takes focus; opened by hover: focus stays on the trigger row
+  const [focusFirst, setFocusFirst] = useState(false)
+  const triggerRef = useRef<HTMLButtonElement>(null), id = useId()
+  const value = useMemo<MenuSubCtxV>(() => ({
+    open: o, focusFirst, triggerRef, id,
+    setOpen: (v, focus = false) => { timer.cancel(); setFocusFirst(v && focus); setO(v) },
+    hover: () => { if (now.current) timer.cancel(); else timer.openIn(HOVER.subOpen) },
+  }), [o, focusFirst, setO, id, timer, now])
   return (
     <MenuSubCtx.Provider value={value}>
-      <div className="relative" onPointerEnter={() => { if (now.current) clearTimeout(t.current) }}
-        onPointerLeave={e => { if (e.pointerType !== 'mouse') return; clearTimeout(t.current); t.current = setTimeout(() => value.setOpen(false), 220) }}
+      <div className="relative" onPointerEnter={() => { if (now.current) timer.cancel() }}
+        onPointerLeave={e => { if (e.pointerType === 'mouse') timer.closeIn(HOVER.subClose) }}
         onBlur={e => { const to = e.relatedTarget as Node | null; if (to && !e.currentTarget.contains(to)) value.setOpen(false) }}>
         {children}
       </div>
@@ -402,16 +504,13 @@ export function MenuSub({ open, defaultOpen = false, onOpenChange, children }: {
 /** The row that opens a submenu (aria-haspopup=menu, aria-expanded); shows a chevron. */
 export function MenuSubTrigger({ children, icon, disabled, textValue, inset, className }: MenuItemBase & { icon?: IconName }) {
   const sub = useMenuSub('SubTrigger')
-  const openAndFocus = () => { sub.setOpen(true); menuFirstItem(sub.id) }
+  const openAndFocus = () => sub.setOpen(true, true)
   return (
-    <motion.button ref={sub.triggerRef} id={`${sub.id}-t`} type="button" variants={menuItemVariants} role="menuitem" aria-haspopup="menu" aria-expanded={sub.open}
-      aria-controls={sub.open ? sub.id : undefined} tabIndex={-1} disabled={disabled} data-text-value={textValue} data-state={sub.open ? 'open' : 'closed'}
-      className={cn(menuRowClass(false, disabled, inset, className), 'data-[state=open]:bg-[var(--muted)]')}
-      onPointerMove={menuHoverFocus} onPointerEnter={e => { if (e.pointerType === 'mouse') sub.hover() }} onClick={openAndFocus}
-      onKeyDown={e => { if (e.key === 'ArrowRight' || e.key === 'Enter' || e.key === ' ') { e.preventDefault(); e.stopPropagation(); openAndFocus() } }}>
-      <span className="flex min-w-0 flex-1 items-center gap-2">{icon && <Icon name={icon} size={15} className="text-[var(--fg3)]" />}{children}</span>
-      <Icon name="chevronRight" size={13} className="text-[var(--fg3)]" />
-    </motion.button>
+    <MenuRow ref={sub.triggerRef} id={`${sub.id}-t`} role="menuitem" aria-haspopup="menu" aria-expanded={sub.open} aria-controls={sub.open ? sub.id : undefined}
+      disabled={disabled} textValue={textValue} inset={inset} data-state={sub.open ? 'open' : 'closed'} className={cn('data-[state=open]:bg-[var(--muted)]', className)}
+      leading={icon && <Icon name={icon} size={15} className="text-[var(--fg3)]" />} trailing={<Icon name="chevronRight" size={13} className="text-[var(--fg3)]" />}
+      onPointerEnter={e => { if (e.pointerType === 'mouse') sub.hover() }} onClick={openAndFocus}
+      onKeyDown={e => { if (e.key === 'ArrowRight' || e.key === 'Enter' || e.key === ' ') { e.preventDefault(); e.stopPropagation(); openAndFocus() } }}>{children}</MenuRow>
   )
 }
 
@@ -420,40 +519,44 @@ const ctxPanelVariants: Variants = {
   show: { opacity: 1, scale: 1, transition: { ...spring(0.25, 0.25), staggerChildren: 0.025 } },
 }
 
+/** The submenu's first row sits level with its trigger row: the panel's top padding plus border, in px. */
+const SUB_ROW_ALIGN = 5
+/** Gap between a submenu and its trigger row, in px. */
+const SUB_GAP = 4
+
 /**
  * The submenu panel. Opens to the right of its trigger, on the other side
  * when that has no room, and on a phone too narrow for either it overlaps just below the trigger; it also moves up to
  * stay on screen.
  */
 export function MenuSubContent({ children, className, 'aria-label': ariaLabel }: { children: ReactNode; className?: string; 'aria-label'?: string }) {
-  const sub = useMenuSub('SubContent'), keys = useMenuKeys()
-  const ref = useRef<HTMLDivElement>(null)
+  const sub = useMenuSub('SubContent')
+  const back = () => { sub.setOpen(false); sub.triggerRef.current?.focus() }
+  const { ref, props } = useMenuList<HTMLDivElement>({ open: sub.open, autoFocus: sub.focusFirst, onEscape: back })
   const [place, setPlace] = useState<{ left: number; top: number; onLeft: boolean } | null>(null)
   useLayoutEffect(() => {
     if (!sub.open) { setPlace(null); return }
     const el = ref.current, tr = sub.triggerRef.current
     if (!el || !tr) return
-    const r = tr.getBoundingClientRect(), w = el.offsetWidth, h = el.offsetHeight
-    const right = r.width + 4, leftOf = -w - 4 // physical offsets from the trigger's left edge
-    const fitsR = r.right + 4 + w <= innerWidth - 8, fitsL = r.left - 4 - w >= 8
-    let left: number, top = -5
-    if (fitsR) left = right
-    else if (fitsL) left = leftOf
-    else { left = Math.max(8, Math.min(innerWidth - 8 - w, (r.left + 24))) - r.left; top = r.height }
-    if (r.top + top + h > innerHeight - 8) top = top > 0 && r.top - h - 2 >= 8 ? -h - 2 : Math.max(8, innerHeight - 8 - h) - r.top // overlapping: above the trigger when below doesn't fit
-    setPlace({ left, top, onLeft: left < 0 })
+    const r = tr.getBoundingClientRect(), size = { w: el.offsetWidth, h: el.offsetHeight }, vp = viewportSize()
+    const fit = fitPanel({ anchor: { left: r.left, right: r.right, top: r.top - SUB_ROW_ALIGN, bottom: r.bottom }, size, side: 'right', align: 'start', gap: SUB_GAP })
+    let { left, top } = fit
+    if (!fit.fits) { // no room on either side (a phone): overlap the trigger, just below it, or above when below doesn't fit
+      left = fitInside(r.left + 24, size.w, vp.w)
+      top = r.bottom + size.h <= vp.h - VIEWPORT_MARGIN ? r.bottom : r.top - size.h - 2 >= VIEWPORT_MARGIN ? r.top - size.h - 2 : fitInside(r.bottom, size.h, vp.h)
+    }
+    setPlace({ left: left - r.left, top: top - r.top, onLeft: left < r.left })
   }, [sub.open]) // eslint-disable-line react-hooks/exhaustive-deps
   return (
     <AnimatePresence>
       {sub.open && (
-        <motion.div ref={ref} id={sub.id} role="menu" aria-label={ariaLabel} aria-labelledby={ariaLabel ? undefined : `${sub.id}-t`} data-menu-list
+        <motion.div ref={ref} id={sub.id} role="menu" aria-label={ariaLabel} aria-labelledby={ariaLabel ? undefined : `${sub.id}-t`} {...props}
           variants={ctxPanelVariants} initial="hidden" animate="show" exit={{ opacity: 0, scale: 0.97, transition: { duration: 0.1 } }}
           style={place ? { left: place.left, top: place.top } : { visibility: 'hidden' }}
           className={cn(surface.floating, 'absolute z-10 min-w-[180px] p-1', place?.onLeft ? 'origin-top-right' : 'origin-top-left', className)}
           onKeyDown={e => {
-            if ((e.target as Element).closest('[data-menu-list]') !== e.currentTarget) return
-            if (e.key === 'ArrowLeft' || e.key === 'Escape') { e.preventDefault(); e.stopPropagation(); sub.setOpen(false); sub.triggerRef.current?.focus(); return }
-            keys(e)
+            if (e.key === 'ArrowLeft' && (e.target as Element).closest('[data-menu-list]') === e.currentTarget) { e.preventDefault(); e.stopPropagation(); back(); return }
+            props.onKeyDown(e)
           }}>
           {children}
         </motion.div>
@@ -466,10 +569,10 @@ export function MenuSubContent({ children, className, 'aria-label': ariaLabel }:
 
 /** The item list inside DropdownMenu content: arrow keys and typeahead move, Tab or focus leaving the menu closes it. */
 function DropdownList({ children }: { children: ReactNode }) {
-  const { setOpen, triggerRef } = usePopover(), keys = useMenuKeys()
+  const { open, setOpen, triggerRef } = usePopoverPart('DropdownMenu.Content')
+  const { ref, props } = useMenuList<HTMLDivElement>({ open, onTab: () => setOpen(false) })
   return (
-    <motion.div data-menu-list initial="hidden" animate="show" variants={menuListVariants}
-      onKeyDown={e => { if (e.key === 'Tab') setOpen(false); else keys(e) }}
+    <motion.div ref={ref} {...props} initial="hidden" animate="show" variants={menuListVariants}
       onBlur={e => { const to = e.relatedTarget as Node | null; if (to && !e.currentTarget.contains(to) && !triggerRef.current?.contains(to)) setOpen(false) }}>
       {children}
     </motion.div>
@@ -482,12 +585,12 @@ export function DropdownMenuRoot(p: { open?: boolean; defaultOpen?: boolean; onO
 }
 /** DropdownMenu.Trigger: opens the menu on click, Enter, Space or ↓ (aria-haspopup=menu). Button props, or `asChild`. */
 export function DropdownMenuTrigger({ onKeyDown, ...p }: ButtonProps) {
-  const { open, setOpen } = usePopover()
+  const { open, setOpen } = usePopoverPart('DropdownMenu.Trigger')
   return <PopoverTrigger aria-haspopup="menu" {...p} onKeyDown={e => { onKeyDown?.(e); if (!e.defaultPrevented && !open && (e.key === 'ArrowDown' || e.key === 'ArrowUp')) { e.preventDefault(); setOpen(true) } }} />
 }
-/** DropdownMenu.Content: the menu panel (role=menu). The first item takes focus and the rest stagger in. `side`, `align`, `sideOffset`, `arrow`. */
+/** DropdownMenu.Content: the menu panel (role=menu). The first enabled item takes focus and the rest stagger in. `side`, `align`, `sideOffset`, `arrow`. */
 export function DropdownMenuContent({ children, className, 'aria-label': ariaLabel, ...float }: FloatProps & { children: ReactNode; className?: string; 'aria-label'?: string }) {
-  const { setOpen, triggerRef } = usePopover()
+  const { setOpen, triggerRef } = usePopoverPart('DropdownMenu.Content')
   const menu = useMemo<MenuCtxV>(() => ({ close: (refocus = true) => { setOpen(false); if (refocus) triggerRef.current?.focus() } }), [setOpen, triggerRef])
   return (
     <MenuCtx.Provider value={menu}>
@@ -509,7 +612,7 @@ function DropdownMenuConfig({ trigger, children, placement, variant, size, class
 
 /**
  * <DropdownMenu trigger="Options"><MenuItem shortcut="E">Edit</MenuItem>…</DropdownMenu>
- * Opens with click, Enter or ↓; the first item takes focus and the rest stagger in. ↑/↓, Home/End and typeahead move;
+ * Opens with click, Enter or ↓; the first enabled item takes focus and the rest stagger in. ↑/↓, Home/End and typeahead move;
  * Tab or moving focus away closes it. Parts: DropdownMenu.Root/Trigger/Content/Item/CheckboxItem/RadioGroup/RadioItem/
  * Label/Separator/Group/Sub/SubTrigger/SubContent/Shortcut.
  */
@@ -519,6 +622,12 @@ export const DropdownMenu = Object.assign(DropdownMenuConfig, {
   Sub: MenuSub, SubTrigger: MenuSubTrigger, SubContent: MenuSubContent, Shortcut: MenuShortcut,
 })
 
+/** The menu item parts on their own, with Menu.List for widgets that bring their own panel. */
+export const Menu = {
+  List: MenuList, Item: MenuItem, CheckboxItem: MenuCheckboxItem, RadioGroup: MenuRadioGroup, RadioItem: MenuRadioItem,
+  Label: MenuLabel, Separator: MenuSeparator, Group: MenuGroup, Shortcut: MenuShortcut,
+}
+
 export type ContextMenuEntry =
   | { label: string; icon?: IconName; shortcut?: string; danger?: boolean; onSelect?: () => void; items?: ContextMenuEntry[] }
   | '-'
@@ -527,6 +636,8 @@ type CtxAt = { x: number; y: number }
 type CtxMenuV = { open: boolean; at: CtxAt | null; openAt: (x: number, y: number) => void; close: (refocus?: boolean) => void; area: RefObject<HTMLElement | null> }
 const ContextMenuCtx = createContext<CtxMenuV | null>(null)
 const useCtxMenu = (part: string) => useRequiredContext(ContextMenuCtx, `<ContextMenu.${part}>`, '<ContextMenu.Root>')
+/** The name of a context-menu area (and its menu) when none is given. */
+const CTX_LABEL = 'Options'
 
 /** ContextMenu.Root: state for a menu opened at a point. `onOpenChange` reports it; `open={false}` closes it, `open` opens it mid-area. */
 export function ContextMenuRoot({ open: openProp, onOpenChange, children }: { open?: boolean; onOpenChange?: (open: boolean) => void; children: ReactNode }) {
@@ -534,12 +645,12 @@ export function ContextMenuRoot({ open: openProp, onOpenChange, children }: { op
   const area = useRef<HTMLElement>(null)
   const open = openProp ?? !!at
   const now = useRef(open); now.current = open
-  const notify = useRef(onOpenChange); notify.current = onOpenChange
-  const openAt = useCallback((x: number, y: number) => { setAt({ x, y }); if (!now.current) notify.current?.(true) }, [])
+  const notify = useLatest(onOpenChange)
+  const openAt = useCallback((x: number, y: number) => { setAt({ x, y }); if (!now.current) notify.current?.(true) }, [notify])
   const close = useCallback((refocus = false) => {
     setAt(null); if (now.current) notify.current?.(false)
     if (refocus) area.current?.focus({ preventScroll: true })
-  }, [])
+  }, [notify])
   useLayoutEffect(() => { // controlled from outside: open mid-area, or forget the point when closed
     if (openProp && !at && area.current) { const r = area.current.getBoundingClientRect(); setAt({ x: r.left + r.width / 2, y: r.top + r.height / 2 }) }
     else if (openProp === false && at) setAt(null)
@@ -550,17 +661,17 @@ export function ContextMenuRoot({ open: openProp, onOpenChange, children }: { op
 
 /**
  * ContextMenu.Trigger: the area that opens the menu on right-click, long-press (touch), or the Menu key / Shift+F10 when
- * focused. A focusable named group (`label`); `children` may be a function of `open`. `asChild` puts it on your element.
+ * focused. A focusable named group (`label`, default "Options"); `children` may be a function of `open`. `asChild` puts it on your element.
  */
-export function ContextMenuTrigger({ children, className, label, asChild }:
+export function ContextMenuTrigger({ children, className, label = CTX_LABEL, asChild }:
   { children: ReactNode | ((open: boolean) => ReactNode); className?: string; label?: string } & AsChildProps) {
   const { open, openAt, area } = useCtxMenu('Trigger')
   const inArea = (t: EventTarget) => !!area.current?.contains(t as Node)
   // touch: long-press opens the menu just under the finger (the menu's own events bubble here through the portal, hence inArea)
-  const hold = useLongPress({ onPress: ({ x, y }) => { navigator.vibrate?.(10); openAt(x, y + 10) } })
+  const hold = useLongPress({ onPress: ({ x, y }) => { haptic(10); openAt(x, y + 10) } })
   const fromArea = <E extends { target: EventTarget }>(fn: (e: E) => void) => (e: E) => { if (inArea(e.target)) fn(e) }
   const props = {
-    ref: area as RefObject<HTMLDivElement | null>, tabIndex: 0, role: 'group', 'aria-label': label ?? 'Options', 'aria-keyshortcuts': 'Shift+F10 ContextMenu', 'data-state': open ? 'open' : 'closed',
+    ref: area as RefObject<HTMLDivElement | null>, tabIndex: 0, role: 'group', 'aria-label': label, 'aria-keyshortcuts': 'Shift+F10 ContextMenu', 'data-state': open ? 'open' : 'closed',
     className: cn('relative select-none outline-none [-webkit-touch-callout:none] focus-visible:ring-2 focus-visible:ring-[var(--accent)]', className),
     onContextMenu: (e: ReactMouseEvent<HTMLElement>) => { if (!inArea(e.target)) return; e.preventDefault(); hold.cancel(); openAt(e.clientX, e.clientY) },
     onPointerDown: fromArea(hold.bind.onPointerDown), onPointerMove: hold.bind.onPointerMove,
@@ -579,12 +690,13 @@ export function ContextMenuTrigger({ children, className, label, asChild }:
 
 /**
  * ContextMenu.Content: the menu, at the pointer (portalled, kept inside the viewport). Focuses its first item; ↑/↓,
- * Home/End and typeahead move; Escape, Tab, an outside click, scroll or resize close it.
+ * Home/End and typeahead move; Escape, Tab, an outside click, scroll or resize close it and return focus to the area.
  */
 export function ContextMenuContent({ children, className, 'aria-label': ariaLabel }: { children: ReactNode; className?: string; 'aria-label'?: string }) {
   const { open, at, close } = useCtxMenu('Content')
-  const panel = useRef<HTMLDivElement>(null), keys = useMenuKeys()
   const [place, setPlace] = useState<{ left: number; top: number; onLeft: boolean } | null>(null)
+  const shown = open && !!at
+  const { ref: panel, props } = useMenuList<HTMLDivElement>({ open: shown, onEscape: () => close(true), onTab: e => { e.preventDefault(); close(true) } })
   useOutside([panel], () => close(), open)
   useEffect(() => {
     if (!open) return
@@ -595,33 +707,23 @@ export function ContextMenuContent({ children, className, 'aria-label': ariaLabe
   useLayoutEffect(() => {
     const el = panel.current
     if (!open || !at || !el) { setPlace(null); return }
-    const w = el.offsetWidth, h = el.offsetHeight
-    const onLeft = at.x + w > innerWidth - 8
-    const left = Math.max(8, Math.min(innerWidth - w - 8, onLeft ? at.x - w : at.x))
-    setPlace({ left, top: Math.max(8, Math.min(at.y, innerHeight - h - 8)), onLeft })
+    const size = { w: el.offsetWidth, h: el.offsetHeight }
+    const fit = fitPanel({ anchor: { left: at.x, right: at.x, top: at.y, bottom: at.y }, size, side: 'right', align: 'start', gap: 0 })
+    setPlace({ left: fitInside(fit.left, size.w, viewportSize().w), top: fit.top, onLeft: fit.side === 'left' })
   }, [open, at?.x, at?.y]) // eslint-disable-line react-hooks/exhaustive-deps
-  useEffect(() => {
-    if (!open || !at) return
-    const r = requestAnimationFrame(() => menuItemsOf(panel.current)[0]?.focus({ preventScroll: true }))
-    return () => cancelAnimationFrame(r)
-  }, [open, at])
   const menu = useMemo<MenuCtxV>(() => ({ close }), [close])
   return (
     <OverlayPortal>
       <MenuCtx.Provider value={menu}>
         <AnimatePresence>
-          {open && at && (
-            <motion.div key="menu" ref={panel} role="menu" aria-label={ariaLabel} data-menu-list variants={ctxPanelVariants} initial="hidden" animate="show"
+          {shown && (
+            <motion.div key="menu" ref={panel} role="menu" aria-label={ariaLabel} {...props} variants={ctxPanelVariants} initial="hidden" animate="show"
               exit={{ opacity: 0, scale: 0.97, transition: { duration: 0.1 } }}
-
               style={{ left: place?.left ?? at.x, top: place?.top ?? at.y, visibility: place ? 'visible' : 'hidden' }}
-              className={cn(surface.floating, 'fixed z-[85] min-w-[200px] p-1', place?.onLeft ? 'origin-top-right' : 'origin-top-left', className)}
+              className={cn(surface.floating, 'fixed min-w-[200px] p-1', Z.menu, place?.onLeft ? 'origin-top-right' : 'origin-top-left', className)}
               onContextMenu={e => { e.preventDefault(); e.stopPropagation() }}
-              onKeyDown={e => {
-                e.stopPropagation()
-                if (e.key === 'Escape' || e.key === 'Tab') { e.preventDefault(); close(true); return }
-                keys(e)
-              }}>
+              // keys stay in the menu: the portal would bubble them to the area's own key handler
+              onKeyDown={e => { e.stopPropagation(); props.onKeyDown(e) }}>
               {children}
             </motion.div>
           )}
@@ -643,9 +745,8 @@ function ctxEntries(entries: ContextMenuEntry[]): ReactNode {
   ))
 }
 
-function ContextMenuConfig({ items, children, className, label: labelProp, onOpenChange }:
+function ContextMenuConfig({ items, children, className, label = CTX_LABEL, onOpenChange }:
   { items: ContextMenuEntry[]; children: ReactNode | ((open: boolean) => ReactNode); className?: string; label?: string; onOpenChange?: (open: boolean) => void }) {
-  const label = labelProp ?? 'Options'
   return (
     <ContextMenuRoot onOpenChange={onOpenChange}>
       <ContextMenuTrigger className={className} label={label}>{children}</ContextMenuTrigger>
@@ -667,59 +768,63 @@ export const ContextMenu = Object.assign(ContextMenuConfig, {
   Sub: MenuSub, SubTrigger: MenuSubTrigger, SubContent: MenuSubContent, Shortcut: MenuShortcut,
 })
 
-/**
- * Open state for hover UI that also works by touch: mouse and pen hover (after `openDelay`, closing `closeDelay` ms after
- * leaving), keyboard focus, and a tap on the trigger (spread `tap`) toggles it. Spread `bind` on the wrapper. A tap anywhere
- * outside `ref` closes it; `touchHide` ms auto-hides a tapped one. `control` makes it controlled (`open` + `onOpenChange`)
- * or sets `defaultOpen`. Returns { open, setOpen, bind, tap }.
- */
-export function useHoverIntent(ref: RefObject<HTMLElement | null>, openDelay = 300, closeDelay = 100, touchHide = 0,
-  control: { open?: boolean; defaultOpen?: boolean; onOpenChange?: (open: boolean) => void } = {}) {
-  const [inner, setInner] = useState(control.defaultOpen ?? false)
-  const controlled = control.open !== undefined
-  const open = controlled ? !!control.open : inner
-  const t = useRef<ReturnType<typeof setTimeout>>(undefined), tapAt = useRef(0), isOpen = useRef(open)
-  isOpen.current = open
-  const notify = useRef(control.onOpenChange); notify.current = control.onOpenChange
-  const setOpen = useCallback((v: boolean) => {
-    if (v === isOpen.current) return
-    isOpen.current = v
-    if (!controlled) setInner(v)
-    notify.current?.(v)
-  }, [controlled])
-  const show = () => { clearTimeout(t.current); t.current = setTimeout(() => setOpen(true), openDelay) }
-  const hide = () => { clearTimeout(t.current); t.current = setTimeout(() => setOpen(false), closeDelay) }
-  useEffect(() => () => clearTimeout(t.current), [])
-  useOutside([ref], () => { clearTimeout(t.current); setOpen(false) }, open)
-  return {
-    open, setOpen,
-    bind: {
-      onPointerEnter: (e: ReactPointerEvent) => { if (!isTouch(e)) show() },
-      onPointerLeave: (e: ReactPointerEvent) => { if (!isTouch(e)) hide() },
-      // a tap focuses the trigger right after pointerup: that focus is part of the tap, not a separate open
-      onFocus: () => { if (Date.now() - tapAt.current > 800) show() },
-      onBlur: hide,
-    },
-    tap: {
-      onPointerUp: (e: ReactPointerEvent) => {
-        if (!isTouch(e)) return
-        tapAt.current = Date.now(); clearTimeout(t.current)
-        const next = !isOpen.current; setOpen(next)
-        if (next && touchHide) t.current = setTimeout(() => setOpen(false), touchHide)
-      },
-    },
-  }
+/** Options for useHoverIntent. */
+export type HoverIntentOptions = {
+  /** ms before a hover or focus opens it (default 300) */ openDelay?: number
+  /** ms after the pointer or focus leaves before it closes (default 150) */ closeDelay?: number
+  /** ms after which a tapped one hides itself (0: never) */ touchHide?: number
+  /** keep it open when the pointer or focus leaves (a pinned card); a tap outside or Escape still closes it */ hold?: boolean
+  open?: boolean; defaultOpen?: boolean; onOpenChange?: (open: boolean) => void
 }
 
-const tipClass = 'flex items-center gap-1.5 whitespace-nowrap rounded-[var(--r-md)] bg-[var(--primary)] px-2 py-1 text-xs text-[var(--on-primary)] shadow-[var(--shadow)]'
-/** Where a portalled tooltip sits for each placement: anchor point plus a CSS translate. */
-function tipFixed(r: DOMRect, p: Placement, offset?: number) {
-  const s = floatSideOf(p)
-  if (s === 'right') return { left: r.right + (offset ?? 8), top: r.top + r.height / 2, transform: 'translateY(-50%)' }
-  if (s === 'left') return { left: r.left - (offset ?? 8), top: r.top + r.height / 2, transform: 'translate(-100%,-50%)' }
-  if (s === 'bottom') return { left: r.left + r.width / 2, top: r.bottom + (offset ?? 6), transform: 'translateX(-50%)' }
-  return { left: r.left + r.width / 2, top: r.top - (offset ?? 8), transform: 'translate(-50%,-100%)' }
+/**
+ * Open state for hover UI that also works by touch: mouse and pen hover (after `openDelay`, closing `closeDelay` ms after
+ * leaving), keyboard focus, and a tap on the trigger (spread `tap`) toggles it. Spread `bind` on the wrapper. A tap
+ * outside `ref` closes it, and so does Escape wherever focus is, so hover content can be dismissed without moving the
+ * pointer. `touchHide` auto-hides a tapped one. `open` + `onOpenChange` control it, or set `defaultOpen`.
+ * Returns { open, setOpen, bind, tap }.
+ */
+export function useHoverIntent(ref: RefObject<HTMLElement | null>, { openDelay = HOVER.cardOpen, closeDelay = HOVER.cardClose, touchHide = 0, hold = false, open, defaultOpen, onOpenChange }: HoverIntentOptions = {}) {
+  const [isOpen, setOpen, now] = useOpenState({ open, defaultOpen, onOpenChange })
+  const timer = useDelayedToggle(setOpen)
+  const tapAt = useRef(0), held = useLatest(hold), controlled = open !== undefined
+  useOutside([ref], () => { timer.cancel(); setOpen(false) }, isOpen)
+  useEffect(() => {
+    if (!isOpen) return
+    // capture phase, before any dialog's handler: the first Escape closes the tip, and (uncontrolled) is consumed so the dialog stays
+    const key = (e: KeyboardEvent) => {
+      if (e.key !== 'Escape' || e.defaultPrevented) return
+      if (!controlled) e.preventDefault()
+      timer.cancel(); setOpen(false)
+    }
+    document.addEventListener('keydown', key, true)
+    return () => document.removeEventListener('keydown', key, true)
+  }, [isOpen, controlled, timer, setOpen])
+  const handlers = useMemo(() => {
+    const show = () => timer.openIn(openDelay)
+    const hide = () => { if (!held.current) timer.closeIn(closeDelay) }
+    return {
+      bind: {
+        onPointerEnter: (e: ReactPointerEvent) => { if (!isTouch(e)) show() },
+        onPointerLeave: (e: ReactPointerEvent) => { if (!isTouch(e)) hide() },
+        // a tap focuses the trigger right after pointerup: that focus is part of the tap, not a separate open
+        onFocus: () => { if (Date.now() - tapAt.current > 800) show() },
+        onBlur: hide,
+      },
+      tap: {
+        onPointerUp: (e: ReactPointerEvent) => {
+          if (!isTouch(e)) return
+          tapAt.current = Date.now(); timer.cancel()
+          const next = !now.current; setOpen(next)
+          if (next && touchHide) timer.closeIn(touchHide)
+        },
+      },
+    }
+  }, [timer, setOpen, now, held, openDelay, closeDelay, touchHide])
+  return { open: isOpen, setOpen, ...handlers }
 }
+
+const tipClass = 'flex w-max max-w-[min(20rem,calc(100vw-16px))] items-center gap-1.5 rounded-[var(--r-md)] bg-[var(--primary)] px-2 py-1 text-xs text-[var(--on-primary)] shadow-[var(--shadow)]'
 
 type TipCtxV = { shown: boolean; id: string; wrap: RefObject<HTMLSpanElement | null> }
 const TipCtx = createContext<TipCtxV | null>(null)
@@ -727,19 +832,18 @@ const useTip = (part: string) => useRequiredContext(TipCtx, `<Tooltip.${part}>`,
 
 /**
  * Tooltip.Root: wraps a Trigger and a Content in an inline box that listens for hover (after `delay` ms), keyboard focus
- * and taps. `open` + `onOpenChange` or `defaultOpen`; `disabled` turns it off. Escape hides it.
+ * and taps. `open` + `onOpenChange` or `defaultOpen`; `disabled` turns it off. Escape hides it, wherever focus is.
  */
-export function TooltipRoot({ open, defaultOpen, onOpenChange, delay = 400, disabled, children, className, describeSelf }:
+export function TooltipRoot({ open, defaultOpen, onOpenChange, delay = HOVER.tooltipDelay, disabled, children, className, describeSelf }:
   { open?: boolean; defaultOpen?: boolean; onOpenChange?: (open: boolean) => void; delay?: number; disabled?: boolean; children: ReactNode; className?: string
     /** the wrapper itself gets aria-describedby (when the trigger isn't a single element) */ describeSelf?: boolean }) {
   const ref = useRef<HTMLSpanElement>(null)
-  const { open: o, setOpen, bind, tap } = useHoverIntent(ref, delay, 0, 2500, { open, defaultOpen, onOpenChange })
-  const id = useId(), shown = o && !disabled
+  const { open: shown, bind, tap } = useHoverIntent(ref, { openDelay: delay, closeDelay: 0, touchHide: HOVER.touchHide, open: disabled ? false : open, defaultOpen, onOpenChange })
+  const id = useId()
   const value = useMemo(() => ({ shown, id, wrap: ref }), [shown, id])
   return (
     <TipCtx.Provider value={value}>
-      <span ref={ref} className={cn('relative inline-flex', className)} {...bind} {...tap} aria-describedby={describeSelf && shown ? id : undefined}
-        onKeyDown={e => { if (e.key === 'Escape' && shown) { e.stopPropagation(); setOpen(false) } }}>
+      <span ref={ref} className={cn('relative inline-flex', className)} {...bind} {...tap} aria-describedby={describeSelf && shown ? id : undefined}>
         {children}
       </span>
     </TipCtx.Provider>
@@ -751,34 +855,46 @@ export function TooltipTrigger({ asChild, children, className, ...p }: HTMLAttri
   return <PartButton asChild={asChild} aria-describedby={shown ? id : undefined} className={asChild ? className : cn('inline-flex cursor-default items-center border-0 bg-transparent p-0 text-inherit', className)} {...p}>{children}</PartButton>
 }
 /**
- * Tooltip.Content: the tip (role=tooltip). `side`/`align`/`sideOffset` (or `placement`), `arrow`, and `portal` to render it
- * in a fixed layer that escapes `overflow: hidden` parents.
+ * Tooltip.Content: the tip (role=tooltip). `side`/`align`/`sideOffset` (or `placement`) and `arrow`, with the same flip
+ * and viewport clamp as the other floating parts; `portal` renders it in a fixed layer that escapes `overflow: hidden`
+ * parents (it follows its trigger when the page scrolls).
  */
 export function TooltipContent({ side, align, sideOffset, placement, arrow, portal, className, children }: FloatProps & { portal?: boolean; className?: string; children: ReactNode }) {
   const { shown, id, wrap } = useTip('Content')
-  const p = floatPlacement(side, align, placement ?? 'top-center'), s = floatSideOf(p)
-  const [rect, setRect] = useState<DOMRect | null>(null)
-  useLayoutEffect(() => { if (shown && portal && wrap.current) setRect(wrap.current.getBoundingClientRect()) }, [shown, portal, wrap])
+  const want = floatPlacement(side, align, placement ?? 'top-center')
+  const box = useRef<HTMLSpanElement>(null)
+  const [pos, setPos] = useState<{ left: number; top: number; p: Placement } | null>(null)
+  useLayoutEffect(() => {
+    if (!shown) { setPos(null); return }
+    let retry = 0
+    const measure = () => {
+      // on a first render already open, the Root's ref isn't attached yet: an inline tip's parent is that wrapper
+      const t = box.current, w = wrap.current ?? (portal ? null : t?.offsetParent ?? t?.parentElement)
+      if (!t || !w) { retry = requestAnimationFrame(measure); return }
+      const r = w.getBoundingClientRect(), s = floatSideOf(want)
+      const fit = fitPanel({ anchor: r, size: { w: t.offsetWidth, h: t.offsetHeight }, side: s, align: floatAlignOf(want), gap: gapOf(s, sideOffset) })
+      const p = fit.side === s ? want : flipPlacement(want)
+      // a portalled tip is fixed (viewport coordinates); an inline one is absolute inside the trigger's wrapper
+      setPos(portal ? { left: fit.left, top: fit.top, p } : { left: fit.left - r.left, top: fit.top - r.top, p })
+    }
+    measure()
+    addEventListener('scroll', measure, { capture: true, passive: true }); addEventListener('resize', measure)
+    return () => { cancelAnimationFrame(retry); removeEventListener('scroll', measure, { capture: true }); removeEventListener('resize', measure) }
+  }, [shown, want, sideOffset, portal, wrap])
+  const p = pos?.p ?? want, s = floatSideOf(p)
   const x = s === 'right' ? -4 : s === 'left' ? 4 : 0, y = x ? 0 : s === 'bottom' ? -3 : 3
-  const tip = (
-    <motion.span id={id} role="tooltip" initial={{ opacity: 0, x, y }} animate={{ opacity: 1, x: 0, y: 0 }} exit={{ opacity: 0 }} transition={{ duration: 0.12 }} className={cn(tipClass, arrow && 'relative', className)}>
-      {children}{arrow && <span aria-hidden className={cn('absolute h-2 w-2 rotate-45 bg-[var(--primary)]', floatArrowClass(p, 'tip', portal))} />}
-    </motion.span>
+  const tip = shown && (
+    <span ref={box} className={cn('pointer-events-none', portal ? cn('fixed', Z.tooltip) : cn('absolute', Z.popover))}
+      style={{ left: pos?.left ?? 0, top: pos?.top ?? 0, visibility: pos ? undefined : 'hidden' }}>
+      <motion.span id={id} role="tooltip" initial={{ opacity: 0, x, y }} animate={{ opacity: 1, x: 0, y: 0 }} exit={{ opacity: 0 }} transition={{ duration: 0.12 }} className={cn(tipClass, arrow && 'relative', className)}>
+        {children}{arrow && <span aria-hidden className={cn('absolute h-2 w-2 rotate-45 bg-[var(--primary)]', floatArrowClass(p, 'tip'))} />}
+      </motion.span>
+    </span>
   )
-  return portal ? (
-    <OverlayPortal>
-      <AnimatePresence>
-        {shown && rect && <span className="pointer-events-none fixed z-[90]" style={tipFixed(rect, p, sideOffset)}>{tip}</span>}
-      </AnimatePresence>
-    </OverlayPortal>
-  ) : (
-    <AnimatePresence>
-      {shown && <span className={cn('pointer-events-none absolute z-50', SIDE[p])} style={floatGap(p, sideOffset)}>{tip}</span>}
-    </AnimatePresence>
-  )
+  return portal ? <OverlayPortal><AnimatePresence>{tip}</AnimatePresence></OverlayPortal> : <AnimatePresence>{tip}</AnimatePresence>
 }
 
-function TooltipConfig({ content, children, placement = 'top-center', delay = 400, portal, disabled, className }:
+function TooltipConfig({ content, children, placement, delay, portal, disabled, className }:
   { content: ReactNode; children: ReactNode; placement?: Placement; delay?: number; portal?: boolean; disabled?: boolean; className?: string }) {
   const el = isValidElement(children) && children.type !== Fragment ? children : null
   return (
@@ -791,14 +907,14 @@ function TooltipConfig({ content, children, placement = 'top-center', delay = 40
 
 /**
  * Short delay, quick fade. Wrap the element that should show it. Shows on hover or keyboard focus; on touch a tap
- * shows it (another tap, a tap elsewhere or 2.5 s hides it). `portal` renders it in a fixed layer
- * so it escapes `overflow: hidden` parents (collapsed sidebars, scroll areas); `disabled` turns it off.
- * The trigger (a single element child) gets `aria-describedby` while the tip shows, so screen readers announce it.
- * Parts: Tooltip.Root (open state, delay) / Tooltip.Trigger (asChild) / Tooltip.Content (side, align, sideOffset, arrow, portal).
+ * shows it (another tap, a tap elsewhere or 2.5 s hides it); Escape hides it. Flips and slides to stay on screen.
+ * `portal` renders it in a fixed layer so it escapes `overflow: hidden` parents (collapsed sidebars, scroll areas);
+ * `disabled` turns it off. The trigger (a single element child) gets `aria-describedby` while the tip shows, so screen
+ * readers announce it. Parts: Tooltip.Root (open state, delay) / Tooltip.Trigger (asChild) / Tooltip.Content (side, align, sideOffset, arrow, portal).
  */
 export const Tooltip = Object.assign(TooltipConfig, { Root: TooltipRoot, Trigger: TooltipTrigger, Content: TooltipContent })
 
-type HoverCardCtxV = { shown: boolean; setOpen: (v: boolean) => void; pinned: boolean; setPinned: (v: boolean) => void; pinOnClick?: boolean
+type HoverCardCtxV = { shown: boolean; id: string; setOpen: (v: boolean) => void; pinned: boolean; setPinned: (v: boolean) => void; pinOnClick?: boolean
   tap: { onPointerUp: (e: ReactPointerEvent) => void }; lastPointer: RefObject<string> }
 const HoverCardCtx = createContext<HoverCardCtxV | null>(null)
 const useHoverCard = (part: string) => useRequiredContext(HoverCardCtx, `<HoverCard.${part}>`, '<HoverCard.Root>')
@@ -807,41 +923,42 @@ const useHoverCard = (part: string) => useRequiredContext(HoverCardCtx, `<HoverC
  * HoverCard.Root: hover/focus/tap state in an inline box (`openDelay`, `closeDelay`; `open` + `onOpenChange` or
  * `defaultOpen`). With `pinOnClick`, a mouse click on the trigger pins the card open until another click, an outside click or Escape.
  */
-export function HoverCardRoot({ open, defaultOpen, onOpenChange, openDelay = 300, closeDelay = 150, pinOnClick, className, children }:
+export function HoverCardRoot({ open, defaultOpen, onOpenChange, openDelay, closeDelay, pinOnClick, className, children }:
   { open?: boolean; defaultOpen?: boolean; onOpenChange?: (open: boolean) => void; openDelay?: number; closeDelay?: number; pinOnClick?: boolean; className?: string; children: ReactNode }) {
   const ref = useRef<HTMLSpanElement>(null)
-  const { open: o, setOpen, bind, tap } = useHoverIntent(ref, openDelay, closeDelay, 0, { open, defaultOpen, onOpenChange })
   const [pinned, setPinned] = useState(false)
-  const lastPointer = useRef('mouse')
-  const shown = o || pinned
-  useOutside([ref], () => { setPinned(false); setOpen(false) }, pinned, { escape: true })
+  const { open: shown, setOpen, bind, tap } = useHoverIntent(ref, {
+    openDelay, closeDelay, hold: pinned, open, defaultOpen,
+    onOpenChange: v => { if (!v) setPinned(false); onOpenChange?.(v) },
+  })
+  const lastPointer = useRef('mouse'), id = useId()
+  const value = useMemo(() => ({ shown, id, setOpen, pinned, setPinned, pinOnClick, tap, lastPointer }), [shown, id, setOpen, pinned, pinOnClick, tap])
   return (
-    <HoverCardCtx.Provider value={{ shown, setOpen, pinned, setPinned, pinOnClick, tap, lastPointer }}>
-      <span ref={ref} className={cn('relative inline-block', className)} {...bind} onKeyDown={e => { if (e.key === 'Escape' && shown) { e.stopPropagation(); setPinned(false); setOpen(false) } }}>
-        {children}
-      </span>
+    <HoverCardCtx.Provider value={value}>
+      <span ref={ref} className={cn('relative inline-block', className)} {...bind}>{children}</span>
     </HoverCardCtx.Provider>
   )
 }
-/** HoverCard.Trigger: what you hover (a link, a name). Wraps its children, or with `asChild` becomes your element. */
+/** HoverCard.Trigger: what you hover (a link, a name); described by the card while it shows. Wraps its children in a span, or with `asChild` becomes your element. */
 export function HoverCardTrigger({ children, asChild }: { children: ReactNode } & AsChildProps) {
   const c = useHoverCard('Trigger')
   const props = {
-    ...c.tap, onPointerDown: (e: ReactPointerEvent) => { c.lastPointer.current = e.pointerType },
+    ...c.tap, 'aria-describedby': c.shown ? c.id : undefined, 'aria-expanded': c.pinOnClick ? c.shown : undefined,
+    onPointerDown: (e: ReactPointerEvent) => { c.lastPointer.current = e.pointerType },
     onClick: () => { if (!c.pinOnClick || c.lastPointer.current === 'touch') return; const next = !c.pinned; c.setPinned(next); c.setOpen(next) },
   }
-  return asChild ? <Slot {...props}>{children}</Slot> : <span className="contents" {...props}>{children}</span>
+  return asChild ? <Slot {...props}>{children}</Slot> : <span {...props}>{children}</span>
 }
-/** HoverCard.Content: the card. `side`/`align`/`sideOffset` (or `placement`, default top-start) and `arrow`; it slides to stay on screen. */
+/** HoverCard.Content: the card (spans, so it is valid inside a `<p>`). `side`/`align`/`sideOffset` (or `placement`, default top-start) and `arrow`; it slides to stay on screen. */
 export function HoverCardContent({ side, align, sideOffset, placement, arrow, className, children }: FloatProps & { className?: string; children: ReactNode }) {
-  const { shown } = useHoverCard('Content')
+  const { shown, id } = useHoverCard('Content')
   return (
-    <FloatingPanel open={shown} placement={floatPlacement(side, align, placement ?? 'top-start')} offset={sideOffset} arrow={arrow} role="tooltip"
+    <FloatingPanel open={shown} id={id} inline placement={floatPlacement(side, align, placement ?? 'top-start')} offset={sideOffset} arrow={arrow} role="tooltip"
       className={cn('w-[250px] p-3 text-[13px] leading-snug', className)}>{children}</FloatingPanel>
   )
 }
 
-function HoverCardConfig({ trigger, children, placement = 'top-start', pinOnClick, className, triggerClassName }:
+function HoverCardConfig({ trigger, children, placement, pinOnClick, className, triggerClassName }:
   { trigger: ReactNode; children: ReactNode; placement?: Placement; pinOnClick?: boolean; className?: string; triggerClassName?: string }) {
   return (
     <HoverCardRoot pinOnClick={pinOnClick} className={triggerClassName}>
@@ -853,8 +970,9 @@ function HoverCardConfig({ trigger, children, placement = 'top-start', pinOnClic
 
 /**
  * Rich preview on hover or focus (profiles, links, citations). Stays open while the pointer is over the card. On touch,
- * tapping the trigger toggles it and tapping outside closes it. With `pinOnClick`, a mouse click on the trigger pins the
- * card open (leaving no longer closes it) until another click, an outside click or Escape. The card slides to stay on screen.
+ * tapping the trigger toggles it and tapping outside closes it; Escape closes it. With `pinOnClick`, a mouse click on the
+ * trigger pins the card open (leaving no longer closes it) until another click, an outside click or Escape. The card
+ * slides to stay on screen, and is built from spans so it can sit inside a paragraph.
  * Parts: HoverCard.Root / HoverCard.Trigger (asChild) / HoverCard.Content (side, align, sideOffset, arrow).
  */
 export const HoverCard = Object.assign(HoverCardConfig, { Root: HoverCardRoot, Trigger: HoverCardTrigger, Content: HoverCardContent })
@@ -874,14 +992,12 @@ export function PointerTooltip({ tip, className }: { tip: PointerTip; className?
   const t = tip ?? last.current
   useLayoutEffect(() => { const n = el.current; if (n && (Math.abs(n.offsetWidth - box.w) > 1 || Math.abs(n.offsetHeight - box.h) > 1)) setBox({ w: n.offsetWidth, h: n.offsetHeight }) })
   if (typeof document === 'undefined' || !t) return null
-  const vw = document.documentElement.clientWidth, right = t.x + 14 + box.w <= vw - 8
-  const left = Math.max(8, Math.min(vw - box.w - 8, right ? t.x + 14 : t.x - 14 - box.w))
-  const top = Math.max(8, t.y - (t.touch ? box.h + 30 : 44))
+  const vw = viewportSize().w, right = t.x + 14 + box.w <= vw - VIEWPORT_MARGIN
+  const left = fitInside(right ? t.x + 14 : t.x - 14 - box.w, box.w, vw)
+  const top = Math.max(VIEWPORT_MARGIN, t.y - (t.touch ? box.h + 30 : 44))
   return createPortal(
-    <div ref={el} role="tooltip" className={cn(surface.floating, 'pointer-events-none fixed z-[90] w-max max-w-[calc(100vw-16px)] rounded-[var(--r-md)] px-2 py-1.5 text-xs leading-snug text-[var(--fg)] transition-opacity duration-150', className)}
-
+    <div ref={el} role="tooltip" className={cn(surface.floating, 'pointer-events-none fixed w-max max-w-[calc(100vw-16px)] rounded-[var(--r-md)] px-2 py-1.5 text-xs leading-snug text-[var(--fg)] transition-opacity duration-150', Z.tooltip, className)}
       style={{ left, top, opacity: tip ? 1 : 0, fontFamily: 'var(--font)' }}>{t.content}</div>,
-
     document.body,
   )
 }
@@ -917,7 +1033,7 @@ export function OverlayPortal({ children }: { children: ReactNode }) {
  * inline styles the first one replaced, which the last one puts back.
  */
 const overlayLock = uiShared('scroll-lock', () => ({ count: 0, saved: null as { overflow: string; side: 'paddingLeft' | 'paddingRight'; pad: string } | null }))
-/** Is the page's vertical scrollbar on the left (some browsers put it there under)? */
+/** Is the page's vertical scrollbar on the left (some browser and OS settings put it there)? */
 function overlayScrollbarLeft() {
   const probe = document.createElement('div')
   probe.style.cssText = 'position:fixed;left:0;top:0;width:0;height:0;visibility:hidden'
@@ -939,8 +1055,7 @@ export function useScrollLock(active: boolean) {
       const w = innerWidth - root.clientWidth, gap = w > 0 && w < 64 ? w : 0 // a classic scrollbar (and not a layout-less test DOM)
       const side = gap > 0 && overlayScrollbarLeft() ? 'paddingLeft' : 'paddingRight'
       s.saved = { overflow: root.style.overflow, side, pad: body.style[side] }
-      if (gap > 0) body.style[side]
- = `${(parseFloat(getComputedStyle(body)[side]) || 0) + gap}px`
+      if (gap > 0) body.style[side] = `${(parseFloat(getComputedStyle(body)[side]) || 0) + gap}px`
       root.style.overflow = 'hidden'
     }
     return () => {
@@ -976,8 +1091,9 @@ function overlaySyncInert() {
  * the page is `inert`, and Escape and Tab are handled at document level, so they work even when focus is outside the
  * panel. Nested modals stack: only the top one closes on Escape, and closing it hands the page back to the one below.
  */
-export function ModalLayer({ open, onClose, onOutsideClick, children }: { open: boolean; onClose: () => void
-  /** a click on the backdrop calls this instead of closing (AlertDialog: shake, don't dismiss) */ onOutsideClick?: () => void; children: ReactNode }) {
+export function ModalLayer({ open, onClose, onOutsideClick, onExitComplete, children }: { open: boolean; onClose: () => void
+  /** a click on the backdrop calls this instead of closing (AlertDialog: shake, don't dismiss) */ onOutsideClick?: () => void
+  /** after the closing animation has finished and the layer is gone */ onExitComplete?: () => void; children: ReactNode }) {
   const ref = useRef<HTMLDivElement>(null)
   const close = useRef(onClose); close.current = onClose
   useFocusTrap(ref, open)
@@ -1005,10 +1121,10 @@ export function ModalLayer({ open, onClose, onOutsideClick, children }: { open: 
   }, [open])
   return (
     <OverlayPortal>
-      <AnimatePresence>
+      <AnimatePresence onExitComplete={onExitComplete}>
         {open && (
           <div ref={ref} className="contents" onKeyDown={e => { if (e.key === 'Escape' && !e.defaultPrevented) { e.stopPropagation(); onClose() } }}>
-            <motion.div className="fixed inset-0 z-[70] bg-black/40" initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}
+            <motion.div className={cn('fixed inset-0 bg-black/40', Z.scrim)} initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}
               transition={{ duration: 0.2 }} onClick={onOutsideClick ?? onClose} aria-hidden />
             {children}
           </div>
@@ -1036,7 +1152,6 @@ export function DialogRoot({ open, defaultOpen = false, onOpenChange, children }
   const [parts, setParts] = useState<Record<DialogPart, boolean>>({ title: false, desc: false })
   const setPart = useCallback((k: DialogPart, on: boolean) => setParts(p => p[k] === on ? p : { ...p, [k]: on }), [])
   const value = useMemo(() => ({ open: o, setOpen: setO, ids: { title: `${base}-t`, desc: `${base}-d` }, parts, setPart }), [o, setO, base, parts, setPart])
-
   return <DialogCtx.Provider value={value}>{children}</DialogCtx.Provider>
 }
 /** Dialog.Trigger: opens it (aria-haspopup=dialog); focus comes back here on close. Button props, or `asChild`. */
@@ -1044,13 +1159,12 @@ export function DialogTrigger({ children, ...p }: ButtonProps) {
   const { open, setOpen } = useDialogCtx('Dialog.Trigger')
   return <OverlayPartButton aria-haspopup="dialog" aria-expanded={open} {...p} action={() => setOpen(true)}>{children}</OverlayPartButton>
 }
-const DIALOG_X = <svg width={15} height={15} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2} strokeLinecap="round" aria-hidden><path d="M18 6 6 18M6 6l12 12" /></svg>
 /** Dialog.Close: closes it. With no children it is the ✕ icon button ("Close"); otherwise a Button, or `asChild`. */
 export function DialogClose({ children, ...p }: ButtonProps) {
   const { setOpen } = useDialogCtx('Dialog.Close')
   if (children === undefined && !p.asChild) {
     const { onClick, ...rest } = p
-    return <IconButton icon={DIALOG_X} label="Close" {...rest} onPointerDown={e => e.stopPropagation()} onClick={e => { onClick?.(e); if (!e.defaultPrevented) setOpen(false) }} />
+    return <IconButton icon="x" label="Close" {...rest} onClick={partClick(onClick, () => setOpen(false))} />
   }
   return <OverlayPartButton {...p} action={() => setOpen(false)}>{children}</OverlayPartButton>
 }
@@ -1059,6 +1173,11 @@ function useDialogPart(k: DialogPart, part: string) {
   const c = useDialogCtx(part), set = c.setPart
   useLayoutEffect(() => { set(k, true); return () => set(k, false) }, [k, set])
   return c.ids[k]
+}
+/** What every dialog panel carries: its role, aria-modal, and its name (`aria-label`, else the mounted Title) and description (the mounted Description). */
+function useDialogA11y(role: 'dialog' | 'alertdialog', ariaLabel: string | undefined, part: string) {
+  const { ids, parts } = useDialogCtx(part)
+  return { role, 'aria-modal': true, 'aria-label': ariaLabel, 'aria-labelledby': !ariaLabel && parts.title ? ids.title : undefined, 'aria-describedby': parts.desc ? ids.desc : undefined } as const
 }
 /** Dialog.Title: the heading that names the panel (aria-labelledby). */
 export function DialogTitle({ className, children, ...p }: HTMLAttributes<HTMLHeadingElement>) {
@@ -1089,7 +1208,7 @@ export function DialogFooter({ className, children, ...p }: HTMLAttributes<HTMLD
   )
 }
 
-const dialogFrame = 'pointer-events-none fixed inset-0 z-[71] grid place-items-center px-[max(16px,env(safe-area-inset-left),env(safe-area-inset-right))] pt-[max(16px,env(safe-area-inset-top))] pb-[max(16px,env(safe-area-inset-bottom))]'
+const dialogFrame = 'pointer-events-none fixed inset-0 grid place-items-center px-[max(16px,env(safe-area-inset-left),env(safe-area-inset-right))] pt-[max(16px,env(safe-area-inset-top))] pb-[max(16px,env(safe-area-inset-bottom))] ' + Z.modal
 const dialogPanel = 'pointer-events-auto max-h-full w-full max-w-[420px] overflow-auto overscroll-contain rounded-[var(--r-lg)] border border-[var(--line)] bg-[var(--card)] p-5 shadow-[var(--shadow)]'
 const dialogMotion = { initial: { opacity: 0, scale: 0.94, y: 8 }, animate: { opacity: 1, scale: 1, y: 0 }, exit: { opacity: 0, scale: 0.96, transition: { duration: 0.15 } }, transition: spring(0.3, 0.4) }
 
@@ -1098,12 +1217,11 @@ const dialogMotion = { initial: { opacity: 0, scale: 0.94, y: 8 }, animate: { op
  * Escape and an outside click close it. Fits small screens: keeps clear of the safe areas and scrolls inside when tall.
  */
 export function DialogContent({ className, children, 'aria-label': ariaLabel }: { className?: string; children: ReactNode; 'aria-label'?: string }) {
-  const { open, setOpen, ids, parts } = useDialogCtx('Dialog.Content')
+  const { open, setOpen } = useDialogCtx('Dialog.Content'), a11y = useDialogA11y('dialog', ariaLabel, 'Dialog.Content')
   return (
     <ModalLayer open={open} onClose={() => setOpen(false)}>
       <div className={dialogFrame}>
-        <motion.div role="dialog" aria-modal="true" aria-label={ariaLabel} aria-labelledby={!ariaLabel && parts.title ? ids.title : undefined} aria-describedby={parts.desc ? ids.desc : undefined}
-          {...dialogMotion} className={cn(dialogPanel, className)}>
+        <motion.div {...a11y} {...dialogMotion} className={cn(dialogPanel, className)}>
           <DialogKindCtx.Provider value="dialog">{children}</DialogKindCtx.Provider>
         </motion.div>
       </div>
@@ -1136,13 +1254,13 @@ export const Dialog = Object.assign(DialogConfig, {
 
 /* Sheet ─ */
 
-// physical edges; `start`/`end` resolve to one of these from the direction
+/** The edges a Sheet can slide in from: its placement and the offset it slides from. */
 const SHEET = {
   right: { cls: 'top-0 right-0 bottom-0 w-[min(380px,92vw)] pt-[max(20px,env(safe-area-inset-top))] pb-[max(20px,env(safe-area-inset-bottom))]', off: { x: '100%' } },
   left: { cls: 'top-0 left-0 bottom-0 w-[min(380px,92vw)] pt-[max(20px,env(safe-area-inset-top))] pb-[max(20px,env(safe-area-inset-bottom))]', off: { x: '-100%' } },
   bottom: { cls: 'inset-x-0 bottom-0 max-h-[85dvh] rounded-t-[var(--r-lg)] !pt-2 pb-[max(20px,env(safe-area-inset-bottom))]', off: { y: '100%' } },
 }
-/** The edge a Sheet slides in from (`start` = left, `end` = right); `bottom` is a bottom sheet. */
+/** The edge a Sheet slides in from (`start` = left, `end` = right, the default); `bottom` is a bottom sheet. */
 export type SheetSide = 'start' | 'end' | 'left' | 'right' | 'bottom'
 const sheetEdge = (side: SheetSide): keyof typeof SHEET => side === 'start' ? 'left' : side === 'end' ? 'right' : side
 /** Below this width a left or right Sheet opens as a bottom sheet instead. */
@@ -1151,41 +1269,40 @@ type SheetGrab = { onPointerDown: (e: ReactPointerEvent) => void; className: str
 const SheetGrabCtx = createContext<SheetGrab>(null)
 
 /**
- * Sheet.Content: the panel that slides in from `side` (default `end`: the right, or the left; `start`, or the
- * physical `left`/`right`, or `bottom`). Below 640px a side sheet becomes a bottom sheet (`responsive={false}` keeps the
- * edge drawer). A bottom sheet has a grab handle: drag it, or the Sheet.Header, down to dismiss.
+ * Sheet.Content: the panel that slides in from `side` (`end` or `right` by default, `start` or `left`, or `bottom`).
+ * Below 640px a side sheet becomes a bottom sheet (`responsive={false}` keeps the edge drawer); crossing that width
+ * while open restyles the same panel, so what is typed in it and the focus survive. A bottom sheet has a grab handle:
+ * drag it, or the Sheet.Header, down to dismiss.
  */
 export function SheetContent({ side = 'end', responsive = true, className, children, 'aria-label': ariaLabel }:
   { side?: SheetSide; responsive?: boolean; className?: string; children: ReactNode; 'aria-label'?: string }) {
-  const { open, setOpen, ids, parts } = useDialogCtx('Sheet.Content')
+  const { open, setOpen } = useDialogCtx('Sheet.Content'), a11y = useDialogA11y('dialog', ariaLabel, 'Sheet.Content')
   const narrow = useMediaQuery(`(max-width: ${SHEET_BOTTOM_BELOW - 1}px)`)
   const edge = responsive && narrow ? 'bottom' : sheetEdge(side)
-
   const { cls, off } = SHEET[edge]
   const drag = useDragControls()
   const bottom = edge === 'bottom'
   const grab = useMemo<SheetGrab>(() => bottom ? { onPointerDown: (e: ReactPointerEvent) => drag.start(e), className: 'touch-none' } : null, [bottom, drag])
   return (
     <ModalLayer open={open} onClose={() => setOpen(false)}>
-      <motion.div key={edge} data-side={edge} role="dialog" aria-modal="true" aria-label={ariaLabel}
- aria-labelledby={!ariaLabel && parts.title ? ids.title : undefined} aria-describedby={parts.desc ? ids.desc : undefined}
-        initial={off} animate={{ x: 0, y: 0 }} exit={off} transition={spring(0.15, 0.4)}
+      <motion.div data-side={edge} {...a11y} initial={off} animate={{ x: 0, y: 0 }} exit={off} transition={spring(0.15, 0.4)}
         drag={bottom ? 'y' : false} dragListener={false} dragControls={drag} dragConstraints={{ top: 0, bottom: 0 }} dragElastic={{ top: 0, bottom: 0.9 }}
         onDragEnd={(_, i) => { if (i.offset.y > 90 || i.velocity.y > 500) setOpen(false) }}
-        className={cn('fixed z-[71] flex flex-col gap-3 overflow-auto overscroll-contain bg-[var(--card)] px-5 shadow-[var(--shadow)]', cls, className)}>
+        className={cn('fixed flex flex-col gap-3 overflow-auto overscroll-contain bg-[var(--card)] px-5 shadow-[var(--shadow)]', Z.modal, cls, className)}>
         {grab && <div aria-hidden {...grab} className="-mx-5 -mb-2 flex flex-none cursor-grab justify-center pt-1 pb-2 touch-none"><span className="h-1 w-9 rounded-full bg-[var(--line2)]" /></div>}
         <DialogKindCtx.Provider value="sheet"><SheetGrabCtx.Provider value={grab}>{children}</SheetGrabCtx.Provider></DialogKindCtx.Provider>
       </motion.div>
     </ModalLayer>
   )
 }
-/** Sheet.Header: the title row (title at the start, close at the end). On a bottom sheet it is also a drag handle. */
+/** Sheet.Header: the title row (title at the start, close at the end). On a bottom sheet it is also a drag handle (not from its buttons and fields). */
 export function SheetHeader({ className, children }: { className?: string; children: ReactNode }) {
   const grab = useContext(SheetGrabCtx)
-  return <div className={cn('flex flex-none items-center justify-between', grab?.className, className)} onPointerDown={grab?.onPointerDown}>{children}</div>
+  const down = grab && ((e: ReactPointerEvent) => { if (!(e.target as Element).closest('button,a,input,select,textarea,[role=button]')) grab.onPointerDown(e) })
+  return <div className={cn('flex flex-none items-center justify-between', grab?.className, className)} onPointerDown={down || undefined}>{children}</div>
 }
 
-function SheetConfig({ open, onOpenChange, title, side = 'end', responsive = true, children, footer, className }:
+function SheetConfig({ open, onOpenChange, title, side, responsive, children, footer, className }:
   ModalProps & { title: ReactNode; side?: SheetSide; responsive?: boolean; children: ReactNode; footer?: ReactNode; className?: string }) {
   return (
     <DialogRoot open={open} onOpenChange={onOpenChange}>
@@ -1217,8 +1334,9 @@ const useAlert = (part: string) => useRequiredContext(AlertCtx, `<AlertDialog.${
  * AlertDialog.Content: the confirmation panel (role=alertdialog). An outside click doesn't close it (it shakes); Escape
  * and Cancel do (`onCancel` runs). While an Action's promise is pending both buttons wait; a rejection shows its message.
  */
-export function AlertDialogContent({ className, children, onCancel }: { className?: string; children: ReactNode; /** Escape or Cancel */ onCancel?: () => void }) {
-  const { open, setOpen, ids, parts } = useDialogCtx('AlertDialog.Content')
+export function AlertDialogContent({ className, children, onCancel, 'aria-label': ariaLabel }:
+  { className?: string; children: ReactNode; /** Escape or Cancel */ onCancel?: () => void; /** names it when it has no Title */ 'aria-label'?: string }) {
+  const { open, setOpen } = useDialogCtx('AlertDialog.Content'), a11y = useDialogA11y('alertdialog', ariaLabel, 'AlertDialog.Content')
   const [pending, setPending] = useState(false)
   const [err, setErr] = useState<string | null>(null)
   const panel = useRef<HTMLDivElement>(null)
@@ -1242,7 +1360,7 @@ export function AlertDialogContent({ className, children, onCancel }: { classNam
   return (
     <ModalLayer open={open} onClose={cancel} onOutsideClick={() => shake(panel.current)}>
       <div className={dialogFrame}>
-        <motion.div ref={panel} tabIndex={-1} role="alertdialog" aria-modal="true" aria-labelledby={parts.title ? ids.title : undefined} aria-describedby={parts.desc ? ids.desc : undefined} aria-busy={pending || undefined}
+        <motion.div ref={panel} tabIndex={-1} {...a11y} aria-busy={pending || undefined}
           {...dialogMotion} className={cn(dialogPanel, 'outline-none', className)}>
           <DialogKindCtx.Provider value="alert"><AlertCtx.Provider value={{ pending, err, confirm, cancel }}>{children}</AlertCtx.Provider></DialogKindCtx.Provider>
         </motion.div>
@@ -1331,12 +1449,19 @@ function cmdkMark(text: string, words: string[]) {
   const re = new RegExp(`(${words.map(w => w.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')).join('|')})`, 'ig')
   return text.split(re).map((part, i) => i % 2 ? <b key={i} className="font-semibold text-[var(--fg)]">{part}</b> : part)
 }
-/** The group key of the Recent entries (shown as "Recent"). */
-const CMDK_RECENT = '\u0000recent'
-const cmdkGroup = (h: CmdkHit | undefined) => h ? (h.recent ? CMDK_RECENT : h.c.group ?? '') : undefined
 const cmdkFlatten = (cs: Command[]): Command[] => cs.flatMap(c => [c, ...cmdkFlatten(c.children ?? [])])
 /** Result lists longer than this are virtualised. */
 const CMDK_VIRTUAL_AT = 60
+/** The stored recent ids (newest first), or [] when storage is blocked or holds junk. */
+function cmdkStoredRecents(key: string | undefined): string[] {
+  if (!key) return []
+  try {
+    const ids: unknown = JSON.parse(localStorage.getItem(key) ?? '[]')
+    return Array.isArray(ids) ? ids.filter((id): id is string => typeof id === 'string') : []
+  } catch { return [] }
+}
+/** A palette row: a group heading (the Recent group or a named one) or the hit at index `hit` of the result list. */
+type CmdkRow = { kind: 'heading'; recent: boolean; group: string } | { kind: 'option'; hit: number }
 
 /**
  * ⌘K palette: type to filter (every word must match the label, keywords or hint), arrows to move, Enter to run.
@@ -1344,17 +1469,20 @@ const CMDK_VIRTUAL_AT = 60
  * a query when nothing matches. `loadItems(query, { signal })` adds results from your API (debounced by `debounce` ms,
  * the previous request aborted, a spinner while loading, errors shown). Entries with `children` / `loadChildren` open
  * nested pages (Enter in, Backspace on an empty search out, or click the breadcrumb). `recents` keeps the last N
- * entries run as a Recent group (persisted under `recentKey`). Long result lists are virtualised.
+ * entries run as a Recent group (persisted under `recentKey`; ids that are no longer in `commands` drop out). Long result
+ * lists are virtualised. A chosen command runs as the palette closes, once focus is back where it was;
+ * `onExitComplete` fires when its closing animation has finished (for work that needs the page uncovered).
  */
-export function CommandPalette({ open, onOpenChange, commands, placeholder, suggestion, loadItems, debounce = 150, recents = 0, recentKey, className }:
+export function CommandPalette({ open, onOpenChange, commands, placeholder, suggestion, loadItems, debounce = 150, recents = 0, recentKey, onExitComplete, className }:
   ModalProps & { commands: Command[]; placeholder?: string; suggestion?: string; loadItems?: CommandLoader; /** ms */ debounce?: number
-    /** how many recently run entries to offer when the search is empty (0: none) */ recents?: number; /** localStorage key for recents */ recentKey?: string; className?: string }) {
+    /** how many recently run entries to offer when the search is empty (0: none) */ recents?: number; /** localStorage key for recents */ recentKey?: string
+    /** after the palette has closed and its exit animation finished */ onExitComplete?: () => void; className?: string }) {
   const [q, setQ] = useState('')
   const [stack, setStack] = useState<{ c: Command; q: string }[]>([])
   const uid = useId()
-  const groupLabel = (g: string) => g === CMDK_RECENT ? 'Recent' : g
   useEffect(() => { if (open) { setQ(''); setStack([]) } }, [open])
   const top = stack[stack.length - 1]?.c
+  const pageName = top?.label.replace(/(…|\.{3})$/, '')
   const pageKey = stack.map(s => s.c.id).join('/')
   const pageCommands = top ? top.children ?? [] : commands
   const loader = top ? top.loadChildren : loadItems
@@ -1377,34 +1505,32 @@ export function CommandPalette({ open, onOpenChange, commands, placeholder, sugg
   const loading = asyncOn && found.loading
   const asyncItems = asyncOn && found.page === pageKey && found.q === q ? found.items : [] // never show results for another query
 
-  /* recents */
-  const [recent, setRecent] = useState<Command[]>([])
-  useEffect(() => {
-    if (!recents || !recentKey) return
-    try {
-      const ids: unknown = JSON.parse(localStorage.getItem(recentKey) ?? '[]'), all = cmdkFlatten(commands)
-      if (Array.isArray(ids)) setRecent(ids.map(id => all.find(c => c.id === id)).filter((c): c is Command => !!c).slice(0, recents))
-    } catch { /* storage blocked or junk: no recents */ }
-  }, [recentKey, recents]) // eslint-disable-line react-hooks/exhaustive-deps
-  const remember = (c: Command) => {
+  /* recents: only ids are kept, and the rows come from the current commands, so late or changed commands show up as they are */
+  const [recentIds, setRecentIds] = useState<string[]>([])
+  useEffect(() => { if (recents) setRecentIds(cmdkStoredRecents(recentKey)) }, [recentKey, recents])
+  const byId = useMemo(() => new Map(cmdkFlatten(commands).map(c => [c.id, c])), [commands])
+  const remember = (id: string) => {
     if (!recents) return
-    const next = [c, ...recent.filter(x => x.id !== c.id)].slice(0, recents)
-    setRecent(next)
-    if (recentKey) try { localStorage.setItem(recentKey, JSON.stringify(next.map(x => x.id))) } catch { /* ignore */ }
+    const next = [id, ...recentIds.filter(x => x !== id)].slice(0, recents)
+    setRecentIds(next)
+    if (recentKey) try { localStorage.setItem(recentKey, JSON.stringify(next)) } catch { /* storage blocked: recents last for this visit */ }
   }
 
   const list = useMemo((): CmdkHit[] => {
     const showRecent = !stack.length && !q.trim() && recents > 0
-    const r: CmdkHit[] = showRecent ? recent.map(c => ({ c, labelHit: false, tags: [], recent: true })) : []
+    const r = showRecent ? recentIds.flatMap(id => { const c = byId.get(id); return c ? [{ c, labelHit: false, tags: [], recent: true }] : [] }).slice(0, recents) : []
     return [...r, ...cmdkFilter(pageCommands, q), ...asyncItems.map((c): CmdkHit => ({ c, labelHit: false, tags: [] }))]
-  }, [pageCommands, q, asyncItems, recent, stack.length, recents])
+  }, [pageCommands, q, asyncItems, recentIds, byId, stack.length, recents])
   const words = q.toLowerCase().trim().split(/\s+/).filter(Boolean)
   const choose = (i: number) => {
     const h = list[i]; if (!h) return
     const c = h.c
     if (c.children || c.loadChildren) { setStack(s => [...s, { c, q }]); setQ(''); return }
-    remember(c)
-    onOpenChange(false); setTimeout(() => c.run?.(), 160)
+    remember(c.id)
+    onOpenChange(false)
+    // after React commits the close and the focus trap has queued its focus restore, still inside the user's gesture:
+    // a command that opens another dialog then records the right element to return focus to
+    queueMicrotask(() => c.run?.())
   }
   const back = (to = stack.length - 1) => { if (to < 0 || to >= stack.length) return; setQ(stack[to].q); setStack(s => s.slice(0, to)) }
   const { active, setActive, onKeyDown } = useRoving(list.length, choose, { homeEnd: false })
@@ -1414,14 +1540,20 @@ export function CommandPalette({ open, onOpenChange, commands, placeholder, sugg
 
   /* rows: group headings interleaved with entries; virtualised when long */
   const rows = useMemo(() => {
-    const out: ({ label: string; hit?: undefined } | { hit: number; label?: undefined })[] = [], at: number[] = []
-    list.forEach((h, i) => { const g = cmdkGroup(h); if (g && g !== cmdkGroup(list[i - 1])) out.push({ label: g }); at.push(out.length); out.push({ hit: i }) })
+    const out: CmdkRow[] = [], at: number[] = []
+    let prev: { recent: boolean; group: string } | null = null
+    list.forEach((h, i) => {
+      const g = { recent: !!h.recent, group: h.recent ? '' : h.c.group ?? '' }
+      if ((g.recent || g.group) && (!prev || prev.recent !== g.recent || prev.group !== g.group)) out.push({ kind: 'heading', ...g })
+      prev = g
+      at.push(out.length); out.push({ kind: 'option', hit: i })
+    })
     return { out, at }
   }, [list])
-  const coarse = useMediaQuery('(pointer: coarse)')
+  const coarse = useCoarsePointer()
   const virtualOn = list.length > CMDK_VIRTUAL_AT
   const listRef = useRef<HTMLDivElement>(null)
-  const est = useCallback((i: number) => rows.out[i]?.label !== undefined ? 29 : coarse ? 40 : 36, [rows, coarse])
+  const est = useCallback((i: number) => rows.out[i]?.kind === 'heading' ? 29 : coarse ? 40 : 36, [rows, coarse])
   const keepActive = useMemo(() => rows.at[active] != null ? [rows.at[active]] : undefined, [rows, active])
   const v = useVirtual({ count: rows.out.length, estimateSize: est, scrollRef: listRef, enabled: virtualOn, keep: keepActive, paddingStart: 6, paddingEnd: 6, initialRect: { width: 540, height: 340 } })
   useEffect(() => {
@@ -1454,18 +1586,20 @@ export function CommandPalette({ open, onOpenChange, commands, placeholder, sugg
       </button>
     )
   }
+  const row = (r: CmdkRow) => r.kind === 'heading' ? <MenuLabel>{r.recent ? 'Recent' : r.group}</MenuLabel> : option(r.hit)
+  const rowKey = (r: CmdkRow, k: number) => r.kind === 'heading' ? `h:${r.recent ? '' : r.group}:${k}` : `o:${list[r.hit].recent ? 'r' : 'c'}:${list[r.hit].c.id}:${r.hit}`
   const empty = list.length === 0 && (
-    <EmptyState size="sm" className="p-6" title={loading ? 'Searching…' : found.error && found.page === pageKey ? null : <>{`Nothing matches “${q}”.`}{!stack.length && suggest && <> {'Try'} <button className="cursor-pointer border-0 bg-transparent p-0 font-medium text-[var(--accent)] underline-offset-2 hover:underline" onClick={() => setQ(suggest)}>{`“${suggest}”`}</button></>}</>} />
+    <EmptyState size="sm" className="p-6" title={loading ? 'Searching…' : found.error && found.page === pageKey ? null : <>{`Nothing matches “${q}”.`}{!stack.length && suggest && <> Try <button className="cursor-pointer border-0 bg-transparent p-0 font-medium text-[var(--accent)] underline-offset-2 hover:underline" onClick={() => setQ(suggest)}>{`“${suggest}”`}</button></>}</>} />
   )
   return (
-    <ModalLayer open={open} onClose={() => onOpenChange(false)}>
-      <motion.div role="dialog" aria-modal="true" aria-label={'Command palette'}
+    <ModalLayer open={open} onClose={() => onOpenChange(false)} onExitComplete={onExitComplete}>
+      <motion.div role="dialog" aria-modal="true" aria-label="Command palette"
         initial={{ opacity: 0, scale: 0.96, y: -8 }} animate={{ opacity: 1, scale: 1, y: 0 }} exit={{ opacity: 0, scale: 0.98, transition: { duration: 0.12 } }}
-        transition={spring(0.25, 0.35)} className={cn(surface.floating, 'fixed top-[14vh] left-1/2 z-[72] w-[min(540px,calc(100%-32px))] -translate-x-1/2 overflow-hidden max-[640px]:top-[max(12px,env(safe-area-inset-top))] [@media(max-height:500px)]:top-[max(8px,env(safe-area-inset-top))]', className)}>
+        transition={spring(0.25, 0.35)} className={cn(surface.floating, 'fixed top-[14vh] left-1/2 w-[min(540px,calc(100%-32px))] -translate-x-1/2 overflow-hidden max-[640px]:top-[max(12px,env(safe-area-inset-top))] [@media(max-height:500px)]:top-[max(8px,env(safe-area-inset-top))]', Z.palette, className)}>
         <div className="flex items-center gap-2 border-b border-[var(--line)] px-4">
           <Icon name="search" className="flex-none text-[var(--fg3)]" />
           {stack.length > 0 && (
-            <nav aria-label={'Palette pages'} className="flex min-w-0 flex-none items-center gap-1 text-xs text-[var(--fg3)]">
+            <nav aria-label="Palette pages" className="flex min-w-0 flex-none items-center gap-1 text-xs text-[var(--fg3)]">
               {stack.map((s, i) => (
                 <span key={s.c.id} className="flex items-center gap-1">
                   <button onClick={() => back(i)} title={`Back to ${i ? stack[i - 1].c.label : 'all commands'}`}
@@ -1475,45 +1609,37 @@ export function CommandPalette({ open, onOpenChange, commands, placeholder, sugg
               ))}
             </nav>
           )}
-          <input ref={inputRef} data-autofocus value={q} onChange={e => setQ(e.target.value)} placeholder={top?.placeholder ?? (top ? `Search ${top.label.replace(/(…|\.{3})$/, '').toLowerCase()}…` : placeholder ?? 'Type a command or search…')}
+          <input ref={inputRef} data-autofocus value={q} onChange={e => setQ(e.target.value)} placeholder={top?.placeholder ?? (pageName ? `Search ${pageName.toLowerCase()}…` : placeholder ?? 'Type a command or search…')}
             onKeyDown={e => { if (e.key === 'Backspace' && !q && stack.length) { e.preventDefault(); back(); return } onKeyDown(e) }}
             role="combobox" aria-expanded="true" aria-controls={`${uid}-list`} aria-autocomplete="list" aria-busy={loading || undefined}
-            aria-activedescendant={list[active] ? optionId(active) : undefined} aria-label={top ? `Search ${top.label.replace(/(…|\.{3})$/, '')}` : 'Search commands'}
+            aria-activedescendant={list[active] ? optionId(active) : undefined} aria-label={pageName ? `Search ${pageName}` : 'Search commands'}
             className="w-full min-w-0 border-0 bg-transparent py-3 text-base outline-none" />
-          {loading && <Spinner size={14} label={'Loading results'} className="text-[var(--fg3)]" />}
+          {loading && <Spinner size={14} label="Loading results" className="text-[var(--fg3)]" />}
         </div>
         {asyncOn && found.error && found.page === pageKey && (
           <div role="alert" className="flex items-center gap-1.5 border-b border-[var(--line)] px-4 py-2 text-xs text-[var(--bad)]"><Icon name="alert" size={13} />{found.error}</div>
         )}
         {virtualOn ? (
-          <div ref={listRef} id={`${uid}-list`} role="listbox" aria-label={'Results'} className="relative h-[min(340px,50vh)] overflow-auto overscroll-contain px-1.5 max-[640px]:h-[min(420px,60dvh)]">
+          <div ref={listRef} id={`${uid}-list`} role="listbox" aria-label="Results" className="relative h-[min(340px,50vh)] overflow-auto overscroll-contain px-1.5 max-[640px]:h-[min(420px,60dvh)]">
             <div style={{ height: v.totalSize, position: 'relative' }}>
-              {v.items.map(it => {
-                const row = rows.out[it.index]
-                return (
-                  <div key={row.label !== undefined ? `l:${row.label}:${it.index}` : `o:${row.hit}`} data-index={it.index} ref={v.measureElement}
-                    style={{ position: 'absolute', top: 0, insetInlineStart: 0, width: '100%', transform: `translateY(${it.start}px)` }}>
-                    {row.label !== undefined ? <MenuLabel>{groupLabel(row.label)}</MenuLabel> : option(row.hit)}
-                  </div>
-                )
-              })}
+              {v.items.map(it => (
+                <div key={rowKey(rows.out[it.index], it.index)} data-index={it.index} ref={v.measureElement}
+                  style={{ position: 'absolute', top: 0, insetInlineStart: 0, width: '100%', transform: `translateY(${it.start}px)` }}>
+                  {row(rows.out[it.index])}
+                </div>
+              ))}
             </div>
           </div>
         ) : (
-          <div ref={listRef} id={`${uid}-list`} role="listbox" aria-label={'Results'} className="max-h-[min(340px,50vh)] overflow-auto overscroll-contain p-1.5 max-[640px]:max-h-[min(420px,60dvh)]">
+          <div ref={listRef} id={`${uid}-list`} role="listbox" aria-label="Results" className="max-h-[min(340px,50vh)] overflow-auto overscroll-contain p-1.5 max-[640px]:max-h-[min(420px,60dvh)]">
             {empty}
-            {list.map((h, i) => (
-              <div key={`${h.recent ? 'r' : 'c'}:${h.c.id}:${i}`}>
-                {cmdkGroup(h) && cmdkGroup(h) !== cmdkGroup(list[i - 1]) && <MenuLabel>{groupLabel(cmdkGroup(h)!)}</MenuLabel>}
-                {option(i)}
-              </div>
-            ))}
+            {rows.out.map((r, k) => <Fragment key={rowKey(r, k)}>{row(r)}</Fragment>)}
           </div>
         )}
         <div className="flex gap-3 border-t border-[var(--line)] px-3 py-2 text-[11px] text-[var(--fg3)] [@media(hover:none)]:hidden">
-          <span><Kbd>↑</Kbd> <Kbd>↓</Kbd> {'move'}</span><span><Kbd>↵</Kbd> {list[active]?.c.children || list[active]?.c.loadChildren ? 'open' : 'run'}</span>
-          {stack.length > 0 && <span><Kbd>⌫</Kbd> {'back'}</span>}<span><Kbd>{'esc'}</Kbd> {'close'}</span>
-          <span className="ms-auto ui-num" aria-live="polite">{loading ? '' : (list.length === 0 ? 'No results' : list.length === 1 ? `${list.length} result` : `${list.length} results`)}</span>
+          <span><Kbd>↑</Kbd> <Kbd>↓</Kbd> move</span><span><Kbd>↵</Kbd> {list[active]?.c.children || list[active]?.c.loadChildren ? 'open' : 'run'}</span>
+          {stack.length > 0 && <span><Kbd>⌫</Kbd> back</span>}<span><Kbd>esc</Kbd> close</span>
+          <span className="ms-auto ui-num" aria-live="polite">{loading ? '' : plural(list.length, 'result', 'results', { zero: 'No results' })}</span>
         </div>
       </motion.div>
     </ModalLayer>
@@ -1578,8 +1704,9 @@ export function NotificationBell({ items, onChange, max = 5, className }: { item
   const prev = useRef(unread), [shake, setShake] = useState(0)
   useEffect(() => { if (unread > prev.current) setShake(s => s + 1); prev.current = unread }, [unread])
   const cascade = useRef(false)
-  const markAll = () => { cascade.current = true; onChange(items.map(n => ({ ...n, read: true }))); setTimeout(() => { cascade.current = false }, 600) }
   const shown = items.slice(0, max)
+  // the dots clear one after another (60 ms apart, each spring about 200 ms); later clicks clear at once
+  const markAll = () => { cascade.current = true; onChange(items.map(n => ({ ...n, read: true }))); setTimeout(() => { cascade.current = false }, shown.length * 60 + 200) }
   return (
     <Popover className={className}>
       <PopoverTrigger size="icon" aria-label={`Notifications, ${unread} unread`} className="!overflow-visible">
@@ -1596,9 +1723,9 @@ export function NotificationBell({ items, onChange, max = 5, className }: { item
         </AnimatePresence>
       </PopoverTrigger>
       <PopoverContent className="w-[min(300px,calc(100vw-32px))] overflow-hidden !p-0">
-        <div className="flex items-center justify-between border-b border-[var(--line)] px-3 py-2"><b className="text-[13px]">{'Notifications'}</b>
-          <Button size="sm" variant="ghost" disabled={!unread} onClick={markAll}>{'Mark all read'}</Button></div>
-        {items.length === 0 ? <EmptyState icon="bell" title={'You’re all caught up'} /> : (
+        <div className="flex items-center justify-between border-b border-[var(--line)] px-3 py-2"><b className="text-[13px]">Notifications</b>
+          <Button size="sm" variant="ghost" disabled={!unread} onClick={markAll}>Mark all read</Button></div>
+        {items.length === 0 ? <EmptyState icon="bell" title="You’re all caught up" /> : (
           <div role="list">
             <AnimatePresence initial>
               {shown.map((n, i) => (
@@ -1626,8 +1753,7 @@ type TourGeo = { x: number; y: number; w: number; h: number; left: number; top: 
 /**
  * Guided tour over a region. Mark targets inside `children` with data-tour="…"; the spotlight springs
  * between them and a tooltip with an arrow anchors below each one (above if there's no room).
- * `step` is the open step (-1 = closed). Next/Done, Skip, ←/→ and Escape work. The spotlight and
- * tooltip are placed from measured geometry, so they are physical by nature.
+ * `step` is the open step (-1 = closed). Next/Done, Skip, ←/→ (not while typing in a field) and Escape work.
  */
 export function Tour({ steps, step, defaultStep = -1, onStepChange, children, className }:
   { steps: TourStep[]; step?: number; defaultStep?: number; onStepChange?: (step: number) => void; children: ReactNode; className?: string }) {
@@ -1646,7 +1772,7 @@ export function Tour({ steps, step, defaultStep = -1, onStepChange, children, cl
     const sr = w.getBoundingClientRect(), r = el.getBoundingClientRect(), pad = 4
     const x = r.left - sr.left - pad, y = r.top - sr.top - pad, bw = r.width + pad * 2, bh = r.height + pad * 2
     const tw = t.offsetWidth, th = t.offsetHeight, SW = w.clientWidth, SH = w.clientHeight
-    const left = Math.max(8, Math.min(SW - tw - 8, x))
+    const left = fitInside(x, tw, SW)
     let top = y + bh + 12, above = false
     if (top + th > SH - 6) { top = Math.max(6, y - th - 12); above = true }
     setGeo({ x, y, w: bw, h: bh, left, top, above, ax: Math.max(12, Math.min(tw - 22, x + bw / 2 - left - 5)) })
@@ -1669,14 +1795,13 @@ export function Tour({ steps, step, defaultStep = -1, onStepChange, children, cl
       onKeyDown={e => {
         if (!open) return
         if (e.key === 'Escape') { e.stopPropagation(); go(-1) }
-        const key = e.key
-        if (key === 'ArrowRight') go(i + 1)
-        if (key === 'ArrowLeft' && i > 0) go(i - 1)
+        else if (isEditableTarget(e.target)) return
+        else if (e.key === 'ArrowRight') go(i + 1)
+        else if (e.key === 'ArrowLeft' && i > 0) go(i - 1)
       }}>
       {children}
       <AnimatePresence>
         {open && geo && (
-
           <motion.div key="spot" aria-hidden className="pointer-events-none absolute top-0 left-0 z-[5] rounded-[var(--r-md)] shadow-[0_0_0_9999px_rgba(0,0,0,.45)]"
             initial={{ opacity: 0, x: geo.x, y: geo.y, width: geo.w, height: geo.h }} animate={{ opacity: 1, x: geo.x, y: geo.y, width: geo.w, height: geo.h }}
             exit={{ opacity: 0, transition: { duration: 0.2 } }} transition={{ ...spring(0.2, 0.5), opacity: { duration: 0.25 } }} />
@@ -1684,26 +1809,22 @@ export function Tour({ steps, step, defaultStep = -1, onStepChange, children, cl
       </AnimatePresence>
       <AnimatePresence>
         {s && (
-          <motion.div key="tip" ref={tip} role="dialog" aria-label={'Product tour'} aria-live="polite"
+          <motion.div key="tip" ref={tip} role="dialog" aria-label="Product tour" aria-live="polite"
             initial={{ opacity: 0, y: 8 }} animate={geo ? { opacity: 1, y: 0, left: geo.left, top: geo.top } : { opacity: 0 }}
             exit={{ opacity: 0, y: 8, transition: { duration: 0.15 } }} transition={{ default: spring(0.25, 0.35), left: move, top: move }}
             style={{ visibility: geo ? 'visible' : 'hidden' }}
-
             className={cn(surface.floating, 'absolute top-0 left-0 z-[6] w-[min(250px,calc(100%-16px))] rounded-[var(--r-md)] p-3 text-[13px]')}>
             {geo && <span aria-hidden className={cn('absolute h-2.5 w-2.5 border-[var(--line)] bg-[var(--card)]',
-
               geo.above ? '-bottom-[6px] rotate-[225deg] border-t border-l' : '-top-[6px] rotate-45 border-t border-l')} style={{ left: geo.ax }} />}
-            <motion.div key={i} initial={{ opacity: 0, x: 6 }}
- animate={{ opacity: 1, x: 0 }} transition={{ duration: 0.2 }}>
+            <motion.div key={i} initial={{ opacity: 0, x: 6 }} animate={{ opacity: 1, x: 0 }} transition={{ duration: 0.2 }}>
               <b className="block font-semibold">{s.title}</b>
               {s.body && <div className="mt-1 mb-3 text-xs leading-normal text-[var(--fg3)]">{s.body}</div>}
             </motion.div>
             <div className="flex items-center justify-between gap-2">
               <span className="ui-num text-xs text-[var(--fg3)]">{`${i + 1} of ${steps.length}`}</span>
               <div className="flex gap-1.5">
-                {i < steps.length - 1 && <Button size="sm" variant="ghost" onClick={() => go(-1)}>{'Skip'}</Button>}
+                {i < steps.length - 1 && <Button size="sm" variant="ghost" onClick={() => go(-1)}>Skip</Button>}
                 <Button ref={next} size="sm" variant="primary" onClick={() => go(i + 1)}>{i === steps.length - 1 ? 'Done' : 'Next'}</Button>
-
               </div>
             </div>
           </motion.div>

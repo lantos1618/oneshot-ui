@@ -715,7 +715,7 @@ export function SourceList({ sources, className }: { sources: Source[]; classNam
  */
 export function Citation({ n, source, className }: { n: number; source: Source; className?: string }) {
   const ref = useRef<HTMLSpanElement>(null), panel = useRef<HTMLSpanElement>(null), pointer = useRef('mouse')
-  const { open, setOpen, bind, tap } = useHoverIntent(ref, 300, 150)
+  const { open, setOpen, bind, tap } = useHoverIntent(ref)
   const [pinned, setPinned] = useState(false)
   const shown = open || pinned
   const [pos, setPos] = useState<{ dx: number; w: number; up: boolean }>({ dx: 0, w: 250, up: true })

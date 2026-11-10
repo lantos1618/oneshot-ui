@@ -25,9 +25,9 @@
  * `magnetize` is the pure core (no React); `useMagnet` wraps it with state, bypass, feedback and keyboard helpers.
  * Slider, RangeSlider, ColorPicker (hue), SplitPane, the media seek bars (chapters) and Gantt (task edges) take it.
  */
-import { useEffect, useLayoutEffect, useMemo, useRef, useState, type ReactNode } from 'react'
+import { useEffect, useLayoutEffect, useMemo, useRef, type ReactNode } from 'react'
 import { AnimatePresence, animate, motion, useMotionValue, useReducedMotion } from 'motion/react'
-import { clamp, cn, isCoarsePointer, fmt } from './core'
+import { clamp, cn, haptic, isCoarsePointer, fmt, useLive } from './core'
 
 /** A point magnet: a bare value, or a value with a label (announced and shown in the thumb's bubble), its own capture radius in px and a strength (scales capture and release). */
 export type MagnetPoint = { value: number; label?: string; /** capture radius, px */ radius?: number; /** 1 = normal, 1.5 = a firmer detent */ strength?: number }
@@ -130,13 +130,19 @@ function magnetViscous(raw: number, zones: readonly MagnetZone[], s: number, rel
 
 const magnetZoneAt = (zones: readonly MagnetZone[], v: number) => zones.find(z => { const [a, b] = magnetZoneBounds(z); return v >= a && v <= b }) ?? null
 
+/** The release distance for a capture `radius`: the default gap between them, for a mouse or a coarse pointer. */
+const magnetRelease = (radius: number, coarse: boolean) =>
+  radius + (coarse ? MAGNET_DEFAULTS.coarseRelease - MAGNET_DEFAULTS.coarseRadius : MAGNET_DEFAULTS.release - MAGNET_DEFAULTS.radius)
+/** How close two values count as the same mark, relative to the range. */
+const magnetEps = (min: number, max: number) => 1e-9 * (max - min || 1)
+
 /**
  * The pure core: where should the thumb be for this raw pointer value? Pass the previous result's `state` back on the
  * next move (start a gesture with MAGNET_IDLE). See the module comment for the behaviour and defaults.
  */
 export function magnetize(raw: number, magnets: readonly Magnet[], state: MagnetState = MAGNET_IDLE, opts: MagnetOptions): MagnetResult {
   const { min, max, step, px = MAGNET_DEFAULTS.px, radius = MAGNET_DEFAULTS.radius, flick = MAGNET_DEFAULTS.flick, t, bypass } = opts
-  const release = Math.max(radius, opts.release ?? radius + (MAGNET_DEFAULTS.release - MAGNET_DEFAULTS.radius))
+  const release = Math.max(radius, opts.release ?? magnetRelease(radius, false))
   const s = px / (max - min || 1)
   let v = state.v
   // speed in px/ms, smoothed with a 12 ms time constant (unbiased whatever the event rate: 60 Hz touch or a 1000 Hz
@@ -169,7 +175,7 @@ export function magnetStops(magnets: readonly Magnet[], { min, max, step }: { mi
 
 /** The next mark above (`dir` 1) or below (-1) `value`, or null past the last one. */
 export function nextMagnet(value: number, magnets: readonly Magnet[], dir: 1 | -1, range: { min: number; max: number; step?: number }) {
-  const stops = magnetStops(magnets, range), eps = 1e-9 * (range.max - range.min || 1)
+  const stops = magnetStops(magnets, range), eps = magnetEps(range.min, range.max)
   return (dir > 0 ? stops.find(v => v > value + eps) : [...stops].reverse().find(v => v < value - eps)) ?? null
 }
 
@@ -206,15 +212,8 @@ export type UseMagnetOptions = {
   /** after a move lands on a mark (hit) or leaves one (null) */ onSnap?: (hit: MagnetHit | null, value: number) => void
 }
 
-/** A short haptic tick: touch screens only, after a user gesture (Chrome blocks vibrate before one and logs it). */
-export function magnetHaptic(ms = 8) {
-  try {
-    if (!isCoarsePointer()) return
-    const ua = (navigator as Navigator & { userActivation?: { hasBeenActive: boolean } }).userActivation
-    if (ua && !ua.hasBeenActive) return
-    navigator.vibrate?.(ms)
-  } catch { /* not supported */ }
-}
+/** A short haptic tick: touch screens only, after a user gesture. Same as core's `haptic`. */
+export const magnetHaptic = haptic
 
 /**
  * Magnets for a drag: `apply(raw, { px, event })` returns `{ value, snapped, zone }` for each pointer move (call
@@ -231,19 +230,13 @@ export function useMagnet(options: UseMagnetOptions) {
   useLayoutEffect(() => { o.current = options })
   const st = useRef(MAGNET_IDLE), zoneRef = useRef<MagnetZone | null>(null)
   const touches = useRef(new Set<number>()), unlisten = useRef<(() => void) | null>(null)
-  const [said, setSaid] = useState(''), timer = useRef<ReturnType<typeof setTimeout>>(undefined)
-  const fmtRef = useRef(fmt)
-  useLayoutEffect(() => { fmtRef.current = fmt })
-  useEffect(() => () => { unlisten.current?.(); clearTimeout(timer.current) }, [])
+  // debounced: a drag across five marks says only where it settled
+  const [announce, live] = useLive({ debounce: 350 })
+  useEffect(() => () => unlisten.current?.(), [])
   const anchors = useMemo(() => on ? magnetAnchors(magnets!, { min, max, step }) : [], [on, magnets, min, max, step])
   const zones = useMemo(() => on ? magnets!.filter(magnetIsZone) : [], [on, magnets])
   const stops = useMemo(() => on ? magnetStops(magnets!, { min, max, step }) : [], [on, magnets, min, max, step])
-  const say = (text: string) => {
-    if (o.current.announce === false) return
-    clearTimeout(timer.current)
-    // debounced: a drag across five marks says only where it settled; the nbsp toggles so the same text is read again
-    timer.current = setTimeout(() => setSaid(prev => prev === text ? text + ' ' : text), 350)
-  }
+  const say = (text: string) => { if (o.current.announce !== false) announce(text) }
   const engage = () => {
     if (unlisten.current || typeof window === 'undefined') return
     // a second finger anywhere bypasses (the dragging finger went down before this, so it never enters the set)
@@ -252,10 +245,10 @@ export function useMagnet(options: UseMagnetOptions) {
     addEventListener('pointerdown', down, true); addEventListener('pointerup', up, true); addEventListener('pointercancel', up, true)
     unlisten.current = () => { removeEventListener('pointerdown', down, true); removeEventListener('pointerup', up, true); removeEventListener('pointercancel', up, true); touches.current.clear() }
   }
-  const labelOf = (hit: { label?: string; value: number }) => hit.label ?? o.current.describe?.(hit.value) ?? fmtRef.current.number(hit.value)
+  const labelOf = (hit: { label?: string; value: number }) => hit.label ?? o.current.describe?.(hit.value) ?? fmt.number(hit.value)
   const at = (value: number): { hit: MagnetHit | null; zone: MagnetZone | null; label: string | undefined } => {
     if (!on) return { hit: null, zone: null, label: undefined }
-    const eps = 1e-9 * (max - min || 1), a = anchors.find(x => Math.abs(x.value - value) <= eps), zone = magnetZoneAt(zones, value)
+    const eps = magnetEps(min, max), a = anchors.find(x => Math.abs(x.value - value) <= eps), zone = magnetZoneAt(zones, value)
     return { hit: a ? magnetHitOf(a) : null, zone, label: a?.label ?? zone?.label }
   }
   return {
@@ -273,7 +266,7 @@ export function useMagnet(options: UseMagnetOptions) {
       const bypass = ctx.bypass ?? (!!(key && ev?.[MAGNET_MOD[key]]) || touches.current.size > 0)
       const coarse = ev?.pointerType ? ev.pointerType !== 'mouse' : isCoarsePointer()
       const radius = opt.radius ?? (coarse ? MAGNET_DEFAULTS.coarseRadius : MAGNET_DEFAULTS.radius)
-      const release = opt.release ?? radius + (coarse ? MAGNET_DEFAULTS.coarseRelease - MAGNET_DEFAULTS.coarseRadius : MAGNET_DEFAULTS.release - MAGNET_DEFAULTS.radius)
+      const release = opt.release ?? magnetRelease(radius, coarse)
       const r = magnetize(raw, opt.magnets, st.current, { min: opt.min, max: opt.max, step: opt.step, px: ctx.px, radius, release, flick: opt.flick, t: ctx.t ?? ev?.timeStamp, bypass })
       st.current = r.state
       if (r.captured && r.snapped) {
@@ -295,7 +288,7 @@ export function useMagnet(options: UseMagnetOptions) {
     /** the mark a jump key moves to from `value` (null past the last one) */
     next: (value: number, dir: 1 | -1) => on ? nextMagnet(value, magnets!, dir, { min, max, step }) : null,
     /** the polite live region; render it once inside the control */
-    live: (on ? <span className="sr-only" aria-live="polite">{said}</span> : null) as ReactNode,
+    live: (on ? live : null) as ReactNode,
   }
 }
 
@@ -360,7 +353,7 @@ export function MagnetMarks({ magnets, min, max, value, inset = 0, tone = 'defau
       {magnets.map((m, i) => {
         const v = typeof m === 'number' ? m : magnetIsZone(m) ? (m.pull === 'center' ? (m.from + m.to) / 2 : null) : m.value
         if (v === null) return null
-        const on = vals.some(x => Math.abs(x - v) <= 1e-9 * span)
+        const on = vals.some(x => Math.abs(x - v) <= magnetEps(min, max))
         return <span key={`p${i}`} data-magnet-tick="" className={cn('absolute top-1/2 -translate-y-1/2 rounded-full transition-[background-color,height,width] duration-150', on ? tickOn : tick)}
           style={{ insetInlineStart: at(f(v)), marginInlineStart: on && tone === 'default' ? -1.5 : -1 }} />
       })}
@@ -375,7 +368,6 @@ export function MagnetBubble({ label, show, className }: { label?: ReactNode; sh
       {show && label != null && label !== '' && (
         <motion.span key="b" aria-hidden initial={{ opacity: 0, y: 4, scale: 0.9 }} animate={{ opacity: 1, y: 0, scale: 1 }} exit={{ opacity: 0, y: 2, scale: 0.95, transition: { duration: 0.1 } }}
           transition={{ type: 'spring', stiffness: 600, damping: 32 }}
-
           className={cn('pointer-events-none absolute bottom-full left-1/2 z-10 mb-2 w-max -translate-x-1/2 rounded-[var(--r-md)] bg-[var(--primary)] px-2 py-1 text-xs whitespace-nowrap text-[var(--on-primary)] shadow-[var(--shadow)]', className)}>
           {label}
         </motion.span>

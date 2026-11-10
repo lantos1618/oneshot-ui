@@ -23,7 +23,7 @@ and motion. Attach the ones you need plus ui-provider.tsx; they share one UIProv
 - shadcn CLI: `npx shadcn add https://lantos1618.github.io/oneshot-ui/r/data-grid.json` (pulls in ui-provider)
 - Index with sizes, exports and embedded components: https://lantos1618.github.io/oneshot-ui/index.json
 - The same files from npm: https://unpkg.com/@lyndon/ui@0.11.0/dist-registry/files/<name>.tsx
-- Whole library in one file (dist-single/ui-all.tsx, ~648.0k tokens): only for tools with a very large context; prefer the drop-ins
+- Whole library in one file (dist-single/ui-all.tsx, ~650.9k tokens): only for tools with a very large context; prefer the drop-ins
 
 ## Tags
 
@@ -157,7 +157,7 @@ Every button presses down slightly (scale .96, CSS). `asChild` renders your elem
 - Embeds: Icon, Slot, Spinner
 - npm: motion, react
 
-### Context menu (`context-menu`, ~11.3k tokens)
+### Context menu (`context-menu`, ~13.5k tokens)
 
 Right-click, long-press (touch) or press the Menu key / Shift+F10 on the focused area to open a menu at that point. Items can have submenus (→ opens, ← closes). The menu stays inside the viewport, focuses its first item, and closes on Escape, outside click, scroll or resize. `children` may be a function of `open` so the target can highlight itself. Parts: ContextMenu.Root/Trigger/Content plus the menu item parts (Item, CheckboxItem, RadioGroup, RadioItem, Label, Separator, Group, Sub, SubTrigger, SubContent, Shortcut).
 
@@ -179,9 +179,9 @@ Copies `text`. On success the icon swaps to a check and the label (or, icon-only
 - Embeds: Button, Icon, Slot, Spinner
 - npm: motion, react
 
-### Dropdown menu (`dropdown-menu`, ~13.8k tokens)
+### Dropdown menu (`dropdown-menu`, ~15.8k tokens)
 
-<DropdownMenu trigger="Options"><MenuItem shortcut="E">Edit</MenuItem>…</DropdownMenu> Opens with click, Enter or ↓; the first item takes focus and the rest stagger in. ↑/↓, Home/End and typeahead move; Tab or moving focus away closes it. Parts: DropdownMenu.Root/Trigger/Content/Item/CheckboxItem/RadioGroup/RadioItem/ Label/Separator/Group/Sub/SubTrigger/SubContent/Shortcut.
+<DropdownMenu trigger="Options"><MenuItem shortcut="E">Edit</MenuItem>…</DropdownMenu> Opens with click, Enter or ↓; the first enabled item takes focus and the rest stagger in. ↑/↓, Home/End and typeahead move; Tab or moving focus away closes it. Parts: DropdownMenu.Root/Trigger/Content/Item/CheckboxItem/RadioGroup/RadioItem/ Label/Separator/Group/Sub/SubTrigger/SubContent/Shortcut.
 
 - File: https://lantos1618.github.io/oneshot-ui/files/dropdown-menu.tsx
 - Kind: component; area: actions; tags: keyboard, overlays
@@ -249,7 +249,7 @@ Pill button for filters, toggles and suggestions. With `pressed` it is a toggle 
 - Embeds: Icon
 - npm: react
 
-### Color picker (`color-picker`, ~14.2k tokens)
+### Color picker (`color-picker`, ~14.5k tokens)
 
 Swatches, a hue slider and a hex field. The preview pops when a swatch or hex changes it (not while dragging hue). `hueMagnets` pulls the hue thumb onto the primary hues (or your own marks) while dragging; see Slider's `magnets`. Form-native: `name` submits "#RRGGBB" (upper case; the last valid colour while the hex field holds a typo), `required`, `disabled`, `readOnly` (shows the colour and hex only), `invalid`, `onBlur`, `form`, and `ref` on the hex field.
 
@@ -260,7 +260,7 @@ Swatches, a hue slider and a hex field. The preview pops when a swatch or hex ch
 - Embeds: FormFieldContext, Input, MagnetBubble, MagnetMarks
 - npm: motion, react
 
-### Combobox (`combobox`, ~19.5k tokens)
+### Combobox (`combobox`, ~20.0k tokens)
 
 Type to filter (the match is bolded), arrows to move, Enter to choose. Options can carry a `leading` flag or emoji, shown in the field once chosen, and a `group` heading. `empty` renders the no-match message for the current query.
 
@@ -293,7 +293,7 @@ Typed date entry: day, month and year segments in the locale's order, separators
 - Embeds: FormFieldContext
 - npm: react
 
-### Date picker (`date-picker`, ~20.1k tokens)
+### Date picker (`date-picker`, ~20.5k tokens)
 
 Date field: the calendar pops from the field (keyboard ready), the picked day pops, Today and Clear sit under the grid. Shows the weekday, in the locale. `min`, `max`, `isDateUnavailable`, `weekStartsOn`, `locale` and `numberOfMonths` go to the Calendar; a value outside them is marked invalid and stops a form submit with a message. Form-native: `name` submits the local date as "2026-11-08" (like <input type="date">; '' when empty), `required`, `disabled`, `readOnly` (doesn't open), `invalid`, `onBlur`, `form`, and `ref` on the trigger. For typing a date, use DateField.
 
@@ -304,7 +304,7 @@ Date field: the calendar pops from the field (keyboard ready), the picked day po
 - Embeds: Button, Calendar, FloatingPanel, FormFieldContext, Popover, PopoverClose, PopoverContent, PopoverRoot, PopoverTrigger, Slot, Spinner
 - npm: motion, react
 
-### Date range picker (`date-range-picker`, ~21.4k tokens)
+### Date range picker (`date-range-picker`, ~21.8k tokens)
 
 Range picker with presets (the matching preset stays highlighted; presets that fall outside `min`/`max` or start or end on an unavailable day are disabled). Stays open so you can drag either end to adjust; Done closes it. Takes the Calendar's `min`, `max`, `isDateUnavailable`, `weekStartsOn`, `locale` and `numberOfMonths` (2 is a good fit on desktop; phones stack them). Form-native: `name` submits two fields, start then end ("2026-11-01", "2026-11-07"; '' for a missing side; read with formData.getAll), `required` (both ends), `disabled`, `readOnly`, `invalid`, `onBlur`, `form`, `ref`.
 
@@ -326,7 +326,7 @@ Typed date and time in one field: the locale's date segments, then hour, minute 
 - Embeds: FormFieldContext
 - npm: react
 
-### Date time picker (`date-time-picker`, ~37.0k tokens)
+### Date time picker (`date-time-picker`, ~37.5k tokens)
 
 Date and time picker: a DateTimeField with a calendar button (or Alt+↓) opening the Calendar with a TimeField under it, and with `timeZonePicker` a searchable time-zone picker beside it. Same value as DateTimeField: an ISO 8601 string with the zone's offset, "2026-11-08T09:30:00+01:00". Picking another zone keeps the wall time (09:30 stays 09:30, the offset changes) and calls `onTimeZoneChange`; `timeZone` controls the zone, `defaultTimeZone` seeds it. Picking a day with no time yet sets midnight. Takes the Calendar's `weekStartsOn` and `numberOfMonths`. Form-native like DateTimeField.
 
@@ -391,7 +391,7 @@ Text input. Set `invalid` to show the error ring; it shakes once when it becomes
 - Embeds: FormFieldContext
 - npm: motion, react
 
-### Magnet bubble (`magnet-bubble`, ~352 tokens)
+### Magnet bubble (`magnet-bubble`, ~351 tokens)
 
 The label bubble above a thumb (the shared tooltip look). Put it inside the thumb; it pops in while `show`.
 
@@ -401,7 +401,7 @@ The label bubble above a thumb (the shared tooltip look). Put it inside the thum
 - Exports: MagnetBubble
 - npm: motion, react
 
-### Magnet marks (`magnet-marks`, ~1.1k tokens)
+### Magnet marks (`magnet-marks`, ~1.2k tokens)
 
 The track decorations: a tick for each point (and each zone centre), a tinted band for each zone. Put it inside the track (it fills it, absolutely positioned, aria-hidden). `inset` is the thumb's radius in px when the thumb's centre stops short of the track's ends (native range inputs), so ticks line up with it.
 
@@ -410,7 +410,7 @@ The track decorations: a tick for each point (and each zone centre), a tinted ba
 - Import: `@lyndon/ui`
 - Exports: MagnetMarks
 
-### Month picker (`month-picker`, ~12.6k tokens)
+### Month picker (`month-picker`, ~13.1k tokens)
 
 Month and year picker: a field that opens a grid of months (its title opens a grid of years), in the locale. `min`/`max` disable months outside them. Value: a Date on the first of the month (null when empty). Form-native: `name` submits "2026-11" (like <input type="month">), `required`, `disabled`, `readOnly`, `invalid`, `onBlur`, `form`, `ref`.
 
@@ -421,7 +421,7 @@ Month and year picker: a field that opens a grid of months (its title opens a gr
 - Embeds: Button, FloatingPanel, FormFieldContext, Popover, PopoverClose, PopoverContent, PopoverRoot, PopoverTrigger, Slot, Spinner
 - npm: motion, react
 
-### Multi select (`multi-select`, ~20.8k tokens)
+### Multi select (`multi-select`, ~21.3k tokens)
 
 Pick several: ticks draw in the list, chosen items become chips (with their colour dot) in the field. Backspace removes the last chip. With `loadOptions(query, { signal })` the field becomes a search box: loads run `debounce` ms (200) after typing stops, once the query has `minChars`; a newer query aborts the older request; the list shows loading, empty and error states (Retry, or Enter); `defaultOptions` show before the first load, options can carry a `group`, and `creatable` adds “Create “x”” (`onCreate(text)` may return the Option to use). Picking keeps the list open and the query, so several results can be ticked in a row. Chosen values keep their labels across searches. Form-native: `name` submits each value as its own field (name=a&name=b; read with formData.getAll), `required` (at least one), `disabled`, `readOnly` (chips only), `invalid`, `onBlur`, `form`, and `ref` on the field (the search input when async). Long lists are virtualised.
 
@@ -465,7 +465,7 @@ Password with show/hide (the eye pops when it flips). `strength` adds four bars 
 - Embeds: Button, FormFieldContext, Icon, Slot, Spinner
 - npm: motion, react
 
-### Phone input (`phone-input`, ~16.9k tokens)
+### Phone input (`phone-input`, ~17.4k tokens)
 
 Phone number with a country picker (flags and dial codes). Digits are formatted with the country's mask as you type, and the digits still to come show as a grey placeholder. Typing `+44…` or `0044…` switches the country. Controlled with `value` (E.164, e.g. "+41791234567": a new value picks the country and digits) or uncontrolled with `defaultCountry` + `defaultValue` (national digits). Form-native: `name` submits E.164 ("+41791234567"; '' while no digits are typed), `required`, `disabled`, `readOnly`, `invalid`, `onBlur`, `form`, and `ref` on the number field. Reset returns to the default country and digits.
 
@@ -509,7 +509,7 @@ Segmented control with a sliding pill: a single choice, so it is a radiogroup (r
 - Embeds: Badge, FormFieldContext, Icon
 - npm: motion, react
 
-### Select (`select`, ~15.7k tokens)
+### Select (`select`, ~16.2k tokens)
 
 Custom select: arrows, Enter/Space, type-ahead that cycles through options starting with the typed letter (works closed too), springs open, flips upward near the bottom of the viewport, checkmark on the current option. Form-native: `name` submits the value ('' when none), `required`, `disabled`, `readOnly` (doesn't open), `invalid`, `onBlur`, `form`, and `ref` on the trigger button. Long lists are virtualised.
 
@@ -520,7 +520,7 @@ Custom select: arrows, Enter/Space, type-ahead that cycles through options start
 - Embeds: CheckMark, CheckboxBox, FloatingPanel, FormFieldContext, Icon
 - npm: motion, react, react-dom
 
-### Slider (`slider`, ~15.2k tokens)
+### Slider (`slider`, ~15.4k tokens)
 
 Range slider with live value. `disabled` fades only the track (label and value stay legible in --fg3; the group gets aria-disabled). Native input: keyboard and screen readers for free, a 32px hit area on touch. `steps` makes it a stepped picker over named stops (value = index; the names show under the track and can be tapped). `compact` uses a smaller grey readout (settings panels). `magnets` (see useMagnet) pull the thumb onto marks while dragging: ticks and zone bands on the track, the mark's label in a bubble over the thumb, a spring as it settles, a tick on touch, "Snapped to …" announced. Hold Alt (Option) or put a second finger down to drag freely; PageUp / PageDown and Ctrl/⌘ + arrows jump between marks, arrows still step. The value stays a plain number (forms submit it as usual). `valueText` names a value for screen readers.
 
@@ -564,7 +564,7 @@ Auto-growing textarea; the height animates as lines are added or removed. With `
 - Embeds: FormFieldContext
 - npm: motion, react
 
-### Time field (`time-field`, ~14.9k tokens)
+### Time field (`time-field`, ~15.3k tokens)
 
 Typed time entry: hour and minute (and second) segments, with an am/pm segment on a 12-hour clock (from the locale or `hourCycle`); type "930" or "9" then ":" and "30", ↑/↓ step a segment, "a"/"p" sets am/pm, pasting "14:30" or "2:30 PM" fills it. `min`/`max` ("08:00", "18:00") mark it invalid. `step` adds a clock button with suggested times every `step` minutes (between `from` and `to`), outside min/max disabled; Alt+↓ opens it. `timeZone` shows the zone's short name after the time (the value is the wall time there). Value: "09:30" (24-hour, like <input type="time">; "09:30:15" with granularity="second"), '' while empty or incomplete. Form-native: `name` submits it, `required`, `disabled`, `readOnly`, `invalid`, `onBlur`, `form`, and `ref` on the first segment.
 
@@ -575,7 +575,7 @@ Typed time entry: hour and minute (and second) segments, with an am/pm segment o
 - Embeds: FloatingPanel, FormFieldContext
 - npm: motion, react
 
-### Time picker (`time-picker`, ~14.7k tokens)
+### Time picker (`time-picker`, ~15.2k tokens)
 
 Time picker: a TimeField (type the time, or step it with ↑/↓) plus a clock button listing times every `step` minutes (15) between `from` and `to` (07:00 to 21:00), opening scrolled to the current one (`value`, `defaultValue` "09:00", `onChange`, `step`, `from`, `to`); it also takes TimeField's `hourCycle`, `locale`, `granularity`, `min`, `max` and `timeZone`. `name` submits "HH:MM" (24-hour, like <input type="time">).
 
@@ -586,7 +586,7 @@ Time picker: a TimeField (type the time, or step it with ↑/↓) plus a clock b
 - Embeds: FloatingPanel, FormFieldContext, TimeField
 - npm: motion, react
 
-### Time zone picker (`time-zone-picker`, ~20.3k tokens)
+### Time zone picker (`time-zone-picker`, ~20.8k tokens)
 
 Searchable time-zone picker: a Combobox of `Intl.supportedValuesOf('timeZone')` (about 420 zones, virtualised), labelled with their current offset, "(GMT+01:00) Europe/Zurich", and sorted by it; type a city or "GMT+05". `zones` limits the list, `at` is the instant the offsets are for (default now). Value: the IANA name. Form-native like Combobox.
 
@@ -597,7 +597,7 @@ Searchable time-zone picker: a Combobox of `Intl.supportedValuesOf('timeZone')` 
 - Embeds: Button, CheckMark, CheckboxBox, Combobox, FloatingPanel, FormFieldContext, Icon, OptionList, Slot, Spinner
 - npm: motion, react, react-dom
 
-### Year picker (`year-picker`, ~11.5k tokens)
+### Year picker (`year-picker`, ~12.0k tokens)
 
 Year picker: a field that opens a grid of twelve years (arrows page past the edges). `min`/`max` disable years outside them. Value: the year as a number (null when empty). Form-native: `name` submits "2026", `required`, `disabled`, `readOnly`, `invalid`, `onBlur`, `form`, `ref`.
 
@@ -624,7 +624,7 @@ Trail of links to the current page (the last item, marked aria-current). Wraps o
 - Embeds: Icon
 - npm: react
 
-### Collapsible sidebar (`collapsible-sidebar`, ~12.1k tokens)
+### Collapsible sidebar (`collapsible-sidebar`, ~13.5k tokens)
 
 App frame whose sidebar folds to icons. Labels become tooltips when collapsed; press `hotkey` (default `[`) while it's on screen to toggle. Has section headings, count badges, a user footer, and a main pane that changes with the selected item (`children` may be a function of the item). Without `defaultCollapsed` it starts folded when the frame is narrower than 440px; in a frame that narrow, expanding it slides it over the main pane (tap outside or pick an item to fold it again).
 
@@ -750,7 +750,7 @@ Steps plus the current step's description and Back / Continue buttons. Back is h
 
 Import from: @lyndon/ui.
 
-### Alert dialog (`alert-dialog`, ~9.1k tokens)
+### Alert dialog (`alert-dialog`, ~9.4k tokens)
 
 Confirmation for a consequential action (role="alertdialog"). It needs a `title` and a `description`, never closes on an outside click (the panel shakes instead), and opens with focus on the least destructive action, Cancel. Escape or Cancel close it. `onConfirm` may return a promise: Confirm then shows a spinner and both buttons wait; it closes when the promise resolves, and stays open with the error's message (announced) when it rejects. Parts: AlertDialog.Root / Trigger / Content / Title / Description / Footer / Cancel (= Close) / Action.
 
@@ -761,9 +761,9 @@ Confirmation for a consequential action (role="alertdialog"). It needs a `title`
 - Embeds: Button, DialogDescription, DialogFooter, DialogRoot, DialogTitle, DialogTrigger, Icon, ModalLayer, OverlayPortal, Slot, Spinner
 - npm: motion, react, react-dom
 
-### Command palette (`command-palette`, ~14.7k tokens)
+### Command palette (`command-palette`, ~16.7k tokens)
 
-⌘K palette: type to filter (every word must match the label, keywords or hint), arrows to move, Enter to run. Groups keep together under their headings. Shows which keyword matched, marks the active row with ↵, and suggests a query when nothing matches. `loadItems(query, { signal })` adds results from your API (debounced by `debounce` ms, the previous request aborted, a spinner while loading, errors shown). Entries with `children` / `loadChildren` open nested pages (Enter in, Backspace on an empty search out, or click the breadcrumb). `recents` keeps the last N entries run as a Recent group (persisted under `recentKey`). Long result lists are virtualised.
+⌘K palette: type to filter (every word must match the label, keywords or hint), arrows to move, Enter to run. Groups keep together under their headings. Shows which keyword matched, marks the active row with ↵, and suggests a query when nothing matches. `loadItems(query, { signal })` adds results from your API (debounced by `debounce` ms, the previous request aborted, a spinner while loading, errors shown). Entries with `children` / `loadChildren` open nested pages (Enter in, Backspace on an empty search out, or click the breadcrumb). `recents` keeps the last N entries run as a Recent group (persisted under `recentKey`; ids that are no longer in `commands` drop out). Long result lists are virtualised. A chosen command runs as the palette closes, once focus is back where it was; `onExitComplete` fires when its closing animation has finished (for work that needs the page uncovered).
 
 - File: https://lantos1618.github.io/oneshot-ui/files/command-palette.tsx
 - Kind: component; area: overlays; tags: search, keyboard, async, virtualised
@@ -772,7 +772,7 @@ Confirmation for a consequential action (role="alertdialog"). It needs a `title`
 - Embeds: EmptyState, Icon, Kbd, MenuLabel, ModalLayer, OverlayPortal, Spinner
 - npm: motion, react, react-dom
 
-### Dialog (`dialog`, ~8.9k tokens)
+### Dialog (`dialog`, ~9.1k tokens)
 
 Modal dialog. Springs in, backdrop fades, focus is trapped, Escape closes. Fits small screens: keeps clear of the safe areas, scrolls inside when taller than the screen, and the footer wraps. Parts: Dialog.Root / Trigger (asChild) / Content / Title / Description / Close (asChild) / Footer.
 
@@ -783,9 +783,9 @@ Modal dialog. Springs in, backdrop fades, focus is trapped, Escape closes. Fits 
 - Embeds: Button, Icon, IconButton, Slot, Spinner
 - npm: motion, react, react-dom
 
-### Hover card (`hover-card`, ~6.0k tokens)
+### Hover card (`hover-card`, ~7.0k tokens)
 
-Rich preview on hover or focus (profiles, links, citations). Stays open while the pointer is over the card. On touch, tapping the trigger toggles it and tapping outside closes it. With `pinOnClick`, a mouse click on the trigger pins the card open (leaving no longer closes it) until another click, an outside click or Escape. The card slides to stay on screen. Parts: HoverCard.Root / HoverCard.Trigger (asChild) / HoverCard.Content (side, align, sideOffset, arrow).
+Rich preview on hover or focus (profiles, links, citations). Stays open while the pointer is over the card. On touch, tapping the trigger toggles it and tapping outside closes it; Escape closes it. With `pinOnClick`, a mouse click on the trigger pins the card open (leaving no longer closes it) until another click, an outside click or Escape. The card slides to stay on screen, and is built from spans so it can sit inside a paragraph. Parts: HoverCard.Root / HoverCard.Trigger (asChild) / HoverCard.Content (side, align, sideOffset, arrow).
 
 - File: https://lantos1618.github.io/oneshot-ui/files/hover-card.tsx
 - Kind: component; area: overlays; tags: people, touch
@@ -794,7 +794,17 @@ Rich preview on hover or focus (profiles, links, citations). Stays open while th
 - Embeds: FloatingPanel, Slot
 - npm: motion, react
 
-### Notification bell (`notification-bell`, ~10.0k tokens)
+### Menu list (`menu-list`, ~1.9k tokens)
+
+Menu.List: a menu's item list without a trigger or panel, for composite widgets that bring their own (a composer's slash-command popup). Arrows, Home/End and typeahead move between the items, the first one takes focus (`autoFocus`), and choosing an item or pressing Escape calls `onClose`; `onTab` handles Tab. A `role="menu"` div unless `role` says otherwise.
+
+- File: https://lantos1618.github.io/oneshot-ui/files/menu-list.tsx
+- Kind: component; area: overlays
+- Import: `@lyndon/ui`
+- Exports: MenuList
+- npm: react
+
+### Notification bell (`notification-bell`, ~10.5k tokens)
 
 Bell with an unread count; shakes when new unread items arrive. The panel shows the newest `max` items, staggering them in on open; clicking one marks it read, "Mark all read" clears them in sequence.
 
@@ -805,7 +815,7 @@ Bell with an unread count; shakes when new unread items arrive. The panel shows 
 - Embeds: AnimatedNumber, Button, EmptyState, FloatingPanel, Icon, Popover, PopoverClose, PopoverContent, PopoverRoot, PopoverTrigger, Slot, Spinner
 - npm: motion, react
 
-### Popover (`popover`, ~7.4k tokens)
+### Popover (`popover`, ~7.9k tokens)
 
 Anchored panel: `<Popover><PopoverTrigger>Share</PopoverTrigger><PopoverContent>…</PopoverContent></Popover>`, or the parts `Popover.Root` / `Popover.Trigger` (asChild) / `Popover.Content` (side, align, sideOffset, arrow) / `Popover.Close`.
 
@@ -816,7 +826,7 @@ Anchored panel: `<Popover><PopoverTrigger>Share</PopoverTrigger><PopoverContent>
 - Embeds: Button, Slot, Spinner
 - npm: motion, react
 
-### Sheet (`sheet`, ~9.4k tokens)
+### Sheet (`sheet`, ~9.7k tokens)
 
 Panel that slides in from an edge: `side` is `end`, `start`, the physical `left`/`right`, or `bottom`. On screens narrower than 640px a side sheet becomes a bottom sheet (pass `responsive={false}` to keep the edge drawer, e.g. for app navigation). A bottom sheet has a grab handle: drag it (or the header) down to dismiss. Keeps clear of the safe areas. Parts: Sheet.Root / Trigger / Content (side, responsive) / Header / Title / Description / Close / Footer.
 
@@ -827,9 +837,9 @@ Panel that slides in from an edge: `side` is `end`, `start`, the physical `left`
 - Embeds: Button, DialogClose, DialogDescription, DialogFooter, DialogRoot, DialogTitle, DialogTrigger, Icon, IconButton, ModalLayer, OverlayPortal, Slot, Spinner
 - npm: motion, react, react-dom
 
-### Tooltip (`tooltip`, ~6.3k tokens)
+### Tooltip (`tooltip`, ~7.8k tokens)
 
-Short delay, quick fade. Wrap the element that should show it. Shows on hover or keyboard focus; on touch a tap shows it (another tap, a tap elsewhere or 2.5 s hides it). `portal` renders it in a fixed layer so it escapes `overflow: hidden` parents (collapsed sidebars, scroll areas); `disabled` turns it off. The trigger (a single element child) gets `aria-describedby` while the tip shows, so screen readers announce it. Parts: Tooltip.Root (open state, delay) / Tooltip.Trigger (asChild) / Tooltip.Content (side, align, sideOffset, arrow, portal).
+Short delay, quick fade. Wrap the element that should show it. Shows on hover or keyboard focus; on touch a tap shows it (another tap, a tap elsewhere or 2.5 s hides it); Escape hides it. Flips and slides to stay on screen. `portal` renders it in a fixed layer so it escapes `overflow: hidden` parents (collapsed sidebars, scroll areas); `disabled` turns it off. The trigger (a single element child) gets `aria-describedby` while the tip shows, so screen readers announce it. Parts: Tooltip.Root (open state, delay) / Tooltip.Trigger (asChild) / Tooltip.Content (side, align, sideOffset, arrow, portal).
 
 - File: https://lantos1618.github.io/oneshot-ui/files/tooltip.tsx
 - Kind: component; area: overlays; tags: help, touch, accessible
@@ -838,9 +848,9 @@ Short delay, quick fade. Wrap the element that should show it. Shows on hover or
 - Embeds: OverlayPortal, PartButton, Slot
 - npm: motion, react, react-dom
 
-### Tour (`tour`, ~4.4k tokens)
+### Tour (`tour`, ~4.6k tokens)
 
-Guided tour over a region. Mark targets inside `children` with data-tour="…"; the spotlight springs between them and a tooltip with an arrow anchors below each one (above if there's no room). `step` is the open step (-1 = closed). Next/Done, Skip, ←/→ and Escape work. The spotlight and tooltip are placed from measured geometry, so they are physical by nature.
+Guided tour over a region. Mark targets inside `children` with data-tour="…"; the spotlight springs between them and a tooltip with an arrow anchors below each one (above if there's no room). `step` is the open step (-1 = closed). Next/Done, Skip, ←/→ (not while typing in a field) and Escape work.
 
 - File: https://lantos1618.github.io/oneshot-ui/files/tour.tsx
 - Kind: component; area: overlays; tags: onboarding, help
@@ -1039,7 +1049,7 @@ A key or shortcut ("⌘K", "Esc"). Always left to right, so "⌘K" doesn't turn 
 - Exports: Kbd
 - npm: react
 
-### Shortcut sheet (`shortcut-sheet`, ~9.7k tokens)
+### Shortcut sheet (`shortcut-sheet`, ~9.9k tokens)
 
 Keyboard shortcuts in titled groups (General / Navigation / Editing…). Inline by default (`columns={2}` lays groups side by side); `variant="dialog"` shows them in a dialog instead, controlled by `open` + `onOpenChange` (two columns, a Close button), and `hotkey` also toggles that dialog with ? (ignored while typing in a field).
 
@@ -1083,7 +1093,7 @@ Activity feed grouped by day. Prepend items (with new ids) and they slide in whi
 - Embeds: Icon
 - npm: motion, react
 
-### Virtual list (`virtual-list`, ~7.0k tokens)
+### Virtual list (`virtual-list`, ~7.1k tokens)
 
 A scrolling list that renders only the items in view. Items measure themselves (variable heights are fine); pass a fixed `estimateSize` and `measure={false}` for uniform rows. `role` sets the container role and each item's (`list` → listitem, `listbox` → option, `feed` → article, `log` → none), with aria-setsize/aria-posinset so screen readers count the whole set. `anchor="end"` makes a chat log: it starts at the bottom, stays pinned there as messages arrive or stream in, and keeps the reader's place when older ones are prepended (give `getItemKey`). `window` scrolls with the page instead of inside a box. `onEndReached` loads more. `ref` gives scrollToIndex etc.
 
@@ -1140,7 +1150,7 @@ Reorderable list. Drag the ⠿ handle (only the handle starts a drag, so text st
 - Embeds: Icon
 - npm: motion, react
 
-### Split pane (`split-pane`, ~9.3k tokens)
+### Split pane (`split-pane`, ~9.6k tokens)
 
 Two resizable panes, side by side or stacked (nest one inside another for IDE layouts). Drag the divider, or focus it and use the arrow keys (Shift for big steps); Enter or double-click resets with a spring. Releasing the first pane below `min` snaps it closed; drag the divider back out to reopen it. Side-by-side panes stack (first on top) while the pane is narrower than `stackBelow` px (640 by default; 0 never stacks). `magnets` (first-pane sizes in %, see useMagnet; `true` = thirds, half and the collapse point) pull the divider while dragging, with guides and the mark's name by the divider; PageUp / PageDown and Ctrl/⌘ + arrows jump between them, Alt (Option) drags freely.
 
@@ -1151,7 +1161,7 @@ Two resizable panes, side by side or stacked (nest one inside another for IDE la
 - Embeds: MagnetBubble
 - npm: motion, react
 
-### Tree view (`tree-view`, ~10.8k tokens)
+### Tree view (`tree-view`, ~10.9k tokens)
 
 File tree with roving focus: ↑ / ↓ move, → opens or steps into a folder, ← closes or jumps to the parent, Home / End jump, Enter opens (folders toggle, files call `onOpen`). F2 renames any row (file or folder) in place; double-click renames a file. Folders show their item count, files their size; icons are coloured by extension. `compact` gives denser rows without the counts (for side panels such as an IDE explorer). Trees of more than 300 nodes (or `virtualize`) render only the visible rows of the flattened open nodes inside a `height` px scroller, with aria-level / aria-setsize / aria-posinset on each row, so 10k-node trees stay instant. `lines` draws thread lines (Reddit / VS Code style): a vertical guide per level from each open folder down through its children, with an elbow into each child row. They are drawn per row, so they follow the open/close animation and virtualisation; the selected row's branch is highlighted, and so is a line under the pointer. Clicking a line collapses that folder (and selects it); keyboard users use ← instead, so the lines are not in the Tab order. `'hover'` shows them only while the pointer or focus is in the tree (always on touch screens). Turning them on or off never moves a row: the indent is the same either way.
 
@@ -1502,7 +1512,7 @@ Squarified treemap: area ∝ value. Tiles grow out of their centres when scrolle
 
 Import from: @lyndon/ui/gantt, @lyndon/ui/statechart, @lyndon/ui/trace, @lyndon/ui/network.
 
-### Data flow (`data-flow`, ~22.5k tokens)
+### Data flow (`data-flow`, ~22.7k tokens)
 
 Streaming pipeline: particles leave each source at its event rate, pass through the processing engine (its stage label cycles) and fan out to destinations by share. Hover, tap or focus a node to trace its path. Speed slider, Pause, and a live stat strip (throughput, processed, in flight, p95 latency). Below 560px the pipeline turns vertical (sources above the engine, destinations below) so labels stay full size on phones. Particles are drawn on one canvas from per-path lookup tables (no DOM reads or writes per frame), capped at 120 in flight, and everything pauses while the diagram is off screen.
 
@@ -1513,7 +1523,7 @@ Streaming pipeline: particles leave each source at its event rate, pass through 
 - Embeds: AnimatedNumber, Button, FormFieldContext, MagnetBubble, MagnetMarks, Slider, Slot, Spinner
 - npm: motion, react
 
-### Gantt (`gantt`, ~23.6k tokens)
+### Gantt (`gantt`, ~24.1k tokens)
 
 Project plan. Phases collapse; drag a bar to move it, drag its right edge (or Shift + arrow keys) to change its duration, snapping to days. Dependants reschedule, and Links, Critical path, Baseline and Workload overlays toggle. Tasks with duration 0 are milestones; `milestone` (default: the last one) anchors the critical path. Thin connectors drop from each phase bar to its tasks' starts (brighter for the task under the pointer). On touch: tap a bar for its details and links, long-press it to move it, or drag the grip on its right edge to resize, so swipes over the chart still scroll. Narrow screens scroll the timeline inside the card, task names pinned.
 
@@ -1546,7 +1556,7 @@ Workflow canvas. Run executes `steps` in order: edges pulse, nodes spin then tic
 - Embeds: Button, Icon, Slot, Spinner, StatusIcon
 - npm: motion, react
 
-### Sankey (`sankey`, ~4.6k tokens)
+### Sankey (`sankey`, ~4.9k tokens)
 
 Two-column Sankey: source nodes on the left, targets on the right, ribbons sized by value with % labels. Hover, tap (or focus) a ribbon or a node to isolate its flows; tap outside to clear. The ribbons wipe in when scrolled into view.
 
@@ -1590,7 +1600,7 @@ SVG statechart: composite states, states, pseudo states (initial, final, history
 - Embeds: Icon, ScrollEdges
 - npm: motion, react
 
-### Trace waterfall (`trace-waterfall`, ~23.2k tokens)
+### Trace waterfall (`trace-waterfall`, ~23.5k tokens)
 
 Nested spans on one streaming timeline (agent runs, API requests, jobs). Plays when scrolled into view: bars grow with a cursor, the stat strip rolls (duration, cost, tokens, calls, errors) and a Live badge settles to Complete. Groups collapse. `failure` lets Simulate failure fail a span part-way and reveal its retry. Spawn connectors run from each parent bar, at the moment a child starts, down to that child's bar; hovering or tapping a span highlights its chain back to the root. Hover or tap a span for its numbers. On phones the timeline scrolls sideways with the span names pinned. `annotations` (deploys, approvals, retries; `at` in ms from the trace start) draw as dashed rules over the time grid with flags in a row of their own (reserved up front, so rows never move); flags that would overlap drop out to a dot on their rule, and `annotationStyle="rug"` shows icons instead, folding crowded ones into "+N". Hover, tap or focus a flag for its tooltip; the flag row is one Tab stop (←/→, Home/End, Escape). `run` draws an agent run instead of `spans` + `total` (a TraceRun: an AgentRun from useAgentRun or an adapter): spans become rows (agents and chains as groups, retrievals and human waits as tools), failed spans show their error, and the run's events (approvals, handoffs, errors, retries) become flags. A finished run plays like a trace; a running one grows live, its clock following the latest moment the run reported, with room ahead on the axis that extends as it fills.
 
@@ -1617,7 +1627,7 @@ Import from: @lyndon/ui/geo.
 - Embeds: Button, Slot, Spinner
 - npm: motion, react
 
-### World map (`world-map`, ~28.2k tokens)
+### World map (`world-map`, ~28.5k tokens)
 
 World choropleth by country with a metric switch. Five-step ramp from the accent, pulsing hub markers, a hover or tap tooltip per country, a legend and a top-countries list whose bars animate; hover or tap a row to spotlight that country (tap outside to clear). The list sits under the map on narrow screens. Countries fade in from west to east when scrolled into view. The country outlines load on first render (`loadWorldMap`); until then a placeholder of the map's exact size shimmers in its place (also what the server renders). Pass `map` to supply them yourself.
 
@@ -1633,7 +1643,7 @@ World choropleth by country with a metric switch. Five-step ramp from the accent
 
 Import from: @lyndon/ui/code, @lyndon/ui/markdown, @lyndon/ui/editor.
 
-### Address autocomplete (`address-autocomplete`, ~13.3k tokens)
+### Address autocomplete (`address-autocomplete`, ~13.8k tokens)
 
 Address search over `addresses` (your data or a geocoder's results): after 2 characters it lists up to five matches (the typed part bolded, city and country beside it). Picking one (click, or ↑ ↓ Enter) fills City, Postcode and Country one after another with a brief highlight. Escape closes the list without closing a dialog around it.
 
@@ -1677,7 +1687,7 @@ Diff computed from `before` and `after` text (LCS line diff). Unified or split v
 - Embeds: ActiveIndicator, Badge, Button, CopyButton, FormFieldContext, Icon, SegmentedControl, Slot, Spinner
 - npm: motion, react
 
-### Emoji input (`emoji-input`, ~6.5k tokens)
+### Emoji input (`emoji-input`, ~7.0k tokens)
 
 Text field with an emoji button: the picker inserts at the caret and remembers recent picks, and every pick also adds a reaction chip with a count below (click a chip to take one back).
 
@@ -1720,7 +1730,7 @@ Markdown for model output (GFM subset: headings, emphasis, strikethrough, code, 
 - Embeds: Button, CopyButton, Icon, InlineCode, ScrollEdges, Slot, Spinner
 - npm: motion, react
 
-### Mentions input (`mentions-input`, ~18.3k tokens)
+### Mentions input (`mentions-input`, ~18.8k tokens)
 
 Message box with `@` mentions and `/` commands. Typing either opens a list at the caret; ↑ ↓ choose, Enter or Tab inserts a non-editable token, Escape closes. With the list closed, Enter sends (Shift+Enter for a new line) and an empty send wiggles. Paste and drop insert plain text only; segments come only from tokens this component inserted (lookalike markup dropped or pasted in is sent as text), with the value rebuilt from `people` / `commands` (both empty by default; the placeholder mentions @ and / only when there is something to pick).
 
@@ -1780,7 +1790,7 @@ Save bar for a form with unsaved changes: slides up inside its (relative, overfl
 
 Import from: @lyndon/ui/lanes, @lyndon/ui/gitgraph.
 
-### Git graph (`git-graph`, ~73.4k tokens)
+### Git graph (`git-graph`, ~75.4k tokens)
 
 Commit history graph (like VS Code's Git Graph or GitKraken): a LaneGraph preset with refs, author, relative date and hash columns, virtualised for 100k commits. Click or Enter opens details (a side panel, a sheet on phones: message, parents, refs, files and diffs from `loadCommit`); Shift+click a second commit compares the range (`loadDiff`). Hover or focus lights the first-parent ancestry. Keys: ↑/↓ rows, ← parent, → child, Home/End, PageUp/Down, `/` search, n/N next/previous match, Enter open, Escape close; Shift+F10, right-click or long-press opens the actions menu. Search, branch filter, first-parent and hide-merged views in the toolbar. New commits on top keep the reader's place.
 
@@ -1791,7 +1801,7 @@ Commit history graph (like VS Code's Git Graph or GitKraken): a LaneGraph preset
 - Embeds: ActiveIndicator, Avatar, Badge, Button, Chip, ContextMenuContent, ContextMenuRoot, ContextMenuTrigger, CopyButton, DialogClose, DialogRoot, DialogTitle, Diff, DropdownMenuContent, DropdownMenuRoot, DropdownMenuTrigger, EmptyState, FloatingPanel, FormFieldContext, Icon, IconButton, InlineCode, Kbd, LaneGraph, LaneGutter, Markdown, MenuCheckboxItem, MenuItem, MenuLabel, MenuSeparator, ModalLayer, OverlayPortal, PopoverContent, PopoverRoot, PopoverTrigger, ScrollEdges, SegmentedControl, SheetContent, SheetHeader, Slot, Spinner
 - npm: motion, react, react-dom
 
-### Lane graph (`lanes`, ~18.2k tokens)
+### Lane graph (`lanes`, ~18.3k tokens)
 
 Any DAG as rows: layoutLanes (headless: order, lanes, colours and each row's edges, O(n · lanes)), LaneGutter (one row's SVG slice, stretches to tall rows) and LaneGraph (a virtualised list of gutter + your renderRow, with selection, hover ancestry, keyboard moves along edges and live inserts). GitGraph is a preset of it.
 
@@ -1806,7 +1816,7 @@ Any DAG as rows: layoutLanes (headless: order, lanes, colours and each row's edg
 
 Import from: @lyndon/ui/media.
 
-### Audio player (`audio-player`, ~20.4k tokens)
+### Audio player (`audio-player`, ~20.6k tokens)
 
 Audio player: cover, title, back / forward 10 s, speed cycle and a waveform you click or drag to seek (hovering previews the jump; on touch, tap or swipe sideways along it, while a vertical swipe still scrolls the page). The waveform is a slider: ← / → seek 2 s, Home / End, Space plays. Pass `track` (createAudioTrack) to share playback with other players, or just `src`.
 
@@ -1817,7 +1827,7 @@ Audio player: cover, title, back / forward 10 s, speed cycle and a waveform you 
 - Embeds: Badge, Button, Icon, IconButton, MagnetMarks, Slot, Spinner, Waveform
 - npm: motion, react
 
-### Avatar cropper (`avatar-cropper`, ~15.7k tokens)
+### Avatar cropper (`avatar-cropper`, ~15.9k tokens)
 
 Avatar cropper: the photo sits under a circular mask; drag (or arrow keys) to reposition, clamped so the circle stays covered; zoom with the slider, the wheel, a two-finger pinch or + / −. "Choose photo" loads a local file and 48 / 32 / 22 px previews update live. `onChange` receives the 256 px circle crop as a PNG data URL once the crop settles (not on every pointer move). Chosen files must be images of at most `maxBytes` (15 MB) and `maxPixels` (40 megapixels, checked from the header before anything is drawn); they load as object URLs, revoked when replaced or on unmount. A rejected file shows why (and calls `onError`).
 
@@ -1883,7 +1893,7 @@ Article / video card: image with a tag and duration badge, date line, title, des
 - Embeds: Avatar, Badge, Button, Icon, IconButton, Slot, Spinner
 - npm: motion, react
 
-### Mini audio player (`mini-audio-player`, ~9.7k tokens)
+### Mini audio player (`mini-audio-player`, ~10.0k tokens)
 
 Slim pill player: play, title, a thin draggable progress bar (← / → when focused; a 32px touch band on phones) and the time. Share `track` to sync with a full player.
 
@@ -1905,7 +1915,7 @@ Image that blurs up: a tiny placeholder shows blurred, then the full image cross
 - Embeds: Button, Icon, Slot, Spinner
 - npm: motion, react
 
-### Video player (`video-player`, ~27.1k tokens)
+### Video player (`video-player`, ~27.4k tokens)
 
 Video player with custom controls: big play button, title that fades while playing, seek bar with buffer, hover time and drag, back 5 s, mute + volume, time, speed cycle and fullscreen. Controls hide when idle. Keys (when the player itself is focused): Space / K play, ← / → seek 2 s, M mute, F fullscreen. Its controls keep their own keys (the seek bar: ← / → and Home / End), so nothing fires twice. Touch: tap shows or hides the controls (tap while paused plays), double-tap the left or right half to seek ∓5 s, and the seek bar and buttons grow to finger size. Clicking the picture toggles playback. While `preparing` (no `src` yet) the poster shows with Play enabled: pressing it shows "Starting…" and playback begins as soon as the source arrives (press again to cancel).
 
@@ -1916,7 +1926,7 @@ Video player with custom controls: big play button, title that fades while playi
 - Embeds: Badge, Button, FormFieldContext, Icon, IconButton, MagnetBubble, MagnetMarks, Slider, Slot, Spinner
 - npm: motion, react
 
-### Voice note (`voice-note`, ~10.4k tokens)
+### Voice note (`voice-note`, ~10.6k tokens)
 
 Chat-style voice note bubble: play, a waveform you tap or drag to seek, elapsed / total time and a speed chip.
 
@@ -1991,7 +2001,7 @@ Live presence on a mock document: collaborators' cursors drift about with name l
 
 Import from: @lyndon/ui/datagrid, @lyndon/ui/scheduler, @lyndon/ui/kanban.
 
-### Data grid (`data-grid`, ~56.8k tokens)
+### Data grid (`data-grid`, ~57.3k tokens)
 
 Data grid, generic over the row type, from a few rows to 100k (rows are virtualised above 100: only the ones in view are in the DOM). Filter with Bricks (chips joined by AND/OR), a Text query (`status is active and mrr > 500`, with highlighting and parse errors) or Scratch-style Blocks with nested groups (drag ⠿) — all three edit one filter. Search every cell ripgrep-style (regex, smart case, whole word, literal; `-i -w -F` flags work too) with highlighted hits. Group by a column with collapsible groups, counts and totals. Click headers to sort, drag their edge to resize, drag a header (or Ctrl+Shift+← →) to reorder; the Columns menu hides, pins (left/right) and reorders. Shift-click checkboxes for ranges, then Export or Delete (with Undo). Double-click a cell to edit; Enter saves, Escape cancels. Keyboard: one Tab stop in the cells, arrows, Home/End, Ctrl+Home/End, PageUp/PageDown, Enter/F2 edits, Space selects. `server` hands sorting, filtering, search and paging to your API (`rowCount`, `page`/`pageSize` or `onLoadMore`, `loading`, `error`); `selection` is controlled with "select all across pages" semantics (see GridSelection).
 
@@ -2049,7 +2059,7 @@ The file's sections as a list: colour dot, name, size and a bar (size relative t
 - Import: `@lyndon/ui/binary`
 - Exports: BinarySectionList
 
-### Binary view (`binary-view`, ~56.3k tokens)
+### Binary view (`binary-view`, ~58.5k tokens)
 
 ByteMap, the sections list, EntropyMap and HexEditor sharing one cursor and selection: a cell on the map, a section, a stretch of the entropy strip or a high-entropy region moves the hex editor there and selects it, and the hex cursor is marked on the map and the strip. High-entropy regions are tinted in the hex grid. Columns on wide screens; tabs (Map / Entropy / Hex) on narrow ones, with "Show in hex" to jump. Entropy is computed once and shared.
 
@@ -2082,7 +2092,7 @@ Entropy strip: Shannon entropy per window (default 512 B) as bars on the shared 
 - Embeds: Badge
 - npm: react, react-dom
 
-### Hex editor (`hex-editor`, ~34.4k tokens)
+### Hex editor (`hex-editor`, ~36.4k tokens)
 
 Hex editor for any size of data: offset · hex · text rows, virtualised (only the rows on screen render, the buffer is never stringified; past ~8 M px of rows the scroll range is scaled so 100 MB still scrolls, with the wheel moving by pixels). Select by dragging, Shift+click or Shift+arrows; the hex and text columns share the cursor and selection. Keys: arrows, Page Up/Down, Home/End (Ctrl: file start/end), Tab between columns, Ctrl+G go to (hex, decimal, +relative or a section address), Ctrl+F search (hex with `??` or text; every match on screen is tinted), Ctrl+A, Ctrl+C (hex; the context menu also copies a C array, Base64 or text). Typing hex digits or text overwrites bytes unless `readOnly`; edits live in a patch map over the data, reported through `onChange`, undone with Ctrl+Z and redone with Ctrl+Shift+Z. Bytes are coloured by class or by section; `highlights` tint ranges. The data inspector decodes the cursor as every integer, float, time and varint type in either byte order. Touch: tap selects a byte, long-press opens the menu, the grid scrolls sideways on phones and the text column hides below 480 px (switch).
 
@@ -2098,7 +2108,7 @@ Hex editor for any size of data: offset · hex · text rows, virtualised (only t
 
 Import from: @lyndon/ui/aistream, @lyndon/ui/ai, @lyndon/ui/aichat.
 
-### Agent composer (`agent-composer`, ~61.5k tokens)
+### Agent composer (`agent-composer`, ~62.9k tokens)
 
 Agent composer that doubles as a control panel. A workspace beside it (`items`, `doc`) adds context (click an item, or select text and "Add to chat"; on phones it folds into a toggle and the bar shows icons only, its panels spanning the composer). Attach with +, drag and drop or paste (file chips with upload progress). Pick a permission mode, toggle connectors, choose the model with per-model speed/effort steps, and open advanced settings.
 
@@ -2151,7 +2161,7 @@ An approval prompt for an action the host wants to run: the tool, a summary, rec
 - Embeds: Badge, Button, Icon, Slot, Spinner
 - npm: motion, react
 
-### Assistant chat (`assistant-chat`, ~40.1k tokens)
+### Assistant chat (`assistant-chat`, ~41.2k tokens)
 
 Rich assistant chat. Starter chips, `/` commands with a keyboard popup, a log that stays pinned to the newest answer (with "Jump to latest" after you scroll up), Stop, and an action row (copy, thumbs up/down, regenerate).
 
@@ -2205,7 +2215,7 @@ Message box: grows with text, Enter sends (never mid IME composition), Shift+Ent
 - Embeds: AttachmentChip, Button, Icon, IconButton, PromptInput, SendButton, Slot, Spinner
 - npm: motion, react
 
-### Citation (`citation`, ~4.8k tokens)
+### Citation (`citation`, ~5.4k tokens)
 
 Inline [n] citation. Hover or focus previews the source; a tap or click pins it open (tap again, Esc or tap outside to close). The card clamps to the screen edges and flips below when there's no room above. (Built from spans, so it is valid inside a <p>; HoverCard's panel is a <div>.)
 
@@ -2216,7 +2226,7 @@ Inline [n] citation. Hover or focus previews the source; a tap or click pins it 
 - Embeds: Icon
 - npm: motion, react
 
-### Confidence field (`confidence-field`, ~17.9k tokens)
+### Confidence field (`confidence-field`, ~19.4k tokens)
 
 Extracted field; only low-confidence values get flagged. A flagged field shows a question ("7 or 1 Nov?"): pick the right value (click, or ↓ to open, arrows and Enter) and it resolves with a check.
 
@@ -2227,7 +2237,7 @@ Extracted field; only low-confidence values get flagged. A flagged field shows a
 - Embeds: CheckMark, CheckboxBox, FloatingPanel, Icon, MenuLabel, OptionList, OverlayPortal, PartButton, Slot, Tooltip, TooltipContent, TooltipRoot, TooltipTrigger
 - npm: motion, react, react-dom
 
-### Conversation (`conversation`, ~8.8k tokens)
+### Conversation (`conversation`, ~8.9k tokens)
 
 The scrolling message log. Stays pinned to the newest message while replies stream, unless the person scrolled up; then a "Jump to latest" button floats at the bottom (it never moves the layout). Give it a height (className, e.g. `h-[420px]`) so streaming never pushes the page. `busy` sets aria-busy; the log itself is not a live region, so screen readers aren't read every token (announce a summary yourself). Past `virtualizeAfter` children (default 60; give each a stable `key`, e.g. the message id) it renders only the messages in view, measuring their real heights, still pinned to the bottom while the last one grows and keeping your place when older ones are prepended.
 
@@ -2249,7 +2259,7 @@ Inline completion: the rest of the best-matching suggestion shows in grey after 
 - Embeds: Kbd
 - npm: motion, react
 
-### Message (`message`, ~28.6k tokens)
+### Message (`message`, ~29.2k tokens)
 
 One message. A user message is a bubble on the right (its text as plain text, attachments as tiles above); an assistant message sits on the start side with a name row (`avatar`, `name`) and its MessageParts, then `actions` once it stopped streaming; a system message is a quiet centred line. Pass the same handlers (and `renderers`) as MessageParts.
 
@@ -2271,7 +2281,7 @@ The row under an answer: "Stopped" when it was cut short, Copy (`text`, read whe
 - Embeds: Button, CopyButton, Icon, IconButton, Slot, Spinner
 - npm: motion, react
 
-### Message parts (`message-parts`, ~28.0k tokens)
+### Message parts (`message-parts`, ~28.5k tokens)
 
 Renders a message's parts in order: text as Markdown (or through `renderers.text`; links through safeUrl, `[n]` is a Citation of the message's n-th source), reasoning as Reasoning, tool calls as ToolCard (approvals go to `onDecideTool`; data through `renderers.value`), files as attachment tiles, errors with a Retry (`onRetry`), and `data` parts through `renderData` (nothing by default). Sources are collected into numbered chips at the end. Model text never reaches the DOM as HTML. `renderers` (or an AiRenderersProvider above) adds code highlighting and JsonViewer: `<MessageParts message={m} renderers={AI_RICH_RENDERERS} />`.
 
@@ -2447,7 +2457,7 @@ One model of an agent run (spans, events, tokens, cost) with a streaming reducer
 - Exports: useAgentRun, applyRunEvent, runFromEvents, runToEvents, runTotals, runLatestMs, runLaneNodes, agentSpanCost, otelTraceIds, otelToRunEvents, fromOtel, aiSdkResultToRunEvents, fromAiSdkResult, aiSdkRunMapper, fromAiSdkUIStream, langGraphRunMapper, fromLangGraphEvents, AGENT_RUN_LIMITS
 - npm: react
 
-### Agent transit map (`agent-transit-map`, ~46.3k tokens)
+### Agent transit map (`agent-transit-map`, ~46.6k tokens)
 
 Live multi-agent "transit map", driven by the same WorkflowEngine as StateMachine. The Indexing loop and the Intake endpoint fire events into a queue (drawn on the map, under Intake); jobs start as slots free up and travel their state graph along the drawn lines, bends included. Agents take one job at a time: the others line up on the incoming line with a counter, and track segments warm up (grey, amber, red) as tokens pile onto them. Orchestrators route with guards, Product forks reviews and joins them, endpoints emit follow-up triggers. Human and Risk stations wait for approval when human-in-the-loop is on: the station gets a countdown ring and an approval card floats beside it, over the map, so nothing on the page moves. Pause, speed and max-jobs controls, fire-event chips, and a live trace table (time, tokens, USD) whose connectors link a follow-up job to the job that triggered it: hover a row, or press its job button, to follow that job on the map. The still drawing renders once; tokens and the train are composited layers moved every frame without re-rendering (30 fps on touch screens); the panels refresh about 8 times a second, and only the parts that changed. Reduced motion places tokens at their stations without travel. On phones the map keeps a readable size and scrolls sideways inside the card, as does the trace table. Pass `machines` whose stations are the map's (the sample is `AGENT_WORKFLOWS` / `AGENT_WORKFLOW_ORDER` in `@lyndon/ui/examples`); without any, the map is drawn with no traffic. `run` draws a real agent run instead (an AgentRun from useAgentRun, fromOtel, fromAiSdkResult or fromLangGraphEvents, finished or live): each span stops at a station (`stations`, default transitRunStation: model calls at Analyst, retrievals at Recall, people at Human, tools by name), each running agent is a numbered token that glides to where its latest step is, stations count their visits and turn red where a step failed, and the trace table lists the steps on the run's own timeline. Hover or tap a row to light its line.
 
@@ -2474,7 +2484,7 @@ Chat on the left, a living document on the right. Asking for a change streams th
 
 Import from: @lyndon/ui/appearance.
 
-### Appearance menu (`appearance-menu`, ~53.6k tokens)
+### Appearance menu (`appearance-menu`, ~54.3k tokens)
 
 The appearance panel behind a gear button for your app header (the gear turns while it is open). Controlled with `open`/`onOpenChange` so a command palette entry can open it too.
 
@@ -2485,7 +2495,7 @@ The appearance panel behind a gear button for your app header (the gear turns wh
 - Embeds: ActiveIndicator, AppearancePanel, Badge, Button, Collapse, CopyButton, FloatingPanel, FormFieldContext, Icon, IconButton, MagnetBubble, MagnetMarks, PartButton, Popover, PopoverClose, PopoverContent, PopoverRoot, PopoverTrigger, ScrollEdges, SegmentedControl, Slider, Slot, Spinner, TabsContent, TabsList, TabsRoot, TabsTrigger, ThemeExportPanel, ThemePreview
 - npm: motion, react
 
-### Appearance panel (`appearance-panel`, ~49.5k tokens)
+### Appearance panel (`appearance-panel`, ~49.8k tokens)
 
 Everything in the appearance panel, without the popover: mode, theme families with split previews, variant chips (Ayu Mirage / Dark, Tokyo Night / Storm), a Customise grid that creates a Custom theme, corner radius, font, an "Export and share" section (ThemeExportPanel: CSS, Tailwind, shadcn, DTCG and Figma tokens, import, share link), Reset and Copy CSS. Use it inside your own panel, or use AppearanceMenu. Font previews load from Google Fonts only when the provider has `fonts` on; otherwise each font shows in the system fallback.
 
@@ -2512,7 +2522,7 @@ Export, import and share for the current theme (the appearance panel's "Export a
 
 Import from: copy-in, not in the package.
 
-### Checkout (`checkout`, ~28.3k tokens)
+### Checkout (`checkout`, ~28.8k tokens)
 
 Checkout: Cart → Details → Payment with slide transitions, quantity steppers and an order summary whose subtotal, promo, VAT and total all roll. Promo codes come from `promoCodes` (wrong code shakes), the email is validated, the card number is grouped as you type with a VISA / Mastercard / Amex badge, expiry is masked MM / YY, and paying shows Processing then a success screen with confetti.
 
@@ -2562,7 +2572,7 @@ Profile card: gradient cover, avatar overlapping it, Message and Follow / Follow
 - Embeds: ActiveIndicator, AnimatedNumber, Avatar, Badge, Button, Icon, IconButton, PartButton, ScrollEdges, Slot, Spinner, Tabs, TabsContent, TabsList, TabsRoot, TabsTrigger
 - npm: motion, react
 
-### Settings page (`settings-page`, ~22.6k tokens)
+### Settings page (`settings-page`, ~23.1k tokens)
 
 Settings page: section nav at the start (pill slides; ↑/↓, Home/End move between sections), the panel slides in from the direction you moved. Every change autosaves: toggles and selects at once, text after a pause or on blur, then a "Saved ✓" flash instead of a Save button. Under ~600px the nav becomes a scrolling row (←/→) with edge fades, keeping the open section in view. `onSave` may return a promise; the flash waits for it.
 
