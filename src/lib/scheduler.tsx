@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useLayoutEffect, useRef, useState, type CSSProperties, type ReactNode, type KeyboardEvent as RKeyboardEvent, type PointerEvent as RPointerEvent } from 'react'
 import { AnimatePresence, motion } from 'motion/react'
-import { Avatar, AvatarStack, Button, useCoarsePointer, IconButton, ScrollEdges, TOUCH, addDays, addMonths, cn, dateFormat, dayKey, maxOf, safeColor, sameDay, spring, startOfDay, startOfWeek, surface, useControllable, usePointerDrag, useScrollEdges, useWidth, plural, fmt, LOCALE, useLive } from './core'
+import { Avatar, AvatarStack, Button, useCoarsePointer, IconButton, ScrollEdges, TOUCH, addDays, addMonths, cn, dateFormat, dayKey, maxOf, safeColor, sameDay, spring, startOfDay, startOfWeek, surface, useControllable, usePointerDrag, useScrollEdges, useWidth, plural, fmt, LOCALE, useLive, useLatestState, uid, haptic, MOVE_SLOP } from './core'
 import { SegmentedControl } from './fields'
 import { useToast } from './feedback'
 
@@ -10,15 +10,10 @@ export type SchedulerEvent = {
 }
 export type SchedulerView = 'day' | '3day' | 'week' | 'month' | 'year'
 
-/** The locale's weekend days (Intl.Locale#getWeekInfo where the engine has it; Saturday and Sunday otherwise). */
-function scWeekend(locale: string): number[] {
-  try {
-    const l = new Intl.Locale(locale) as Intl.Locale & { getWeekInfo?: () => { weekend: number[] }; weekInfo?: { weekend: number[] } }
-    const w = (l.getWeekInfo?.() ?? l.weekInfo)?.weekend
-    if (w?.length) return w.map(d => d % 7)
-  } catch { /* old engine */ }
-  return [6, 0]
-}
+/** Saturday and Sunday (Date#getDay). */
+const SC_WEEKEND = [6, 0]
+/** Weeks start on Monday (en-GB, as fmt.weekdays). */
+const SC_WEEK_START = 1
 
 const SC_VIEWS: SchedulerView[] = ['year', 'month', 'week', '3day', 'day']
 /** fractional hours as a Date on a fixed day, for formatting as a clock time in the locale (9.5 → "09:30" / "9:30 AM") */
@@ -28,6 +23,15 @@ const SC_SNAP = 0.25
 const SC_HOLD = 380
 /** below this width the scheduler switches to phone layout: 3-day default, swipeable week, dots in month */
 const SC_NARROW = 640
+/** a drag of an event or a chip starts after this many px (a smaller wobble is still a tap) */
+const SC_DRAG_START = 4
+/** days shown by each time-grid view */
+const SC_SPAN = { day: 1, '3day': 3, week: 7 } as const satisfies Partial<Record<SchedulerView, number>>
+type ScGridView = keyof typeof SC_SPAN
+/** the time gutter's width (px); narrow is 44px = Tailwind's scroll-ps-11 on the swipeable week */
+const SC_GUTTER = { narrow: 44, wide: 52 } as const
+/** the time grid's height cap, and the placeholder's height before mount (full class names, for Tailwind) */
+const SC_GRID_H = { max: 'max-h-[min(460px,75svh)]', fixed: 'h-[min(460px,75svh)]' } as const
 
 type ScDrag =
   | { mode: 'create'; ev: SchedulerEvent; anchor: number; top: number }
@@ -42,8 +46,10 @@ type ScDrag =
  * month cells show dots, and tapping an event shows its details. On touch, press and hold to create or move
  * (a swipe keeps scrolling); a tapped (selected) event drags straight away and shows a resize grip.
  */
-export function Scheduler({ events, defaultEvents = [], onChange, defaultView = 'week', today: todayProp, startHour = 8, endHour = 19, hourHeight = 44, className }:
+export function Scheduler({ events, defaultEvents = [], onChange, defaultView = 'week', today: todayProp, startHour = 8, endHour = 19, hourHeight = 44, newEvent, className }:
   { events?: SchedulerEvent[]; defaultEvents?: SchedulerEvent[]; onChange?: (e: SchedulerEvent[]) => void; defaultView?: SchedulerView
+    /** fills in an event created by dragging on empty time (e.g. the current user as attendee, a colour); the drag still sets its date and times */
+    newEvent?: (draft: SchedulerEvent) => Partial<Omit<SchedulerEvent, 'date' | 'start' | 'duration'>>
     /** the day treated as today (opening date, highlight); by default the client's date, read after mount so server and client render the same */ today?: Date
     startHour?: number; endHour?: number; hourHeight?: number; className?: string }) {
   const [list, setList] = useControllable(events, defaultEvents, onChange)
@@ -59,21 +65,19 @@ export function Scheduler({ events, defaultEvents = [], onChange, defaultView = 
   const ready = !!(curState ?? today)
   useEffect(() => { if (!curState && now) setCur(startOfDay(now)) }, [now]) // eslint-disable-line react-hooks/exhaustive-deps
   const [trans, setTrans] = useState<{ zoom?: number; dir?: number }>({})
-  const [drag, setDragState] = useState<ScDrag | null>(null)
-  const dragRef = useRef<ScDrag | null>(null)
-  const setDrag = (d: ScDrag | null) => { dragRef.current = d; setDragState(d) }
-  const [naming, setNamingState] = useState<string | null>(null)
-  const namingRef = useRef<string | null>(null)
-  const setNaming = (id: string | null) => { namingRef.current = id; setNamingState(id) }
+  const [drag, setDrag, getDrag] = useLatestState<ScDrag | null>(null)
+  const [naming, setNaming, getNaming] = useLatestState<string | null>(null)
   const [picked, setPicked] = useState<string | null>(null)
   const [pending, setPending] = useState<{ x: number; y: number } | null>(null)
-  const toast = useToast(), locale = LOCALE, ws = 1
-  const weekend = scWeekend(locale), isWeekend = (d: Date) => weekend.includes(d.getDay())
+  const toast = useToast(), locale = LOCALE
+  const isWeekend = (d: Date) => SC_WEEKEND.includes(d.getDay())
   // events are wall-clock times on local calendar days: format them in the locale but never shift them into the provider's time zone
   const scDf = (d: Date, o: Intl.DateTimeFormatOptions) => dateFormat(locale, o.hour ? { ...o, hourCycle: 'h23' } : o).format(d)
   const scHM = (h: number) => scDf(scAt(h), { hour: 'numeric', minute: '2-digit' })
   const dayNum = (d: Date) => scDf(d, { day: 'numeric' })
-  const sow = (d: Date) => startOfWeek(d, ws)
+  const sow = (d: Date) => startOfWeek(d, SC_WEEK_START)
+  /** the days a time-grid view shows */
+  const gridDays = (v: ScGridView, c: Date) => v === 'week' ? Array.from({ length: 7 }, (_, i) => addDays(sow(c), i)) : Array.from({ length: SC_SPAN[v] }, (_, i) => addDays(startOfDay(c), i))
   const [root, rootW] = useWidth<HTMLDivElement>()
   const narrow = rootW > 0 && rootW < SC_NARROW
   const chosen = useRef(false)
@@ -85,7 +89,7 @@ export function Scheduler({ events, defaultEvents = [], onChange, defaultView = 
   const shift = (dir: number) => {
     setTrans({ dir }); setPicked(null)
     const c = cur
-    setCur(view === 'day' ? addDays(c, dir) : view === '3day' ? addDays(c, 3 * dir) : view === 'week' ? addDays(c, 7 * dir) : view === 'month' ? addMonths(c, dir) : new Date(c.getFullYear() + dir, 0, 1))
+    setCur(view === 'month' ? addMonths(c, dir) : view === 'year' ? new Date(c.getFullYear() + dir, 0, 1) : addDays(c, SC_SPAN[view] * dir))
   }
   const on = (d: Date) => ref.current.filter(e => sameDay(e.date, d)).sort((a, b) => a.start - b.start)
   const scFmt = (d: Date, o: Intl.DateTimeFormatOptions) => ready ? scDf(d, o) : '\u00a0'
@@ -111,14 +115,14 @@ export function Scheduler({ events, defaultEvents = [], onChange, defaultView = 
     onMove: p => {
       const g = gs.current; if (!g) return
       g.lx = p.x; g.ly = p.y
-      if (!g.armed) { if (Math.hypot(p.dx, p.dy) > 8) ptrDrag.cancel(); return }
+      if (!g.armed) { if (Math.hypot(p.dx, p.dy) > MOVE_SLOP) ptrDrag.cancel(); return }
       dragMove(p.x, p.y)
     },
     onEnd: (p, cancelled) => {
       const g = gs.current; gs.current = null; if (!g) return
       clearTimeout(g.timer); setPending(null)
       if (g.armed) { if (cancelled) setDrag(null); else dragUp() }
-      else if (!cancelled && Math.hypot(p.dx, p.dy) <= 8) g.onTap?.()
+      else if (!cancelled && Math.hypot(p.dx, p.dy) <= MOVE_SLOP) g.onTap?.()
     },
   })
   const gesture = (e: RPointerEvent, begin: () => ScDrag | null, hold: boolean, onTap?: () => void) => {
@@ -128,16 +132,16 @@ export function Scheduler({ events, defaultEvents = [], onChange, defaultView = 
       ptrDrag.start(e, root.current)
       const g = { begin, onTap, armed: false, timer: 0, lx: sx, ly: sy }
       gs.current = g
-      const arm = () => { const d = begin(); if (!d) return ptrDrag.cancel(); g.armed = true; setPending(null); setDrag(d); if (hold) navigator.vibrate?.(10); dragMove(g.lx, g.ly) }
+      const arm = () => { const d = begin(); if (!d) return ptrDrag.cancel(); g.armed = true; setPending(null); setDrag(d); if (hold) haptic(10); dragMove(g.lx, g.ly) }
       if (hold) { showPending(); g.timer = window.setTimeout(arm, SC_HOLD) } else arm()
       return
     }
     const el = e.target as HTMLElement
     let armed = !hold, timer = 0, lx = sx, ly = sy
-    const arm = () => { const d = begin(); if (!d) return end(); armed = true; timer = 0; setPending(null); setDrag(d); if (hold) navigator.vibrate?.(10); dragMove(lx, ly) }
+    const arm = () => { const d = begin(); if (!d) return end(); armed = true; timer = 0; setPending(null); setDrag(d); if (hold) haptic(10); dragMove(lx, ly) }
     const move = (x: number, y: number) => {
       lx = x; ly = y
-      if (!armed) { if (Math.hypot(x - sx, y - sy) > 8) end(); return }
+      if (!armed) { if (Math.hypot(x - sx, y - sy) > MOVE_SLOP) end(); return }
       dragMove(x, y)
     }
     const onTouch = (ev: TouchEvent) => { const t = ev.touches[0]; if (!t) return; if (armed && ev.cancelable) ev.preventDefault(); move(t.clientX, t.clientY) }
@@ -147,7 +151,7 @@ export function Scheduler({ events, defaultEvents = [], onChange, defaultView = 
       el.removeEventListener('touchmove', onTouch); el.removeEventListener('touchend', up); el.removeEventListener('touchcancel', up)
       removeEventListener('contextmenu', noMenu)
     }
-    const up = () => { const was = armed, still = Math.hypot(lx - sx, ly - sy) <= 8; end(); if (was) dragUp(); else if (still) onTap?.() }
+    const up = () => { const was = armed, still = Math.hypot(lx - sx, ly - sy) <= MOVE_SLOP; end(); if (was) dragUp(); else if (still) onTap?.() }
     el.addEventListener('touchmove', onTouch, { passive: false }); el.addEventListener('touchend', up); el.addEventListener('touchcancel', up)
     addEventListener('contextmenu', noMenu)
     if (hold) { showPending(); timer = window.setTimeout(arm, SC_HOLD) } else arm()
@@ -162,7 +166,8 @@ export function Scheduler({ events, defaultEvents = [], onChange, defaultView = 
     gesture(e, () => {
       const r = col.getBoundingClientRect()
       const at = Math.min(H1 - SC_SNAP, Math.max(H0, snapAt(y, r.top, Math.floor)))
-      return { mode: 'create', ev: { id: `ev${Date.now().toString(36)}`, date: day, start: at, duration: SC_SNAP * 2, title: 'New event', color: 'var(--accent)', attendees: ['Alex Lee'] }, anchor: at, top: r.top }
+      const draft: SchedulerEvent = { id: uid('ev'), date: day, start: at, duration: SC_SNAP * 2, title: 'New event', color: 'var(--accent)', attendees: [] }
+      return { mode: 'create', ev: { ...draft, ...newEvent?.(draft), date: day, start: at, duration: draft.duration }, anchor: at, top: r.top }
     }, touch)
   }
   const downEvent = (e: RPointerEvent, ev: SchedulerEvent) => {
@@ -183,25 +188,25 @@ export function Scheduler({ events, defaultEvents = [], onChange, defaultView = 
     gesture(e, () => ({ mode: 'chip', ev, sx, sy, ox: sx - r.left, oy: sy - r.top, w: r.width, started: touch, x: r.left, y: r.top, cell: null }), touch, () => go('day', new Date(ev.date)))
   }
   const dragMove = (x: number, y: number) => {
-    const d = dragRef.current; if (!d) return
+    const d = getDrag(); if (!d) return
     if (d.mode === 'create') {
       const t = Math.min(H1, Math.max(H0, snapAt(y, d.top, Math.round)))
       const a = Math.min(d.anchor, t), b = Math.max(d.anchor + SC_SNAP, t)
       setDrag({ ...d, ev: { ...d.ev, start: a, duration: Math.max(SC_SNAP, b - a) } })
     } else if (d.mode === 'resize') {
       const dy = (y - d.sy) / hr
-      setDrag({ ...d, moved: d.moved || Math.abs(y - d.sy) > 4, ev: { ...d.ev, duration: Math.max(SC_SNAP, Math.min(H1 - d.ev.start, Math.round((d.du0 + dy) / SC_SNAP) * SC_SNAP)) } })
+      setDrag({ ...d, moved: d.moved || Math.abs(y - d.sy) > SC_DRAG_START, ev: { ...d.ev, duration: Math.max(SC_SNAP, Math.min(H1 - d.ev.start, Math.round((d.du0 + dy) / SC_SNAP) * SC_SNAP)) } })
     } else if (d.mode === 'move') {
       const dy = (y - d.sy) / hr, hit = d.cols.find(([, l, r]) => x >= l && x < r)
-      setDrag({ ...d, moved: d.moved || Math.hypot(x - d.sx, y - d.sy) > 4, ev: { ...d.ev, start: Math.max(H0, Math.min(H1 - d.ev.duration, Math.round((d.s0 + dy) / SC_SNAP) * SC_SNAP)), date: hit ? new Date(hit[0]) : d.ev.date } })
+      setDrag({ ...d, moved: d.moved || Math.hypot(x - d.sx, y - d.sy) > SC_DRAG_START, ev: { ...d.ev, start: Math.max(H0, Math.min(H1 - d.ev.duration, Math.round((d.s0 + dy) / SC_SNAP) * SC_SNAP)), date: hit ? new Date(hit[0]) : d.ev.date } })
     } else if (d.mode === 'chip') {
-      if (!d.started && Math.hypot(x - d.sx, y - d.sy) < 5) return
+      if (!d.started && Math.hypot(x - d.sx, y - d.sy) <= SC_DRAG_START) return
       const hitEl = document.elementFromPoint(x, y)?.closest<HTMLElement>('[data-sc-cell]'), cell = hitEl && root.current?.contains(hitEl) ? hitEl : null
       setDrag({ ...d, started: true, x: x - d.ox, y: y - d.oy, cell: cell ? Number(cell.dataset.scCell) : null })
     }
   }
   const dragUp = () => {
-    const d = dragRef.current; setDrag(null); if (!d) return
+    const d = getDrag(); setDrag(null); if (!d) return
     if (d.mode === 'create') { commit([...ref.current, d.ev]); setNaming(d.ev.id); return }
     if (d.mode === 'chip') {
       if (!d.started) { go('day', new Date(d.ev.date)); return }
@@ -245,12 +250,12 @@ export function Scheduler({ events, defaultEvents = [], onChange, defaultView = 
     commit(ref.current.map(x => x.id === ev.id ? next : x))
     refocus.current = ev.id
     // moved past the visible days: page along with it
-    if (dDay && !days.some(d => sameDay(d, next.date))) { setTrans({ dir: dDay }); setCur(view === 'day' ? startOfDay(next.date) : view === '3day' ? addDays(cur, 3 * dDay) : addDays(cur, 7 * dDay)) }
+    if (dDay && !days.some(d => sameDay(d, next.date))) { setTrans({ dir: dDay }); setCur(view === 'day' ? startOfDay(next.date) : addDays(cur, SC_SPAN[view as ScGridView] * dDay)) }
     setSaid(`${next.title}: ${scFmt(next.date, { weekday: 'long', day: 'numeric', month: 'long' })}, ${scHM(next.start)} to ${scHM(next.start + next.duration)}`)
   }
 
   const finishName = (ev: SchedulerEvent, value: string | null) => {
-    if (namingRef.current !== ev.id) return
+    if (getNaming() !== ev.id) return
     setNaming(null)
     if (value === null) { commit(ref.current.filter(x => x.id !== ev.id)); return }
     const name = value.trim() || 'New event'
@@ -268,23 +273,20 @@ export function Scheduler({ events, defaultEvents = [], onChange, defaultView = 
     placed.current = el; el.scrollTop = hr * 0.5
     // today's column just past the sticky 44px time gutter at the start edge
     const td = el.querySelector<HTMLElement>('[data-sc-today]')
-    if (td) { const er = el.getBoundingClientRect(), tr = td.getBoundingClientRect(); el.scrollLeft += tr.left - (er.left + 44) }
+    if (td) { const er = el.getBoundingClientRect(), tr = td.getBoundingClientRect(); el.scrollLeft += tr.left - (er.left + SC_GUTTER.narrow) }
   }, [hr]) // eslint-disable-line react-hooks/exhaustive-deps
   const nowH = now ? now.getHours() + now.getMinutes() / 60 : -1
   const [edgeRef, edges] = useScrollEdges<HTMLDivElement>()
 
   const gridView = () => {
-    const days = view === 'day' ? [new Date(cur.getFullYear(), cur.getMonth(), cur.getDate())]
-      : view === '3day' ? [0, 1, 2].map(i => addDays(cur, i)) : Array.from({ length: 7 }, (_, i) => addDays(sow(cur), i))
+    const days = gridDays(view as ScGridView, cur)
     // on a phone the week keeps readable columns and scrolls sideways (snapping per day) under a sticky time gutter
-    const cols = { gridTemplateColumns: `${narrow ? 44 : 52}px repeat(${days.length},minmax(${swipeWeek ? 92 : 0}px,1fr))` }
+    const cols = { gridTemplateColumns: `${narrow ? SC_GUTTER.narrow : SC_GUTTER.wide}px repeat(${days.length},minmax(${swipeWeek ? 92 : 0}px,1fr))` }
     const live = drag && drag.mode !== 'chip' ? drag.ev : null
     const gut = 'sticky start-0 z-[6] bg-[var(--card)]'
     return (
       <div className="relative">
-        <div ref={placeGrid}
-
- className={cn('relative max-h-[min(460px,75svh)] overflow-auto overscroll-x-contain', swipeWeek && 'snap-x snap-mandatory scroll-ps-11')}>
+        <div ref={placeGrid} className={cn('relative overflow-auto overscroll-x-contain', SC_GRID_H.max, swipeWeek && 'snap-x snap-mandatory scroll-ps-11')}>
           <div className="grid min-w-full" style={cols}>
             <div className={cn(gut, 'top-0 z-[8] border-b border-[var(--line)]')} />
             {days.map(d => {
@@ -361,7 +363,7 @@ export function Scheduler({ events, defaultEvents = [], onChange, defaultView = 
             const d = addDays(start, i), evs = on(d), out = d.getMonth() !== m
             // phone: the whole cell is one button (date + a dot per event); drag chips in the wider layout
             if (narrow) return (
-              <button key={+d} onClick={() => go('day', d)} aria-label={`${scFmt(d, { weekday: 'long', day: 'numeric', month: 'long' })}, ${evs.length === 0 ? 'no events' : evs.length === 1 ? `${evs.length} event` : `${evs.length} events`}`}
+              <button key={+d} onClick={() => go('day', d)} aria-label={`${scFmt(d, { weekday: 'long', day: 'numeric', month: 'long' })}, ${plural(evs.length, 'event', undefined, { zero: 'no events' })}`}
                 className={cn('flex min-w-0 cursor-pointer flex-col items-center gap-1 border-0 border-e border-b border-[var(--line)] bg-transparent p-1 pt-1.5 [&:nth-child(7n)]:border-e-0',
                   (isWeekend(d) || out) && 'bg-[color-mix(in_srgb,var(--muted)_45%,transparent)]')}>
                 {/* days of the neighbouring months: a muted date (still readable), not a faded cell */}
@@ -407,14 +409,14 @@ export function Scheduler({ events, defaultEvents = [], onChange, defaultView = 
     return (
       <div className={cn('grid gap-5 p-4 sm:grid-cols-3 lg:grid-cols-4', narrow ? 'grid-cols-2 gap-3 p-3' : 'grid-cols-2')}>
         {Array.from({ length: 12 }, (_, m) => {
-          const first = new Date(y, m, 1), n = new Date(y, m + 1, 0).getDate(), lead = (first.getDay() - ws + 7) % 7
+          const first = new Date(y, m, 1), n = new Date(y, m + 1, 0).getDate(), lead = (first.getDay() - SC_WEEK_START + 7) % 7
           const days = Array.from({ length: n }, (_, i) => {
             const d = new Date(y, m, i + 1), c = on(d).length, td = sameDay(d, today)
             const cls = cn('grid aspect-square place-items-center rounded-[var(--r-sm)] p-0 text-[11px] font-medium', td ? 'bg-[var(--bad)] text-[var(--card)]' : 'text-[var(--fg2)]')
             const bg = td ? undefined : { background: `color-mix(in srgb,var(--accent) ${Math.round(Math.min(1, c / 4) * 55)}%,transparent)` }
             // phone: days are too small to tap, so the whole month is the button (opens Month view)
             return narrow ? <span key={i} className={cls} style={bg}>{dayNum(d)}</span>
-              : <button key={i} onClick={() => go('day', d)} title={`${scDf(d, { weekday: 'short', day: 'numeric', month: 'short', year: 'numeric' })}, ${c === 0 ? 'no events' : c === 1 ? `${c} event` : `${c} events`}`} className={cn(cls, 'cursor-pointer border-0 hover:shadow-[inset_0_0_0_1.5px_var(--accent)]')} style={bg}>{dayNum(d)}</button>
+              : <button key={i} onClick={() => go('day', d)} title={`${scDf(d, { weekday: 'short', day: 'numeric', month: 'short', year: 'numeric' })}, ${plural(c, 'event', undefined, { zero: 'no events' })}`} className={cn(cls, 'cursor-pointer border-0 hover:shadow-[inset_0_0_0_1.5px_var(--accent)]')} style={bg}>{dayNum(d)}</button>
           })
           const grid = (
             <div className="grid grid-cols-7 gap-0.5">
@@ -458,7 +460,7 @@ export function Scheduler({ events, defaultEvents = [], onChange, defaultView = 
       <div className="flex flex-wrap items-center gap-2">
         <SegmentedControl size="sm" value={view} onChange={v => { chosen.current = true; go(v as SchedulerView) }} options={views}
           className={cn('[@media(pointer:coarse)]:[&>button]:h-9', narrow && 'w-full [&>button]:px-1')} />
-        <Button size="sm" className={tap} onClick={() => { setTrans({}); setCur(startOfDay(todayProp ?? new Date())); setPicked(null) }}>{'Today'}</Button>
+        <Button size="sm" className={tap} onClick={() => { setTrans({}); setCur(startOfDay(today ?? new Date())); setPicked(null) }}>{'Today'}</Button>
         <span className={cn('flex-1', narrow && 'hidden')} />
         <span className={cn('flex items-center gap-2', narrow && 'flex-1')}>
           <IconButton icon="chevronLeft" label={'Previous'} variant="default" onClick={() => shift(-1)} className={TOUCH.tap36} />
@@ -486,7 +488,7 @@ export function Scheduler({ events, defaultEvents = [], onChange, defaultView = 
         <AnimatePresence mode="wait" initial={false}>
           <motion.div key={`${view}:${period}`} initial={{ opacity: 0, scale: z ? (z > 0 ? 1.02 : 0.98) : 1, x: (dx * 16) }} animate={{ opacity: 1, scale: 1, x: 0 }}
             exit={{ opacity: 0, scale: z ? (z > 0 ? 0.98 : 1.02) : 1, x: (-dx * 16), transition: { duration: 0.12 } }} transition={spring(0.2, 0.32)}>
-            {!ready ? <div className="h-[min(460px,75svh)]" /> : view === 'month' ? monthView() : view === 'year' ? yearView() : gridView()}
+            {!ready ? <div className={SC_GRID_H.fixed} /> : view === 'month' ? monthView() : view === 'year' ? yearView() : gridView()}
           </motion.div>
         </AnimatePresence>
       </div>
@@ -576,7 +578,7 @@ export function OrgChart({ root, defaultCollapsed = [], height = 420, className 
         </span>
       </div>
       <div className="relative">
-      <div ref={setBox} role="tree" aria-label={'Organisation chart'} onPointerDown={startPan}
+      <div ref={setBox} role="group" aria-roledescription={'organisation chart'} aria-label={'Organisation chart'} onPointerDown={startPan}
         className={cn(surface.card, 'relative overflow-auto overscroll-x-contain !bg-[var(--bg)] bg-[radial-gradient(circle,var(--line2)_1px,transparent_1.2px)] bg-[length:18px_18px] [@media(pointer:fine)]:cursor-grab', panning && '[@media(pointer:fine)]:cursor-grabbing select-none')}
         style={{ height }}>
         {width > 0 && (
@@ -593,14 +595,14 @@ export function OrgChart({ root, defaultCollapsed = [], height = 420, className 
             {all.map(({ n }) => {
               const p = pos.get(n.id)!, kids = n.children?.length ?? 0, isClosed = closed.has(n.id)
               return (
-                <motion.div key={n.id} role="treeitem" aria-expanded={kids ? !isClosed : undefined} aria-hidden={!p.shown || undefined}
+                <motion.div key={n.id} role="group" aria-label={`${n.name}, ${n.role}`} aria-hidden={!p.shown || undefined}
                   initial={false} animate={{ x: p.x + off, y: p.y, opacity: p.shown ? 1 : 0 }} transition={spring(0.15, 0.45)}
                   className={cn(surface.card, 'absolute top-0 start-0 flex items-center gap-2.5 px-3 py-2.5 shadow-[0_1px_2px_rgba(0,0,0,.05)]', p.shown ? 'z-[1]' : 'pointer-events-none z-0')}
                   style={{ width: OC_W, height: OC_H }}>
                   <Avatar name={n.name} size={32} className="!border-0" />
                   <div className="min-w-0"><b className="block truncate text-[13px] leading-tight font-semibold">{n.name}</b><span className="block truncate text-[11px] text-[var(--fg3)]">{n.role}</span></div>
                   {kids > 0 && (
-                    <button onClick={() => toggle(n.id)} tabIndex={p.shown ? 0 : -1} aria-label={isClosed ? `+${count(n)} hidden, expand ${n.name}’s team` : `${plural(kids, 'report')}, collapse ${n.name}’s team`}
+                    <button onClick={() => toggle(n.id)} tabIndex={p.shown ? 0 : -1} aria-expanded={!isClosed} aria-label={isClosed ? `+${count(n)} hidden, expand ${n.name}’s team` : `${plural(kids, 'report')}, collapse ${n.name}’s team`}
                       className={cn('absolute -bottom-[11px] left-1/2 h-[22px] min-w-[22px] -translate-x-1/2 cursor-pointer rounded-full border px-1.5 font-[family-name:var(--mono)] text-[11px] font-semibold [@media(pointer:coarse)]:-bottom-4 [@media(pointer:coarse)]:h-8 [@media(pointer:coarse)]:min-w-8 [@media(pointer:coarse)]:px-2 [@media(pointer:coarse)]:text-xs',
                         isClosed ? 'border-[var(--primary)] bg-[var(--primary)] text-[var(--on-primary)]' : 'border-[var(--line)] bg-[var(--card)] text-[var(--fg2)] hover:border-[var(--fg3)] hover:text-[var(--fg)]')}>
                       {isClosed ? `+${fmt.number(count(n))}` : fmt.number(kids)}

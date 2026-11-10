@@ -218,14 +218,16 @@ describe('formatting and parsing', () => {
     expect(formatBytesAs(new Uint8Array(17), 'hex').split('\n')).toHaveLength(2)
     expect(hexOffset(0x360, 8)).toBe('00000360')
   })
-  it('parses go-to offsets: hex, decimal, relative and section addresses', () => {
+  it('parses go-to offsets: hex (bare digits too), #decimal, relative and section addresses', () => {
     const o = { size: 0x1000, cursor: 0x100, sections: [{ name: '.text', offset: 0x200, size: 0x400, vaddr: 0x401000 }] }
     expect(parseByteOffset('0x10', o)).toBe(16)
-    expect(parseByteOffset('10', o)).toBe(10)
+    expect(parseByteOffset('10', o)).toBe(16)
+    expect(parseByteOffset('00000360', o)).toBe(0x360)
+    expect(parseByteOffset('#10', o)).toBe(10)
     expect(parseByteOffset('ff', o)).toBe(255)
     expect(parseByteOffset('20h', o)).toBe(32)
     expect(parseByteOffset('+0x10', o)).toBe(0x110)
-    expect(parseByteOffset('-16', o)).toBe(0xf0)
+    expect(parseByteOffset('-10', o)).toBe(0xf0)
     expect(parseByteOffset('0x401010', o)).toBe(0x210)
     expect(parseByteOffset('0x5000', o)).toBeNull()
     expect(parseByteOffset('nope', o)).toBeNull()
