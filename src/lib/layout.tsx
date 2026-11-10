@@ -1,7 +1,7 @@
 import { Fragment, useEffect, useId, useLayoutEffect, useMemo, useRef, useState, type CSSProperties, type ReactNode, type KeyboardEvent as RKeyboardEvent, type PointerEvent as RPointerEvent } from 'react'
 import { AnimatePresence, motion } from 'motion/react'
-import { Icon, type IconName, TOUCH, clamp, cn, prefersReducedMotion, safeColor, spring, surface, useCoarsePointer, useRefocus, useLongPress, usePointerDrag, useWidth, fmt } from './core'
-import { Collapse } from './feedback'
+import { Icon, type IconName, TOUCH, clamp, cn, prefersReducedMotion, safeColor, spring, surface, useCoarsePointer, useRefocus, useLongPress, usePointerDrag, useWidth, fmt, moveById } from './core'
+import { Collapse, EmptyState } from './feedback'
 import { useVirtual } from './virtual'
 import { type Magnet, MagnetBubble, magnetKeyDirection, useMagnet } from './magnet'
 
@@ -207,11 +207,12 @@ export function SortableList<T extends { id: string; color?: string }>({ items, 
   const root = useRef<HTMLDivElement>(null)
   const refocus = useRefocus(root)
   const hint = useId()
-  const [lifted, setLifted] = useState<string | null>(null)
+  const [lifted, setLifted] = useState<string | null>(null), liftT = useRef<ReturnType<typeof setTimeout>>(undefined)
+  useEffect(() => () => clearTimeout(liftT.current), [])
   const [said, setSaid] = useState('')
   const moveTo = (id: string, index: number) => {
-    const cur = ref.current, it = cur.find(x => x.id === id)!, rest = cur.filter(x => x.id !== id)
-    const next = [...rest.slice(0, index), it, ...rest.slice(index)]; ref.current = next; onChange(next)
+    const next = moveById(ref.current, id, index)
+    if (next !== ref.current) { ref.current = next; onChange(next) }
   }
   const sort = useDragSort({ onMove: (id, _, i) => moveTo(id, i) })
   return (
@@ -225,7 +226,8 @@ export function SortableList<T extends { id: string; color?: string }>({ items, 
             onKeyDown={e => {
               if (!e.altKey || (e.key !== 'ArrowUp' && e.key !== 'ArrowDown')) return
               e.preventDefault(); const j = i + (e.key === 'ArrowUp' ? -1 : 1); if (j < 0 || j >= items.length) return
-              moveTo(it.id, j); refocus(`[data-sl-item="${CSS.escape(it.id)}"]`); setLifted(it.id); setTimeout(() => setLifted(l => l === it.id ? null : l), 350)
+              moveTo(it.id, j); refocus(`[data-sl-item="${CSS.escape(it.id)}"]`)
+              setLifted(it.id); clearTimeout(liftT.current); liftT.current = setTimeout(() => setLifted(null), 350)
               setSaid(`Moved to position ${j + 1} of ${items.length}`)
             }}
             className={cn('flex items-center gap-2.5 rounded-[var(--r-md)] border px-2.5 py-2 text-[13px] outline-none select-none focus-visible:shadow-[0_0_0_2px_var(--accent)]',
@@ -258,14 +260,20 @@ type TreeFlat = {
   /** ancestors, root first (path[d] owns the thread line at level d) */ path: TreeNode[]
   /** per depth 0..depth: whether the node at that depth on this row's path has siblings after it (its parent's thread continues below) */ rails: boolean[]
 }
+/**
+ * Row heights (px) with the classes that draw them: the virtualiser and PageUp/PageDown use the numbers, CSS the
+ * classes (touch screens get the taller rows before any script runs), so each pair must change together.
+ */
+const TREE_ROW = { normal: [28, 'h-7 text-[13px]'], compact: [24, 'h-6 text-xs'], coarse: [36, '[@media(pointer:coarse)]:h-9 [@media(pointer:coarse)]:text-sm'] } as const
 /** Indent geometry shared by rows and thread lines: the row's start padding and the per-level step (px). */
 const treeIndent = (compact?: boolean) => compact ? { base: 4, step: 12 } : { base: 8, step: 16 }
 
 /**
  * File tree with roving focus: ↑ / ↓ move, → opens or steps into a folder, ← closes or jumps to the parent,
- * Home / End jump, Enter opens (folders toggle, files call `onOpen`). F2 renames any row (file or folder) in place;
- * double-click renames a file. Folders show their item count, files their size; icons are coloured by extension.
- * `compact` gives denser rows without the counts (for side panels such as an IDE explorer). Trees of more than 300
+ * Home / End jump, Enter opens (folders toggle, files call `onOpen`). With `onRename`, F2 renames any row (file or
+ * folder) in place and double-click renames a file; the new name shows until `nodes` changes that label. Folders show
+ * their item count, files their size; icons are coloured by extension. `compact` gives denser rows without the counts
+ * (for side panels such as an IDE explorer). With no nodes it shows `empty` (default "No items"). Trees of more than 300
  * nodes (or `virtualize`) render only the visible rows of the flattened open nodes inside a `height` px scroller,
  * with aria-level / aria-setsize / aria-posinset on each row, so 10k-node trees stay instant.
  * `lines` draws thread lines (Reddit / VS Code style): a vertical guide per level from each open folder down through
@@ -275,9 +283,10 @@ const treeIndent = (compact?: boolean) => compact ? { base: 4, step: 12 } : { ba
  * `'hover'` shows them only while the pointer or focus is in the tree (always on touch screens). Turning them on or
  * off never moves a row: the indent is the same either way.
  */
-export function TreeView({ nodes, defaultExpanded = [], onSelect, onOpen, onRename, compact, lines = false, virtualize, height = 360, className, 'aria-label': ariaLabelProp }:
+export function TreeView({ nodes, defaultExpanded = [], onSelect, onOpen, onRename, compact, lines = false, virtualize, height = 360, empty, className, 'aria-label': ariaLabelProp }:
   { nodes: TreeNode[]; defaultExpanded?: string[]; onSelect?: (n: TreeNode) => void; onOpen?: (n: TreeNode) => void
     onRename?: (n: TreeNode, name: string, previous: string) => void; compact?: boolean
+    /** shown instead of the tree when `nodes` is empty (default "No items") */ empty?: ReactNode
     /** thread lines from each folder through its children (default false); 'hover' shows them while the tree is hovered or focused */ lines?: boolean | 'hover'
     /** render only the rows in view: true, false, or above this many nodes (default 300) */ virtualize?: boolean | number
     /** px, virtual mode: the tree scrolls inside this height */ height?: number; className?: string; 'aria-label'?: string }) {
@@ -285,12 +294,13 @@ export function TreeView({ nodes, defaultExpanded = [], onSelect, onOpen, onRena
   const ariaLabel = ariaLabelProp ?? 'Files'
   const uid = useId()
   const [hot, setHot] = useState<string | null>(null) // the folder whose thread line is under the pointer
-  const [names, setNames] = useState<Record<string, string>>({})
+  // renamed labels, each kept only while `nodes` still has the label it replaced
+  const [names, setNames] = useState<Record<string, { from: string; to: string }>>({})
   const [sel, setSel] = useState<string>(nodes[0]?.id ?? '')
   const [editing, setEditing] = useState<string | null>(null)
   const cancelRename = useRef(false)
   const rows = useRef(new Map<string, HTMLDivElement>())
-  const name = (n: TreeNode) => names[n.id] ?? n.label
+  const name = (n: TreeNode) => { const o = names[n.id]; return o && o.from === n.label ? o.to : n.label }
   const flat = useMemo(() => {
     const out: TreeFlat[] = []
     const walk = (list: TreeNode[], parent: TreeNode | null, depth: number, path: TreeNode[], rails: boolean[]) => list.forEach((n, i) => {
@@ -306,9 +316,12 @@ export function TreeView({ nodes, defaultExpanded = [], onSelect, onOpen, onRena
   const virtualOn = virtualize === true || (virtualize !== false && total > (typeof virtualize === 'number' ? virtualize : TREE_VIRTUAL_AT))
   const coarse = useCoarsePointer()
   const box = useRef<HTMLDivElement>(null)
+  // the Tab stop: the selected row, or the first one when the selected id is gone from `nodes`
+  const tabStop = indexOf.has(sel) ? sel : flat[0]?.n.id
   const selAt = indexOf.get(sel) ?? 0
   const keep = useMemo(() => [selAt], [selAt])
-  const v = useVirtual({ count: flat.length, estimateSize: coarse ? 36 : compact ? 24 : 28, scrollRef: box, enabled: virtualOn, keep, initialRect: { width: 320, height } })
+  const rowH = TREE_ROW[coarse ? 'coarse' : compact ? 'compact' : 'normal'][0]
+  const v = useVirtual({ count: flat.length, estimateSize: rowH, scrollRef: box, enabled: virtualOn, keep, initialRect: { width: 320, height } })
   const pendingFocus = useRef<string | null>(null)
   useLayoutEffect(() => { const id = pendingFocus.current; if (id && rows.current.get(id)) { pendingFocus.current = null; rows.current.get(id)!.focus({ preventScroll: true }) } })
   const toggle = (id: string, force?: boolean) => setOpen(s => { const n = new Set(s), on = force ?? !n.has(id); if (on) n.add(id); else n.delete(id); return n })
@@ -322,15 +335,16 @@ export function TreeView({ nodes, defaultExpanded = [], onSelect, onOpen, onRena
   const onKey = (e: RKeyboardEvent, n: TreeNode, i: number, parent: TreeNode | null) => {
     if (editing) return
     const dir = !!n.children, isOpen = open.has(n.id)
-    const page = Math.max(1, Math.floor(v.viewportSize / (coarse ? 36 : compact ? 24 : 28)) - 1)
+    const page = Math.max(1, Math.floor(v.viewportSize / rowH) - 1)
     const act: Record<string, () => void> = {
       ArrowDown: () => flat[i + 1] && select(flat[i + 1].n), ArrowUp: () => flat[i - 1] && select(flat[i - 1].n),
       Home: () => select(flat[0].n), End: () => select(flat[flat.length - 1].n),
       PageDown: () => select(flat[Math.min(flat.length - 1, i + page)].n), PageUp: () => select(flat[Math.max(0, i - page)].n),
       ArrowRight: () => { if (dir) { if (isOpen) { if (flat[i + 1]) select(flat[i + 1].n) } else toggle(n.id, true) } },
       ArrowLeft: () => { if (dir && isOpen) toggle(n.id, false); else if (parent) select(parent) },
-      Enter: () => { if (dir) toggle(n.id); else onOpen?.(n) }, F2: () => setEditing(n.id),
+      Enter: () => { if (dir) toggle(n.id); else onOpen?.(n) },
     }
+    if (onRename) act.F2 = () => setEditing(n.id)
     const key = e.key
     if (act[key]) { e.preventDefault(); act[key]() }
   }
@@ -367,11 +381,11 @@ export function TreeView({ nodes, defaultExpanded = [], onSelect, onOpen, onRena
     const idl = `${uid}t${encodeURIComponent(n.id)}`, named = !!lines && depth > 0 && editing !== n.id
     return (
       <div ref={el => { if (!el) return; rows.current.set(n.id, el); return () => { if (rows.current.get(n.id) === el) rows.current.delete(n.id) } }} role="treeitem" aria-level={depth + 1} aria-selected={sel === n.id}
-        aria-expanded={dir ? isOpen : undefined} tabIndex={sel === n.id ? 0 : -1} data-index={virtualOn ? i : undefined} {...extra?.aria}
+        aria-expanded={dir ? isOpen : undefined} tabIndex={tabStop === n.id ? 0 : -1} data-index={virtualOn ? i : undefined} {...extra?.aria}
         aria-labelledby={named ? (compact ? `${idl}l` : `${idl}l ${idl}c`) : undefined}
         style={{ paddingInlineStart: base + depth * step, ...extra?.style }}
-        onClick={() => { select(n); if (dir) toggle(n.id) }} onDoubleClick={() => !dir && setEditing(n.id)} onKeyDown={e => onKey(e, n, i, parent)}
-        className={cn('relative flex cursor-pointer items-center gap-1.5 rounded-[var(--r-md)] pe-2 whitespace-nowrap outline-none focus-visible:shadow-[inset_0_0_0_2px_var(--accent)] [@media(pointer:coarse)]:h-9 [@media(pointer:coarse)]:text-sm', compact ? 'h-6 text-xs' : 'h-7 text-[13px]',
+        onClick={() => { select(n); if (dir) toggle(n.id) }} onDoubleClick={() => { if (!dir && onRename) setEditing(n.id) }} onKeyDown={e => onKey(e, n, i, parent)}
+        className={cn('relative flex cursor-pointer items-center gap-1.5 rounded-[var(--r-md)] pe-2 whitespace-nowrap outline-none focus-visible:shadow-[inset_0_0_0_2px_var(--accent)]', TREE_ROW[compact ? 'compact' : 'normal'][1], TREE_ROW.coarse[1],
           sel === n.id ? 'bg-[var(--accent-soft)] text-[color-mix(in_srgb,var(--accent)_78%,var(--fg))]' : 'hover:bg-[var(--muted)]')}>
         {lines && threads(f)}
         {/* above the thread lines' widened hit areas, so a click on the chevron toggles this row */}
@@ -391,15 +405,16 @@ export function TreeView({ nodes, defaultExpanded = [], onSelect, onOpen, onRena
               if (cancelRename.current) { cancelRename.current = false; return }
               const val = e.currentTarget.value.trim(), prev = name(n)
               setEditing(null); rows.current.get(n.id)?.focus()
-              if (val && val !== prev) { setNames(m => ({ ...m, [n.id]: val })); onRename?.(n, val, prev) }
+              if (val && val !== prev) { setNames(m => ({ ...m, [n.id]: { from: n.label, to: val } })); onRename?.(n, val, prev) }
             }}
             className={cn('w-[140px] min-w-0 rounded-[var(--r-sm)] border border-[var(--accent)] bg-[var(--card)] px-1 py-px text-[13px] text-[var(--fg)] outline-none [@media(pointer:coarse)]:flex-1', TOUCH.input)} />
-          : <motion.span key={name(n)} id={`${idl}l`} initial={{ opacity: names[n.id] ? 0.3 : 1 }} animate={{ opacity: 1 }} className="truncate">{name(n)}</motion.span>}
+          : <motion.span key={name(n)} id={`${idl}l`} initial={{ opacity: name(n) !== n.label ? 0.3 : 1 }} animate={{ opacity: 1 }} className="truncate">{name(n)}</motion.span>}
         {/* the space keeps label and count apart in the accessible name (flex drops it visually) */}
         {!compact && <>{' '}<span id={`${idl}c`} className="ms-auto ps-2 text-[11px] tabular-nums text-[var(--fg2)]">{dir ? n.children!.length : n.size}</span></>}
       </div>
     )
   }
+  if (!nodes.length) return <div className={className}>{empty ?? <EmptyState size="sm" title="No items" />}</div>
   if (virtualOn) return (
     <div ref={box} role="tree" aria-label={ariaLabel} className={cn('group/tree relative overflow-auto overscroll-contain select-none', className)} style={{ height }}>
       <div style={{ height: v.totalSize, position: 'relative' }}>
@@ -487,7 +502,8 @@ export function Timeline({ items, className }: { items: TimelineItem[]; classNam
 
 /**
  * Two resizable panes, side by side or stacked (nest one inside another for IDE layouts). Drag the divider,
- * or focus it and use the arrow keys (Shift for big steps); Enter or double-click resets with a spring.
+ * or focus it and use the arrow keys (Shift for big steps) or Home / End (first pane closed / at `max`); Enter or
+ * double-click resets with a spring.
  * Releasing the first pane below `min` snaps it closed; drag the divider back out to reopen it.
  * Side-by-side panes stack (first on top) while the pane is narrower than `stackBelow` px (640 by default; 0 never stacks).
  * `magnets` (first-pane sizes in %, see useMagnet; `true` = thirds, half and the collapse point) pull the divider while
@@ -523,10 +539,12 @@ export function SplitPane({ first, second, direction = 'horizontal', defaultSize
   const onKey = (e: RKeyboardEvent) => {
     const jump = mg.enabled ? magnetKeyDirection(e) : 0, to = jump ? mg.next(state.size, jump) : null
     if (to !== null) { e.preventDefault(); set(to, 'snap'); return }
-    const step = e.shiftKey ? 10 : 2, k = h ? { ArrowLeft: -step, ArrowRight: step } : { ArrowUp: -step, ArrowDown: step }
-    const d = (k as unknown as Record<string, number | undefined>)[e.key]
+    const step = e.shiftKey ? 10 : 2
+    const k: Record<string, number> = h ? { ArrowLeft: -step, ArrowRight: step } : { ArrowUp: -step, ArrowDown: step }
+    const d = k[e.key]
     if (d !== undefined) { e.preventDefault(); set(state.size === 0 && d > 0 ? min : state.size + d) }
-    if (e.key === 'Enter' || e.key === 'Home') { e.preventDefault(); set(defaultSize, 'reset') }
+    if (e.key === 'Home' || e.key === 'End') { e.preventDefault(); set(e.key === 'Home' ? 0 : max) }
+    if (e.key === 'Enter') { e.preventDefault(); set(defaultSize, 'reset') }
   }
   const pos = (v: number) => `${clamp(v, 0, 100)}%`
   return (

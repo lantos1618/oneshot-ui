@@ -1,6 +1,6 @@
 import { createContext, useCallback, useContext, useEffect, useId, useLayoutEffect, useMemo, useRef, useState, type ButtonHTMLAttributes, type HTMLAttributes, type ReactNode, type Ref, type KeyboardEvent as RKeyboardEvent, type MouseEvent as ReactMouseEvent } from 'react'
 import { AnimatePresence, motion, type Variants } from 'motion/react'
-import { type AsChildProps, Avatar, Button, type ButtonProps, Icon, IconButton, type IconName, ScrollEdges, StatusIcon, cn, prefersReducedMotion, safeUrl, spring, useCoarsePointer, useComposedRefs, useControllable, useHotkey, useOutside, useScrollEdges, fmt, useResizeObserver, useRequiredContext, PartButton, focusStep } from './core'
+import { type AsChildProps, Avatar, Button, type ButtonProps, Icon, IconButton, type IconName, ScrollEdges, StatusIcon, cn, prefersReducedMotion, safeUrl, spring, useCoarsePointer, useComposedRefs, useControllable, useHotkey, useOutside, useScrollEdges, fmt, useResizeObserver, useRequiredContext, PartButton, focusStep, focusables, idPart, useLatest } from './core'
 import { ActiveIndicator } from './fields'
 import { Tooltip } from './overlay'
 
@@ -18,8 +18,8 @@ function useNavRegistry() {
 }
 /** The first enabled registered value. */
 const navFirst = (items: { value: string; disabled: boolean }[]) => items.find(x => !x.disabled)?.value
-/** DOM-order arrow-key step through `items` from the focused one: ±1 (wrapping when `loop`), or the first/last. */
-const navIdPart = (v: string) => v.replace(/[^\w-]/g, '_')
+/** The items of the composite `root` that match `sel`, without those of a composite nested inside it. */
+const navOwn = (root: HTMLElement, sel: string, owner: string) => [...root.querySelectorAll<HTMLElement>(sel)].filter(el => el.closest(owner) === root)
 
 export type TabItem = { value: string; label: ReactNode; content?: ReactNode; badge?: ReactNode }
 
@@ -80,8 +80,7 @@ export function TabsList({ className, children, fade = 'card', 'aria-label': ari
   }, [c.value, vertical])
   const onKeyDown = (e: RKeyboardEvent<HTMLDivElement>) => {
     if (e.key === 'Enter' || (e.target as Element).closest('[role=tablist]') !== e.currentTarget) return
-    const tabs = [...e.currentTarget.querySelectorAll<HTMLElement>('[role=tab]')].filter(t => t.closest('[role=tablist]') === e.currentTarget && !(t as HTMLButtonElement).disabled)
-    const to = focusStep(tabs, e.key, { orientation: vertical ? 'vertical' : 'horizontal' })
+    const to = focusStep(navOwn(e.currentTarget, '[role=tab]', '[role=tablist]'), e, { orientation: vertical ? 'vertical' : 'horizontal' })
     if (!to) return
     e.preventDefault(); to.focus()
     if (!c.manual && to.dataset.value !== undefined) c.select(to.dataset.value)
@@ -109,12 +108,12 @@ export function TabsTrigger({ value, disabled = false, asChild, className, child
   const register = c.registerTab
   useLayoutEffect(() => register(value, disabled), [register, value, disabled])
   const none = !c.tabs.some(t => t.value === c.value && !t.disabled)
-  const id = `${c.base}-tab-${navIdPart(value)}`
+  const id = `${c.base}-tab-${idPart(value)}`
   const props = {
-    role: 'tab', id, 'aria-selected': on, 'aria-controls': c.panels.has(value) ? `${c.base}-panel-${navIdPart(value)}` : undefined,
+    role: 'tab', id, 'aria-selected': on, 'aria-controls': c.panels.has(value) ? `${c.base}-panel-${idPart(value)}` : undefined,
     tabIndex: on || (none && navFirst(c.tabs) === value) ? 0 : -1, 'data-value': value, 'data-state': on ? 'active' : 'inactive',
     onClick: () => { if (!disabled) c.select(value) },
-    onKeyDown: (e: RKeyboardEvent<HTMLElement>) => { if (c.manual && (e.key === 'Enter' || e.key === ' ')) { e.preventDefault(); c.select(value) } },
+    onKeyDown: (e: RKeyboardEvent<HTMLElement>) => { if (c.manual && !disabled && (e.key === 'Enter' || e.key === ' ')) { e.preventDefault(); c.select(value) } },
     className: cn('relative flex flex-none cursor-pointer items-center gap-1.5 border-0 bg-transparent text-[13px] font-medium whitespace-nowrap transition-colors disabled:cursor-default disabled:opacity-50',
       vertical ? 'h-8 justify-start rounded-[var(--r-md)] pe-4 ps-2.5 text-start [@media(pointer:coarse)]:h-10' : 'px-0 py-2 [@media(pointer:coarse)]:py-2.5',
       on ? 'text-[var(--fg)]' : 'text-[var(--fg2)] hover:text-[var(--fg)]', vertical && !on && 'hover:bg-[var(--muted)]', className),
@@ -134,7 +133,7 @@ export function TabsContent({ value, forceMount, className, children }: { value:
   useLayoutEffect(() => mounted ? register(value) : undefined, [register, value, mounted])
   if (!mounted) return null
   return (
-    <motion.div role="tabpanel" id={`${c.base}-panel-${navIdPart(value)}`} aria-labelledby={`${c.base}-tab-${navIdPart(value)}`} hidden={!on} data-state={on ? 'active' : 'inactive'}
+    <motion.div role="tabpanel" id={`${c.base}-panel-${idPart(value)}`} aria-labelledby={`${c.base}-tab-${idPart(value)}`} hidden={!on} data-state={on ? 'active' : 'inactive'}
       initial={on && c.switched ? { opacity: 0, y: -4 } : false} animate={on ? { opacity: 1, y: 0 } : { opacity: 0, y: -4 }} transition={{ duration: 0.2 }}
       className={cn('text-[13px]', vertical ? 'min-w-0 flex-1' : 'pt-3', className)}>{children}</motion.div>
   )
@@ -185,28 +184,20 @@ export function NavList({ items, value, defaultValue, onChange, collapsed, class
 export type SidebarEntry = (NavItem & { count?: number }) | { heading: string }
 const isHeading = (e: SidebarEntry): e is { heading: string } => 'heading' in e
 
-/** Default main pane: the page title over placeholder cards. */
-function SidebarPage({ item }: { item: NavItem }) {
-  return (
-    <>
-      <h4 className="m-0 flex items-center gap-2 text-base font-semibold">{item.icon && <Icon name={item.icon} size={16} className="text-[var(--fg3)]" />}{item.label}</h4>
-      <div className="grid grid-cols-3 gap-2.5">{[0, 1, 2].map(k => <div key={k} className="h-[70px] rounded-[var(--r-md)] border border-[var(--line)] bg-[var(--card)]" />)}</div>
-      <div className="min-h-[80px] flex-1 rounded-[var(--r-md)] border border-[var(--line)] bg-[var(--card)]" />
-    </>
-  )
-}
-
 const sbFade = { duration: 0.15 }
+/** Frame width below which the sidebar starts folded and, expanded, slides over the main pane (px). */
+const SB_NARROW = 440
+/** Sidebar width folded to icons and expanded (px). */
+const SB_RAIL = 60, SB_WIDE = 220
 
 /**
  * App frame whose sidebar folds to icons. Labels become tooltips when collapsed; press `hotkey` (default `[`)
- * while it's on screen to toggle. Has section headings, count badges, a user footer, and a main pane that
- * changes with the selected item (`children` may be a function of the item). Without `defaultCollapsed`
- * it starts folded when the frame is narrower than 440px; in a frame that narrow, expanding it slides it over the
- * main pane (tap outside or pick an item to fold it again).
+ * while it's on screen to toggle. Has an optional `title` (the brand, also naming the navigation), section headings,
+ * count badges, a user footer, and a main pane that shows `children` (a function of the selected item, or a node).
+ * Without `defaultCollapsed` it starts folded when the frame is narrower than 440px; in a frame that narrow, expanding
+ * it slides it over the main pane (tap outside or pick an item to fold it again).
  */
-
-export function CollapsibleSidebar({ items, title = 'Northwind', user, value, defaultValue, onChange, collapsed, defaultCollapsed, onCollapsedChange, hotkey = '[', children, className }:
+export function CollapsibleSidebar({ items, title = '', user, value, defaultValue, onChange, collapsed, defaultCollapsed, onCollapsedChange, hotkey = '[', children, className }:
   { items: SidebarEntry[]; title?: string; user?: { name: string; detail?: string }; value?: string; defaultValue?: string; onChange?: (v: string) => void
     collapsed?: boolean; defaultCollapsed?: boolean; onCollapsedChange?: (v: boolean) => void; hotkey?: string | false
     children?: ReactNode | ((item: NavItem) => ReactNode); className?: string }) {
@@ -214,12 +205,16 @@ export function CollapsibleSidebar({ items, title = 'Northwind', user, value, de
   const [v, setV] = useControllable(value, defaultValue ?? navItems[0]?.value, onChange)
   const [col, setCol] = useControllable(collapsed, defaultCollapsed ?? false, onCollapsedChange)
   const frame = useRef<HTMLDivElement>(null), group = useId()
-  // no default given: start folded when the frame is too narrow for labels and a usable main pane
-  useLayoutEffect(() => { if (collapsed === undefined && defaultCollapsed === undefined && (frame.current?.offsetWidth ?? 999) < 440) setCol(true) }, []) // eslint-disable-line react-hooks/exhaustive-deps
   const coarse = useCoarsePointer() // touch: the toggle's tooltip would only repeat its label and the keyboard hint
-  // narrow frame (phones): the expanded sidebar slides over the main pane instead of squeezing it
-  const [over, setOver] = useState(false)
-  useResizeObserver(frame, el => setOver(el.offsetWidth < 440))
+  // narrow frame (phones): the expanded sidebar slides over the main pane instead of squeezing it; with no default
+  // given, it also starts folded there (too narrow for labels and a usable main pane)
+  const [over, setOver] = useState(false), measured = useRef(false)
+  useResizeObserver(frame, el => {
+    const narrow = el.offsetWidth < SB_NARROW
+    setOver(narrow)
+    if (!measured.current && narrow && collapsed === undefined && defaultCollapsed === undefined) setCol(true)
+    measured.current = true
+  })
   const toggle = useCallback(() => setCol(!col), [col, setCol])
   useHotkey(hotkey || '', () => { // only the sidebar that is on screen answers
     const r = frame.current?.getBoundingClientRect()
@@ -229,16 +224,16 @@ export function CollapsibleSidebar({ items, title = 'Northwind', user, value, de
   const beside = 'right' // tooltips open away from the sidebar's edge
   return (
     <div ref={frame} className={cn('relative flex h-[400px] overflow-hidden rounded-[var(--r-lg)] border border-[var(--line)] bg-[var(--bg)]', className)}>
-      {over && <div aria-hidden className="w-[60px] flex-none" />}
+      {over && <div aria-hidden className="flex-none" style={{ width: SB_RAIL }} />}
       <AnimatePresence>
         {over && !col && <motion.div key="scrim" aria-hidden onClick={toggle} className="absolute inset-0 z-[5] bg-black/25"
           initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} transition={{ duration: 0.2 }} />}
       </AnimatePresence>
-      <motion.aside initial={false} animate={{ width: col ? 60 : 220 }} transition={spring(0.12, 0.4)} aria-label={`${title} navigation`}
+      <motion.aside initial={false} animate={{ width: col ? SB_RAIL : SB_WIDE }} transition={spring(0.12, 0.4)} aria-label={title ? `${title} navigation` : 'Sidebar'}
         className={cn('flex flex-none flex-col gap-1.5 overflow-hidden border-e border-[var(--line)] bg-[var(--card)] p-2.5',
           over && 'absolute inset-y-0 start-0 z-10', over && !col && 'shadow-[var(--shadow)]')}>
         <div className="flex h-9 items-center gap-2 px-1 whitespace-nowrap">
-          <motion.span initial={false} animate={{ opacity: col ? 0 : 1, width: col ? 0 : 22 }} transition={sbFade} className="h-[22px] flex-none rounded-[var(--r-md)] bg-[linear-gradient(135deg,var(--accent),var(--c4))]" />
+          {title && <motion.span initial={false} animate={{ opacity: col ? 0 : 1, width: col ? 0 : 22 }} transition={sbFade} className="h-[22px] flex-none rounded-[var(--r-md)] bg-[linear-gradient(135deg,var(--accent),var(--c4))]" />}
           <motion.b initial={false} animate={{ opacity: col ? 0 : 1 }} transition={sbFade} className="min-w-0 flex-1 truncate text-sm font-semibold">{title}</motion.b>
           <Tooltip content={<>{col ? 'Expand' : 'Collapse'} <kbd className="font-[family-name:var(--mono)] opacity-70 [@media(hover:none)]:hidden">{hotkey || ''}</kbd></>} placement={col ? beside : 'bottom-center'} portal delay={300} disabled={coarse}>
             <IconButton icon="panel" label={col ? 'Expand sidebar' : 'Collapse sidebar'} aria-expanded={!col} onClick={toggle} />
@@ -279,7 +274,7 @@ export function CollapsibleSidebar({ items, title = 'Northwind', user, value, de
         <AnimatePresence mode="wait" initial={false}>
           <motion.div key={current?.value} initial={{ opacity: 0, y: 6 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0, transition: { duration: 0.08 } }} transition={{ duration: 0.22 }}
             className="flex h-full flex-col gap-3 p-4">
-            {current && (typeof children === 'function' ? children(current) : children ?? <SidebarPage item={current} />)}
+            {current && (typeof children === 'function' ? children(current) : children)}
           </motion.div>
         </AnimatePresence>
       </section>
@@ -296,7 +291,7 @@ export type TabBarItem = NavItem & { count?: number }
  */
 export function MobileTabBar({ items, value, defaultValue, onChange, onAction, actionLabel, actionIcon = 'plus', className }:
   { items: TabBarItem[]; value?: string; defaultValue?: string; onChange?: (v: string) => void; onAction?: () => void; actionLabel?: string; actionIcon?: IconName; className?: string }) {
-  const [v, set] = useControllable(value, defaultValue ?? items[0].value, onChange)
+  const [v, set] = useControllable(value, defaultValue ?? items[0]?.value ?? '', onChange)
   const group = useId(), touched = useRef(false)
   const [spin, setSpin] = useState(0)
   const mid = Math.ceil(items.length / 2)
@@ -348,9 +343,6 @@ const megaSlide: Variants = {
   exit: (d: number) => ({ opacity: 0, x: -40 * d, transition: { duration: 0.2 } }),
 }
 
-/** The focusable links and buttons of the mega menu panel's current content, in DOM order. */
-const megaFocusables = (root: Element | null | undefined) =>
-  root ? [...root.querySelectorAll<HTMLElement>('a[href],button:not([disabled]),[tabindex]:not([tabindex="-1"])')].filter(el => el.getClientRects().length > 0) : []
 /**
  * Spatial arrow-key step through a panel laid out as a grid: the nearest item in the arrow's direction, scored by distance
  * along the arrow plus twice the sideways offset. Returns null at the grid's edge.
@@ -396,17 +388,20 @@ export function MegaMenu({ items, brand, actions, children, closeDelay = 160, de
     const i = typeof v === 'number' ? v : typeof v === 'string' ? items.findIndex(it => it.label === v) : -1
     return i >= 0 && i < items.length && items[i].content ? i : -1
   }
-  const [cur, setCurState] = useState(() => megaIndex(openProp !== undefined ? openProp : defaultOpen))
-  const curRef = useRef(cur); curRef.current = cur
-  const notify = useRef(onOpenChange); notify.current = onOpenChange
-  const setCur = (i: number) => { if (i !== curRef.current) { curRef.current = i; setCurState(i); notify.current?.(i >= 0 ? items[i].label : null) } }
-  const [shown, setShown] = useState(cur) // what the panel shows; outlives `cur` while the panel fades out
-  const [dir, setDir] = useState(1)
+  const notify = useCallback((i: number) => onOpenChange?.(i >= 0 ? items[i].label : null), [onOpenChange, items])
+  const [cur, setCurRaw] = useControllable<number>(openProp === undefined ? undefined : megaIndex(openProp), megaIndex(defaultOpen), notify)
+  const curRef = useLatest(cur)
+  const setCur = (i: number) => { if (i !== curRef.current) setCurRaw(i) }
+  // what the panel shows (it outlives `cur` while the panel fades out), the slide direction, and whether the panel
+  // morphs from another open menu; derived from each change of `cur`, so a controlled `open` drives them too
+  const [view, setView] = useState({ cur, shown: cur, dir: 1, morph: false })
+  if (view.cur !== cur) setView(v => cur >= 0 ? { cur, shown: cur, dir: v.cur >= 0 && cur < v.cur ? -1 : 1, morph: v.cur >= 0 } : { ...v, cur, morph: false })
+  const { shown, dir, morph: morphing } = view
   const openedAt = useRef(0)
   const [sizes, setSizes] = useState<{ w: number; h: number }[]>([])
   const [hostW, setHostW] = useState(0), [hostH, setHostH] = useState(0)
   const [edges, setEdges] = useState<{ l: number; r: number }[]>([])
-  const wasOpen = useRef(false), closeT = useRef<ReturnType<typeof setTimeout>>(undefined)
+  const closeT = useRef<ReturnType<typeof setTimeout>>(undefined)
   const pid = useId()
 
   const measure = useCallback(() => {
@@ -424,58 +419,44 @@ export function MegaMenu({ items, brand, actions, children, closeDelay = 160, de
     measures.current.forEach(m => m && ro.observe(m))
     return () => ro.disconnect()
   }, [measure, items])
+  useLayoutEffect(() => { if (cur >= 0) measure() }, [cur, measure]) // the triggers may have scrolled since
   useEffect(() => () => clearTimeout(closeT.current), [])
   useOutside([host], e => {
     const t = triggers.current[cur], refocus = e.type === 'keydown' && host.current?.contains(document.activeElement)
-    clearTimeout(closeT.current); wasOpen.current = false; setCur(-1)
+    clearTimeout(closeT.current); setCur(-1)
     if (refocus) t?.focus()
   }, cur >= 0, { escape: true })
 
   const open = (i: number) => {
     clearTimeout(closeT.current)
-    if (i === cur) return
-    measure()
-    wasOpen.current = cur >= 0; openedAt.current = Date.now()
-    setDir((cur >= 0 && i < cur ? -1 : 1)); setCur(i); setShown(i)
+    if (i === curRef.current) return
+    openedAt.current = Date.now()
+    setCur(i)
   }
   const close = (now = false) => {
     clearTimeout(closeT.current)
-    const go = () => { wasOpen.current = false; setCur(-1) }
-    if (now) go(); else closeT.current = setTimeout(go, closeDelay)
+    if (now) setCur(-1); else closeT.current = setTimeout(() => setCur(-1), closeDelay)
   }
-  useEffect(() => { // controlled: follow `open` from outside (without echoing it back through onOpenChange)
-    if (openProp === undefined) return
-    const i = megaIndex(openProp)
-    if (i === curRef.current) return
-    const echo = notify.current; notify.current = undefined
-    if (i >= 0) open(i); else close(true)
-    notify.current = echo
-  }, [openProp]) // eslint-disable-line react-hooks/exhaustive-deps
   const size = sizes[shown] ?? { w: 0, h: 0 }
   // the panel lines up with its trigger's start edge, clamped inside the frame
   const edge = edges[shown] ?? { l: 0, r: 0 }
   const left = shown >= 0 ? Math.max(8, Math.min(hostW - size.w - 8, (edge.l - 20))) : 0
-  const morph = wasOpen.current ? spring(0.12, 0.4) : { duration: 0 }
+  const morph = morphing ? spring(0.12, 0.4) : { duration: 0 }
   const maxW = Math.max(200, hostW - 16)
   const topItems = () => [...(host.current?.querySelectorAll<HTMLElement>('[data-mega-top]') ?? [])]
   const content = () => panel.current?.querySelector(`[data-mega="${cur}"]`)
   const enterPanel = (i: number, last = false) => {
     open(i)
-    requestAnimationFrame(() => { const all = megaFocusables(panel.current?.querySelector(`[data-mega="${i}"]`)); (last ? all[all.length - 1] : all[0])?.focus() })
+    requestAnimationFrame(() => { const all = focusables(panel.current?.querySelector(`[data-mega="${i}"]`)); (last ? all[all.length - 1] : all[0])?.focus() })
   }
   const onTopKey = (e: React.KeyboardEvent<HTMLElement>, i: number) => {
-    const tops = topItems(), at = tops.indexOf(e.currentTarget)
-    const go = (n: number) => { e.preventDefault(); tops[(n + tops.length) % tops.length]?.focus() }
-    const key = e.key
-    if (key === 'ArrowRight') go(at + 1)
-    else if (key === 'ArrowLeft') go(at - 1)
-    else if (e.key === 'Home') go(0)
-    else if (e.key === 'End') go(tops.length - 1)
+    const to = focusStep(topItems(), e, { orientation: 'horizontal' })
+    if (to) { e.preventDefault(); to.focus() }
     else if (items[i]?.content && (e.key === 'ArrowDown' || e.key === 'ArrowUp')) { e.preventDefault(); enterPanel(i, e.key === 'ArrowUp') }
   }
   const onPanelKey = (e: React.KeyboardEvent) => {
     if (cur < 0 || !['ArrowDown', 'ArrowUp', 'ArrowLeft', 'ArrowRight', 'Home', 'End'].includes(e.key)) return
-    const all = megaFocusables(content()), from = document.activeElement as HTMLElement | null
+    const all = focusables(content()), from = document.activeElement as HTMLElement | null
     if (!all.length || !from || !all.includes(from)) return
     e.preventDefault()
     if (e.key === 'Home' || e.key === 'End') return all[e.key === 'Home' ? 0 : all.length - 1].focus()
@@ -517,12 +498,12 @@ export function MegaMenu({ items, brand, actions, children, closeDelay = 160, de
         className={cn('absolute top-16 z-[4] overflow-x-hidden overflow-y-auto overscroll-contain rounded-[var(--r-lg)] border border-[var(--line)] bg-[var(--card)] shadow-[var(--shadow)]', cur < 0 && 'pointer-events-none', shown < 0 && 'invisible')}
         initial={false}
         animate={cur >= 0 ? { opacity: 1, y: 0, scale: 1, left, width: size.w, height: hostH ? Math.min(size.h, hostH - 72) : size.h } : { opacity: 0, y: -4, scale: 0.98 }}
-        onAnimationComplete={() => { if (cur < 0) setShown(-1) }}
+        onAnimationComplete={() => { if (cur < 0) setView(v => v.cur < 0 ? { ...v, shown: -1 } : v) }}
         transition={{ default: cur >= 0 ? spring(0.2, 0.3) : { duration: 0.15 }, left: morph, width: morph, height: morph }}
         onKeyDown={onPanelKey} onPointerEnter={() => clearTimeout(closeT.current)} onPointerLeave={e => { if (e.pointerType === 'mouse') close() }}>
         <AnimatePresence initial={false} custom={dir}>
           {shown >= 0 && (
-            <motion.div key={shown} data-mega={shown} custom={dir} variants={megaSlide} initial={wasOpen.current ? 'enter' : false} animate="center" exit="exit"
+            <motion.div key={shown} data-mega={shown} custom={dir} variants={megaSlide} initial={morphing ? 'enter' : false} animate="center" exit="exit"
               className="absolute top-0 start-0 w-max p-4" style={{ maxWidth: maxW }}>{items[shown]?.content}</motion.div>
           )}
         </AnimatePresence>
@@ -707,8 +688,7 @@ export function ToggleGroupRoot(props: ToggleGroupProps) {
   const ctx: TgCtxV = { single, value, toggle, variant, size, disabled, inToolbar, tabStop, setFocused, register }
   const onKeyDown = (e: RKeyboardEvent<HTMLDivElement>) => {
     if (inToolbar) return
-    const own = [...e.currentTarget.querySelectorAll<HTMLElement>('[data-tg-item]')].filter(el => el.closest('[data-tg-root]') === e.currentTarget && !(el as HTMLButtonElement).disabled)
-    const to = focusStep(own, e.key, { orientation, loop })
+    const to = focusStep(navOwn(e.currentTarget, '[data-tg-item]', '[data-tg-root]'), e, { orientation, loop })
     if (!to) return
     e.preventDefault(); to.focus()
     if (single && to.dataset.value !== undefined) setValue([to.dataset.value]) // radio: arrows select
@@ -750,8 +730,8 @@ const TOOLBAR_ITEM = '[data-toolbar-item]'
 export function ToolbarRoot({ orientation = 'horizontal', loop = true, className, children, 'aria-label': ariaLabel, 'aria-labelledby': labelledBy }:
   { orientation?: 'horizontal' | 'vertical'; loop?: boolean; className?: string; children: ReactNode; 'aria-label'?: string; 'aria-labelledby'?: string }) {
   const ref = useRef<HTMLDivElement>(null), active = useRef(0)
-  const items = () => [...(ref.current?.querySelectorAll<HTMLElement>(TOOLBAR_ITEM) ?? [])]
-    .filter(el => el.closest('[role=toolbar]') === ref.current && !(el as HTMLButtonElement).disabled && el.getAttribute('aria-disabled') !== 'true')
+  const items = () => (ref.current ? navOwn(ref.current, TOOLBAR_ITEM, '[role=toolbar]') : [])
+    .filter(el => !(el as HTMLButtonElement).disabled && el.getAttribute('aria-disabled') !== 'true')
   const sync = () => { const all = items(); const i = Math.min(active.current, all.length - 1); all.forEach((el, k) => { el.tabIndex = k === i ? 0 : -1 }) }
   useLayoutEffect(sync) // after every render: items may have come, gone or been disabled
   const ctx = useMemo(() => ({ orientation }), [orientation])
@@ -761,8 +741,7 @@ export function ToolbarRoot({ orientation = 'horizontal', loop = true, className
         onFocus={e => { const i = items().indexOf(e.target as HTMLElement); if (i >= 0 && i !== active.current) { active.current = i; sync() } }}
         onKeyDown={e => {
           if ((e.target as Element).closest('[role=toolbar]') !== e.currentTarget || (e.target as Element).matches('input,textarea,select,[contenteditable="true"]')) return
-          const to = focusStep(items(), e.key, { orientation, loop })
-
+          const to = focusStep(items(), e, { orientation, loop })
           if (to) { e.preventDefault(); to.focus() }
         }}
         className={cn('flex items-center gap-1 rounded-[var(--r-lg)] border border-[var(--line)] bg-[var(--card)] p-1', orientation === 'vertical' ? 'inline-flex flex-col' : 'flex-wrap', className)}>

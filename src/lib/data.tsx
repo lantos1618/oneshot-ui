@@ -1,8 +1,8 @@
-import { createContext, useContext, useId, useMemo, useRef, useState, type ReactNode } from 'react'
+import { createContext, useContext, useId, useLayoutEffect, useMemo, useRef, useState, type MouseEvent as ReactMouseEvent, type ReactNode } from 'react'
 import { AnimatePresence, motion } from 'motion/react'
-import { AnimatedNumber, type AsChildProps, Button, DeltaBadge, Icon, IconButton, Kbd, TOUCH, cn, inputClass, spring, surface, useControllable, useHotkey, SparkChart, rowHoverClass, plural, writeClipboard, useRequiredContext, PartButton } from './core'
+import { AnimatedNumber, type AsChildProps, Button, DeltaBadge, Icon, IconButton, Kbd, TOUCH, cn, inputClass, spring, surface, useControllable, useHotkey, SparkChart, rowHoverClass, plural, writeClipboard, useRequiredContext, PartButton, useResizeObserver, type TableSort, ariaSort, collator, compareCells, idPart, nextSort, revealInScroller, uid } from './core'
 import { shake } from './motion'
-import { Collapse, useToast } from './feedback'
+import { Collapse, EmptyState, useToast } from './feedback'
 import { CheckboxBox } from './fields'
 import { Dialog } from './overlay'
 
@@ -43,54 +43,67 @@ export function StatCard({ label, value, format, delta, trend, lowerIsBetter, co
   )
 }
 
-/** A DataTable column. `align` 'end' (or 'right', its old name) puts the cell at the end edge, for numbers; 'start' (or 'left') is the default. */
-export type Column<T> = { key: keyof T & string; label: string; align?: 'start' | 'end' | 'left' | 'right'; sortable?: boolean; render?: (row: T) => ReactNode; className?: string }
+/** A DataTable column. `align` 'end' puts the cell at the end edge, for numbers; 'start' is the default. */
+export type Column<T> = { key: keyof T & string; label: string; /** 'left' and 'right' are deprecated aliases of 'start' and 'end' */ align?: 'start' | 'end' | 'left' | 'right'; sortable?: boolean; render?: (row: T) => ReactNode; className?: string }
 /** Sort state of a DataTable: the column key and 1 (ascending) or -1 (descending). */
-export type DataSort<T> = { key: keyof T & string; dir: 1 | -1 }
+export type DataSort<T> = TableSort<keyof T & string>
 
 /**
- * Sortable table; rows slide to their new position when the order changes. Sort is uncontrolled (`initialSort`) or
- * controlled (`sort` + `onSortChange`). With `onRowClick` a click anywhere on a row opens it, and the first cell is a real
- * button, so keyboard users Tab to it and press Enter or Space. Scrolls sideways inside its box when too wide.
+ * A sortable column header's button: the label and an arrow that points up (ascending), turns down (descending) or
+ * fades (`dir` undefined: not sorted by this column). Put it in a `<th aria-sort={ariaSort(sort, key)}>`; the click
+ * usually sets `nextSort(sort, key)`. DataTable and DataGrid use it.
  */
-export function DataTable<T extends object>({ columns, rows, rowKey, initialSort, sort: sortProp, onSortChange, onRowClick, className }:
+export function SortHeader({ dir, onClick, children, className }: { dir: 1 | -1 | undefined; onClick: (e: ReactMouseEvent<HTMLButtonElement>) => void; children: ReactNode; className?: string }) {
+  return (
+    <button type="button" onClick={onClick}
+      className={cn('inline-flex cursor-pointer items-center gap-1 border-0 bg-transparent p-0 font-[inherit] text-inherit hover:text-[var(--fg)]', TOUCH.tap36, className)}>
+      {children}
+      <Icon name="arrowUp" size={11} className={cn('flex-none transition-[transform,opacity] duration-200 motion-reduce:transition-none', dir === undefined && 'opacity-30', dir === -1 && 'rotate-180')} />
+    </button>
+  )
+}
+
+/**
+ * Sortable table; rows slide to their new position when the order changes. A header click sorts ascending, then
+ * descending, then back to the original order. Numbers and Dates sort by value, text naturally ("item 2" before
+ * "item 10"), and empty cells last either way. Sort is uncontrolled (`initialSort`) or controlled (`sort` +
+ * `onSortChange`). With `onRowClick` a click anywhere on a row opens it, and the first cell is a real button, so keyboard
+ * users Tab to it and press Enter or Space. With no rows it shows `empty` (default "No rows"). Scrolls sideways inside
+ * its box when too wide.
+ */
+export function DataTable<T extends object>({ columns, rows, rowKey, initialSort, sort: sortProp, onSortChange, onRowClick, empty, className }:
   { columns: Column<T>[]; rows: T[]; rowKey: (r: T) => string; initialSort?: DataSort<T>
     /** controlled sort; null = original order */ sort?: DataSort<T> | null; onSortChange?: (s: DataSort<T> | null) => void
-    onRowClick?: (r: T) => void; className?: string }) {
+    onRowClick?: (r: T) => void; /** shown in place of the rows when there are none (default "No rows") */ empty?: ReactNode; className?: string }) {
   const [sort, setSort] = useControllable<DataSort<T> | null>(sortProp, initialSort ?? null, onSortChange)
   const sorted = useMemo(() => {
     if (!sort) return rows
-    return [...rows].sort((a, b) => {
-      const x = a[sort.key], y = b[sort.key]
-      return (typeof x === 'number' && typeof y === 'number' ? x - y : String(x).localeCompare(String(y))) * sort.dir
-    })
+    const coll = collator()
+    return [...rows].sort((a, b) => compareCells(a[sort.key], b[sort.key], sort.dir, coll))
   }, [rows, sort])
+  const end = (c: Column<T>) => c.align === 'right' || c.align === 'end'
   const cell = (r: T, c: Column<T>) => c.render ? c.render(r) : String(r[c.key] ?? '')
   return (
     <div className={cn('overflow-x-auto', className)}>
       <table className="w-full border-collapse text-[13px]">
         <thead>
           <tr>{columns.map(c => (
-            <th key={c.key} aria-sort={sort?.key === c.key ? (sort.dir === 1 ? 'ascending' : 'descending') : undefined}
-              className={cn('border-b border-[var(--line)] px-2 py-1.5 text-xs font-medium whitespace-nowrap text-[var(--fg3)] first:ps-0 last:pe-0', c.align === 'right' || c.align === 'end' ? 'text-end' : 'text-start')}>
-              {c.sortable === false ? c.label : (
-                <button onClick={() => setSort({ key: c.key, dir: sort?.key === c.key ? (-sort.dir as 1 | -1) : 1 })}
-                  className={cn('inline-flex cursor-pointer items-center gap-1 border-0 bg-transparent p-0 font-medium text-inherit hover:text-[var(--fg)]', TOUCH.tap36)}>
-                  {c.label}
-                  <motion.span animate={{ rotate: sort?.key === c.key && sort.dir === -1 ? 180 : 0, opacity: sort?.key === c.key ? 1 : 0.3 }}><Icon name="arrowUp" size={11} /></motion.span>
-                </button>
-              )}
+            <th key={c.key} aria-sort={ariaSort(sort, c.key)}
+              className={cn('border-b border-[var(--line)] px-2 py-1.5 text-xs font-medium whitespace-nowrap text-[var(--fg3)] first:ps-0 last:pe-0', end(c) ? 'text-end' : 'text-start')}>
+              {c.sortable === false ? c.label
+                : <SortHeader dir={sort?.key === c.key ? sort.dir : undefined} onClick={() => setSort(nextSort(sort, c.key, { clearable: true }))}>{c.label}</SortHeader>}
             </th>
           ))}</tr>
         </thead>
         <tbody>
+          {!sorted.length && <tr><td colSpan={columns.length} className="border-b border-[var(--line)] p-0">{empty ?? <EmptyState size="sm" title="No rows" />}</td></tr>}
           {sorted.map(r => (
             <motion.tr key={rowKey(r)} layout="position" transition={spring(0.15, 0.4)}
               // mouse and touch: the whole row; controls inside cells keep their own clicks
               onClick={onRowClick && (e => { if (!(e.target as Element).closest('button,a,input,select,textarea,label')) onRowClick(r) })}
               className={cn(onRowClick && 'cursor-pointer hover:bg-[var(--muted)] has-[[data-row-open]:focus-visible]:bg-[var(--muted)]')}>
               {columns.map((c, i) => (
-                <td key={c.key} className={cn('border-b border-[var(--line)] px-2 py-2 first:ps-0 last:pe-0', (c.align === 'right' || c.align === 'end') && 'ui-num text-end', c.className)}>
+                <td key={c.key} className={cn('border-b border-[var(--line)] px-2 py-2 first:ps-0 last:pe-0', end(c) && 'ui-num text-end', c.className)}>
                   {onRowClick && i === 0
                     ? <button data-row-open onClick={() => onRowClick(r)}
                       className="cursor-pointer rounded-[var(--r-sm)] border-0 bg-transparent p-0 text-start font-[inherit] text-inherit outline-none focus-visible:shadow-[0_0_0_2px_var(--accent)]">{cell(r, c)}</button>
@@ -110,7 +123,6 @@ const AccCtx = createContext<AccCtxV | null>(null)
 type AccItemCtxV = { value: string; on: boolean; disabled?: boolean; triggerId: string; panelId: string }
 const AccItemCtx = createContext<AccItemCtxV | null>(null)
 const useAccItem = (part: string) => useRequiredContext(AccItemCtx, `<Accordion.${part}>`, '<Accordion.Item>')
-const accIdPart = (v: string) => v.replace(/[^\w-]/g, '_')
 
 /** Props of Accordion.Root: `type="single"` (one open `value`, '' for none) or `"multiple"` (a list of open values). */
 export type AccordionRootProps = { className?: string; children: ReactNode; disabled?: boolean } & (
@@ -136,7 +148,7 @@ export function AccordionRoot(props: AccordionRootProps) {
 /** Accordion.Item: one section (`value`), with a rule under it. `disabled` locks it. */
 export function AccordionItem({ value, disabled, className, children }: { value: string; disabled?: boolean; className?: string; children: ReactNode }) {
   const acc = useRequiredContext(AccCtx, '<Accordion.Item>', '<Accordion.Root>')
-  const on = acc.open.includes(value), id = `${acc.base}-${accIdPart(value)}`
+  const on = acc.open.includes(value), id = `${acc.base}-${idPart(value)}`
   return (
     <AccItemCtx.Provider value={{ value, on, disabled: disabled || acc.disabled, triggerId: `${id}-h`, panelId: `${id}-p` }}>
       <div data-state={on ? 'open' : 'closed'} className={cn('border-b border-[var(--line)]', className)}>{children}</div>
@@ -220,7 +232,7 @@ export function TaskList({ value, defaultValue = [], onChange, placeholder: ph, 
   const add = () => {
     const v = input.current!.value.trim()
     if (!v) { shake(input.current, 4); input.current!.focus(); return }
-    set([...tasks, { id: `t${Date.now().toString(36)}`, text: v }]); input.current!.value = ''
+    set([...tasks, { id: uid('task'), text: v }]); input.current!.value = ''
   }
   return (
     <div className={cn('flex flex-col gap-2', className)}>
@@ -251,6 +263,12 @@ class JvMarker { readonly text: string; constructor(text: string) { this.text = 
 const JV_MAX_DEPTH = 64
 const JV_MAX_NODES = 5000
 const jvIsObj = (v: unknown): v is object => v !== null && typeof v === 'object' && !(v instanceof JvMarker)
+/**
+ * The path of child `k` under path `p` (the key for collapse state, search, scroll targets and "copy path"): `p[3]` in
+ * an array, `p.name` for an identifier key, `p["a.b"]` for any other key, so `"a.b"` and `a → b` never share a path.
+ */
+const jvChild = (p: string, k: string, arr: boolean) =>
+  arr ? `${p}[${k}]` : /^[A-Za-z_$][\w$]*$/.test(k) ? (p ? `${p}.${k}` : k) : `${p}[${JSON.stringify(k)}]`
 /**
  * A copy of `data` that is safe to render: cycles become [Circular] (tracked per path with a WeakSet, so shared but
  * acyclic references still show), nesting stops at JV_MAX_DEPTH levels, and the tree stops after JV_MAX_NODES values.
@@ -313,7 +331,7 @@ function JsonNode({ k, v, path, last, ctx }: { k: string | number | null; v: unk
         <div className="ms-1.5 border-s border-[var(--line)] ps-4">
           {entries.map(([kk, vv], i) => (
             <JsonNode key={kk} k={arr ? i : kk} v={vv} last={i === entries.length - 1} ctx={ctx}
-              path={arr ? `${path}[${kk}]` : path ? `${path}.${kk}` : kk} />
+              path={jvChild(path, kk, arr)} />
           ))}
         </div>
         <div className={row}>{pad}<span className="text-[var(--fg2)]">{arr ? ']' : '}'}</span>{!last && <span className="text-[var(--fg3)]">,</span>}</div>
@@ -332,12 +350,22 @@ export function JsonViewer({ data, defaultCollapsed = [], onCopyPath, maxHeight 
   { data: unknown; /** paths to start closed, e.g. ['flow.owner'] */ defaultCollapsed?: string[]; onCopyPath?: (path: string) => void; maxHeight?: number; className?: string }) {
   const [closed, setClosed] = useState(() => new Set(defaultCollapsed))
   const [q, setQ] = useState('')
-  const box = useRef<HTMLDivElement>(null)
+  const [noMatch, setNoMatch] = useState(false)
+  const box = useRef<HTMLDivElement>(null), tree = useRef<HTMLDivElement>(null)
+  // the first hit, kept in view (also while its branches animate open) until the next filter or a click in the tree
+  const jump = useRef<string | null>(null)
+  const reveal = () => {
+    if (!jump.current) return
+    const el = box.current?.querySelector<HTMLElement>(`[data-jv-path="${CSS.escape(jump.current)}"]`)
+    revealInScroller(el, { scroller: box.current }); revealInScroller(el, { axis: 'x', scroller: box.current })
+  }
+  useLayoutEffect(reveal)
+  useResizeObserver(tree, reveal)
   const toast = useToast()
   const safe = useMemo(() => jvSafe(data), [data])
   const containers = useMemo(() => {
     const out: string[] = []
-    const walk = (v: unknown, p: string) => { if (jvIsObj(v)) { if (p) out.push(p); Object.entries(v).forEach(([k, x]) => walk(x, Array.isArray(v) ? `${p}[${k}]` : p ? `${p}.${k}` : k)) } }
+    const walk = (v: unknown, p: string) => { if (jvIsObj(v)) { if (p) out.push(p); Object.entries(v).forEach(([k, x]) => walk(x, jvChild(p, k, Array.isArray(v)))) } }
     walk(safe, ''); return out
   }, [safe])
   const allClosed = containers.length > 0 && containers.every(p => closed.has(p))
@@ -348,34 +376,36 @@ export function JsonViewer({ data, defaultCollapsed = [], onCopyPath, maxHeight 
   }
   const filter = (raw: string) => {
     const s = raw.trim().toLowerCase(); setQ(s)
-    if (!s) return
+    jump.current = null
+    if (!s) { setNoMatch(false); return }
     // first key that matches, in document order
     let first: string | null = null
     const walk = (v: unknown, p: string) => {
       if (first || !jvIsObj(v)) return
-      for (const [k, x] of Object.entries(v)) { const np = Array.isArray(v) ? `${p}[${k}]` : p ? `${p}.${k}` : k; if (k.toLowerCase().includes(s)) { first = np; return } walk(x, np); if (first) return }
+      for (const [k, x] of Object.entries(v)) { const np = jvChild(p, k, Array.isArray(v)); if (k.toLowerCase().includes(s)) { first = np; return } walk(x, np); if (first) return }
     }
     walk(safe, '')
+    setNoMatch(!first)
     if (first) {
       const target: string = first
+      jump.current = target
       setClosed(c => { const n = new Set(c); [...n].forEach(p => { if (target.startsWith(p) && /^[.[]/.test(target.slice(p.length))) n.delete(p) }); return n })
-      setTimeout(() => box.current?.querySelector<HTMLElement>(`[data-jv-path="${CSS.escape(target)}"]`)?.scrollIntoView({ block: 'nearest', behavior: 'smooth' }), 340)
     }
   }
-  const ctx: JvCtx = { closed, q, copy, toggle: p => setClosed(c => { const n = new Set(c); if (n.has(p)) n.delete(p); else n.add(p); return n }) }
+  const ctx: JvCtx = { closed, q, copy, toggle: p => { jump.current = null; setClosed(c => { const n = new Set(c); if (n.has(p)) n.delete(p); else n.add(p); return n }) } }
   return (
     <div className={cn('flex flex-col gap-2.5', className)}>
       <div className="flex gap-2">
         <input placeholder={'Filter keys'} aria-label={'Filter keys'} onChange={e => filter(e.target.value)}
           className={cn(inputClass, '!h-8 min-w-0 flex-1 [@media(pointer:coarse)]:!h-10', TOUCH.input)} />
-        <Button size="sm" onClick={() => setClosed(allClosed ? new Set() : new Set(containers))} className={TOUCH.row}>{allClosed ? 'Expand all' : 'Collapse all'}</Button>
+        <Button size="sm" onClick={() => { jump.current = null; setClosed(allClosed ? new Set() : new Set(containers)) }} className={TOUCH.row}>{allClosed ? 'Expand all' : 'Collapse all'}</Button>
       </div>
+      <span role="status" className="sr-only">{noMatch ? 'No matching keys' : ''}</span>
+      {noMatch && <p aria-hidden className="m-0 text-xs text-[var(--fg3)]">{'No matching keys'}</p>}
       {/* touch: 32px rows so every key and toggle is a finger-sized target; the box scrolls both ways */}
-      {/* JSON is code: the tree reads left to right in every locale */}
-      <div ref={box} className="overflow-auto overscroll-x-contain rounded-[var(--r-md)] border border-[var(--line)] bg-[color-mix(in_srgb,var(--muted)_35%,var(--card))] px-2.5 py-2 font-[family-name:var(--mono)] text-xs leading-6 [@media(pointer:coarse)]:text-[13px] [@media(pointer:coarse)]:leading-8" style={{ maxHeight }}>
-
+      <div ref={box} onPointerDown={() => { jump.current = null }} onWheel={() => { jump.current = null }} className="overflow-auto overscroll-x-contain rounded-[var(--r-md)] border border-[var(--line)] bg-[color-mix(in_srgb,var(--muted)_35%,var(--card))] px-2.5 py-2 font-[family-name:var(--mono)] text-xs leading-6 [@media(pointer:coarse)]:text-[13px] [@media(pointer:coarse)]:leading-8" style={{ maxHeight }}>
         {/* as wide as the widest row, so long keys and values scroll with the box instead of being clipped by a branch */}
-        <div className="w-max min-w-full"><JsonNode k={null} v={safe} path="" last ctx={ctx} /></div>
+        <div ref={tree} className="w-max min-w-full"><JsonNode k={null} v={safe} path="" last ctx={ctx} /></div>
       </div>
     </div>
   )
