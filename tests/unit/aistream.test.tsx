@@ -119,7 +119,7 @@ describe('toAiChunk (AI SDK UI message stream mapping)', () => {
     expect(toAiChunk({ type: 'source-url', sourceId: 's', url: 'https://a', title: 'A' })).toEqual({ type: 'source', url: 'https://a', title: 'A', id: 's' })
     expect(toAiChunk({ type: 'data-weather', id: 'w', data: { t: 1 } })).toEqual({ type: 'data', name: 'weather', id: 'w', data: { t: 1 } })
     expect(toAiChunk({ type: 'error', errorText: 'oops' })).toEqual({ type: 'error', message: 'oops' })
-    expect(toAiChunk({ type: 'abort' })).toEqual({ type: 'finish' })
+    expect(toAiChunk({ type: 'abort' })).toEqual({ type: 'abort' })
     expect(toAiChunk({ type: 'start-step' })).toBeNull()
     expect(toAiChunk('plain')).toEqual({ type: 'text-delta', delta: 'plain' })
     expect(toAiChunk(42)).toBeNull()
@@ -296,7 +296,7 @@ describe('useAiChat', () => {
     expect(host).toHaveBeenCalledWith(expect.anything(), false)
     await waitFor(() => expect(result.current.status).toBe('ready'))
     const tool = result.current.messages[1].parts[0] as AiToolPart
-    expect(tool).toMatchObject({ state: 'error', approval: { approved: false } })
+    expect(tool).toMatchObject({ state: 'denied', approval: { approved: false } })
     expect(tool.result).toBeUndefined()
     // a second decision is ignored
     await act(async () => { await result.current.decideTool('c1', true) })

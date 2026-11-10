@@ -1,18 +1,17 @@
 import { Children, Fragment, createContext, isValidElement, useCallback, useContext, useEffect, useId, useLayoutEffect, useRef, useState, type KeyboardEvent as RKeyboardEvent, type ReactNode } from 'react'
 import { AnimatePresence, motion, useReducedMotion } from 'motion/react'
-import { Badge, Button, Chip, Icon, IconButton, Spinner, TOUCH, cn, inputClass, menuItemClass, safeColor, sleep, spring, surface, useCoarsePointer, useControllable, useMediaQuery, useOutside, useRoving, type IconName, type Tone, plural, fmt, useLive } from './core'
+import { Badge, Button, Chip, Icon, IconButton, RUN_STATUS, Spinner, TOUCH, cn, inputClass, menuItemClass, safeColor, sleep, spring, surface, useCoarsePointer, useControllable, useFlash, useLatest, useListbox, useMediaQuery, useOutside, useRoving, type IconName, type Tone, plural, fmt, useLive } from './core'
 import { Collapse, CopyButton, TypingDots, confetti, EmptyState } from './feedback'
-import { Checkbox, Switch } from './fields'
+import { Checkbox, Switch, type Option } from './fields'
+import { OptionList } from './select'
 import { Slider } from './inputs'
 import { FloatingPanel, MenuItem, MenuLabel } from './overlay'
-import { AttachmentChip, Citation, PromptInput, SendButton, SourceList, sourceDomain, ShimmerText, StreamingText, ToolCall, useAttachments, type Attachment } from './ai'
+import { AttachmentChip, Citation, PromptInput, SendButton, SourceList, attachmentRejectNote, sourceDomain, ShimmerText, StreamingText, ToolCall, useAttachments, type Attachment } from './ai'
 import { JsonViewer } from './data'
 import { useVirtual } from './virtual'
 import { Markdown, type MarkdownCodeRenderer } from './markdown'
 import { markdownCodeBlock } from './code'
-import { aiMessageText, type AiChat, type AiDataPart, type AiFilePart, type AiMessage, type AiSourcePart, type AiToolPart, type AiToolState } from './aistream'
-
-/** AssistantChat's strings, and the answer cards (ChatChecklist, ChatApproval). */
+import { aiMessageText, valueText, type AiChat, type AiDataPart, type AiFilePart, type AiMessage, type AiSourcePart, type AiToolPart, type AiToolState } from './aistream'
 
 /** How a text part is drawn: `streaming` while it grows; `renderCitation(n)` draws `[n]`; `onLinkClick` is MessageParts' own. */
 export type AiTextRenderer = (text: string, o: { streaming: boolean; renderCitation: (n: number) => ReactNode; onLinkClick?: (href: string, e: React.MouseEvent) => void }) => ReactNode
@@ -36,10 +35,8 @@ export const AI_RICH_RENDERERS: AiRenderers = { text: aiMarkdownText(markdownCod
 /** The default text renderer: Markdown, fences in its plain frame (no highlighter bundled). */
 const aiDefaultText = aiMarkdownText()
 /** The default value renderer: indented JSON (as text, never markup), capped, scrolling inside a 160px box. */
-const aiJsonValue = (v: unknown) => {
-  let s: string; try { s = typeof v === 'string' ? v : JSON.stringify(v, null, 2) ?? String(v) } catch { s = String(v) }
-  return <pre tabIndex={0} className="m-0 max-h-40 overflow-auto rounded-[var(--r-md)] border border-[var(--line)] bg-[var(--bg)] px-2 py-1.5 font-[family-name:var(--mono)] text-[11px] leading-normal break-all whitespace-pre-wrap outline-none focus-visible:shadow-[0_0_0_2px_var(--accent-soft)]">{s.length > 8000 ? s.slice(0, 8000) + '…' : s}</pre>
-}
+const aiJsonValue = (v: unknown) =>
+  <pre tabIndex={0} className="m-0 max-h-40 overflow-auto rounded-[var(--r-md)] border border-[var(--line)] bg-[var(--bg)] px-2 py-1.5 font-[family-name:var(--mono)] text-[11px] leading-normal break-all whitespace-pre-wrap outline-none focus-visible:shadow-[0_0_0_2px_var(--accent-soft)]">{valueText(v, 8000, 2)}</pre>
 
 /** Card frame for a generated answer part: title, caption, optional badge on the right. */
 export function ChatCard({ title, sub, badge, children, className }: { title?: ReactNode; sub?: ReactNode; badge?: ReactNode; children: ReactNode; className?: string }) {
@@ -61,7 +58,7 @@ export function ChatChecklist({ title, items, className }: { title: string; item
     if (next.every(Boolean) && ref.current) { const r = ref.current.getBoundingClientRect(); confetti({ x: r.left + r.width / 2, y: r.top + 20, count: 90 }) }
   }
   return (
-    <div ref={ref} className={className}><ChatCard title={title} sub={<motion.span key={left} initial={{ opacity: 0, y: -3 }} animate={{ opacity: 1, y: 0 }} className="inline-block">{left ? `${left} open` : 'All clear 🎉'}</motion.span>}>
+    <div ref={ref} className={className}><ChatCard title={title} sub={<motion.span key={left} initial={{ opacity: 0, y: -3 }} animate={{ opacity: 1, y: 0 }} className="inline-block">{left ? `${left} open` : 'All clear'}</motion.span>}>
       {items.map((it, i) => (
         <div key={it.label} className="flex flex-wrap items-center gap-x-2 gap-y-1 border-t border-[var(--line)] py-2">
           <Checkbox checked={done[i]} onChange={v => toggle(i, v)}><span className={cn('transition-colors', done[i] && 'text-[var(--fg3)] line-through')}>{it.label}</span></Checkbox>
@@ -69,31 +66,6 @@ export function ChatChecklist({ title, items, className }: { title: string; item
         </div>
       ))}
     </ChatCard></div>
-  )
-}
-
-/** Approval answer: the drafted message with Edit, Don’t send and Send; after sending, Undo. */
-export function ChatApproval({ title, to, body: initial, className }: { title: string; to: string; body: string; className?: string }) {
-  const [state, setState] = useState<'ask' | 'edit' | 'sending' | 'sent' | 'unsent' | 'declined'>('ask')
-  const [body, setBody] = useState(initial)
-  const send = async () => { setState('sending'); await sleep(900); setState('sent') }
-  return (
-    <ChatCard title={title} sub={to} className={className}>
-      {state === 'edit'
-        ? <textarea autoFocus value={body} onChange={e => setBody(e.target.value)} rows={3} aria-label={'Edit message'} className={cn(inputClass, '!h-auto mb-2.5 resize-none py-2 leading-normal shadow-[0_0_0_1.5px_var(--accent)]', TOUCH.input)} />
-        : <div className="mb-2.5 rounded-[var(--r-md)] bg-[var(--muted)] px-3 py-2.5 text-[13px] leading-normal">{body}</div>}
-      <div className="flex min-h-[30px] flex-wrap items-center justify-end gap-1.5">
-        {(state === 'ask' || state === 'edit') && <>
-          <Button size="sm" variant="ghost" onClick={() => setState(state === 'edit' ? 'ask' : 'edit')}>{state === 'edit' ? 'Done' : 'Edit'}</Button>
-          <Button size="sm" onClick={() => setState('declined')}>{'Don’t send'}</Button>
-          <Button size="sm" variant="primary" onClick={send}>{'Send'}</Button></>}
-        {state === 'sending' && <span className="me-auto flex items-center gap-2 text-xs text-[var(--fg3)]"><Spinner size={12} />{'Sending…'}</span>}
-        {state === 'sent' && <><motion.span initial={{ scale: 0.6 }} animate={{ scale: 1 }} transition={spring(0.5, 0.35)} className="me-auto"><Badge tone="ok"><Icon name="check" size={11} strokeWidth={3} />{'Sent'}</Badge></motion.span>
-          <Button size="sm" variant="ghost" onClick={() => setState('unsent')}>{'Undo'}</Button></>}
-        {state === 'unsent' && <span className="me-auto text-xs text-[var(--fg3)]">{'Unsent. Nothing left your outbox.'}</span>}
-        {state === 'declined' && <span className="me-auto text-xs text-[var(--fg3)]">{'Not sent. The draft is saved.'}</span>}
-      </div>
-    </ChatCard>
   )
 }
 
@@ -217,20 +189,6 @@ function AiJumpButton({ show, label, onJump }: { show: boolean; label: string; o
   )
 }
 
-/** AssistantChat's log: Conversation without virtualisation (pinned to the newest message, "Jump to latest"). */
-function AiChatLog({ children, busy, className, contentClassName }: { children: ReactNode; busy?: boolean; className?: string; contentClassName?: string }) {
-  const stick = useStickToBottom<HTMLDivElement>()
-  return (
-    <div className={cn('relative flex min-h-0 flex-col', className)}>
-      <div ref={stick.ref} role="log" aria-live="off" aria-busy={busy || undefined} aria-label={'Conversation'} tabIndex={0}
-        className="min-h-0 flex-1 overflow-y-auto overscroll-contain rounded-[var(--r-md)] outline-none focus-visible:shadow-[0_0_0_2px_var(--accent-soft)]">
-        <div className={cn('flex flex-col gap-3 p-0.5', contentClassName)}>{children}</div>
-      </div>
-      <AiJumpButton show={!stick.pinned} label={'Jump to latest'} onJump={() => stick.jump()} />
-    </div>
-  )
-}
-
 /** Suggestion chips (starters, follow-ups). A group named by `label`; each chip calls `onPick(text)`. */
 export function Suggestions({ items, onPick, label, disabled, className }: { items: string[]; onPick: (s: string) => void; label?: string; disabled?: boolean; className?: string }) {
   if (!items.length) return null
@@ -286,16 +244,14 @@ export function Reasoning({ text, streaming, defaultOpen, className }: { text: s
     <div className={cn(surface.card, 'overflow-hidden text-[13px]', className)}>
       <button type="button" aria-expanded={open} onClick={() => setUser(!open)} className="flex w-full cursor-pointer items-center gap-2 border-0 bg-transparent px-3 py-2 text-start font-medium text-[var(--fg2)] hover:text-[var(--fg)] [@media(pointer:coarse)]:min-h-10">
         <Icon name="bulb" size={14} />
-        {streaming ? <ShimmerText>{'Thinking…'} <span className="tabular-nums">{`${fmt.number(live, { minimumFractionDigits: 1, maximumFractionDigits: 1 })}s`}</span></ShimmerText>
-          : <span>{secs != null ? `Thought for ${fmt.number(Math.max(1, Math.round(secs)))}s` : 'Reasoning'}</span>}
+        {streaming ? <ShimmerText>{'Thinking…'} <span className="tabular-nums">{fmt.seconds(live)}</span></ShimmerText>
+          : <span>{secs != null ? `Thought for ${fmt.seconds(Math.max(1, Math.round(secs)), 0)}` : 'Reasoning'}</span>}
         <motion.span className="ms-auto grid text-[var(--fg3)]" animate={{ rotate: open ? 0 : -90 }} transition={spring(0.2, 0.3)}><Icon name="chevronDown" size={12} strokeWidth={2.5} /></motion.span>
       </button>
       <Collapse open={open}><div className="border-t border-[var(--line)] px-3 py-2 text-xs leading-relaxed whitespace-pre-wrap text-[var(--fg2)]">{text}</div></Collapse>
     </div>
   )
 }
-
-const acArgText = (v: unknown) => { let t: string; try { t = typeof v === 'string' ? v : JSON.stringify(v) ?? String(v) } catch { t = String(v) } return t.length > 160 ? t.slice(0, 157) + '…' : t }
 
 /**
  * An approval prompt for an action the host wants to run: the tool, a summary, recipients and arguments exactly as
@@ -315,7 +271,7 @@ export function ApprovalCard({ tool, summary, args, recipients, demo, busy, onDe
         <code className="rounded-[var(--r-sm)] bg-[var(--muted)] px-1.5 font-[family-name:var(--mono)] text-[11px] break-all">{tool}</code>{demo && <Badge>{'demo'}</Badge>}</div>
       {summary && <span className="break-words">{summary}</span>}
       {!!recipients?.length && <span className="text-xs text-[var(--fg2)]">{`To: ${fmt.list(recipients)}`}</span>}
-      {rows.length > 0 && <dl className="m-0 grid grid-cols-[auto_minmax(0,1fr)] gap-x-2 gap-y-0.5 text-xs">{rows.flatMap(([k, v]) => [<dt key={`k${k}`} className="font-[family-name:var(--mono)] text-[var(--fg3)]">{k}</dt>, <dd key={`v${k}`} className="m-0 break-words text-[var(--fg2)]">{acArgText(v)}</dd>])}</dl>}
+      {rows.length > 0 && <dl className="m-0 grid grid-cols-[auto_minmax(0,1fr)] gap-x-2 gap-y-0.5 text-xs">{rows.flatMap(([k, v]) => [<dt key={`k${k}`} className="font-[family-name:var(--mono)] text-[var(--fg3)]">{k}</dt>, <dd key={`v${k}`} className="m-0 break-words text-[var(--fg2)]">{valueText(v, 160)}</dd>])}</dl>}
       <div className="flex justify-end gap-2">
         <Button size="sm" disabled={busy} onClick={() => onDecide(false)}>{'Deny'}</Button>
         <Button size="sm" variant="primary" disabled={!armed || busy} loading={busy} onClick={() => onDecide(true)}>{'Approve'}</Button>
@@ -324,12 +280,27 @@ export function ApprovalCard({ tool, summary, args, recipients, demo, busy, onDe
   )
 }
 
-const AI_TOOL_BADGE: Record<AiToolState, [string, Tone | undefined]> = { pending: ['Preparing', undefined], running: ['Running', 'accent'], 'awaiting-approval': ['Needs approval', 'warn'], done: ['Done', 'ok'], error: ['Failed', 'bad'] }
+/** How each tool-call state looks: its badge (RUN_STATUS where the state is a run state) and its glyph (null: a spinner). */
+const AI_TOOL_STATUS = {
+  pending: { label: 'Preparing', tone: 'neutral', icon: null, color: '' },
+  running: { label: RUN_STATUS.running.label, tone: RUN_STATUS.running.tone, icon: null, color: '' },
+  'awaiting-approval': { label: 'Needs approval', tone: 'warn', icon: 'shield', color: 'text-[var(--warn)]' },
+  approved: { label: 'Approved', tone: 'accent', icon: 'check', color: 'text-[var(--fg3)]' },
+  denied: { label: 'Denied', tone: 'neutral', icon: 'x', color: 'text-[var(--fg3)]' },
+  done: { label: 'Done', tone: RUN_STATUS.ok.tone, icon: 'check', color: 'text-[var(--ok)]' },
+  error: { label: RUN_STATUS.error.label, tone: RUN_STATUS.error.tone, icon: 'x', color: 'text-[var(--bad)]' },
+} as const satisfies Record<AiToolState, { label: string; tone: Tone; icon: IconName | null; color: string }>
+
+function AiToolGlyph({ state }: { state: AiToolState }) {
+  const s = AI_TOOL_STATUS[state]
+  return <span className="grid w-3 flex-none place-items-center">{s.icon ? <Icon name={s.icon} size={12} strokeWidth={s.icon === 'shield' ? undefined : 3} className={s.color} /> : <Spinner size={12} />}</span>
+}
 
 /**
  * A tool call from a message: status icon, tool name and state, and (click to open) its arguments and result, as data
- * (indented JSON, or `renderValue`, e.g. `v => <JsonViewer data={v} />`). While it awaits approval it shows an ApprovalCard; `onDecide` gets the decision (useAiChat's
- * `decideTool`). A denied call says so and never shows a result.
+ * (indented JSON, or `renderValue`, e.g. `v => <JsonViewer data={v} />`). While it awaits approval it shows an
+ * ApprovalCard; `onDecide` gets the decision (useAiChat's `decideTool`). An approved call that has not reported back
+ * reads "Approved"; a denied call says so and never shows a result.
  */
 export function ToolCard({ part, onDecide, defaultOpen = false, renderValue, className }:
   { part: AiToolPart; onDecide?: (approved: boolean) => void; defaultOpen?: boolean; /** arguments and result (default: indented JSON) */ renderValue?: (value: unknown) => ReactNode; className?: string }) {
@@ -338,15 +309,15 @@ export function ToolCard({ part, onDecide, defaultOpen = false, renderValue, cla
   const [busy, setBusy] = useState(false)
   useEffect(() => { if (part.state !== 'awaiting-approval') setBusy(false) }, [part.state])
   const denied = part.approval?.approved === false
-  const [label, tone] = denied ? ['Denied', undefined] as const : AI_TOOL_BADGE[part.state]
+  const state: AiToolState = denied ? 'denied' : part.state
+  const { label, tone } = AI_TOOL_STATUS[state]
   const args = part.args !== undefined ? part.args : part.argsText
-  const working = part.state === 'running' || part.state === 'pending'
+  const working = state === 'running' || state === 'pending'
   return (
     <div className={cn('overflow-hidden rounded-[var(--r-md)] border border-[var(--line)] text-xs', className)}>
       <button type="button" aria-expanded={open} onClick={() => setOpen(!open)}
         className="flex w-full cursor-pointer items-center gap-2 border-0 bg-[var(--muted)] px-2.5 py-2 text-start text-[var(--fg2)] [@media(pointer:coarse)]:min-h-10">
-        <span className="grid w-3 flex-none place-items-center">{working ? <Spinner size={12} /> : part.state === 'awaiting-approval' ? <Icon name="shield" size={12} className="text-[var(--warn)]" />
-          : <Icon name={part.state === 'done' ? 'check' : 'x'} size={12} strokeWidth={3} className={part.state === 'done' ? 'text-[var(--ok)]' : 'text-[var(--bad)]'} />}</span>
+        <AiToolGlyph state={state} />
         <ShimmerText active={working} className="min-w-0 truncate font-[family-name:var(--mono)]">{part.name}</ShimmerText>
         <Badge size="sm" tone={tone} className="ms-auto flex-none">{label}</Badge>
         <motion.span className="grid flex-none text-[var(--fg3)]" animate={{ rotate: open ? 90 : 0 }} transition={spring(0.2, 0.3)}><Icon name="chevronRight" size={11} strokeWidth={2.5} /></motion.span>
@@ -355,7 +326,8 @@ export function ToolCard({ part, onDecide, defaultOpen = false, renderValue, cla
         <div className="flex flex-col gap-2 p-2.5">
           {args !== undefined && <div><div className="mb-1 text-[11px] font-medium text-[var(--fg3)]">{'Arguments'}</div>{show(args)}</div>}
           {part.state === 'done' && !denied && <div><div className="mb-1 text-[11px] font-medium text-[var(--fg3)]">{'Result'}</div>{show(part.result ?? null)}</div>}
-          {part.state === 'error' && <div className="text-[var(--bad)]">{part.error || 'The tool failed.'}</div>}
+          {state === 'error' && <div className="text-[var(--bad)]">{part.error || 'The tool failed.'}</div>}
+          {state === 'denied' && <div className="text-[var(--fg2)]">{'Denied. The tool was not run.'}</div>}
         </div>
       </Collapse>
       {part.state === 'awaiting-approval' && onDecide && (
@@ -365,8 +337,9 @@ export function ToolCard({ part, onDecide, defaultOpen = false, renderValue, cla
   )
 }
 
-/** The person's chat bubble: a tail on the inline-end bottom corner, so it mirrors with the page direction. */
-const AI_USER_BUBBLE = 'rounded-[14px] rounded-ee-[4px] bg-[var(--primary)] px-3 py-2 text-[13px] leading-normal break-words whitespace-pre-wrap text-[var(--on-primary)]'
+/** The person's chat bubble, its tail on the end-bottom corner: `primary` (AssistantChat, Message) or `muted` (AgentComposer). */
+const aiUserBubble = (tone: 'primary' | 'muted' = 'primary') => cn('rounded-[14px] rounded-ee-[4px] px-3 py-2 text-[13px] leading-normal break-words whitespace-pre-wrap',
+  tone === 'primary' ? 'bg-[var(--primary)] text-[var(--on-primary)]' : 'bg-[var(--muted)]')
 
 /** The numbered source chips under an answer (the same numbers as its [n] citations). */
 function AiMessageSources({ sources }: { sources: AiSourcePart[] }) {
@@ -429,7 +402,7 @@ export function Message({ message, name, avatar, actions, onDecideTool, onRetry,
     return (
       <motion.div initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }} transition={spring(0.25, 0.4)} className={cn('flex max-w-[85%] flex-col items-end gap-1.5 self-end', className)}>
         {files.length > 0 && <div className="flex flex-wrap justify-end gap-1.5">{files.map((f, i) => <AttachmentChip key={i} name={f.name} size={f.size} url={/^image\//.test(f.mediaType) ? f.url : null} />)}</div>}
-        {text && <div className={AI_USER_BUBBLE}>{text}</div>}
+        {text && <div className={aiUserBubble()}>{text}</div>}
       </motion.div>
     )
   }
@@ -454,40 +427,37 @@ export type ChatScript = {
 export type SlashCommand = { cmd: string; prompt: string; hint: string }
 type ChatTurn = { id: number; q: string; s: ChatScript; phase: 'dots' | 'tool' | 'stream' | 'done'; v: number; run: number; stopped: boolean; shown: string; rating: 0 | 1 | -1 }
 
-/** AssistantChat's input: a pill text field with `/` commands in a keyboard popup, and Send / Stop. */
+/**
+ * AssistantChat's input: a pill text field with `/` commands in a listbox popup (matched case-insensitively; text after
+ * the command is kept as its argument), and Send / Stop.
+ */
 function AiSlashInput({ commands, placeholder, busy, onSend, onStop }: { commands: SlashCommand[]; placeholder: string; busy: boolean; onSend: (q: string) => void; onStop: () => void }) {
   const [text, setText] = useState('')
-  const [slashOpen, setSlashOpen] = useState(true)
-  const listId = useId()
-  const matches = text.startsWith('/') ? commands.filter(c => c.cmd.startsWith(text.split(' ')[0].toLowerCase())) : []
-  const popup = slashOpen && matches.length > 0
-  const ask = (q: string) => { if (!q.trim() || busy) return; setText(''); onSend(q.trim()) }
-  const go = (c: SlashCommand) => { setText(''); ask(c.prompt) }
-  const roving = useRoving(matches.length, i => go(matches[i]), { homeEnd: false })
+  const [open, setOpen] = useState(true)
+  const word = text.startsWith('/') ? text.split(/\s/, 1)[0].toLowerCase() : ''
+  const arg = word ? text.slice(word.length).trim() : ''
+  const matches = word ? commands.filter(c => c.cmd.toLowerCase().startsWith(word)) : []
+  const popup = open && matches.length > 0
+  const ask = (q: string) => { q = q.trim(); if (!q || busy) return; setText(''); onSend(q) }
+  const go = (c: SlashCommand) => ask(arg ? `${c.prompt} ${arg}` : c.prompt)
+  const options: Option[] = matches.map(c => ({ value: c.cmd, label: c.cmd, hint: c.hint }))
+  const lb = useListbox(options, i => go(matches[i]), { open: popup, setOpen, input: true })
+  const active = Math.min(lb.active, Math.max(0, matches.length - 1))
   return (
     <div className="relative">
       {/* sized for the full command list, so filtering never makes the panel above the field jump */}
       <FloatingPanel open={popup} placement="top-start" flip={false} role="presentation" style={{ minHeight: `min(${40 + commands.length * 36}px, 300px, 45dvh)` }} className="max-h-[min(300px,45dvh)] w-[min(280px,calc(100vw-32px))] overflow-y-auto overscroll-contain">
         <MenuLabel className="font-semibold tracking-wide uppercase">{'Commands'}</MenuLabel>
-        <div role="listbox" id={listId} aria-label={'Commands'} className="flex flex-col">
-          {matches.map((c, i) => (
-            <div key={c.cmd} id={`${listId}-${i}`} role="option" aria-selected={i === roving.active} data-active={i === roving.active}
-              onPointerEnter={() => roving.setActive(i)} onMouseDown={e => e.preventDefault()} onClick={() => go(c)} className={cn(menuItemClass, '[@media(pointer:coarse)]:min-h-11')}>
-              <span className="font-[family-name:var(--mono)] text-xs"><b className="font-semibold">{c.cmd.slice(0, text.split(' ')[0].length)}</b>{c.cmd.slice(text.split(' ')[0].length)}</span>
-              <span className="min-w-0 truncate text-xs text-[var(--fg3)]">{c.hint}</span>
-            </div>))}
-        </div>
+        <OptionList id={lb.id} label={'Commands'} options={options} active={active} query={word} isSelected={() => false} onPick={i => go(matches[i])} onHover={lb.setActive} />
       </FloatingPanel>
       <div className="flex items-center gap-2 rounded-full border border-[var(--line)] bg-[var(--card)] py-1 pe-1 ps-4 focus-within:border-[var(--fg3)]">
-        <input value={text} placeholder={placeholder} aria-label={'Message'} autoComplete="off" role="combobox" aria-expanded={popup} aria-autocomplete="list"
-          aria-controls={popup ? listId : undefined} aria-activedescendant={popup ? `${listId}-${roving.active}` : undefined}
-          onChange={e => { setText(e.target.value); setSlashOpen(true) }} onBlur={() => setTimeout(() => setSlashOpen(false), 150)} onFocus={() => setSlashOpen(true)}
+        <input value={text} placeholder={placeholder} aria-label={'Message'} autoComplete="off" {...lb.comboProps}
+          onChange={e => { setText(e.target.value); setOpen(true) }} onBlur={() => setOpen(false)} onFocus={() => setOpen(true)}
           onKeyDown={e => {
             if (e.nativeEvent.isComposing) return // Enter that confirms an IME candidate must not send
             if (popup) {
-              if (e.key === 'Tab') { e.preventDefault(); go(matches[roving.active]); return }
-              if (e.key === 'Escape') { e.stopPropagation(); setSlashOpen(false); return }
-              roving.onKeyDown(e); return
+              if (e.key === 'Tab' && !e.shiftKey) { e.preventDefault(); go(matches[active]); return }
+              lb.onKeyDown(e); return
             }
             if (e.key === 'Enter') { e.preventDefault(); ask(text) }
           }}
@@ -498,35 +468,42 @@ function AiSlashInput({ commands, placeholder, busy, onSend, onStop }: { command
   )
 }
 
+/** Announces a chat's progress through `say` (useLive) once per status change: thinking, failed, the finished answer's opening. Never per token. */
+function useChatAnnouncer(chat: Pick<AiChat, 'status' | 'messages'> | undefined, say: (text: string) => void) {
+  const status = chat?.status, prev = useRef(status)
+  const messages = useLatest(chat?.messages)
+  useEffect(() => {
+    if (prev.current === status) return
+    prev.current = status
+    const ms = messages.current, last = ms?.[ms.length - 1]
+    if (status === 'submitted') say('Assistant is thinking…')
+    else if (status === 'error') say('The reply failed')
+    else if (status === 'ready' && last?.role === 'assistant') say(last.stopped ? 'Stopped' : `Assistant: ${valueText(aiMessageText(last), 300)}`)
+  }, [status, messages, say])
+}
+
 /** AssistantChat over useAiChat: the same frame, with real streamed parts. */
 function AiLiveChat({ chat, starters, commands, placeholder, renderers, className }: { chat: AiChat; starters: string[]; commands: SlashCommand[]; placeholder: string; renderers?: AiRenderers; className?: string }) {
   const { messages, busy } = chat
-  const [setSaid, live] = useLive()
-  const prev = useRef(chat.status)
-  useEffect(() => { // announce a short summary once, not every token
-    if (prev.current !== chat.status) {
-      const last = messages[messages.length - 1]
-      if (chat.status === 'submitted') setSaid('Assistant is thinking…')
-      else if (chat.status === 'error') setSaid('The reply failed')
-      else if (chat.status === 'ready' && last?.role === 'assistant') setSaid(last.stopped ? 'Stopped' : `Assistant: ${aiMessageText(last).slice(0, 300)}`)
-      prev.current = chat.status
-    }
-  }, [chat.status, messages]) // eslint-disable-line react-hooks/exhaustive-deps
+  const [say, live] = useLive()
+  useChatAnnouncer(chat, say)
   const lastAssistant = messages.reduce((k, m, i) => m.role === 'assistant' ? i : k, -1)
   return (
     <div className={cn('flex flex-col gap-2.5', className)}>
       {live}
-      <AiChatLog busy={busy} className="h-[min(420px,62dvh)]" contentClassName="!gap-2.5">
-        {!messages.length && <Suggestions items={starters} onPick={q => chat.submit(q)} />}
+      <Conversation busy={busy} className="h-[min(420px,62dvh)]" contentClassName="!gap-2.5">
+        {!messages.length && <Suggestions key="starters" items={starters} onPick={q => chat.submit(q)} />}
         {messages.map((m, i) => (
           <Message key={m.id} message={m} renderers={renderers} onDecideTool={chat.decideTool} onRetry={i === lastAssistant ? chat.regenerate : undefined}
-            actions={m.role === 'assistant' && <MessageActions text={() => aiMessageText(m)} stopped={m.stopped} onRetry={i === lastAssistant ? chat.regenerate : undefined} retryLabel={m.stopped || m.status === 'error' ? 'Retry' : 'Regenerate'} disabled={busy} />} />
+            actions={m.role === 'assistant' && <MessageActions text={() => aiMessageText(m)} stopped={m.stopped} onRetry={i === lastAssistant ? chat.regenerate : undefined} retryLabel={aiRetryLabel(m)} disabled={busy} />} />
         ))}
-      </AiChatLog>
+      </Conversation>
       <AiSlashInput commands={commands} placeholder={placeholder} busy={busy} onSend={q => chat.submit(q)} onStop={chat.stop} />
     </div>
   )
 }
+/** "Retry" for a reply that was cut short or failed, else "Regenerate". */
+const aiRetryLabel = (m: AiMessage) => m.stopped || m.truncated || m.status === 'error' ? 'Retry' : 'Regenerate'
 
 /**
  * Rich assistant chat. Starter chips, `/` commands with a keyboard popup, a log that stays pinned to the newest answer
@@ -583,7 +560,7 @@ function AiScriptedChat({ starters, commands, respond, defaultTurns, placeholder
   return (
     <div className={cn('flex flex-col gap-2.5', className)}>
       {live}
-      <AiChatLog busy={streaming} className="h-[min(420px,62dvh)]" contentClassName="!gap-2.5">
+      <Conversation busy={streaming} virtualizeAfter={Infinity} className="h-[min(420px,62dvh)]" contentClassName="!gap-2.5">
         <AnimatePresence>
           {!turns.length && starters.length > 0 && (
             <motion.div key="starters" exit={{ opacity: 0, y: -6, transition: { duration: 0.15 } }}><Suggestions items={starters} onPick={ask} /></motion.div>
@@ -594,7 +571,7 @@ function AiScriptedChat({ starters, commands, respond, defaultTurns, placeholder
           return (
             <div key={turn.id} className="flex flex-col gap-2.5">
               <motion.div initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }} transition={spring(0.25, 0.4)}
-                className={cn(AI_USER_BUBBLE, 'max-w-[80%] self-end')}>{turn.q}</motion.div>
+                className={cn(aiUserBubble(), 'max-w-[80%] self-end')}>{turn.q}</motion.div>
               <motion.div initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }} transition={spring(0.25, 0.4)} className="max-w-[92%] text-[13px]">
                 <div className="mb-1 flex items-center gap-1.5 text-xs font-medium text-[var(--fg3)]"><i className="h-2 w-2 rounded-full bg-[var(--accent)]" />{'Assistant'}</div>
                 {turn.phase === 'dots' ? <TypingDots /> : <>
@@ -622,7 +599,7 @@ function AiScriptedChat({ starters, commands, respond, defaultTurns, placeholder
             </div>
           )
         })}
-      </AiChatLog>
+      </Conversation>
       <AiSlashInput commands={commands} placeholder={placeholder} busy={busy} onSend={ask} onStop={stop} />
     </div>
   )
@@ -630,7 +607,8 @@ function AiScriptedChat({ starters, commands, respond, defaultTurns, placeholder
 
 export type ComposerMode = { id: string; label: string; desc: string; icon: IconName; tone: Tone }
 export type Connector = { name: string; desc: string; color: string; on: boolean }
-export type ComposerModel = { name: string; vendor: string; speeds: string[]; efforts: string[] }
+/** A model in the settings panel: its speed and effort steps, and (scripted replies) ms per revealed word for each speed (default 45). */
+export type ComposerModel = { name: string; vendor: string; speeds: string[]; efforts: string[]; wordDelay?: Record<string, number> }
 export type WorkspaceItem = { label: string; title: string; sub: string; icon: string }
 
 /** The default permission modes. */
@@ -641,9 +619,6 @@ const AC_MODES: ComposerMode[] = [
 ]
 /** Used when no `models` are passed: one model with one speed and effort. */
 const AC_MODELS: ComposerModel[] = [{ name: 'Default model', vendor: 'Assistant', speeds: ['Normal'], efforts: ['Medium'] }]
-/** Demo-only fallback for `needsApproval`: a word match over the person's text. Real apps return `needsApproval` from onSend. */
-const AC_RISKY = /send|email|remind|create|open|post|deploy|delete/i
-const AC_DEMO_NEEDS_APPROVAL = (text: string) => AC_RISKY.test(text)
 const AC_NONE: WorkspaceItem[] = [], AC_NO_CONNECTORS: Connector[] = [], AC_NO_SAMPLES: ComposerSample[] = []
 /** Most messages kept in the conversation and in the follow-up queue (older messages drop off the top). */
 const AC_MAX_MSGS = 200, AC_MAX_QUEUE = 10, AC_MAX_FILES = 20
@@ -664,11 +639,21 @@ export type ComposerSample = { title: string; desc: string; files: () => File[] 
 
 type AcFile = Attachment
 type AcDraft = { id: number; text: string; files: AcFile[]; ctx: string[] }
-/** ok / no: the host confirmed the action ran / didn't run; ok? / no?: the host didn't confirm (or there is no host action). */
-type AcApproval = 'busy' | 'ok' | 'ok?' | 'no' | 'no?'
-type AcMsg = { id: number; role: 'u' | 'a'; d?: AcDraft; q?: string; text?: string; model?: string; mode?: ComposerMode; phase?: 'wait' | 'stream' | 'approve' | 'done'; note?: string
-  action?: ComposerAction; demo?: boolean; approval?: AcApproval }
-const AC_APPROVAL_TEXT = { ok: '✓ Approved. The action ran.', 'ok?': 'Approved. The app hasn’t confirmed that the action ran.', no: 'Not approved. The action was not run.', 'no?': 'Not approved. The app hasn’t confirmed whether anything ran.' } as const satisfies Record<Exclude<AcApproval, 'busy'>, string>
+/** `confirmed`: the host said the action ran (approved) or that nothing ran (denied). */
+type AcApproval = 'busy' | { approved: boolean; confirmed: boolean }
+type AcMsg = { id: number; role: 'u' | 'a'; d: AcDraft; text?: string; model?: string; mode?: ComposerMode; phase?: 'wait' | 'stream' | 'approve' | 'done' | 'error'
+  error?: string; action?: ComposerAction; demo?: boolean; approval?: AcApproval }
+const acApprovalText = ({ approved, confirmed }: { approved: boolean; confirmed: boolean }) => approved
+  ? confirmed ? 'Approved. The action ran.' : 'Approved. The app hasn’t confirmed that the action ran.'
+  : confirmed ? 'Not approved. The action was not run.' : 'Not approved. The app hasn’t confirmed whether anything ran.'
+/** The status slot before Send. */
+const AC_STATUS = {
+  working: { dot: 'bg-[var(--warn)]', pulse: true },
+  queued: { dot: 'bg-[var(--accent)]', pulse: false },
+  input: { dot: 'bg-[var(--bad)]', pulse: false },
+  note: { dot: 'bg-[var(--fg3)]', pulse: false },
+} as const
+type AcStatus = keyof typeof AC_STATUS | 'idle'
 // keep the closest step when the new model has a different enum
 const acNearest = (list: string[], prev: string, prevList: string[]) => list.includes(prev) ? prev : list[Math.round((Math.max(0, prevList.indexOf(prev)) / Math.max(1, prevList.length - 1)) * (list.length - 1))] ?? list[0]
 
@@ -740,25 +725,49 @@ function AcStepSlider({ title, list, value, onChange, single }: { title: string;
   return <Slider label={title} steps={list} value={Math.max(0, list.indexOf(value))} onChange={i => onChange(list[i])} />
 }
 
-/** The person's message in AgentComposer: a muted bubble with its tail on the right. */
-const AC_USER_BUBBLE = 'rounded-[16px] rounded-ee-[4px] bg-[var(--muted)] px-3 py-2 text-[13px] leading-normal break-words whitespace-pre-wrap'
-/** One message of AgentComposer's log when it runs on useAiChat: the composer's user bubble (with its context chips), or the assistant's streamed parts. */
+const AC_IN = { initial: { opacity: 0, y: 10 }, animate: { opacity: 1, y: 0 }, transition: spring(0.3, 0.35) }
+/** The person's message in AgentComposer: its context chips and file names, then the text in a muted bubble. */
+function AcUserBubble({ text, ctx, files }: { text: string; ctx: string[]; files: string[] }) {
+  return (
+    <motion.div {...AC_IN} className="flex max-w-[82%] flex-col items-end gap-1 self-end">
+      {(ctx.length > 0 || files.length > 0) && <div className="flex flex-wrap justify-end gap-1">{ctx.map(c => <Badge key={c} tone="accent">{c}</Badge>)}
+        {files.map((f, i) => <Badge key={i}><Icon name="paperclip" size={11} />{f}</Badge>)}</div>}
+      {text && <div className={aiUserBubble('muted')}>{text}</div>}
+    </motion.div>
+  )
+}
+/** One message of AgentComposer's log when it runs on useAiChat: the composer's user bubble, or the assistant's streamed parts. */
 function AcLiveMessage({ m, chat, renderers }: { m: AiMessage; chat: AiChat; renderers?: AiRenderers }) {
   if (m.role === 'user') {
     const ctx = Array.isArray(m.metadata?.context) ? (m.metadata!.context as unknown[]).map(String) : []
-    const files = m.parts.filter((p): p is AiFilePart => p.type === 'file'), text = aiMessageText(m)
-    return (
-      <motion.div initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }} transition={spring(0.3, 0.35)} className="flex max-w-[82%] flex-col items-end gap-1 self-end">
-        {(ctx.length > 0 || files.length > 0) && <div className="flex flex-wrap justify-end gap-1">{ctx.map(c => <Badge key={c} tone="accent">{c}</Badge>)}{files.map((f, i) => <Badge key={i}>📎 {f.name}</Badge>)}</div>}
-        {text && <div className={AC_USER_BUBBLE}>{text}</div>}
-      </motion.div>
-    )
+    return <AcUserBubble text={aiMessageText(m)} ctx={ctx} files={m.parts.filter((p): p is AiFilePart => p.type === 'file').map(f => f.name)} />
   }
   const last = chat.messages[chat.messages.length - 1]?.id === m.id
   return (
-    <motion.div initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }} transition={spring(0.3, 0.35)} className="flex max-w-[88%] min-w-0 flex-col gap-1.5 px-0.5">
+    <motion.div {...AC_IN} className="flex max-w-[88%] min-w-0 flex-col gap-1.5 px-0.5">
       <MessageParts message={m} renderers={renderers} onDecideTool={chat.decideTool} onRetry={last ? chat.regenerate : undefined} />
-      {m.status !== 'streaming' && <MessageActions text={() => aiMessageText(m)} stopped={m.stopped} feedback={false} onRetry={last ? chat.regenerate : undefined} retryLabel={m.stopped || m.status === 'error' ? 'Retry' : 'Regenerate'} disabled={chat.busy} />}
+      {m.status !== 'streaming' && <MessageActions text={() => aiMessageText(m)} stopped={m.stopped} feedback={false} onRetry={last ? chat.regenerate : undefined} retryLabel={aiRetryLabel(m)} disabled={chat.busy} />}
+    </motion.div>
+  )
+}
+/** A scripted reply in AgentComposer's log: model and mode, the text as it streams, the approval card and its outcome, or the error with Retry. */
+function AcReply({ m, wordDelay, busy, onStreamed, onDecide, onRetry }:
+  { m: AcMsg; wordDelay: number; busy: boolean; onStreamed: () => void; onDecide: (ok: boolean) => void; onRetry: () => void }) {
+  const a = m.approval
+  return (
+    <motion.div {...AC_IN} className="flex max-w-[82%] flex-col gap-1.5">
+      <div className="flex flex-wrap gap-1"><Badge>{m.model}</Badge><Badge tone={m.mode!.tone}>{m.mode!.label}</Badge></div>
+      {m.phase === 'error'
+        ? <div role="alert" className="flex flex-wrap items-center gap-2 rounded-[var(--r-md)] border border-[color-mix(in_srgb,var(--bad)_35%,var(--line))] bg-[var(--bad-soft)] px-3 py-2 text-[13px]">
+            <Icon name="alert" size={14} className="text-[var(--bad)]" /><span className="min-w-0 flex-1 break-words">{m.error}</span>
+            <Button size="sm" disabled={busy} onClick={onRetry}>{'Retry'}</Button>
+          </div>
+        : <div className="px-0.5 text-[13px] leading-normal">
+            {m.phase === 'wait' ? <TypingDots /> : m.phase === 'stream' ? <StreamingText text={m.text!} wordDelay={wordDelay} onDone={onStreamed} /> : m.text}
+          </div>}
+      {m.phase === 'approve' && m.action && <ApprovalCard tool={m.action.tool} summary={m.action.summary} args={m.action.args} recipients={m.action.recipients} demo={m.demo} busy={a === 'busy'} onDecide={onDecide} />}
+      {a && a !== 'busy' && <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} className={cn('flex items-center gap-1.5 rounded-[var(--r-md)] border px-3 py-2 text-[13px]', a.approved && a.confirmed ? 'border-[color-mix(in_srgb,var(--ok)_35%,var(--line))] bg-[var(--ok-soft)] text-[var(--ok)]' : 'border-[var(--line)] bg-[var(--muted)] text-[var(--fg2)]')}>
+        {a.approved && a.confirmed && <Icon name="check" size={13} strokeWidth={3} />}{acApprovalText(a)}</motion.div>}
     </motion.div>
   )
 }
@@ -766,27 +775,29 @@ function AcLiveMessage({ m, chat, renderers }: { m: AiMessage; chat: AiChat; ren
 /**
  * Agent composer that doubles as a control panel. A workspace beside it (`items`, `doc`) adds context (click an item, or
  * select text and "Add to chat"; on phones it folds into a toggle and the bar shows icons only, its panels spanning the
- * composer). Attach with +, drag and drop or paste (file chips with upload progress). Pick a permission mode, toggle
- * connectors, choose the model with per-model speed/effort steps, and open advanced settings.
+ * composer). Attach with +, drag and drop or paste (files it can't take are named in the status slot). Pick a permission
+ * mode, toggle connectors, choose the model with per-model speed/effort steps, and open advanced settings.
  *
  * `onSend(text, files, context, meta)` runs for each message (queued ones when their turn comes). Return the reply text
- * (or a promise of it) to stream it in the conversation; return nothing to only show the message. While a reply streams,
- * new messages queue as follow-ups (up to 10). The empty hero glides into the conversation on first send.
+ * (or a promise of it) to stream it in the conversation; return nothing to only show the message. A throw or a rejected
+ * promise shows the error with Retry and calls `onError`. While a reply streams, new messages queue as follow-ups (up to
+ * 10). The empty hero glides into the conversation on first send. The log stays pinned to the newest reply unless the
+ * person scrolls up ("Jump to latest" brings it back).
  *
  * Approvals come from the host: return `{ text, needsApproval: { tool, summary, args, recipients } }` from onSend
  * WITHOUT running the action. The card shows that action as given; on Approve or Deny the composer awaits
  * `onApprovalRequest(action, approved)`, where the host runs the action only if approved and resolves true when it ran
  * (approve) or to confirm nothing ran (deny). Without that confirmation the card says so instead of claiming an outcome.
- * `needsApproval` (a text test, default: a word match for send, email, create, deploy…) is a demo fallback only: it
- * applies when onSend returns a plain string in "Ask for approval" mode, after onSend already ran, so it can't stop anything.
+ * `needsApproval(text)` (off by default) adds a card to plain-string replies in "Ask for approval" mode; it runs after
+ * onSend, so it can't stop anything: use it only for demos.
  *
  * Real model: pass `chat` from useAiChat instead of onSend. Replies stream in as parts (`renderers` as in MessageParts,
  * e.g. AI_RICH_RENDERERS for Markdown), tool calls that need approval show the same card and wait for `chat.decideTool`
  * (run the tool in useAiChat's `onApprovalRequest`), and with an empty composer the send button stops the reply.
  * Advanced settings (creativity, memory, citations, web search) open inside the model-settings panel.
  */
-export function AgentComposer({ chat: live, onSend, onApprovalRequest, items = AC_NONE, doc, modes: modesProp, connectors = AC_NO_CONNECTORS, models: modelsProp, samples = AC_NO_SAMPLES,
-  needsApproval = AC_DEMO_NEEDS_APPROVAL, hero, hint, renderers, onAddConnector, className }:
+export function AgentComposer({ chat: live, onSend, onApprovalRequest, onError, items = AC_NONE, doc, modes: modesProp, connectors = AC_NO_CONNECTORS, models: modelsProp, samples = AC_NO_SAMPLES,
+  needsApproval, hero, hint, renderers, onAddConnector, className }:
   { /**
      * A real chat from useAiChat. Each message goes to `chat.submit(text, files, { metadata: { context, mode, settings, connectors } })`
      * (onSend is not called), replies render as streamed parts, tool approvals use the chat's `decideTool`, and Send
@@ -796,17 +807,19 @@ export function AgentComposer({ chat: live, onSend, onApprovalRequest, items = A
     onSend?: (text: string, files: File[], context: string[], meta: ComposerSendMeta) => string | ComposerReply | void | Promise<string | ComposerReply | void>
     /** The person approved or denied `action` (from onSend's needsApproval). Run it now only if approved; resolve true when it ran (approve) or to confirm nothing ran (deny). */
     onApprovalRequest?: (action: ComposerAction, approved: boolean) => Promise<boolean>
+    /** onSend threw or its promise rejected (the log shows the error with Retry) */
+    onError?: (error: unknown) => void
     items?: WorkspaceItem[]; doc?: string; modes?: ComposerMode[]; connectors?: Connector[]; models?: ComposerModel[]; samples?: ComposerSample[]
-    /** Demo fallback: which plain-string replies get a (non-blocking) approval card. Prefer returning needsApproval from onSend. */
+    /** Demos only: which plain-string replies get a (non-blocking) approval card. Return needsApproval from onSend instead. */
     needsApproval?: (text: string) => boolean; hero?: string; hint?: string
     /** live mode: how text and tool data render (see MessageParts) */ renderers?: AiRenderers
     /** shows "+ Add connector" in the connectors panel (open your connector or MCP directory) */ onAddConnector?: () => void; className?: string }) {
-  const [full, setFull] = useState(false) // the follow-up queue refused a message: said in the status slot until the queue moves
   const modes = modesProp ?? AC_MODES, models = modelsProp ?? AC_MODELS
   const reduce = useReducedMotion()
+  const [note, flashNote] = useFlash(4000, '') // said in the status slot: refused files, a full queue
   const [chat, setChat] = useState(!!live?.messages.length)
   const [text, setText] = useState('')
-  const att = useAttachments({ max: AC_MAX_FILES }), files = att.files
+  const att = useAttachments({ max: AC_MAX_FILES, onReject: (f, why) => flashNote(attachmentRejectNote(f, why, { max: AC_MAX_FILES })) }), files = att.files
   const [ctx, setCtx] = useState<string[]>([])
   const [mode, setMode] = useState(modes[1]?.id ?? modes[0].id)
   const [cons, setCons] = useState(connectors)
@@ -816,115 +829,129 @@ export function AgentComposer({ chat: live, onSend, onApprovalRequest, items = A
   const [pop, setPop] = useState<null | 'add' | 'mode' | 'con' | 'set'>(null)
   const [msgs, setMsgs] = useState<AcMsg[]>([])
   const [queue, setQueue] = useState<AcDraft[]>([])
-  const [submitting, setSubmitting] = useState(false)
-  const [setSaid, liveRegion] = useLive()
+  const queueRef = useRef(queue)
+  const setQ = (f: (q: AcDraft[]) => AcDraft[]) => { queueRef.current = f(queueRef.current); setQueue(queueRef.current) }
+  const [pending, setPending] = useState(0) // onSend promises not settled yet
+  const [say, liveRegion] = useLive()
   const [sel, setSel] = useState<{ x: number; y: number; bottom: number; text: string } | null>(null)
   const narrow = useMediaQuery('(max-width: 639px)'), coarse = useCoarsePointer()
   const [wsOpen, setWsOpen] = useState(false) // phones: the workspace folds into a toggle above the composer
-  const inp = useRef<HTMLTextAreaElement>(null), docRef = useRef<HTMLParagraphElement>(null), logRef = useRef<HTMLDivElement>(null)
+  const inp = useRef<HTMLTextAreaElement>(null), docRef = useRef<HTMLParagraphElement>(null)
   const barRef = useRef<HTMLDivElement>(null), mid = useRef(0), alive = useRef(true)
   const pid = useId(), panelId = (k: string) => `${pid}-${k}`
   const liveWaiting = !!live && live.messages.some(m => m.parts.some(p => p.type === 'tool' && p.state === 'awaiting-approval'))
-  const busy = live ? live.busy || liveWaiting : msgs.some(m => m.role === 'a' && m.phase !== 'done')
+  const busy = live ? live.busy || liveWaiting : msgs.some(m => m.role === 'a' && (m.phase === 'wait' || m.phase === 'stream' || m.phase === 'approve'))
   const streaming = live ? live.status === 'streaming' : msgs.some(m => m.phase === 'stream')
   const waiting = live ? liveWaiting : msgs.some(m => m.phase === 'approve')
-  const queueRef = useRef(queue); queueRef.current = queue
-  const approve = useRef(onApprovalRequest); approve.current = onApprovalRequest
+  const approve = useLatest(onApprovalRequest), fail = useLatest(onError)
   const curMode = modes.find(m => m.id === mode) ?? modes[0]
   const model = models.find(m => m.name === S.model) ?? models[0]
   const onCount = cons.filter(c => c.on).length
-  const status = waiting ? 'input' : busy ? (queue.length ? 'queued' : 'working') : 'idle'
-  useEffect(() => setFull(false), [queue.length])
+  const status: AcStatus = note ? 'note' : waiting ? 'input' : busy ? (queue.length ? 'queued' : 'working') : 'idle'
   const workspace = items.length > 0 || !!doc
+  useChatAnnouncer(live, say)
 
   useOutside([barRef], () => setPop(null), !!pop)
-  useEffect(() => { const el = logRef.current; if (el && !live) el.scrollTo({ top: el.scrollHeight, behavior: reduce ? 'auto' : 'smooth' }) }, [msgs, reduce, live])
   useEffect(() => { alive.current = true; return () => { alive.current = false } }, [])
-  useEffect(() => { if (live && !busy) next() }, [live, busy]) // eslint-disable-line react-hooks/exhaustive-deps -- a live reply finished: send the next queued follow-up
+  useEffect(() => { if (live && !live.busy && !liveWaiting) next() }, [live?.busy, liveWaiting]) // eslint-disable-line react-hooks/exhaustive-deps -- a live reply finished: send the next queued follow-up
 
   /* selection → "Add to chat". Mouse: on mouseup. Touch: selection handles fire selectionchange, so follow that
      (debounced, and a cleared selection lingers briefly so tapping the button still works after iOS drops it). */
   useEffect(() => {
-    let t: ReturnType<typeof setTimeout> | undefined
+    let t: ReturnType<typeof setTimeout> | undefined, u: ReturnType<typeof setTimeout> | undefined
     const read = () => {
       const s = getSelection(), txt = s?.toString().trim()
       if (!txt || !s || !s.rangeCount || !docRef.current?.contains(s.anchorNode)) return false
       const r = s.getRangeAt(0).getBoundingClientRect(); setSel({ x: r.left + r.width / 2, y: r.top, bottom: r.bottom, text: txt }); return true
     }
-    const up = () => setTimeout(() => { if (!read()) setSel(null) }, 0)
+    const up = () => { clearTimeout(u); u = setTimeout(() => { if (!read()) setSel(null) }, 0) }
     const change = () => { clearTimeout(t); t = setTimeout(() => { if (!read()) setSel(null) }, read() ? 120 : 400) }
     const scroll = (e: Event) => { if (!(e.target instanceof Node) || !docRef.current?.contains(e.target)) setSel(null) }
     document.addEventListener('mouseup', up); document.addEventListener('selectionchange', change); addEventListener('scroll', scroll, true)
-    return () => { clearTimeout(t); document.removeEventListener('mouseup', up); document.removeEventListener('selectionchange', change); removeEventListener('scroll', scroll, true) }
+    return () => { clearTimeout(t); clearTimeout(u); document.removeEventListener('mouseup', up); document.removeEventListener('selectionchange', change); removeEventListener('scroll', scroll, true) }
   }, [])
   const takeSel = () => { if (!sel) return; addCtx(`“${sel.text}”`); getSelection()?.removeAllRanges(); setSel(null) }
 
-  const addFiles = (list: FileList | File[]) => { att.add(Array.from(list).slice(0, 8)); inp.current?.focus() }
+  const addFiles = (list: FileList | File[]) => { att.add(list); inp.current?.focus() }
   const addCtx = (label: string) => { setCtx(c => c.includes(label) ? c : [...c, label]); inp.current?.focus() }
   const toggleCtx = (label: string) => ctx.includes(label) ? setCtx(c => c.filter(x => x !== label)) : addCtx(label)
 
   const patchMsg = (id: number, p: Partial<AcMsg>) => setMsgs(ms => ms.map(x => x.id === id ? { ...x, ...p } : x))
   const addMsg = (m: AcMsg) => setMsgs(ms => [...ms, m].slice(-AC_MAX_MSGS))
-  /** A reply from onSend as message fields: plain strings may get the demo approval fallback, objects carry the host's action. */
+  /** A reply from onSend as message fields: plain strings may get the demo approval card, objects carry the host's action. */
   const toReply = (r: string | ComposerReply, q: string): Partial<AcMsg> => {
-    if (typeof r === 'string') return { text: r, ...(curMode.id === 'ask' && needsApproval(q) ? { action: { tool: cons.find(c => c.on)?.name ?? 'assistant', summary: `Act on: “${q}”` }, demo: true } : {}) }
-    return { text: r.text ?? '', action: r.needsApproval }
+    const p: Partial<AcMsg> = typeof r === 'string'
+      ? { text: r, ...(curMode.id === 'ask' && needsApproval?.(q) ? { action: { tool: cons.find(c => c.on)?.name ?? 'assistant', summary: `Act on: “${q}”` }, demo: true } : {}) }
+      : { text: r.text ?? '', action: r.needsApproval }
+    return { ...p, phase: p.text ? 'stream' : p.action ? 'approve' : 'done' }
+  }
+  const failed = (err: unknown): Partial<AcMsg> => {
+    fail.current?.(err); say('The reply failed')
+    return { phase: 'error', error: valueText(err, 300) || 'Something went wrong' }
+  }
+  /** Calls onSend for a draft; `aid` retries that reply in place. */
+  const ask = (d: AcDraft, aid?: number) => {
+    const id = aid ?? ++mid.current
+    const put = (p: Partial<AcMsg>) => { if (aid === undefined && !placed) { placed = true; addMsg({ id, role: 'a', d, model: S.model, mode: curMode, ...p }) } else patchMsg(id, p) }
+    let placed = false, reply: ReturnType<NonNullable<typeof onSend>>
+    try { reply = onSend?.(d.text, d.files.map(f => f.file), d.ctx, { mode: curMode, settings: S, connectors: cons.filter(c => c.on).map(c => c.name) }) }
+    catch (err) { put(failed(err)); next(); return }
+    if (reply == null) { if (aid !== undefined) patchMsg(aid, { phase: 'done', text: '' }); say('Message sent'); next(); return }
+    if (typeof (reply as Promise<unknown>).then !== 'function') { const p = toReply(reply as string | ComposerReply, d.text); put(p); if (p.phase === 'done') next(); return }
+    put({ text: '', phase: 'wait', error: undefined }); say('Assistant is working…'); setPending(n => n + 1)
+    ;(reply as Promise<string | ComposerReply | void>).then(
+      r => { if (!alive.current) return; const p = r == null ? { phase: 'done' as const } : toReply(r, d.text); put(p); if (p.phase === 'done') next() },
+      err => { if (!alive.current) return; put(failed(err)); next() },
+    ).finally(() => { if (alive.current) setPending(n => n - 1) })
   }
   const run1 = (d: AcDraft) => {
     setChat(true)
     if (live) {
-      live.submit(d.text, d.files.map(f => f.file), { metadata: { context: d.ctx, mode: curMode.id, settings: S, connectors: cons.filter(c => c.on).map(c => c.name) } })
-      setSaid('Assistant is working…'); return
+      const ok = live.submit(d.text, d.files.map(f => f.file), { metadata: { context: d.ctx, mode: curMode.id, settings: S, connectors: cons.filter(c => c.on).map(c => c.name) } })
+      if (!ok) { if (d.text || d.files.length) setQ(q => [d, ...q]); else flashNote('Add a message to send with the context') } // refused while busy: wait for the next turn
+      return
     }
-    const id = ++mid.current
-    addMsg({ id, role: 'u', d })
-    const reply = onSend?.(d.text, d.files.map(f => f.file), d.ctx, { mode: curMode, settings: S, connectors: cons.filter(c => c.on).map(c => c.name) })
-    if (reply == null) { setSaid('Message sent'); setTimeout(() => { if (alive.current) next() }, 0); return }
-    const aid = ++mid.current, base: AcMsg = { id: aid, role: 'a', q: d.text, model: S.model, mode: curMode }
-    const show = (r: string | ComposerReply) => { const p = toReply(r, d.text); return { ...p, phase: p.text ? 'stream' as const : p.action ? 'approve' as const : 'done' as const } }
-    if (typeof (reply as Promise<unknown>).then !== 'function') { const p = show(reply as string | ComposerReply); addMsg({ ...base, ...p }); if (p.phase === 'done') next(); return }
-    addMsg({ ...base, text: '', phase: 'wait' }); setSaid('Assistant is working…')
-    ;(reply as Promise<string | ComposerReply | void>).then(r => { if (!alive.current) return; const p = r == null ? { phase: 'done' as const } : show(r); patchMsg(aid, p); if (p.phase === 'done') next() },
-      () => { if (alive.current) patchMsg(aid, { text: 'Something went wrong. Try again.', phase: 'stream' }) })
+    addMsg({ id: ++mid.current, role: 'u', d })
+    ask(d)
   }
   function next() {
     const q = queueRef.current
-    if (q.length) { const [nx, ...rest] = q; setQueue(rest); setTimeout(() => { if (alive.current) run1(nx) }, 250) }
+    if (q.length) { const [nx, ...rest] = q; setQ(() => rest); run1(nx) }
   }
   const streamDone = (m: AcMsg) => {
-    if (m.action) { patchMsg(m.id, { phase: 'approve' }); setSaid(`Assistant: ${m.text ?? ''} Needs your approval: ${m.action.tool}, ${m.action.summary}`); return }
-    patchMsg(m.id, { phase: 'done' }); setSaid(`Assistant: ${m.text ?? ''}`); next()
+    if (m.action) { patchMsg(m.id, { phase: 'approve' }); say(`Assistant: ${m.text ?? ''} Needs your approval: ${m.action.tool}, ${m.action.summary}`); return }
+    patchMsg(m.id, { phase: 'done' }); say(`Assistant: ${m.text ?? ''}`); next()
   }
   const deciding = useRef(new Set<number>())
-  const decide = async (m: AcMsg, ok: boolean) => {
+  const decide = async (m: AcMsg, approved: boolean) => {
     if (m.approval || deciding.current.has(m.id)) return
     deciding.current.add(m.id)
     patchMsg(m.id, { approval: 'busy' })
     let confirmed = false // only the host can say whether the action ran
-    if (m.action && !m.demo && approve.current) { try { confirmed = (await approve.current(m.action, ok)) === true } catch { confirmed = false } }
+    if (m.action && !m.demo && approve.current) { try { confirmed = (await approve.current(m.action, approved)) === true } catch { confirmed = false } }
     if (!alive.current) return
-    const approval: AcApproval = ok ? (confirmed ? 'ok' : 'ok?') : (confirmed ? 'no' : 'no?')
-    patchMsg(m.id, { phase: 'done', approval }); setSaid(AC_APPROVAL_TEXT[approval]); next()
+    const approval = { approved, confirmed }
+    patchMsg(m.id, { phase: 'done', approval }); say(acApprovalText(approval)); next()
   }
 
   const takeDraft = (): AcDraft => {
     const d = { id: ++mid.current, text: text.trim(), files: files.map(f => ({ ...f, url: null })), ctx } // previews only live in the composer; the sent message lists names
     att.clear(); setText(''); setCtx([]); return d
   }
-  const canSend = !waiting && !submitting && (!!text.trim() || files.length > 0 || ctx.length > 0)
+  const canSend = !waiting && (!!text.trim() || files.length > 0 || ctx.length > 0)
   const canStop = !!live && live.busy && !text.trim() && !files.length && !ctx.length // live: an empty composer stops the reply
   const submit = () => {
     if (!canSend) return
-    if (busy) { if (queue.length >= AC_MAX_QUEUE) { setFull(true); setSaid(`Up to ${AC_MAX_QUEUE} follow-ups can wait; send this one when the queue clears.`); return } setQueue(q => [...q, takeDraft()]); return }
-    const d = takeDraft(); setSubmitting(true)
-    setTimeout(() => { if (!alive.current) return; setSubmitting(false); run1(d) }, reduce ? 0 : 380)
+    if (busy) { if (queue.length >= AC_MAX_QUEUE) { flashNote('Queue is full'); say(`Up to ${AC_MAX_QUEUE} follow-ups can wait; send this one when the queue clears.`); return } setQ(q => [...q, takeDraft()]); return }
+    run1(takeDraft())
   }
   const toggle = (k: NonNullable<typeof pop>) => setPop(p => p === k ? null : k)
   const close = () => setPop(null)
-  const wordDelay = ({ 'Ultra fast': 14, Fast: 26, Priority: 30 } as Record<string, number>)[S.speed] ?? 45
+  const wordDelay = model.wordDelay?.[S.speed] ?? 45
   const placeholder = (status === 'input' ? 'Approve or deny above to continue' : busy ? 'Working… type to queue a follow-up' : files.length || ctx.length ? 'Add a message, or just send' : 'Ask anything, or drop files here')
   const setModel = (name: string) => { const prev = model, m = models.find(x => x.name === name)!; setS(s => ({ ...s, model: name, speed: acNearest(m.speeds, s.speed, prev.speeds), effort: acNearest(m.efforts, s.effort, prev.efforts) })) }
   const shownCons = cons.filter(c => !conQ || (c.name + ' ' + c.desc).toLowerCase().includes(conQ.toLowerCase()))
+  const statusText = status === 'note' ? note : status === 'working' ? 'Working' : status === 'queued' ? `${queue.length} queued` : 'Needs your input'
 
   return (
     <div className={cn('grid gap-4 sm:min-h-[440px]', workspace && 'md:grid-cols-[240px_minmax(0,1fr)]', className)}>
@@ -962,25 +989,13 @@ export function AgentComposer({ chat: live, onSend, onApprovalRequest, items = A
             <h4 className="m-0 text-[22px] font-semibold tracking-tight max-sm:text-base">{hero ?? 'What should we work on?'}</h4>{hint && <span className="text-xs text-[var(--fg3)]">{hint}</span>}
           </motion.div>)}</AnimatePresence>
         {chat && (
-          <motion.div ref={logRef} role="log" aria-live="off" aria-busy={streaming} aria-label={'Conversation'} initial={{ opacity: 0, y: 12 }} animate={{ opacity: 1, y: 0 }} transition={{ duration: 0.4, delay: 0.15 }}
-            className="flex max-h-[min(360px,55dvh)] flex-1 flex-col gap-3 overflow-auto px-0.5 py-1">
-            {live ? live.messages.map(m => <AcLiveMessage key={m.id} m={m} chat={live} renderers={renderers} />) : msgs.map(m => m.role === 'u' ? (
-              <motion.div key={m.id} initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }} transition={spring(0.3, 0.35)} className="flex max-w-[82%] flex-col items-end gap-1 self-end">
-                {(m.d!.ctx.length > 0 || m.d!.files.length > 0) && <div className="flex flex-wrap justify-end gap-1">{m.d!.ctx.map(c => <Badge key={c} tone="accent">{c}</Badge>)}{m.d!.files.map(f => <Badge key={f.id}>📎 {f.file.name}</Badge>)}</div>}
-                {m.d!.text && <div className={AC_USER_BUBBLE}>{m.d!.text}</div>}
-              </motion.div>
-            ) : (
-              <motion.div key={m.id} initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }} transition={spring(0.3, 0.35)} className="flex max-w-[82%] flex-col gap-1.5">
-                <div className="flex flex-wrap gap-1"><Badge>{m.model}</Badge><Badge tone={m.mode!.tone}>{m.mode!.label}</Badge></div>
-                <div className="px-0.5 text-[13px] leading-normal">
-                  {m.phase === 'wait' ? <TypingDots /> : m.phase === 'stream' ? <StreamingText text={m.text!} wordDelay={wordDelay} onDone={() => setTimeout(() => alive.current && streamDone(m), reduce ? 0 : 500)} /> : m.text}
-                </div>
-                {m.phase === 'approve' && m.action && <ApprovalCard tool={m.action.tool} summary={m.action.summary} args={m.action.args} recipients={m.action.recipients} demo={m.demo} busy={m.approval === 'busy'} onDecide={ok => decide(m, ok)} />}
-                {m.approval && m.approval !== 'busy' && <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} className={cn('rounded-[var(--r-md)] border px-3 py-2 text-[13px]', m.approval === 'ok' ? 'border-[color-mix(in_srgb,var(--ok)_35%,var(--line))] bg-[var(--ok-soft)] text-[var(--ok)]' : 'border-[var(--line)] bg-[var(--muted)] text-[var(--fg2)]')}>
-                  {AC_APPROVAL_TEXT[m.approval]}</motion.div>}
-                {m.note && <span className="text-xs text-[var(--fg3)]">{m.note}</span>}
-              </motion.div>
-            ))}
+          <motion.div initial={{ opacity: 0, y: 12 }} animate={{ opacity: 1, y: 0 }} transition={{ duration: 0.4, delay: 0.15 }} className="flex max-h-[min(360px,55dvh)] min-h-0 flex-1 flex-col">
+            <Conversation busy={streaming} className="min-h-0 flex-1" contentClassName="px-0.5 py-1">
+              {live ? live.messages.map(m => <AcLiveMessage key={m.id} m={m} chat={live} renderers={renderers} />)
+                : msgs.map(m => m.role === 'u'
+                  ? <AcUserBubble key={m.id} text={m.d.text} ctx={m.d.ctx} files={m.d.files.map(f => f.file.name)} />
+                  : <AcReply key={m.id} m={m} wordDelay={wordDelay} busy={busy} onStreamed={() => streamDone(m)} onDecide={ok => decide(m, ok)} onRetry={() => ask(m.d, m.id)} />)}
+            </Conversation>
           </motion.div>
         )}
         {queue.length > 0 && <div className="flex w-full flex-col gap-1">
@@ -988,13 +1003,13 @@ export function AgentComposer({ chat: live, onSend, onApprovalRequest, items = A
             <motion.div key={d.id} layout initial={{ opacity: 0, y: 6 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0, height: 0 }} transition={spring(0.3, 0.35)}
               className={cn(surface.dashed, 'flex items-center gap-2 bg-[var(--bg)] py-1 pe-1 ps-3 text-xs text-[var(--fg2)]')}>
               <b className="font-medium text-[var(--fg3)]">{'Queued'}</b><span className="min-w-0 flex-1 truncate">{d.text || (d.files.length ? plural(d.files.length, 'file') : 'Context only')}</span>
-              <IconButton icon="x" label={'Remove queued message'} onClick={() => setQueue(q => q.filter(x => x.id !== d.id))} className={cn('!h-6 !w-6', TOUCH.tap)} />
+              <IconButton icon="x" label={'Remove queued message'} onClick={() => setQ(q => q.filter(x => x.id !== d.id))} className={cn('!h-6 !w-6', TOUCH.tap)} />
             </motion.div>))}</AnimatePresence>
         </div>}
 
-        <PromptInput layout value={text} onChange={setText} placeholder={placeholder} attachmentState={att} maxFiles={AC_MAX_FILES} uploadProgress
+        <PromptInput layout value={text} onChange={setText} placeholder={placeholder} attachmentState={att} maxFiles={AC_MAX_FILES}
           inputRef={inp} barRef={barRef} canSubmit={canSend} onSubmit={() => { submit(); return false }}
-          sendButton={{ state: submitting ? 'sending' : canStop ? 'stop' : busy ? 'queue' : 'send', disabled: !canSend && !canStop, onClick: canStop ? live!.stop : submit }}
+          sendButton={{ state: canStop ? 'stop' : canSend && busy ? 'queue' : pending && !canSend ? 'sending' : 'send', disabled: !canSend && !canStop, onClick: canStop ? live!.stop : submit }}
           className={cn('w-full cursor-text !px-3 !pt-3', !chat && 'max-w-[600px]')}
           classNames={{ input: '!p-1', bar: 'relative !mt-1 cursor-default max-sm:!gap-0.5', send: 'transition-[opacity,transform] enabled:hover:scale-105 disabled:!opacity-25' }}
           dropHint={<span className="flex flex-col items-center gap-1"><Icon name="upload" size={22} /><b className="text-[13px]">{'Drop files to attach'}</b><span className="text-xs font-normal">{'Images, PDFs, code, anything'}</span></span>}
@@ -1080,9 +1095,9 @@ export function AgentComposer({ chat: live, onSend, onApprovalRequest, items = A
                 </span>
           </>}
           aside={status !== 'idle' && <span role="status" className="me-2 inline-flex min-w-0 max-sm:me-1 items-center gap-1.5 text-xs whitespace-nowrap text-[var(--fg3)]">
-                <motion.i className={cn('h-[7px] w-[7px] rounded-full', status === 'working' ? 'bg-[var(--warn)]' : status === 'queued' ? 'bg-[var(--accent)]' : 'bg-[var(--bad)]')}
-                  animate={status === 'working' ? { opacity: [1, 0.35, 1], scale: [1, 0.8, 1] } : { opacity: 1, scale: 1 }} transition={status === 'working' ? { duration: 1.2, repeat: Infinity } : undefined} />
-                {status === 'working' ? 'Working' : status === 'queued' ? (full ? 'Queue is full' : `${queue.length} queued`) : 'Needs your input'}</span>} />
+                <motion.i className={cn('h-[7px] w-[7px] flex-none rounded-full', AC_STATUS[status].dot)}
+                  animate={AC_STATUS[status].pulse ? { opacity: [1, 0.35, 1], scale: [1, 0.8, 1] } : { opacity: 1, scale: 1 }} transition={AC_STATUS[status].pulse ? { duration: 1.2, repeat: Infinity } : undefined} />
+                <span className="min-w-0 truncate">{statusText}</span></span>} />
       </div>
 
       <AnimatePresence>{sel && (
