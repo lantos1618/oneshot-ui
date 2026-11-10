@@ -15,6 +15,8 @@ Every module in `src/lib` belongs to the **core** tier or to one **extras** fami
   motion, virtual, magnet, overlays and forms, navigation, feedback, data, layout, provider.
 - Extras, each reached through its own subpath (`@lyndon/ui/charts`): vizkit, charts, diagrams, geo, content, lanes,
   media, collab, data (datagrid, scheduler, kanban), binary, ai, agents, theming.
+- Core never imports `motion` (an optional peer): it animates with the `ui-*` CSS classes in TOKENS and the
+  primitives in `motion.tsx`. Extras take motion's names from `./motionkit`, never from `motion/react` directly.
 - Core never imports extras, not even types. An extras module imports core, its own family and the families listed in
   its `deps`. Nothing imports a barrel except `./core`. No runtime import cycles. `tests/unit/tiers.test.ts` checks all
   of this, plus that `index.ts`, `all.ts`, `package.json` exports, the single-file bundles and the tag areas match.
@@ -27,7 +29,7 @@ Every module in `src/lib` belongs to the **core** tier or to one **extras** fami
 
 - Edit only the files your brief lists. Exception: you may append new icon paths to `ICONS` in `src/lib/icons.tsx` (re-read the file right before editing; keep the edit to the map). If you need any other change in a file you don't own, put a minimal local version in your own module and mention it in your report.
 - Import siblings explicitly: `import { Button, cn, spring } from './core'`, never from another barrel (`./forms`, `./diagrams`). Showcase files import core from `'../lib'`, extras from `'../lib/<module>'`, and `'./kit'`.
-- No new npm dependencies. Everything is React + `motion/react` + Tailwind.
+- No new npm dependencies. Core is React + Tailwind; the extras may also use motion (through `./motionkit`).
 - Do not run `pnpm build`, do not commit, do not restart the dev server.
 
 ## Style (match what's there)
@@ -45,8 +47,9 @@ Every module in `src/lib` belongs to the **core** tier or to one **extras** fami
   - Chart neutral series: `var(--c-neutral)` (≥4.5:1 on cards in every theme, light and dark), never `--fg`.
 - Tailwind class strings must be literal (no `bg-[var(--${x})]`); pick from maps of full class strings.
 - No tailwind-merge: to override a class a component already sets, use the `!` prefix (`className="!h-8"`).
-- Animation: `motion/react` with `spring(bounce, duration)` from core. Use `initial={false}` where mount animation isn't wanted. Keyframe arrays that must replay on every change need a changing `key` (or `useAnimate`), because the same array on re-render does nothing. `MotionConfig reducedMotion="user"` already wraps everything.
-- Reuse the shared pieces before writing new ones: `Button`, `IconButton`, `Badge`, `Card`, `Avatar`, `AnimatedNumber` (rolling digits), `ActiveIndicator` (sliding pill/underline via layoutId), `Popover`/`FloatingPanel`/`DropdownMenu`/`MenuItem`, `ModalLayer`/`Dialog`/`Sheet`, `Collapse`, `Select`/`Combobox`/`OptionList`, `Tooltip`, `HoverCard`, `useToast` (supports `action` for Undo), `useControllable`, `useDisclosure`, `useRoving`, `useListbox`, `useHotkey`, `useWidth`, `useActiveIndex`, `useStatusFlash`, `useLive`, `useResizeObserver`, `useRequiredContext`, `PartButton`, `gridKeyMove`/`focusStep`, `downloadBlob`, `writeClipboard`, `Legend`, `EmptyState size="sm"`, `svgN`, `useWheelZoom`/`usePinchPan`, `Chart` kit (`useChartShell` + `ChartShell`, chart math, `niceStep` and `TrackGrid` in `vizkit.tsx`), `confetti()`.
+- Animation in core: no library. Enter and exit are the `ui-in` class with `--ui-*` properties (`ui-in [--ui-y:4px] [--ui-s:.97]`; the exit reverses it, `--ui-xo`/`--ui-yo`/`--ui-so`/`--ui-do` override it); wrap a conditional element in `Presence`, a keyed list in `PresenceList`, a keyed swap in `Swap` so the exit plays. One-shots (`ui-pop`, `ui-pulse`) replay when the element's `key` changes; gate them with `useChanged` when they must not play on mount. State changes are CSS transitions with `ease-[var(--ui-spring)]` (`-pop`, `-soft`). Lists that reorder use `useFlip` + `data-flip`; heights use `ui-grow` (rows) or `Collapse`; one-off effects use `play()`; drags use `useSwipe` / `usePointerDrag`. Reduced motion is handled by the CSS and by those helpers: add `motion-reduce:transition-none` to transform transitions you write yourself.
+- Animation in extras: motion, imported from `./motionkit` (`motion`, `AnimatePresence`, …), with `spring(bounce, duration)` from core; `useReducedMotion` and `useInView` come from core. Use `initial={false}` where mount animation isn't wanted.
+- Reuse the shared pieces before writing new ones: `Button`, `IconButton`, `Badge`, `Card`, `Avatar`, `AnimatedNumber` (rolling digits), `ActiveIndicator` (sliding pill/underline), `Presence`/`PresenceList`/`Swap` (exit animations), `useFlip`, `useSwipe`, `play`/`shake`, `Popover`/`FloatingPanel`/`DropdownMenu`/`MenuItem`, `ModalLayer`/`Dialog`/`Sheet`, `Collapse`, `Select`/`Combobox`/`OptionList`, `Tooltip`, `HoverCard`, `useToast` (supports `action` for Undo), `useControllable`, `useDisclosure`, `useRoving`, `useListbox`, `useHotkey`, `useWidth`, `useActiveIndex`, `useStatusFlash`, `useLive`, `useResizeObserver`, `useRequiredContext`, `PartButton`, `gridKeyMove`/`focusStep`, `downloadBlob`, `writeClipboard`, `Legend`, `EmptyState size="sm"`, `svgN`, `useWheelZoom`/`usePinchPan`, `Chart` kit (`useChartShell` + `ChartShell`, chart math, `niceStep` and `TrackGrid` in `vizkit.tsx`), `confetti()`.
 - Components: typed props, `className` passthrough, controlled (`value`/`onChange`) or uncontrolled (`defaultValue`) where it's an input, keyboard support and ARIA roles, touch support for anything draggable (pointer events + `touch-none`), a one-line JSDoc on each export saying what it is and how it behaves.
 - Demos in the showcase use `<Spec title desc span>` inside `<Section>`. Use realistic content from the original. Every interactive demo should work, not just render.
 
@@ -117,6 +120,8 @@ Test with Playwright device emulation: `devices['iPhone 13']` (390px, touch) and
   `E2E_BASE_URL=http://localhost:5173 pnpm test:e2e` uses the dev server instead (a test that sees a hot reload
   skips itself). Every section on desktop light, desktop dark and iPhone 13 must log no console errors, stay inside
   its layout-shift budget, add no axe violations beyond the baseline, and (phone) not make the page scroll sideways.
+  A fourth profile, `desktop-reduced` (prefers-reduced-motion), opens and closes the core overlays and checks that
+  nothing moves and that a closed overlay is gone within 200 ms.
   `--project desktop-light` or `-g "section charts"` narrows a run (it also matches the Design QA test of that section).
 - **axe baseline:** `tests/e2e/axe-baseline.json` holds today's known violations (profile → section → rule → node
   count). A test fails only on a new rule or a higher count. After fixing violations run

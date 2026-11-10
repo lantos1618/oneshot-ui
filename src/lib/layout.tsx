@@ -8,7 +8,7 @@ import { type Magnet, MagnetBubble, magnetKeyDirection, useMagnet } from './magn
 /*
  * Pointer-driven (mouse, pen, touch). The dragged item stays in place as a dashed slot while a
  * floating clone follows the pointer; `onMove` fires live as the slot should move, so React state is
- * the single source of truth and motion's `layout` animates everything else out of the way. */
+ * the single source of truth and useFlip slides everything else out of the way. */
 
 /** Rect without the element's own transform, so items mid-animation don't make the slot oscillate. */
 function lyLayoutRect(el: HTMLElement) {

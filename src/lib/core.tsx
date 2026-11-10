@@ -8,7 +8,8 @@
  *   - Components take `className` and spread native props where it makes sense.
  *   - Variants are props (`variant`, `size`, `tone`), built with the tiny `variants()` helper.
  *   - Stateful inputs are controlled or uncontrolled: `value` + `onChange`, or `defaultValue`.
- *   - Motion: springs come from `spring()` / `MOTION`, eases from `EASE_OUT`; reduced motion is respected (MotionConfig).
+ *   - Animation: the `ui-*` CSS classes in TOKENS (enter/exit keyframes, spring easings) and motion.tsx's Presence, Swap,
+ *     useFlip and play; no animation library. Reduced motion keeps the fades and drops the movement.
  *   - Wrap the app once in <UIProvider> (theme tokens, optional fonts, toasts). Add <ThemeScript /> to <head> to avoid a
  *     theme flash with SSR.
  *

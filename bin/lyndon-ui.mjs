@@ -20,7 +20,7 @@ const HELP = `Usage: lyndon-ui <command> [options]
 
 Commands
   add <name…>     copy drop-in component files into your project (self-contained .tsx; they import only
-                  react, react-dom and motion)
+                  react and react-dom, and the extras motion)
   list            list the components with their size and approximate token count
   info <name>     show what a component exports, embeds and needs
 
@@ -158,7 +158,7 @@ function add() {
     out(`${exists ? 'replace' : 'write'}  ${shown} (${note})`)
   }
 
-  const needed = new Set([...plan.values()].flatMap(({ e, variant }) => (variant === 'package' ? [index.name, 'motion'] : e.dependencies)))
+  const needed = new Set([...plan.values()].flatMap(({ e, variant }) => (variant === 'package' ? [index.name, ...e.dependencies.filter(d => d === 'motion')] : e.dependencies)))
   const missing = [...needed].filter(d => d !== 'react' && d !== 'react-dom' && !projectDeps[d])
   out('')
   if (missing.length && projectPkg) out(`Install: npm i ${missing.join(' ')}`)

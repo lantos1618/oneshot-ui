@@ -1,6 +1,6 @@
 import { Fragment, memo, useEffect, useLayoutEffect, useMemo, useRef, useState, type PointerEvent as ReactPointerEvent, type ReactNode } from 'react'
-import { motion, useInView, useReducedMotion } from 'motion/react'
-import { AnimatedNumber, Badge, Button, Icon, RUN_STATUS, Spinner, TOUCH, cn, isTouch, onMouseLeave, surface, useWidth, type IconName, type RunStatus, type Tone, plural, fmt } from './core'
+import { motion } from './motionkit'
+import { AnimatedNumber, Badge, Button, Icon, RUN_STATUS, Spinner, TOUCH, cn, isTouch, onMouseLeave, surface, useWidth, type IconName, type RunStatus, type Tone, plural, fmt, useInView, useReducedMotion } from './core'
 import { Collapse } from './feedback'
 import { PointerTooltip, usePointerTooltip } from './overlay'
 import { useFrameLoop } from './motion'

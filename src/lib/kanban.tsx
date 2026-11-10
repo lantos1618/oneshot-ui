@@ -1,5 +1,5 @@
 import { useId, useRef, useState, type KeyboardEvent as RKeyboardEvent } from 'react'
-import { LayoutGroup, motion } from 'motion/react'
+import { LayoutGroup, motion } from './motionkit'
 import { AvatarStack, Badge, DeltaBadge, Icon, ScrollEdges, StatusIcon, type StatusIconStatus, TOUCH, type Tone, cn, safeColor, spring, surface, useCoarsePointer, useControllable, useRefocus, useScrollEdges, SparkChart, plural, fmt, moveById, uid } from './core'
 import { Collapse, useToast } from './feedback'
 import { useDragSort } from './layout'

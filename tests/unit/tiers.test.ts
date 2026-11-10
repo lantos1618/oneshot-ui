@@ -15,10 +15,6 @@ const sourceOf = (m: string) => readFileSync(join(libDir, files.find(f => nameOf
 /** Violations that are allowed for now, as 'from -> to'. Empty once the split is done. */
 const KNOWN = new Set<string>([])
 
-/** Core modules that still import motion while they move to the CSS animations in motion.tsx. Empty once that is done. */
-const MOTION_KNOWN = new Set<string>([
-  'navigation', 'provider',
-])
 
 type Edge = { to: string; typeOnly: boolean; dynamic: boolean; reexport: boolean }
 const STATEMENT = /^(import|export)\s+(type\s+)?([\s\S]*?)\s*from\s*'\.\/([\w-]+)'/gm
@@ -57,10 +53,12 @@ describe('module tiers', () => {
     expect(bad.filter(v => !KNOWN.has(v))).toEqual([])
   })
 
-  it('core never imports motion (it is an optional peer for extras)', () => {
-    const bad = CORE.filter(m => /^(?:import|export)\s[^']*?from\s*'motion(?:\/[\w-]+)?'/m.test(sourceOf(m)))
-    expect(bad.filter(m => !MOTION_KNOWN.has(m))).toEqual([])
-    expect([...MOTION_KNOWN].filter(m => !bad.includes(m)), 'modules that no longer import motion: drop them from MOTION_KNOWN').toEqual([])
+  it('core never imports motion: an optional peer that only the extras reach, through motionkit', () => {
+    const importsMotion = (m: string) => /^(?:import|export)\s[^']*?from\s*'motion(?:\/[\w-]+)?'/m.test(sourceOf(m)) || /\bimport\(\s*'motion/.test(sourceOf(m))
+    expect(CORE.filter(importsMotion)).toEqual([])
+    expect(modules.filter(importsMotion)).toEqual(['motionkit'])
+    const peers = JSON.parse(readFileSync(join(root, 'package.json'), 'utf8')) as { peerDependenciesMeta?: Record<string, { optional?: boolean }> }
+    expect(peers.peerDependenciesMeta?.motion?.optional).toBe(true)
   })
 
   it('extras import only core, their own family and its declared deps', () => {

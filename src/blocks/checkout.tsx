@@ -1,12 +1,17 @@
 import { useEffect, useRef, useState, type ReactNode } from 'react'
 import { AnimatePresence, motion } from 'motion/react'
-import { AnimatedNumber, Button, Icon, TOUCH, cn, spring, surface, useWidth, shake, Field, Input, NumberStepper, Select, Steps, Collapse, confetti, fmt, slideVariants } from '../lib'
+import { AnimatedNumber, Button, Icon, TOUCH, cn, spring, surface, useWidth, shake, Field, Input, NumberStepper, Select, Steps, Collapse, confetti, fmt } from '../lib'
 
 /* Checkout: cart, details and payment steps with an order summary.
    Copy-in block (registry: `registry:block`), not part of the npm API: copy it into your app and edit freely. It builds
    on the library through `../lib` (in your app: `@lyndon/ui`). */
 
-const checkoutSlide = slideVariants(20)
+/** The step panes slide sideways: `custom` is +1 for forward (enters from the right), -1 for back. */
+const checkoutSlide = {
+  enter: (d: number) => ({ opacity: 0, x: 20 * d }),
+  center: { opacity: 1, x: 0 },
+  exit: (d: number) => ({ opacity: 0, x: -20 * d, transition: { duration: 0.14 } }),
+}
 
 /* ── Checkout ──────────────────────────────────────────────────────────── */
 

@@ -18,7 +18,7 @@ export function variants<V extends VariantMap>(base: string, map: V, defaults: V
 /** One spring for the whole library: spring(bounce, duration). */
 export const spring = (bounce = 0.25, duration = 0.45) => ({ type: 'spring' as const, bounce, duration })
 
-/** The library's entrance easing (quick out, long settle), as motion's cubic-bezier array. */
+/** The library's entrance easing (quick out, long settle), as a cubic-bezier array (play() and motion take it as is). */
 export const EASE_OUT: [number, number, number, number] = [0.22, 1, 0.36, 1]
 
 /** EASE_OUT as a CSS timing function, for `transition` / `animation` strings and `ease-[…]` classes. */
@@ -59,16 +59,6 @@ export const springVar = (bounce: number) => `var(--ui-spring${bounce >= 0.4 ? '
 export const MOTION = {
   press: spring(0.5, 0.3), pop: spring(0.5, 0.35), panel: spring(0.25, 0.3), layout: spring(0.3, 0.35), settle: spring(0.2, 0.3),
 } as const
-
-/**
- * Variants for content that slides sideways when it changes (pagers, steps, mega menus): pass the direction as `custom`
- * (+1 enters from the right, -1 from the left). `exit` is the leave duration in seconds.
- */
-export const slideVariants = (distance = 20, exit = 0.14) => ({
-  enter: (d: number) => ({ opacity: 0, x: distance * d }),
-  center: { opacity: 1, x: 0 },
-  exit: (d: number) => ({ opacity: 0, x: -distance * d, transition: { duration: exit } }),
-})
 
 /** Resolves after `ms` milliseconds: await sleep(300). */
 export const sleep = (ms: number) => new Promise<void>(r => setTimeout(r, ms))

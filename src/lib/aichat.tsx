@@ -1,6 +1,6 @@
 import { Children, Fragment, createContext, isValidElement, useCallback, useContext, useEffect, useId, useLayoutEffect, useRef, useState, type KeyboardEvent as RKeyboardEvent, type ReactNode } from 'react'
-import { AnimatePresence, motion, useReducedMotion } from 'motion/react'
-import { Badge, Button, Chip, Icon, IconButton, RUN_STATUS, Spinner, TOUCH, cn, inputClass, menuItemClass, safeColor, sleep, spring, surface, useCoarsePointer, useControllable, useFlash, useLatest, useListbox, useMediaQuery, useOutside, useRoving, type IconName, type Tone, plural, fmt, useLive } from './core'
+import { AnimatePresence, motion } from './motionkit'
+import { Badge, Button, Chip, Icon, IconButton, RUN_STATUS, Spinner, TOUCH, cn, inputClass, menuItemClass, safeColor, sleep, spring, surface, useCoarsePointer, useControllable, useFlash, useLatest, useListbox, useMediaQuery, useOutside, useRoving, type IconName, type Tone, plural, fmt, useLive, useReducedMotion } from './core'
 import { Collapse, CopyButton, TypingDots, confetti, EmptyState } from './feedback'
 import { Checkbox, Switch, type Option } from './fields'
 import { OptionList } from './select'

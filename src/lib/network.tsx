@@ -1,6 +1,6 @@
 import { useEffect, useId, useLayoutEffect, useMemo, useReducer, useRef, useState, type CSSProperties, type PointerEvent as ReactPointerEvent } from 'react'
-import { AnimatePresence, animate, cubicBezier, motion, useInView, useReducedMotion } from 'motion/react'
-import { AnimatedNumber, Button, EASE_OUT, ICONS, Icon, StatusIcon, TOUCH, capturePointer, clamp, cn, colorResolver, isTouch, onMouseLeave, safeColor, sleep, spring, surface, useOutside, usePointerDrag, useTouchScrollLock, useLatest, useThemeVersion, useWidth, type IconName, type RGBA, type StatusIconStatus, plural, useActiveIndex, fmt, svgN, svgTranslate } from './core'
+import { AnimatePresence, animate, cubicBezier, motion } from './motionkit'
+import { AnimatedNumber, Button, EASE_OUT, ICONS, Icon, StatusIcon, TOUCH, capturePointer, clamp, cn, colorResolver, isTouch, onMouseLeave, safeColor, sleep, spring, surface, useOutside, usePointerDrag, useTouchScrollLock, useLatest, useThemeVersion, useWidth, type IconName, type RGBA, type StatusIconStatus, plural, useActiveIndex, fmt, svgN, svgTranslate, useInView, useReducedMotion } from './core'
 import { Slider } from './inputs'
 import { PointerTooltip, usePointerTooltip } from './overlay'
 import { useFrameLoop, useViewport, useWheelZoom } from './motion'

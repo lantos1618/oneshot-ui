@@ -6,7 +6,7 @@ import { REDUCED_MOTION, mediaQueryList } from './helpers'
 
 afterEach(() => { cleanup(); localStorage.clear(); vi.useRealTimers() })
 
-// matchMedia: no media query matches except prefers-reduced-motion, so motion skips transform animations.
+// matchMedia: no media query matches except prefers-reduced-motion, so presence unmounts at once and play/FLIP do nothing.
 // tests/helpers.ts mockMedia() swaps the answers for one test.
 window.matchMedia ??= (query: string) => mediaQueryList(query, REDUCED_MOTION.test(query))
 

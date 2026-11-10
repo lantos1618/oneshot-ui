@@ -1,6 +1,6 @@
 import { memo, useCallback, useEffect, useId, useMemo, useRef, useState, type CSSProperties, type ReactNode, type Ref } from 'react'
-import { motion, useReducedMotion } from 'motion/react'
-import { Button, Icon, IconButton, ScrollEdges, cn, sleep, spring, useControllable, useMediaQuery, useRoving, useScrollEdges, useSize, useWidth, useResizeObserver, useStableArray } from './core'
+import { motion } from './motionkit'
+import { Button, Icon, IconButton, ScrollEdges, cn, sleep, spring, useControllable, useMediaQuery, useRoving, useScrollEdges, useSize, useWidth, useResizeObserver, useStableArray, useReducedMotion } from './core'
 import { SegmentedControl } from './fields'
 import { CopyButton } from './feedback'
 import { ActiveIndicator, useViewport } from './motion'

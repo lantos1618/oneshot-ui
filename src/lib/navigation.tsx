@@ -1,7 +1,6 @@
-import { createContext, useCallback, useContext, useEffect, useId, useLayoutEffect, useMemo, useRef, useState, type ButtonHTMLAttributes, type HTMLAttributes, type ReactNode, type Ref, type KeyboardEvent as RKeyboardEvent, type MouseEvent as ReactMouseEvent } from 'react'
-import { AnimatePresence, motion, type Variants } from 'motion/react'
-import { type AsChildProps, Avatar, Button, type ButtonProps, Icon, IconButton, type IconName, ScrollEdges, StatusIcon, cn, prefersReducedMotion, safeUrl, spring, useCoarsePointer, useComposedRefs, useControllable, useHotkey, useOutside, useScrollEdges, fmt, useResizeObserver, useRequiredContext, PartButton, focusStep, focusables, idPart, useLatest } from './core'
-import { ActiveIndicator } from './motion'
+import { createContext, useCallback, useContext, useEffect, useId, useLayoutEffect, useMemo, useRef, useState, type ButtonHTMLAttributes, type CSSProperties, type HTMLAttributes, type ReactNode, type Ref, type KeyboardEvent as RKeyboardEvent, type MouseEvent as ReactMouseEvent } from 'react'
+import { type AsChildProps, Avatar, Button, type ButtonProps, Icon, IconButton, type IconName, ScrollEdges, StatusIcon, cn, prefersReducedMotion, safeUrl, spring, useCoarsePointer, useComposedRefs, useControllable, useHotkey, useOutside, useScrollEdges, fmt, useResizeObserver, useRequiredContext, PartButton, focusStep, focusables, idPart, useChanged, useLatest } from './core'
+import { ActiveIndicator, Presence, Swap, play } from './motion'
 import { Tooltip } from './overlay'
 
 /**
@@ -133,9 +132,9 @@ export function TabsContent({ value, forceMount, className, children }: { value:
   useLayoutEffect(() => mounted ? register(value) : undefined, [register, value, mounted])
   if (!mounted) return null
   return (
-    <motion.div role="tabpanel" id={`${c.base}-panel-${idPart(value)}`} aria-labelledby={`${c.base}-tab-${idPart(value)}`} hidden={!on} data-state={on ? 'active' : 'inactive'}
-      initial={on && c.switched ? { opacity: 0, y: -4 } : false} animate={on ? { opacity: 1, y: 0 } : { opacity: 0, y: -4 }} transition={{ duration: 0.2 }}
-      className={cn('text-[13px]', vertical ? 'min-w-0 flex-1' : 'pt-3', className)}>{children}</motion.div>
+    // the entrance replays each time the panel is shown again (not for the tab that starts selected)
+    <div role="tabpanel" id={`${c.base}-panel-${idPart(value)}`} aria-labelledby={`${c.base}-tab-${idPart(value)}`} hidden={!on} data-state={on ? 'active' : 'inactive'}
+      className={cn('text-[13px]', vertical ? 'min-w-0 flex-1' : 'pt-3', on && c.switched && 'ui-in [--ui-d:.2s] [--ui-e:ease-out] [--ui-y:-4px]', className)}>{children}</div>
   )
 }
 
@@ -170,9 +169,9 @@ export function NavList({ items, value, defaultValue, onChange, collapsed, class
             it.value === v ? 'font-medium text-[var(--fg)]' : 'text-[var(--fg2)] hover:bg-[var(--muted)] hover:text-[var(--fg)]')}>
           {it.value === v && <ActiveIndicator group={group} className="rounded-[var(--r-md)] bg-[var(--muted)]" />}
           {it.icon && <Icon name={it.icon} size={16} className="relative" />}
-          <AnimatePresence initial={false}>
-            {!collapsed && <motion.span initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0, transition: { duration: 0.08 } }} className="relative flex-1 truncate">{it.label}</motion.span>}
-          </AnimatePresence>
+          <Presence>
+            {!collapsed && <span className="ui-in relative flex-1 truncate [--ui-do:.08s] [--ui-e:ease-out]">{it.label}</span>}
+          </Presence>
           {!collapsed && it.badge && <span className="relative">{it.badge}</span>}
         </button>
       ))}
@@ -184,7 +183,7 @@ export function NavList({ items, value, defaultValue, onChange, collapsed, class
 export type SidebarEntry = (NavItem & { count?: number }) | { heading: string }
 const isHeading = (e: SidebarEntry): e is { heading: string } => 'heading' in e
 
-const sbFade = { duration: 0.15 }
+const sbFade = 'transition-opacity duration-150'
 /** Frame width below which the sidebar starts folded and, expanded, slides over the main pane (px). */
 const SB_NARROW = 440
 /** Sidebar width folded to icons and expanded (px). */
@@ -225,24 +224,22 @@ export function CollapsibleSidebar({ items, title = '', user, value, defaultValu
   return (
     <div ref={frame} className={cn('relative flex h-[400px] overflow-hidden rounded-[var(--r-lg)] border border-[var(--line)] bg-[var(--bg)]', className)}>
       {over && <div aria-hidden className="flex-none" style={{ width: SB_RAIL }} />}
-      <AnimatePresence>
-        {over && !col && <motion.div key="scrim" aria-hidden onClick={toggle} className="absolute inset-0 z-[5] bg-black/25"
-          initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} transition={{ duration: 0.2 }} />}
-      </AnimatePresence>
-      <motion.aside initial={false} animate={{ width: col ? SB_RAIL : SB_WIDE }} transition={spring(0.12, 0.4)} aria-label={title ? `${title} navigation` : 'Sidebar'}
-        className={cn('flex flex-none flex-col gap-1.5 overflow-hidden border-e border-[var(--line)] bg-[var(--card)] p-2.5',
+      <Presence appear>
+        {over && !col && <div aria-hidden onClick={toggle} className="ui-in absolute inset-0 z-[5] bg-black/25 [--ui-d:.2s] [--ui-do:.2s] [--ui-e:linear]" />}
+      </Presence>
+      <aside style={{ width: col ? SB_RAIL : SB_WIDE }} aria-label={title ? `${title} navigation` : 'Sidebar'}
+        className={cn('flex flex-none flex-col gap-1.5 overflow-hidden border-e border-[var(--line)] bg-[var(--card)] p-2.5 transition-[width] duration-[400ms] ease-[var(--ui-spring-soft)]',
           over && 'absolute inset-y-0 start-0 z-10', over && !col && 'shadow-[var(--shadow)]')}>
         <div className="flex h-9 items-center gap-2 px-1 whitespace-nowrap">
-          {title && <motion.span initial={false} animate={{ opacity: col ? 0 : 1, width: col ? 0 : 22 }} transition={sbFade} className="h-[22px] flex-none rounded-[var(--r-md)] bg-[linear-gradient(135deg,var(--accent),var(--c4))]" />}
-          <motion.b initial={false} animate={{ opacity: col ? 0 : 1 }} transition={sbFade} className="min-w-0 flex-1 truncate text-sm font-semibold">{title}</motion.b>
+          {title && <span className={cn('h-[22px] flex-none rounded-[var(--r-md)] bg-[linear-gradient(135deg,var(--accent),var(--c4))] transition-[opacity,width] duration-150', col ? 'w-0 opacity-0' : 'w-[22px]')} />}
+          <b className={cn('min-w-0 flex-1 truncate text-sm font-semibold', sbFade, col && 'opacity-0')}>{title}</b>
           <Tooltip content={<>{col ? 'Expand' : 'Collapse'} <kbd className="font-[family-name:var(--mono)] opacity-70 [@media(hover:none)]:hidden">{hotkey || ''}</kbd></>} placement={col ? beside : 'bottom-center'} portal delay={300} disabled={coarse}>
             <IconButton icon="panel" label={col ? 'Expand sidebar' : 'Collapse sidebar'} aria-expanded={!col} onClick={toggle} />
           </Tooltip>
         </div>
         <nav className="mt-1.5 flex flex-1 flex-col gap-0.5">
           {items.map((it, k) => isHeading(it) ? (
-            <motion.div key={`h${k}`} initial={false} animate={{ opacity: col ? 0 : 1 }} transition={sbFade} aria-hidden={col}
-              className="px-2.5 pt-2.5 pb-1 text-[11px] whitespace-nowrap text-[var(--fg3)]">{it.heading}</motion.div>
+            <div key={`h${k}`} aria-hidden={col} className={cn('px-2.5 pt-2.5 pb-1 text-[11px] whitespace-nowrap text-[var(--fg3)]', sbFade, col && 'opacity-0')}>{it.heading}</div>
           ) : (
             <Tooltip key={it.value} content={it.label} placement={beside} portal disabled={!col} delay={80}>
               <button onClick={() => { setV(it.value); if (over && !col) setCol(true) }} aria-current={it.value === v ? 'page' : undefined} aria-label={col ? it.label : undefined}
@@ -250,10 +247,9 @@ export function CollapsibleSidebar({ items, title = '', user, value, defaultValu
                   it.value === v ? 'font-medium text-[var(--fg)]' : 'text-[var(--fg2)] hover:text-[var(--fg)]')}>
                 {it.value === v && <ActiveIndicator group={group} className="rounded-[var(--r-md)] bg-[var(--muted)]" />}
                 {it.icon && <Icon name={it.icon} size={16} className="relative" />}
-                <motion.span initial={false} animate={{ opacity: col ? 0 : 1 }} transition={sbFade} className="relative flex-1 truncate">{it.label}</motion.span>
+                <span className={cn('relative flex-1 truncate', sbFade, col && 'opacity-0')}>{it.label}</span>
                 {(it.count ?? 0) > 0 && (
-                  <motion.span initial={false} animate={{ opacity: col ? 0 : 1 }} transition={sbFade}
-                    className="relative rounded-full bg-[var(--accent)] px-1.5 py-px font-[family-name:var(--mono)] text-[11px] font-semibold text-[var(--card)]">{it.count}</motion.span>
+                  <span className={cn('relative rounded-full bg-[var(--accent)] px-1.5 py-px font-[family-name:var(--mono)] text-[11px] font-semibold text-[var(--card)]', sbFade, col && 'opacity-0')}>{it.count}</span>
                 )}
                 {(it.count ?? 0) > 0 && col && <span className="absolute top-1.5 start-[26px] h-1.5 w-1.5 rounded-full bg-[var(--accent)]" />}
                 {!it.count && it.badge && !col && <span className="relative">{it.badge}</span>}
@@ -264,19 +260,18 @@ export function CollapsibleSidebar({ items, title = '', user, value, defaultValu
         {user && (
           <div className="flex items-center gap-2 border-t border-[var(--line)] px-0.5 pt-2 whitespace-nowrap">
             <Avatar name={user.name} size={30} className="!border-0" />
-            <motion.div initial={false} animate={{ opacity: col ? 0 : 1 }} transition={sbFade} className="min-w-0">
+            <div className={cn('min-w-0', sbFade, col && 'opacity-0')}>
               <b className="block truncate text-xs font-semibold">{user.name}</b>{user.detail && <span className="block truncate text-[11px] text-[var(--fg3)]">{user.detail}</span>}
-            </motion.div>
+            </div>
           </div>
         )}
-      </motion.aside>
+      </aside>
       <section aria-label={current?.label} className="relative min-w-0 flex-1 overflow-hidden">
-        <AnimatePresence mode="wait" initial={false}>
-          <motion.div key={current?.value} initial={{ opacity: 0, y: 6 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0, transition: { duration: 0.08 } }} transition={{ duration: 0.22 }}
-            className="flex h-full flex-col gap-3 p-4">
+        <Swap k={current?.value ?? ''} mode="wait">
+          <div className="ui-in flex h-full flex-col gap-3 p-4 [--ui-d:.22s] [--ui-do:.08s] [--ui-e:ease-out] [--ui-y:6px] [--ui-yo:0]">
             {current && (typeof children === 'function' ? children(current) : children)}
-          </motion.div>
-        </AnimatePresence>
+          </div>
+        </Swap>
       </section>
     </div>
   )
@@ -292,8 +287,8 @@ export type TabBarItem = NavItem & { count?: number }
 export function MobileTabBar({ items, value, defaultValue, onChange, onAction, actionLabel, actionIcon = 'plus', className }:
   { items: TabBarItem[]; value?: string; defaultValue?: string; onChange?: (v: string) => void; onAction?: () => void; actionLabel?: string; actionIcon?: IconName; className?: string }) {
   const [v, set] = useControllable(value, defaultValue ?? items[0]?.value ?? '', onChange)
-  const group = useId(), touched = useRef(false)
-  const [spin, setSpin] = useState(0)
+  const group = useId()
+  const bounce = { duration: 0.35, ease: 'easeOut' } as const
   const mid = Math.ceil(items.length / 2)
   const cells: (TabBarItem | null)[] = onAction ? [...items.slice(0, mid), null, ...items.slice(mid)] : items
   return (
@@ -301,30 +296,23 @@ export function MobileTabBar({ items, value, defaultValue, onChange, onAction, a
       style={{ gridTemplateColumns: `repeat(${cells.length}, minmax(0, 1fr))` }}>
       {cells.map(it => it === null ? (
         <span key="action" className="grid place-items-center">
-          {/* the replay key sits on the icon, not the button, so pressing it keeps keyboard focus */}
-          <motion.button aria-label={actionLabel ?? 'New'} onClick={() => { setSpin(s => s + 1); onAction?.() }} whileTap={{ scale: 0.92 }}
-            className="-mt-5 grid h-11 w-11 cursor-pointer place-items-center rounded-full border-0 bg-[var(--primary)] text-[var(--on-primary)] shadow-[0_6px_16px_rgba(0,0,0,.2)]">
-            <motion.span key={spin} className="grid" initial={false} animate={spin ? { rotate: [0, 90], scale: [1, 0.9, 1] } : undefined} transition={{ duration: 0.35, ease: 'easeOut' }}>
-              <Icon name={actionIcon} size={20} />
-            </motion.span>
-          </motion.button>
+          <button aria-label={actionLabel ?? 'New'} onClick={e => { play(e.currentTarget.firstElementChild, { rotate: [0, 90], scale: [1, 0.9, 1] }, bounce); onAction?.() }}
+            className="-mt-5 grid h-11 w-11 cursor-pointer place-items-center rounded-full border-0 bg-[var(--primary)] text-[var(--on-primary)] shadow-[0_6px_16px_rgba(0,0,0,.2)] transition-transform duration-150 motion-safe:active:scale-[.92]">
+            <span className="grid"><Icon name={actionIcon} size={20} /></span>
+          </button>
         </span>
       ) : (
-        <button key={it.value} onClick={() => { touched.current = true; set(it.value) }} aria-current={it.value === v ? 'page' : undefined}
+        <button key={it.value} onClick={e => { if (it.value !== v) play(e.currentTarget.querySelector('[data-tab-icon]'), { y: [0, -4, 0] }, bounce); set(it.value) }} aria-current={it.value === v ? 'page' : undefined}
           className={cn('relative flex h-full min-w-0 cursor-pointer flex-col items-center justify-center gap-1 border-0 bg-transparent text-[11px] font-medium transition-colors',
             it.value === v ? 'text-[var(--accent)]' : 'text-[var(--fg3)] hover:text-[var(--fg2)]')}>
-          {it.value === v && <motion.span layoutId={group} className="absolute top-0 start-[calc(50%-14px)] h-[3px] w-7 rounded-b-[var(--r-sm)] bg-[var(--accent)]" transition={spring(0.25, 0.4)} />}
+          {it.value === v && <ActiveIndicator group={group} transition={spring(0.25, 0.4)} className="!inset-auto !start-[calc(50%-14px)] !top-0 h-[3px] w-7 rounded-b-[var(--r-sm)] bg-[var(--accent)]" />}
           <span className="relative inline-flex">
-            <motion.span key={it.value === v ? 'on' : 'off'} className="inline-flex" initial={false}
-              animate={it.value === v && touched.current ? { y: [0, -4, 0] } : { y: 0 }} transition={{ duration: 0.35, ease: 'easeOut' }}>
-              {it.icon && <Icon name={it.icon} size={20} />}
-            </motion.span>
-            <AnimatePresence>
+            <span data-tab-icon className="inline-flex">{it.icon && <Icon name={it.icon} size={20} />}</span>
+            <Presence appear>
               {(it.count ?? 0) > 0 && (
-                <motion.span aria-hidden initial={{ scale: 0 }} animate={{ scale: 1 }} exit={{ scale: 0, transition: { duration: 0.2 } }} transition={spring(0.5, 0.35)}
-                  className="absolute -top-2 start-[calc(100%-7px)] grid h-[18px] min-w-[18px] place-items-center rounded-full border-2 border-[var(--card)] bg-[var(--bad)] px-1 text-[11px] leading-none font-bold text-[var(--card)]">{it.count}</motion.span>
+                <span aria-hidden className="ui-in absolute -top-2 start-[calc(100%-7px)] grid h-[18px] min-w-[18px] place-items-center rounded-full border-2 border-[var(--card)] bg-[var(--bad)] px-1 text-[11px] leading-none font-bold text-[var(--card)] [--ui-d:.35s] [--ui-do:.2s] [--ui-e:var(--ui-spring-pop)] [--ui-o:1] [--ui-s:0]">{it.count}</span>
               )}
-            </AnimatePresence>
+            </Presence>
           </span>
           {/* the name is the visible label plus the count ("Inbox, 3 new"), so it matches what is on screen */}
           <span>{it.label}{(it.count ?? 0) > 0 && <span className="sr-only">{`, ${it.count ?? 0} new`}</span>}</span>
@@ -335,13 +323,8 @@ export function MobileTabBar({ items, value, defaultValue, onChange, onAction, a
 }
 
 export type MegaMenuItem = { label: string; content?: ReactNode; href?: string }
-
-/** `custom` is the slide direction in screen terms: +1 enters from the right, -1 from the left. */
-const megaSlide: Variants = {
-  enter: (d: number) => ({ opacity: 0, x: 40 * d }),
-  center: { opacity: 1, x: 0, transition: spring(0.15, 0.35) },
-  exit: (d: number) => ({ opacity: 0, x: -40 * d, transition: { duration: 0.2 } }),
-}
+/** How long the mega panel takes to fade out (ms). */
+const MEGA_FADE_MS = 150
 
 /**
  * Spatial arrow-key step through a panel laid out as a grid: the nearest item in the arrow's direction, scored by distance
@@ -421,6 +404,11 @@ export function MegaMenu({ items, brand, actions, children, closeDelay = 160, de
   }, [measure, items])
   useLayoutEffect(() => { if (cur >= 0) measure() }, [cur, measure]) // the triggers may have scrolled since
   useEffect(() => () => clearTimeout(closeT.current), [])
+  useEffect(() => { // faded out: hide the panel (see `invisible` below) and drop its content
+    if (cur >= 0) return
+    const t = setTimeout(() => setView(v => v.cur < 0 && v.shown >= 0 ? { ...v, shown: -1 } : v), MEGA_FADE_MS)
+    return () => clearTimeout(t)
+  }, [cur])
   useOutside([host], e => {
     const t = triggers.current[cur], refocus = e.type === 'keydown' && host.current?.contains(document.activeElement)
     clearTimeout(closeT.current); setCur(-1)
@@ -441,7 +429,9 @@ export function MegaMenu({ items, brand, actions, children, closeDelay = 160, de
   // the panel lines up with its trigger's start edge, clamped inside the frame
   const edge = edges[shown] ?? { l: 0, r: 0 }
   const left = shown >= 0 ? Math.max(8, Math.min(hostW - size.w - 8, (edge.l - 20))) : 0
-  const morph = morphing ? spring(0.12, 0.4) : { duration: 0 }
+  // open: fades and settles in, and morphs to the next menu's place and size; closing is a quick fade
+  const fade = cur >= 0 ? '.3s var(--ui-spring)' : `${MEGA_FADE_MS}ms ease`
+  const moves = [...['opacity', 'translate', 'scale'].map(p => `${p} ${fade}`), ...(morphing ? ['left', 'width', 'height'] : []).map(p => `${p} .4s var(--ui-spring-soft)`)].join(',')
   const maxW = Math.max(200, hostW - 16)
   const topItems = () => [...(host.current?.querySelectorAll<HTMLElement>('[data-mega-top]') ?? [])]
   const content = () => panel.current?.querySelector(`[data-mega="${cur}"]`)
@@ -492,22 +482,20 @@ export function MegaMenu({ items, brand, actions, children, closeDelay = 160, de
         <span className="flex-1" />
         {actions && <span className="hidden flex-none items-center gap-2 sm:flex">{actions}</span>}
       </div>
-      <motion.div ref={panel} id={pid} role="region" aria-label={cur >= 0 ? items[cur].label : undefined} aria-hidden={cur < 0}
+      <div ref={panel} id={pid} role="region" aria-label={cur >= 0 ? items[cur].label : undefined} aria-hidden={cur < 0}
         // hidden once faded out: the first open then makes the panel appear at its size instead of resizing a box that
         // was there all along (which counted as a layout shift)
-        className={cn('absolute top-16 z-[4] overflow-x-hidden overflow-y-auto overscroll-contain rounded-[var(--r-lg)] border border-[var(--line)] bg-[var(--card)] shadow-[var(--shadow)]', cur < 0 && 'pointer-events-none', shown < 0 && 'invisible')}
-        initial={false}
-        animate={cur >= 0 ? { opacity: 1, y: 0, scale: 1, left, width: size.w, height: hostH ? Math.min(size.h, hostH - 72) : size.h } : { opacity: 0, y: -4, scale: 0.98 }}
-        onAnimationComplete={() => { if (cur < 0) setView(v => v.cur < 0 ? { ...v, shown: -1 } : v) }}
-        transition={{ default: cur >= 0 ? spring(0.2, 0.3) : { duration: 0.15 }, left: morph, width: morph, height: morph }}
+        className={cn('absolute top-16 z-[4] overflow-x-hidden overflow-y-auto overscroll-contain rounded-[var(--r-lg)] border border-[var(--line)] bg-[var(--card)] shadow-[var(--shadow)]',
+          cur < 0 && 'pointer-events-none -translate-y-1 scale-[.98] opacity-0 motion-reduce:translate-y-0 motion-reduce:scale-100', shown < 0 && 'invisible')}
+        // the content slides only between two open menus, from the side the new one is on
+        style={{ left, width: size.w, height: hostH ? Math.min(size.h, hostH - 72) : size.h, transition: moves, '--ui-dir': morphing ? dir : 0 } as CSSProperties}
         onKeyDown={onPanelKey} onPointerEnter={() => clearTimeout(closeT.current)} onPointerLeave={e => { if (e.pointerType === 'mouse') close() }}>
-        <AnimatePresence initial={false} custom={dir}>
-          {shown >= 0 && (
-            <motion.div key={shown} data-mega={shown} custom={dir} variants={megaSlide} initial={morphing ? 'enter' : false} animate="center" exit="exit"
-              className="absolute top-0 start-0 w-max p-4" style={{ maxWidth: maxW }}>{items[shown]?.content}</motion.div>
-          )}
-        </AnimatePresence>
-      </motion.div>
+        {shown >= 0 && (
+          <Swap k={shown} mode="sync">
+            <div data-mega={shown} className="ui-in ui-slide absolute top-0 start-0 w-max p-4 [--ui-d:.35s] [--ui-do:.2s] [--ui-e:var(--ui-spring-soft)] [--ui-slide:40px]" style={{ maxWidth: maxW }}>{items[shown]?.content}</div>
+          </Swap>
+        )}
+      </div>
       {/* off-screen copies, measured so the panel knows each menu's size before it morphs */}
       <div aria-hidden className="pointer-events-none invisible absolute top-0 start-0">
         {items.map((it, i) => it.content ? <div key={it.label} ref={el => { measures.current[i] = el }} className="absolute top-0 start-0 w-max p-4" style={{ maxWidth: maxW }}>{it.content}</div> : null)}
@@ -564,19 +552,20 @@ export function Pagination({ page, total, onChange, className, 'aria-label': ari
 
 /** Wizard progress: done steps fill, connecting lines draw across. On phones only the current step keeps its label. */
 export function Steps({ steps, current, className }: { steps: string[]; current: number; className?: string }) {
+  const moved = useChanged(current)
   return (
     <ol className={cn('m-0 flex list-none items-center gap-1.5 p-0 text-xs', className)}>
       {steps.map((s, i) => (
         <li key={s} className="contents">
           <span className={cn('flex items-center gap-1.5', i <= current ? 'text-[var(--fg)]' : 'text-[var(--fg3)]')} aria-current={i === current ? 'step' : undefined}>
-            <motion.span key={i === current ? `c${current}` : 'n'} className="grid" initial={false} animate={{ scale: i === current ? [1, 1.15, 1] : 1 }}>
+            <span key={i === current ? `c${current}` : 'n'} className={cn('grid', moved && i === current && 'ui-pulse [--ui-d:.8s] [--ui-e:ease-in-out] [--ui-s:1.15]')}>
               <StatusIcon status={i < current ? 'done' : i === current ? 'active' : 'pending'} number={i + 1} size={22} className="!text-[11px]" />
-            </motion.span>
+            </span>
             <span className={cn(i === current ? 'whitespace-nowrap' : 'hidden sm:inline')}>{s}</span>
           </span>
           {i < steps.length - 1 && (
             <span className="relative h-0.5 min-w-4 flex-1 overflow-hidden rounded-full bg-[var(--line)]">
-              <motion.b className="absolute inset-0 origin-left bg-[var(--primary)]" initial={false} animate={{ scaleX: i < current ? 1 : 0 }} transition={spring(0.1, 0.4)} />
+              <b className={cn('absolute inset-0 origin-left bg-[var(--primary)] transition-transform duration-[400ms] ease-[var(--ui-spring-soft)] motion-reduce:transition-none', i >= current && 'scale-x-0')} />
             </span>
           )}
         </li>
@@ -601,11 +590,10 @@ export function Wizard({ steps, value, defaultValue = 0, onChange, onFinish, res
   return (
     <div className={cn('flex flex-col gap-3', className)}>
       <Steps steps={steps.map(s => s.label)} current={i} />
-      <div className="relative min-h-5 overflow-hidden text-[13px] text-[var(--fg2)]" aria-live="polite">
-        <AnimatePresence mode="popLayout" initial={false} custom={dir}>
-          <motion.p key={i} custom={dir} className="m-0" initial={{ opacity: 0, x: 12 * dir }} animate={{ opacity: 1, x: 0 }} exit={{ opacity: 0, x: -12 * dir, transition: { duration: 0.12 } }}
-            transition={spring(0.15, 0.35)}>{steps[i]?.description}</motion.p>
-        </AnimatePresence>
+      <div className="relative min-h-5 overflow-hidden text-[13px] text-[var(--fg2)]" aria-live="polite" style={{ '--ui-dir': dir } as CSSProperties}>
+        <Swap k={i}>
+          <p className="ui-in ui-slide m-0 [--ui-d:.35s] [--ui-do:.12s] [--ui-e:var(--ui-spring-soft)] [--ui-slide:12px]">{steps[i]?.description}</p>
+        </Swap>
       </div>
       <div className="flex items-center justify-between">
         <Button size="sm" onClick={() => go(Math.max(0, i - 1))} className={cn((i === 0 || last) && 'invisible')} aria-hidden={i === 0 || last} tabIndex={i === 0 || last ? -1 : 0}>{'Back'}</Button>

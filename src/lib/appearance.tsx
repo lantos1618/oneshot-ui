@@ -1,5 +1,5 @@
 import { type ReactNode, useEffect, useId, useMemo, useRef, useState } from 'react'
-import { AnimatePresence, type Transition, motion } from 'motion/react'
+import { AnimatePresence, type Transition, motion } from './motionkit'
 import { Button, FONTS, Icon, IconButton, type Palette, THEMES, type ThemeSettings, cn, derive, editPalette, inputClass, loadFont, spring, themeCSS, themePalette, themeShareUrl, useControllable, useTheme, plural, downloadBlob } from './core'
 import { Collapse, CopyButton, useCopy, useToast } from './feedback'
 import { SegmentedControl } from './fields'

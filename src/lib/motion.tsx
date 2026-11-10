@@ -23,7 +23,7 @@ function PresenceItem({ exiting = false, enter = true, pop = false, onGone, chil
   useLayoutEffect(() => {
     if (!exiting) return
     const el = ref.current, b = box.current
-    // popLayout: the leaving node keeps its box but leaves the flow, so the new one takes its place at once
+    // popped: the leaving node keeps its box but leaves the flow, so the new one takes its place at once
     if (pop && el && b) Object.assign(el.style, { position: 'absolute', left: `${b[0]}px`, top: `${b[1]}px`, width: `${b[2]}px`, height: `${b[3]}px`, margin: '0' })
     return whenAnimationsDone(el, () => onGone?.())
   }, [exiting]) // eslint-disable-line react-hooks/exhaustive-deps
@@ -85,8 +85,7 @@ export function PresenceList<T>({ items, keyOf, appear = false, pop = false, chi
  */
 export function Swap({ k, mode = 'pop', appear = false, children }: { k: Key; mode?: 'pop' | 'wait' | 'sync'; appear?: boolean; children: PresenceChild }) {
   const [state, setState] = useState({ k, first: true, gone: [] as { k: Key; node: PresenceChild }[] })
-  const last = useRef(children)
-  useLayoutEffect(() => { last.current = children })
+  const last = useLatest(children)
   if (state.k !== k) setState(s => ({ k, first: false, gone: [...s.gone.filter(g => g.k !== k), { k: s.k, node: last.current }] }))
   const waiting = mode === 'wait' && state.gone.length > 0
   // one keyed list, so the child that leaves keeps its DOM node (and its measured box) when it moves to `gone`
@@ -114,8 +113,7 @@ const flipOffset = (el: HTMLElement): [number, number] => [el.offsetLeft, el.off
  * instead of jumping. Off for reduced motion and for lists longer than `max`.
  */
 export function useFlip(ref: RefObject<HTMLElement | null>, { selector = ':scope > [data-flip]', max = 200, transition = MOTION.layout }: { selector?: string; max?: number; transition?: SpringOptions } = {}) {
-  const t = useRef(transition)
-  useLayoutEffect(() => { t.current = transition })
+  const t = useLatest(transition)
   useLayoutEffect(() => {
     const box = ref.current
     if (!box || typeof MutationObserver === 'undefined') return
@@ -144,7 +142,7 @@ export function useFlip(ref: RefObject<HTMLElement | null>, { selector = ':scope
     const ro = new ResizeObserver(() => { last = snap() })
     ro.observe(box)
     return () => { mo.disconnect(); ro.disconnect() }
-  }, [ref, selector, max])
+  }, [ref, selector, max, t])
 }
 
 /**

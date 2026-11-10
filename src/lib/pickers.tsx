@@ -717,10 +717,9 @@ export function Calendar({ selected, onSelect, range, onRangeChange, month: init
       onBlur={e => { if (!wrap.current?.contains(e.relatedTarget as Node)) { wantFocus.current = false; setKbd(false) } }}>
       <div className="relative">
         <div className={cn('relative', view !== 'days' && 'invisible')} inert={view !== 'days'}>
-          {/* the leaving month slides out the way the new one came from (the direction is read when it leaves) */}
-          <div className="relative overflow-hidden" style={{ '--cal-dir': dir } as CSSProperties}>
+          <div className="relative overflow-hidden" style={{ '--ui-dir': dir } as CSSProperties}>
             <Swap k={+month}>
-              <div data-cal={+month} className={cn('ui-in flex gap-x-5 gap-y-4 [--ui-d:.3s] [--ui-do:.2s] [--ui-e:var(--ui-spring-soft)] [--ui-x:calc(var(--cal-dir)*40px)] [--ui-xo:calc(var(--cal-dir)*-40px)]', n > 1 && 'flex-col sm:flex-row', onRangeChange && 'touch-pan-y [-webkit-touch-callout:none]')}
+              <div data-cal={+month} className={cn('ui-in ui-slide flex gap-x-5 gap-y-4 [--ui-d:.3s] [--ui-do:.2s] [--ui-e:var(--ui-spring-soft)] [--ui-slide:40px]', n > 1 && 'flex-col sm:flex-row', onRangeChange && 'touch-pan-y [-webkit-touch-callout:none]')}
                 onKeyDown={onKey} onPointerLeave={() => setHover(null)} onPointerMove={onMove} onPointerUp={cancelHold} onPointerCancel={cancelHold}
                 onContextMenu={onRangeChange ? e => e.preventDefault() : undefined}>
                 {months.map(panel)}

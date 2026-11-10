@@ -13,26 +13,28 @@ export const CORE = [
 
 /** Extras families: modules in dependency order, and the families they may import besides core. */
 export const EXTRAS = {
+  // motion/react for the extras (core has none): every family that animates with motion lists it
+  motionkit: { modules: ['motionkit'], deps: [] },
   vizkit: { modules: ['vizkit'], deps: [] },
-  charts: { modules: ['annotate', 'charts', 'timeline'], deps: ['vizkit'] },
-  diagrams: { modules: ['diagramkit', 'gantt', 'statechart', 'trace', 'network', 'diagrams'], deps: ['charts', 'vizkit'] },
-  geo: { modules: ['geoworld', 'geoland', 'geo'], deps: ['vizkit'] },
-  content: { modules: ['code', 'markdown', 'editor'], deps: [] },
+  charts: { modules: ['annotate', 'charts', 'timeline'], deps: ['vizkit', 'motionkit'] },
+  diagrams: { modules: ['diagramkit', 'gantt', 'statechart', 'trace', 'network', 'diagrams'], deps: ['charts', 'vizkit', 'motionkit'] },
+  geo: { modules: ['geoworld', 'geoland', 'geo'], deps: ['vizkit', 'motionkit'] },
+  content: { modules: ['code', 'markdown', 'editor'], deps: ['motionkit'] },
   lanes: { modules: ['lanes', 'gitgraph'], deps: ['content', 'vizkit'] },
-  media: { modules: ['media'], deps: [] },
-  collab: { modules: ['collab'], deps: [] },
-  data: { modules: ['datagrid', 'scheduler', 'kanban'], deps: [] },
+  media: { modules: ['media'], deps: ['motionkit'] },
+  collab: { modules: ['collab'], deps: ['motionkit'] },
+  data: { modules: ['datagrid', 'scheduler', 'kanban'], deps: ['motionkit'] },
   binary: { modules: ['binary'], deps: ['vizkit'] },
-  ai: { modules: ['aistream', 'ai', 'aichat'], deps: ['content', 'media'] },
-  agents: { modules: ['agentrun', 'aiagent'], deps: ['ai', 'content', 'diagrams'] },
-  theming: { modules: ['themeexport', 'appearance'], deps: [] },
+  ai: { modules: ['aistream', 'ai', 'aichat'], deps: ['content', 'media', 'motionkit'] },
+  agents: { modules: ['agentrun', 'aiagent'], deps: ['ai', 'content', 'diagrams', 'motionkit'] },
+  theming: { modules: ['themeexport', 'appearance'], deps: ['motionkit'] },
 }
 
 /** Modules that only re-export. Nothing imports a barrel except `./core`. */
 export const BARRELS = ['core', 'forms', 'diagrams']
 
 /** Modules with no subpath export of their own (internal plumbing of their tier). */
-export const INTERNAL = ['formkit', 'diagramkit']
+export const INTERNAL = ['formkit', 'diagramkit', 'motionkit']
 
 /** Data that geo loads on demand: a subpath of its own, never in a barrel. */
 export const LAZY = ['geoworld', 'geoland']
@@ -43,7 +45,7 @@ export const ENTRIES = ['index', 'all', 'utils', 'utils-extras']
 /** Single-file bundles (dist-single) by family; `ui` is core. Each bundle may import only the bundles before it. */
 export const BUNDLE_FAMILIES = {
   ui: [],
-  'ui-charts': ['vizkit', 'charts', 'diagrams', 'geo'],
+  'ui-charts': ['motionkit', 'vizkit', 'charts', 'diagrams', 'geo'],
   'ui-content': ['content', 'lanes', 'media', 'collab', 'data', 'binary', 'theming'],
   'ui-ai': ['ai', 'agents'],
 }

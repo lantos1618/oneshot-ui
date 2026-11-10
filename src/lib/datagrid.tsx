@@ -1,5 +1,5 @@
 import { memo, useCallback, useId, useEffect, useLayoutEffect, useMemo, useRef, useState, type CSSProperties, type KeyboardEvent as RKeyboardEvent, type ReactElement, type ReactNode } from 'react'
-import { AnimatePresence, motion } from 'motion/react'
+import { AnimatePresence, motion } from './motionkit'
 import { Button, Icon, IconButton, clamp, ScrollEdges, Skeleton, Spinner, TOUCH, cn, dateFormat, spring, surface, useCoarsePointer, useControllable, usePointerDrag, useScrollEdges, useWidth, plural, fmt, LOCALE, useLive, useLatestState, compareCells, nextSort, ariaSort, downloadBlob, onColorLabel, type TableSort } from './core'
 import { Popover, PopoverContent, PopoverTrigger } from './overlay'
 import { SegmentedControl, inputShellClass } from './fields'

@@ -1,5 +1,4 @@
 import { memo, useCallback, useEffect, useImperativeHandle, useLayoutEffect, useMemo, useRef, useState, type HTMLAttributes, type KeyboardEvent as RKeyboardEvent, type MouseEvent as RMouseEvent, type ReactElement, type ReactNode, type Ref } from 'react'
-import { motion } from 'motion/react'
 import { cn, isEditableTarget, useCoarsePointer, useControllable, useStableArray } from './core'
 import { useVirtual, type VirtualAlign } from './virtual'
 
@@ -687,7 +686,7 @@ const LaneRowView = memo(function LaneRowView({ row, start, height, columns, gut
         height ? 'items-center [contain:strict]' : 'items-stretch [contain:layout_paint]', selected ? 'bg-[var(--accent-soft)]' : 'hover:bg-[var(--muted)]', extraClass?.(row, state))}
       style={{ height, transform: `translateY(${start}px)`, gridTemplateColumns: `${gutterWidth}px ${columns}` }}
       onClick={e => { if (!laneControl(e.target, e.currentTarget)) onRowClick(row.index, e) }} onPointerEnter={e => { if (e.pointerType === 'mouse') onHover(row.index) }}>
-      {fresh ? <motion.div className="contents" initial={{ opacity: 0 }} animate={{ opacity: 1 }} transition={{ duration: 0.4 }}>{inner}</motion.div> : inner}
+      {fresh ? <div className="contents">{inner}</div> : inner}
     </div>
   )
 })

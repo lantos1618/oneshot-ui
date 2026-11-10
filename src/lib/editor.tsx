@@ -1,5 +1,5 @@
 import { useEffect, useId, useLayoutEffect, useRef, useState, type ReactNode, type KeyboardEvent as RKeyboardEvent, type RefObject } from 'react'
-import { AnimatePresence, motion } from 'motion/react'
+import { AnimatePresence, motion } from './motionkit'
 import { Avatar, Button, Icon, type IconName, Spinner, TEXT_LINK_SCHEMES, clamp, cn, formatHotkey, inputClass, isCoarsePointer, safeUrl, spring, useLatest, useOutside, useRoving, plural, resolveColor, useResizeObserver, useListbox, useThemeVersion, gridKeyMove } from './core'
 import { play, shake } from './motion'
 import { FloatingPanel, MenuLabel } from './overlay'

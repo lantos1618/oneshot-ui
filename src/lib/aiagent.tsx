@@ -1,6 +1,6 @@
 import { memo, useEffect, useLayoutEffect, useMemo, useRef, useState, type ReactNode } from 'react'
-import { AnimatePresence, motion, useReducedMotion } from 'motion/react'
-import { Badge, Button, Chip, FONT_CSS, Icon, IconButton, RUN_STATUS, Spinner, TOUCH, cn, ScrollEdges, onColorLabel, spring, surface, themeCSS, uid, useLatest, useMediaQuery, useRoving, useScrollEdges, useTheme, plural, fmt, svgN, svgTranslate } from './core'
+import { AnimatePresence, motion } from './motionkit'
+import { Badge, Button, Chip, FONT_CSS, Icon, IconButton, RUN_STATUS, Spinner, TOUCH, cn, ScrollEdges, onColorLabel, spring, surface, themeCSS, uid, useLatest, useMediaQuery, useRoving, useScrollEdges, useTheme, plural, fmt, svgN, svgTranslate, useReducedMotion } from './core'
 import { CopyButton, TypingDots, EmptyState } from './feedback'
 import { SegmentedControl } from './fields'
 import { SendButton, StreamingText } from './ai'

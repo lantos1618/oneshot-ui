@@ -1,6 +1,6 @@
 import { Fragment, useEffect, useId, useLayoutEffect, useMemo, useRef, useState, type CSSProperties, type KeyboardEvent as ReactKeyboardEvent, type MouseEvent as ReactMouseEvent, type PointerEvent as ReactPointerEvent } from 'react'
-import { motion, useInView } from 'motion/react'
-import { Avatar, Button, Chip, EASE_OUT, TOUCH, addDays, cn, haptic, isTouch, maxOf, minOf, onMouseLeave, spring, surface, useLongPress, useOutside, usePointerDrag, useTouchScrollLock, useWidth, plural, fmt } from './core'
+import { motion } from './motionkit'
+import { Avatar, Button, Chip, EASE_OUT, TOUCH, addDays, cn, haptic, isTouch, maxOf, minOf, onMouseLeave, spring, surface, useLongPress, useOutside, usePointerDrag, useTouchScrollLock, useWidth, plural, fmt, useInView } from './core'
 import { Collapse } from './feedback'
 import { PointerTooltip, usePointerTooltip } from './overlay'
 import { DG_COLLAPSE_STICKY, DG_NOW, DG_PIN, DG_ROW, DgArrowMarkers, DgChevron, DgTrack, DgTrackHead, dgSafeId } from './diagramkit'

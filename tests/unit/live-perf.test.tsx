@@ -9,8 +9,6 @@ import { TraceWaterfall } from '../../src/lib/trace'
 import { Globe } from '../../src/lib/geo'
 import { AGENT_WORKFLOWS, AGENT_WORKFLOW_ORDER } from '../../src/examples'
 
-// reduced motion on for these components (motion asks for "(prefers-reduced-motion)", which the shared stub doesn't match)
-vi.mock('motion/react', async orig => ({ ...(await orig<typeof import('motion/react')>()), useReducedMotion: () => true }))
 
 /** IntersectionObserver that reports everything on screen. */
 class SeenObserver {

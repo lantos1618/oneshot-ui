@@ -1,5 +1,5 @@
 import { memo, useEffect, useId, useLayoutEffect, useMemo, useRef, useState, type FocusEvent as ReactFocusEvent, type KeyboardEvent as ReactKeyboardEvent, type PointerEvent as ReactPointerEvent, type ReactNode, type Ref, type RefObject, type CSSProperties } from 'react'
-import { motion } from 'motion/react'
+import { motion } from './motionkit'
 import { AnimatedNumber, Button, DeltaBadge, FOCUS, Icon, IconButton, SparkChart, TOUCH, chartPath, colorResolver, composeRefs, focusStep, menuItemClass, surface, type Curve, type RGBA, addDays, clamp, cn, dayKey, extent, fmt, isTouch, maxOf, minOf, onMouseLeave, prefersReducedMotion, releaseTouchCapture, safeColor, spring, startOfWeek, useCoarsePointer, useControllable, useOutside, useWidth, plural, rangeStr, downloadBlob, writeClipboard, gridKeyMove, useActiveIndex, useStatusFlash, useLive, Legend, useResizeObserver, svgN } from './core'
 import { useTween, useViewport } from './motion'
 import { CHART_NEUTRAL, VIZ_LIT_RING, VizTip, linScale, niceStep, niceTicks, polarPt, seriesColor, svgWedge, textPx, tickDecimals, ticksIn, vizTipAnchor, type VizTipAnchor } from './vizkit'

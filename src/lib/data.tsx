@@ -176,7 +176,11 @@ export function AccordionContent({ className, children, forceMount }: { classNam
   const panel = <div id={it.panelId} role="region" aria-labelledby={it.triggerId} className={cn('pb-3 text-[13px] text-[var(--fg2)]', className)}>{children}</div>
   if (!forceMount) return <Collapse open={it.on}>{panel}</Collapse>
   return (
-    <div className="ui-collapse" data-open={it.on ? '' : undefined} style={{ visibility: it.on ? 'visible' : 'hidden' }}><div>{panel}</div></div>
+    // closed: zero-height row, hidden once the transition has ended (the inner wrapper has no padding, so the row can close fully)
+    <div style={{ visibility: it.on ? 'visible' : 'hidden' }}
+      className={cn('grid', it.on ? 'grid-rows-[1fr] [transition:grid-template-rows_.3s_var(--ui-ease-out),opacity_.3s]' : 'grid-rows-[0fr] opacity-0 [transition:grid-template-rows_.3s_var(--ui-ease-out),opacity_.3s,visibility_0s_.3s]')}>
+      <div className="min-h-0 overflow-hidden">{panel}</div>
+    </div>
   )
 }
 

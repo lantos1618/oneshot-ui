@@ -1,6 +1,6 @@
 import { useEffect, useLayoutEffect, useMemo, useRef, useState, useSyncExternalStore, type KeyboardEvent as RKeyboardEvent, type PointerEvent as RPointerEvent, type ReactNode, type RefObject } from 'react'
-import { AnimatePresence, animate, motion, useInView, useMotionValue, useReducedMotion } from 'motion/react'
-import { Avatar, Badge, Button, Chip, EASE_OUT, EASE_OUT_CSS, Icon, IconButton, TOUCH, capturePointer, clamp, cn, cssUrl, safeMediaUrl, Spinner, spring, surface, useControllable, useElementSize, useFocusTrap, useWidth, uiShared, plural, fmt } from './core'
+import { AnimatePresence, animate, motion, useMotionValue } from './motionkit'
+import { Avatar, Badge, Button, Chip, EASE_OUT, EASE_OUT_CSS, Icon, IconButton, TOUCH, capturePointer, clamp, cn, cssUrl, safeMediaUrl, Spinner, spring, surface, useControllable, useElementSize, useFocusTrap, useWidth, uiShared, plural, fmt, useInView, useReducedMotion } from './core'
 import { Slider } from './inputs'
 import { useToast } from './feedback'
 import { OverlayPortal, useScrollLock } from './overlay'

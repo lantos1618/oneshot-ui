@@ -9,6 +9,8 @@ const external = process.env.E2E_BASE_URL
 const PORT = 4173
 /** The Design QA audit (tests/e2e/design-qa.spec.ts) runs on desktop light and iPhone 13 (every section). */
 const DESIGN_QA = /design-qa\.spec\.ts$/
+/** The reduced-motion checks (tests/e2e/reduced-motion.spec.ts) run only in their own profile. */
+const REDUCED = /reduced-motion\.spec\.ts$/
 
 export default defineConfig<ShowcaseOptions>({
   testDir: 'tests/e2e',
@@ -31,10 +33,11 @@ export default defineConfig<ShowcaseOptions>({
     browserName: 'chromium',
   },
   projects: [
-    { name: 'desktop-light', use: { viewport: { width: 1440, height: 900 }, colorScheme: 'light', themeMode: 'light' } },
-    { name: 'desktop-dark', testIgnore: DESIGN_QA, use: { viewport: { width: 1440, height: 900 }, colorScheme: 'dark', themeMode: 'dark' } },
+    { name: 'desktop-light', testIgnore: REDUCED, use: { viewport: { width: 1440, height: 900 }, colorScheme: 'light', themeMode: 'light' } },
+    { name: 'desktop-dark', testIgnore: [DESIGN_QA, REDUCED], use: { viewport: { width: 1440, height: 900 }, colorScheme: 'dark', themeMode: 'dark' } },
     // iPhone 13 metrics (390 × 664 CSS px, touch, mobile) in Chromium instead of WebKit.
-    { name: 'iphone-13', use: { ...devices['iPhone 13'], browserName: 'chromium', colorScheme: 'light', themeMode: 'light' } },
+    { name: 'iphone-13', testIgnore: REDUCED, use: { ...devices['iPhone 13'], browserName: 'chromium', colorScheme: 'light', themeMode: 'light' } },
+    { name: 'desktop-reduced', testMatch: REDUCED, use: { viewport: { width: 1440, height: 900 }, colorScheme: 'light', themeMode: 'light', contextOptions: { reducedMotion: 'reduce' } } },
   ],
   webServer: external ? undefined : {
     command: `pnpm exec vite build --logLevel warn && pnpm exec vite preview --port ${PORT} --strictPort`,

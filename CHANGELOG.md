@@ -3,6 +3,43 @@
 All notable changes to `@lyndon/ui`, newest first. While on 0.x, a minor release may break APIs; each breaking
 change is listed with how to migrate.
 
+## 0.13.0
+
+The core tier (`@lyndon/ui`) no longer uses motion. Its animations are CSS keyframes and transitions plus the Web
+Animations API: the `ui-in` / `ui-pop` / `ui-grow` classes and spring easings in the tokens, and `Presence`,
+`PresenceList`, `Swap`, `useFlip`, `useSwipe` and `ActiveIndicator` in `@lyndon/ui/motion`. An app that uses only core
+downloads about 51 KB less (min+gzip): 128.5 KB instead of 180.0 KB for the whole core barrel, 57.6 KB instead of
+109.1 KB for a typical CRUD set. `motion` is now an optional peer dependency that only the extras need, and no core
+drop-in file imports it (88 did).
+
+### Breaking changes
+
+| Before | After |
+|---|---|
+| `motion` is a required peer dependency | Optional. `@lyndon/ui` never imports it; install it when you use an extras subpath (`@lyndon/ui/charts`, `/datagrid`, `/aichat`, …) |
+| `UIProvider` wraps the app in `<MotionConfig reducedMotion="user" nonce>` | It doesn't. Core handles reduced motion in CSS; the extras' motion animations jump to their end for reduced-motion users. Your own motion components inside `UIProvider` need your own `<MotionConfig reducedMotion="user">`, and under a nonce CSP the extras that use `popLayout` (`ai`, `datagrid`, `editor`, `statechart`) need `<MotionConfig nonce={N}>` |
+| `tokens.css` holds the theme tokens | It also holds the animation CSS. With `injectStyles={false}`, serve the 0.13 `tokens.css` (a copy from 0.12 leaves core without animations) |
+| `ModalLayer` runs the `exit` of motion elements inside it | The panel leaves through the `ui-in` class (on a child of the layer, or one level down): it reverses its entrance. Motion `exit` props inside a `ModalLayer` no longer run |
+| `Reveal` takes `HTMLMotionProps<'div'>` | `HTMLAttributes<HTMLDivElement>` plus `delay`, `y`, `amount` |
+| `play(el, keyframes, options)` takes motion's keyframes and `Transition` | `PlayKeyframes` (`x`, `y`, `scale`, `rotate`, `opacity` arrays) and `PlayOptions` (a `spring()`, or `duration` with an easing name or cubic-bezier array); returns the `Animation` |
+| `motionTransition()` returns motion's `Transition` | `MotionTransition`, the same two shapes typed locally |
+| `useViewport(ref, { margin })` takes motion's margin type | A CSS margin string (`'64px'`) |
+| `Collapse` / `Ring` `transition` is a motion `Transition` | A `spring(bounce, duration)`: its duration, and the library spring easing nearest its bounce |
+| `useMagnetSettle()` returns a `MotionValue` | `{ f, settling }`: draw the thumb at `f` and give its position `transition: MAGNET_SETTLE_CSS` while `settling` |
+| `menuListVariants` | Removed. A menu's rows slide in through the `ui-stagger` class on the list |
+| `popIn()`, `POP_IN`, `slideVariants()` | Removed. Use `ui-in` with `--ui-*` properties, and `ui-slide` (with `--ui-dir` on the container) for content that slides sideways |
+| `ActiveIndicator` in `@lyndon/ui/fields` | In `@lyndon/ui/motion` (still exported from `@lyndon/ui`); `transition` sets the slide's spring |
+| `MenuItem` and the other menu rows accept motion props | Plain button attributes |
+| Tailwind v3 projects scanning the core drop-ins | Unchanged for layout; a few transitions on `scale` / `translate` utilities only animate with Tailwind v4 (the end states are the same) |
+
+### Also
+
+- New in core: `springEasing`, `springVar`, `useReducedMotion`, `useInView`, `usePlayState`, `usePresence`,
+  `presenceProps`, `whenAnimationsDone`, `useChanged`, `Presence`, `PresenceList`, `Swap`, `useFlip`, `useSwipe`.
+- The first toast of a page now animates in like the others.
+- A swiped toast leaves from where it was let go, in the direction it was thrown.
+- Lanes (`@lyndon/ui/lanes`, `/gitgraph`) no longer need motion.
+
 ## 0.12.0
 
 A code audit fixed 67 high-priority bugs, each with a regression test. Components no longer fake success: uploads,

@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useRef, useState, useSyncExternalStore, type PointerEvent as ReactPointerEvent, type ReactNode } from 'react'
-import { motion, useInView, useReducedMotion } from 'motion/react'
-import { Button, EASE_OUT, Skeleton, TOUCH, clamp, cn, colorResolver, isTouch, maxOf, minOf, onMouseLeave, safeColor, useOutside, usePointerDrag, useThemeVersion, fmt, useResizeObserver, type RGBA } from './core'
+import { motion } from './motionkit'
+import { Button, EASE_OUT, Skeleton, TOUCH, clamp, cn, colorResolver, isTouch, maxOf, minOf, onMouseLeave, safeColor, useOutside, usePointerDrag, useThemeVersion, fmt, useResizeObserver, type RGBA, useInView, useReducedMotion } from './core'
 import { SegmentedControl } from './fields'
 import { PointerTooltip, usePointerTooltip } from './overlay'
 import { useFrameLoop } from './motion'

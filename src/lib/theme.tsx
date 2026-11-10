@@ -40,16 +40,17 @@ html.ui-theming *,html.ui-theming *::before,html.ui-theming *::after{transition:
  * is inserted, from `--ui-o` opacity, `--ui-x`/`--ui-y` offset, `--ui-s` scale and `--ui-r` rotation (set them with
  * `[--ui-y:4px]`), over `--ui-d` with `--ui-e` after `--ui-delay`. Exit: `data-ui-exit` (usePresence, Presence, Swap)
  * plays the reverse, with `--ui-xo`/`--ui-yo`/`--ui-so`/`--ui-ro` overriding the end and `--ui-do` the duration. One-shots
- * (`ui-pop`, `ui-pulse`) replay when the element's key changes. `ui-grow` opens to its height (grid rows), `ui-collapse`
- * does the same while staying mounted (`data-open`; set `visibility` inline, the class delays it until the panel has
- * closed); both need one child without vertical padding or border, which would keep the row from closing fully.
+ * (`ui-pop`, `ui-pulse`) replay when the element's key changes. `ui-grow` opens to its height (grid rows); it needs
+ * one child without vertical padding or border, which would keep the row from closing fully.
+ * `ui-slide` (with `ui-in`) slides content sideways when it changes: it enters from the side its container's `--ui-dir`
+ * points to (+1 from the right, -1 from the left) and leaves to the other, `--ui-slide` px (pagers, steps, mega menus).
  * `ui-open` is Collapse's measured height (it also follows the content while open). `ui-stagger` slides a menu's rows
  * in one after another; `ui-layer` is ModalLayer's box-less wrapper, whose backdrop and panel leave when it does. Springs are `linear()` easings sampled from spring(). Reduced motion keeps the fades and drops the movement.
  */
 const MOTION_CSS = /* @__PURE__ */ (() => {
   const springs = [['', 0.25], ['-pop', 0.5], ['-soft', 0.1]] as const
   const vars = (k: 'easing' | 'fallback') => springs.map(([n, b]) => `--ui-spring${n}:${springEasing(b)[k]}`).join(';')
-  const reset = ['x', 'y', 's', 'r', 'o', 'd', 'e', 'delay', 'xo', 'yo', 'so', 'ro', 'do'].map(v => `--ui-${v}:initial`).join(';')
+  const reset = ['x', 'y', 's', 'r', 'o', 'd', 'e', 'delay', 'xo', 'yo', 'so', 'ro', 'do', 'slide'].map(v => `--ui-${v}:initial`).join(';')
   const t = 'translate(var(--ui-x,0),var(--ui-y,0)) scale(var(--ui-s,1)) rotate(var(--ui-r,0deg))'
   // menu rows slide in one after another (a group delays its rows together)
   const row = '.ui-stagger>:not([role=group]),.ui-stagger>[role=group]>*'
@@ -73,12 +74,11 @@ const MOTION_CSS = /* @__PURE__ */ (() => {
 @keyframes ui-bob{50%{transform:translateY(-5px)}}
 @keyframes ui-dot{0%,100%{transform:none;opacity:.4}50%{transform:translateY(-4px);opacity:1}}
 .ui-in{animation:ui-in var(--ui-d,.3s) var(--ui-e,var(--ui-spring)) var(--ui-delay,0s) backwards}
+.ui-slide{--ui-x:calc(var(--ui-dir,1)*var(--ui-slide,20px));--ui-xo:calc(var(--ui-dir,1)*var(--ui-slide,20px)*-1)}
 .ui-pop{animation:ui-pop var(--ui-d,.35s) var(--ui-e,var(--ui-spring-pop)) var(--ui-delay,0s) backwards}
 .ui-pulse{animation:ui-pulse var(--ui-d,.35s) var(--ui-e,ease-out) var(--ui-delay,0s)}
 .ui-grow{display:grid;grid-template-rows:1fr;animation:ui-grow var(--ui-d,.3s) var(--ui-e,var(--ui-ease-out)) var(--ui-delay,0s) backwards}
-.ui-grow>*,.ui-collapse>*{min-height:0;overflow:hidden}
-.ui-collapse{display:grid;grid-template-rows:0fr;opacity:0;transition:grid-template-rows .3s var(--ui-ease-out),opacity .3s,visibility 0s .3s}
-.ui-collapse[data-open]{grid-template-rows:1fr;opacity:1;transition:grid-template-rows .3s var(--ui-ease-out),opacity .3s}
+.ui-grow>*{min-height:0;overflow:hidden}
 .ui-open{overflow:hidden;animation:ui-open var(--ui-d,.32s) var(--ui-e,var(--ui-spring-soft)) backwards;transition:height var(--ui-d,.32s) var(--ui-e,var(--ui-spring-soft))}
 .ui-bob{animation:ui-bob 2.6s ease-in-out infinite;animation-play-state:var(--ui-play,running)}
 .ui-dot{animation:ui-dot .7s ease-in-out var(--ui-delay,0s) infinite;animation-play-state:var(--ui-play,running)}
@@ -91,7 +91,7 @@ ${stagger}
 .ui-open[data-ui-exit]{animation:ui-close var(--ui-d,.32s) var(--ui-e,var(--ui-spring-soft)) forwards}
 @media (prefers-reduced-motion:reduce){.ui-in,${row}{animation-name:ui-fade;animation-duration:.15s;animation-timing-function:linear}
 [data-ui-exit],${layer}{animation-name:ui-fade-out;animation-duration:.1s}
-.ui-grow,.ui-grow[data-ui-exit],.ui-collapse,.ui-collapse[data-open]{animation-duration:1ms;transition-duration:0s}
+.ui-grow,.ui-grow[data-ui-exit]{animation-duration:1ms}
 .ui-pop,.ui-pulse,.ui-bob,.ui-dot,[data-ui-still],[data-reveal].ui-in{animation:none}}
 @media (prefers-reduced-motion:no-preference) and (scripting:enabled){[data-reveal]:not(.ui-in){opacity:0}}}`
 })()

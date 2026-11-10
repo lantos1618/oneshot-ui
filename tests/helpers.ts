@@ -12,7 +12,7 @@ export function inForm(children: ReactNode) {
   return { ...r, form, data: () => new FormData(form) }
 }
 
-/** The reduced-motion query tests/setup.ts answers yes to (motion then skips transform animations). */
+/** The reduced-motion query tests/setup.ts answers yes to (the library then skips its animations). */
 export const REDUCED_MOTION = /prefers-reduced-motion:\s*reduce/
 
 /** A static MediaQueryList, as jsdom lacks matchMedia. */

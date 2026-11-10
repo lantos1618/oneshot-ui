@@ -1,5 +1,5 @@
 import { createContext, useContext, useEffect, useId, useRef, useState, type AriaAttributes, type FormEvent, type FormHTMLAttributes, type ReactNode, type Ref } from 'react'
-import { FormFieldContext, type FormControlProps, type FormFieldState, useFormControl, Badge, ICONS, Icon, type IconName, cn, useRoving, composeRefs } from './core'
+import { FormFieldContext, type FormControlProps, type FormFieldState, useFormControl, Badge, ICONS, Icon, type IconName, cn, useChanged, useRoving, composeRefs } from './core'
 import { ActiveIndicator } from './motion'
 
 /**
@@ -180,8 +180,7 @@ export function CheckMark({ checked = true, size = 12, strokeWidth = 3.5, draw =
 /** The square box of a checkbox (filled with a drawn tick when checked; pops on change). For custom rows, lists and tables; the row carries the role. */
 export function CheckboxBox({ checked, size = 18, pop = true, className }: { checked: boolean; size?: number; pop?: boolean; className?: string }) {
   const small = size < 18
-  const [first] = useState(checked), [changed, setChanged] = useState(false)
-  if (!changed && checked !== first) setChanged(true)
+  const changed = useChanged(checked)
   return (
     <span key={pop ? String(checked) : undefined} aria-hidden
       style={{ width: size, height: size }}

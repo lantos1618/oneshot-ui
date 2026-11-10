@@ -1,6 +1,6 @@
 import { useEffect, useId, useLayoutEffect, useMemo, useRef, useState, type ReactNode, type RefObject } from 'react'
-import { AnimatePresence, motion, useAnimate, useInView, useReducedMotion } from 'motion/react'
-import { AnimatedNumber, Avatar, Badge, Button, Chevron, EASE_OUT, Icon, IconButton, Kbd, REDUCED_MOTION_Q, Spinner, StatusIcon, TOUCH, cn, cssUrl, inputClass, safeColor, safeUrl, sleep, spring, surface, useControllable, useLatest, useLive, useOutside, useMediaQuery, useRoving, type IconName, plural, fmt } from './core'
+import { AnimatePresence, motion, useAnimate } from './motionkit'
+import { AnimatedNumber, Avatar, Badge, Button, Chevron, EASE_OUT, Icon, IconButton, Kbd, REDUCED_MOTION_Q, Spinner, StatusIcon, TOUCH, cn, cssUrl, inputClass, safeColor, safeUrl, sleep, spring, surface, useControllable, useLatest, useLive, useOutside, useMediaQuery, useRoving, type IconName, plural, fmt, useInView, useReducedMotion } from './core'
 import { AutoHeight, Collapse, Progress, TypingDots, useToast } from './feedback'
 import { CheckMark, Checkbox, type Option } from './fields'
 import { OptionList } from './select'

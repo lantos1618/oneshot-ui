@@ -421,7 +421,7 @@ export const TAG_MODULE_AREA: Readonly<Record<string, TagArea>> = {
   navigation: 'navigation', feedback: 'feedback', data: 'data', layout: 'layout', appearance: 'theming', theme: 'theming',
   annotate: 'charts', charts: 'charts', timeline: 'charts', diagramkit: 'diagrams', gantt: 'diagrams', statechart: 'diagrams', trace: 'diagrams',
   network: 'diagrams', diagrams: 'diagrams', geoworld: 'diagrams', geoland: 'diagrams', geo: 'diagrams',
-  editor: 'forms', datagrid: 'data', scheduler: 'layout', code: 'code', markdown: 'code', media: 'media', collab: 'collaboration', kanban: 'layout', vizkit: 'charts',
+  editor: 'forms', datagrid: 'data', scheduler: 'layout', code: 'code', markdown: 'code', media: 'media', collab: 'collaboration', kanban: 'layout', vizkit: 'charts', motionkit: 'charts',
   lanes: 'code', gitgraph: 'code', aistream: 'ai', agentrun: 'ai', ai: 'ai', aichat: 'ai', aiagent: 'ai', themeexport: 'theming', binary: 'code',
 }
 /** Tags every item of a module gets (for modules no card covers yet). */

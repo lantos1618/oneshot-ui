@@ -247,7 +247,8 @@ describe('I-M11: PermissionRequest Deny', () => {
     expect(onDecide).toHaveBeenCalledWith(false, false, { subject: '', body: '' })
     expect(await screen.findByText('Declining…')).toBeInTheDocument()
     await act(async () => { done() })
-    expect(await screen.findByText('Declined')).toBeInTheDocument()
+    // the announcement and, once the card has swapped (at once here: reduced motion skips the extras' animations), the result title
+    expect((await screen.findAllByText('Declined')).length).toBeGreaterThan(0)
     expect(await screen.findByText('You declined this request.')).toBeInTheDocument()
     expect(screen.queryByText(/app was told/)).toBeNull()
     await user.click(screen.getByRole('button', { name: 'Review again' }))

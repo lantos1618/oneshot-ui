@@ -56,6 +56,10 @@ function load(file) {
   return { imports, body: body.trim() }
 }
 
+// motionkit declares the names the extras take from motion. A file bundled with it (ui-all, ui-with-examples) that also
+// imports one of them straight from motion/react (the showcase, the blocks) uses that declaration: it is the same thing.
+const motionkitNames = new Set([...readFileSync(join(root, 'src/lib/motionkit.tsx'), 'utf8').matchAll(/^export (?:const|type) (\w+)/gm)].map(m => m[1]))
+
 function render(files, { self, exampleDefault }) {
   const external = new Map(), raw = new Set(), cross = new Map()
   const bodies = []
@@ -77,6 +81,7 @@ function render(files, { self, exampleDefault }) {
     }
     bodies.push(body)
   }
+  if (files.includes(libFile('motionkit'))) for (const n of external.get('motion/react') ?? []) if (motionkitNames.has(n.replace(/^type /, ''))) external.get('motion/react').delete(n)
   const sort = s => [...s].sort((a, b) => a.replace('type ', '').localeCompare(b.replace('type ', '')))
   const head = [
     ...raw,

@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useLayoutEffect, useRef, useState, type CSSProperties, type ReactNode, type KeyboardEvent as RKeyboardEvent, type PointerEvent as RPointerEvent } from 'react'
-import { AnimatePresence, motion } from 'motion/react'
+import { AnimatePresence, motion } from './motionkit'
 import { Avatar, AvatarStack, Button, useCoarsePointer, IconButton, ScrollEdges, TOUCH, addDays, addMonths, cn, dateFormat, dayKey, maxOf, safeColor, sameDay, spring, startOfDay, startOfWeek, surface, useControllable, usePointerDrag, useScrollEdges, useWidth, plural, fmt, LOCALE, useLive, useLatestState, uid, haptic, MOVE_SLOP } from './core'
 import { SegmentedControl } from './fields'
 import { useToast } from './feedback'

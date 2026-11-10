@@ -1,5 +1,4 @@
 import { type ReactNode } from 'react'
-import { MotionConfig } from 'motion/react'
 import { DEFAULT_THEME, FONT_CSS, FONT_HREF, THEME_MODES, THEME_LEGACY_KEY, THEME_STORAGE_KEY, THEME_TOKEN_NAMES, THEME_VALUE_SOURCE, TOKENS, ThemeProvider, type ThemeSettings, UIHosts, Button, Icon, type Palette, THEMES, type Theme, cn, themeStyle, themeTokens, useTheme } from './core'
 import { Swap } from './motion'
 
@@ -44,12 +43,12 @@ const PROVIDER_PAGE_CSS = 'html,html body{background:var(--bg);color:var(--fg)}'
 
 /**
  * Wrap your app once. Injects the tokens (and, with `fonts`, the Geist import), applies the theme, hosts page-level UI
- * (the toast region, mounted on the first `useToast()` toast) inside the themed `.ui-root` wrapper, and turns motion off
- * for reduced-motion users. Makes no outside requests unless `fonts`.
+ * (the toast region, mounted on the first `useToast()` toast) inside the themed `.ui-root` wrapper. The tokens carry
+ * the animation CSS, which tones itself down for reduced-motion users. Makes no outside requests unless `fonts`.
  */
 export function UIProvider({ children, className, defaultTheme, storageKey, persist, fonts = false, target = 'html', nonce, injectStyles = true, themeFromUrl = false }: UIProviderProps) {
   return (
-    <MotionConfig reducedMotion="user" nonce={nonce}>
+    <>
       {fonts && (injectStyles ? <style nonce={nonce}>{FONT_CSS}</style> : <link rel="stylesheet" href={FONT_HREF} nonce={nonce} />)}
       {injectStyles && <style nonce={nonce}>{(target === 'html' ? TOKENS + '\n' + PROVIDER_PAGE_CSS : TOKENS)}</style>}
       <ThemeProvider defaultSettings={defaultTheme} storageKey={storageKey} persist={persist} fonts={fonts} target={target} fromUrl={themeFromUrl}>
@@ -58,7 +57,7 @@ export function UIProvider({ children, className, defaultTheme, storageKey, pers
           <UIHosts />
         </UIProviderRoot>
       </ThemeProvider>
-    </MotionConfig>
+    </>
   )
 }
 

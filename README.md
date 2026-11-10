@@ -2,7 +2,8 @@
 
 Animated React components with themes, in the shadcn style. Buttons, inputs and forms, overlays, navigation,
 toasts, data tables and a data grid, a rich-text editor, a scheduler, code blocks, media players, charts,
-diagrams and maps, collaboration widgets and AI chat patterns, all themed by CSS variables and animated with
+diagrams and maps, collaboration widgets and AI chat patterns, all themed by CSS variables. The core tier animates
+with CSS and the Web Animations API and has no animation library; the extras (charts, data grid, AI chat, …) use
 [Motion](https://motion.dev).
 
 - **Themes**: seven palette families (Default, Atom One, Ayu, Gruvbox, Solarized, Nord, Tokyo Night) in light
@@ -18,15 +19,17 @@ diagrams and maps, collaboration widgets and AI chat patterns, all themed by CSS
 ## Install
 
 ```sh
-pnpm add @lyndon/ui motion
-# or: npm i @lyndon/ui motion
+pnpm add @lyndon/ui
+# or: npm i @lyndon/ui
+# when you use an extras subpath (@lyndon/ui/charts, /datagrid, /aichat, …): pnpm add motion
 ```
 
 Requirements:
 
 - **React 19** (`react` and `react-dom` `^19.0.0`). Components take `ref` as a normal prop, which React 18 does
   not support.
-- **motion** `^13` or `^14` (peer dependency; v12 and older render some SVG animations incorrectly).
+- **motion** `^13` or `^14`, only for the extras (an optional peer dependency: `@lyndon/ui` itself never imports it;
+  v12 and older render some SVG animations incorrectly).
 - **Tailwind CSS v4** (recommended), Tailwind v3.4, or no Tailwind at all with the precompiled stylesheet.
 
 ## Styles
@@ -96,8 +99,8 @@ What it does:
   (`ui-sans-serif, system-ui, …`). If you want Geist without Google, self-host it and keep `fonts` off.
 - Applies the current theme (CSS variables and `data-theme="light|dark"` on `<html>`), follows the OS in
   "system" mode, and remembers the user's choice in `localStorage`.
-- Hosts toasts (`useToast()`) and turns animations off for users who prefer reduced motion
-  (`MotionConfig reducedMotion="user"`).
+- Hosts toasts (`useToast()`). The tokens carry the animation CSS (the `ui-*` classes), which keeps the fades and
+  drops the movement for users who prefer reduced motion.
 - Renders a `<div class="ui-root">` around your app. Overlays (dialogs, sheets, popovers) portal into it.
 
 | Prop | Default | |
@@ -107,7 +110,7 @@ What it does:
 | `persist` | `true` | Save and restore the user's theme. `false` always starts from `defaultTheme`. |
 | `fonts` | `false` | `true` loads Geist (and the appearance panel's fonts) from Google Fonts: requests go to `fonts.googleapis.com` and `fonts.gstatic.com`. |
 | `target` | `'html'` | `'self'` puts the theme variables on the `.ui-root` wrapper instead of `<html>` and leaves the host page alone (useful for embedding in an existing app). |
-| `nonce` | | CSP nonce for the `<style>` elements UIProvider renders (and motion's layout styles). See [Content Security Policy](#content-security-policy). |
+| `nonce` | | CSP nonce for the `<style>` elements UIProvider renders. See [Content Security Policy](#content-security-policy). |
 | `injectStyles` | `true` | `false` renders no `<style>`: link `@lyndon/ui/tokens.css` instead (for a CSP without nonces). |
 | `themeFromUrl` | `false` | Apply a theme share link (`#theme=…` or `?theme=…`) on load, validated like saved settings, then remove it from the address bar. See [Exporting and sharing themes](#exporting-and-sharing-themes). |
 | `className` | | Classes for the `.ui-root` wrapper. |
@@ -348,8 +351,10 @@ img-src 'self' data: blob:; media-src 'self' blob:; connect-src 'self'; font-src
 object-src 'none'; base-uri 'none'; frame-ancestors 'none'
 ```
 
-- **Nonce**: `<UIProvider nonce={N}>` puts it on the token `<style>` (and passes it to motion for its layout
-  styles); `<ThemeScript nonce={N} />` on the inline script. Generate a fresh `N` per response.
+- **Nonce**: `<UIProvider nonce={N}>` puts it on the token `<style>`; `<ThemeScript nonce={N} />` on the inline
+  script. Generate a fresh `N` per response. Core injects no other styles. The extras that use motion's `popLayout`
+  (`ai`, `datagrid`, `editor`, `statechart`) inject a small `<style>`: wrap them in motion's
+  `<MotionConfig nonce={N}>`.
 - **No nonce**: `<UIProvider injectStyles={false}>` renders no `<style>` at all. Load the same CSS as a file
   instead: `import '@lyndon/ui/tokens.css'` (or link `node_modules/@lyndon/ui/dist/tokens.css`), so `style-src 'self'`
   is enough. With `fonts` on, the Google Fonts stylesheet is then added as a `<link>`.
@@ -663,7 +668,7 @@ Tree-shaking works with either style: a bundler only keeps the components you im
 
 Every component is also published as one **self-contained `.tsx` file**: the component (or a small family, such as
 `dialog` with `DialogRoot`/`DialogContent`/…, or `dropdown-menu` with the menu items) plus exactly the library
-helpers it uses, importing only `react`, `react-dom` and `motion`. A build script walks the dependency graph of the
+helpers it uses, importing only `react` and `react-dom` (extras files also import `motion`). A build script walks the dependency graph of the
 library's top-level declarations with the TypeScript compiler and keeps the transitive closure, so `button.tsx` is
 about 20 KB (~6k tokens) instead of the ~700 KB `ui.tsx`. There are about 200 of them; the median is ~8k tokens.
 
@@ -692,7 +697,7 @@ npx @lyndon/ui info data-grid                           # exports, embedded comp
 
 `add` also adds what an item requires (`ui-provider`, unless `--no-deps`), skips files that exist (exit code 2;
 `--overwrite` replaces them), never writes outside `--dir` and refuses names that aren't registry names (no paths).
-It prints the npm packages your `package.json` is missing (usually `motion`).
+It prints the npm packages your `package.json` is missing (`motion`, when a file is an extra).
 
 Wrap the app once in `<UIProvider>` from `ui-provider.tsx`. The files share it: React contexts (theme, forms)
 and module state (toast queue, scroll lock, modal stack and `inert` list, focus-trap stack, icon registry) live on
@@ -740,7 +745,7 @@ description, its size in tokens and a link to its file); [`llms-full.txt`](./llm
 and embedded components. Both are generated by `pnpm build:registry`. A prompt that works well:
 
 ```text
-Build the UI with the attached files (React 19 + Tailwind + motion): ui-provider.tsx, button.tsx, dialog.tsx, …
+Build the UI with the attached files (React 19 + Tailwind; no animation library): ui-provider.tsx, button.tsx, dialog.tsx, …
 Import each component from its file. Wrap the app in <UIProvider>. Use only what the files export and the colour
 tokens (bg-[var(--card)], text-[var(--fg2)], border-[var(--line)], var(--accent)) instead of raw colours, so
 light/dark and every theme keep working. Override a component's own classes with Tailwind's ! prefix (className="!h-8").
@@ -1374,8 +1379,15 @@ they exist.
   status region (an assertive alert for errors), and at most five per position show at once (`ToastProvider max`).
 - Every chart is one Tab stop with an arrow-key readout, and its data is also a real table: visually hidden by default,
   or behind a "Show data" button (`table="toggle"`).
-- Every animation respects `prefers-reduced-motion` (`MotionConfig reducedMotion="user"` plus CSS fallbacks);
-  the theme reveal becomes an instant change.
+- Every animation respects `prefers-reduced-motion`: core's CSS keeps opacity fades and drops movement, its
+  JS-driven effects (list reordering, the sliding indicator, `play`, swipe spring-back) do nothing, the extras' motion
+  animations jump to their end, and the theme reveal becomes an instant change.
+- Core animates without a library. Enter and exit are CSS keyframes on the `ui-in` class, parameterised with custom
+  properties (`<div className="ui-in [--ui-y:8px] [--ui-s:.96]">`); `Presence`, `PresenceList` and `Swap` keep a
+  leaving element mounted until its exit has played; `useFlip` slides list items to their new place;
+  `ActiveIndicator` slides a highlight between items; `useSwipe` is swipe-to-dismiss; `play(el, { scale: [0.8, 1] })`
+  is a one-off Web Animations effect. Springs are `linear()` easings (`--ui-spring`, `--ui-spring-pop`,
+  `--ui-spring-soft`), with a cubic-bezier fallback where `linear()` is unsupported.
 - Touch: controls grow their hit areas on coarse pointers, hover-only affordances also work by tap or focus,
   and text fields are 16px on phones so iOS does not zoom.
 - Secondary text colours are nudged to at least 4.5:1 contrast in every theme.
@@ -1445,7 +1457,7 @@ and zizmor.
   `dist-single/SHA256SUMS` matches the bundles, and the CLI and every drop-in listed in `dist-registry/index.json` are
   in the tarball with matching sha256.
 - **`ci.yml` → check (registry and docs):** `pnpm test:registry` (every drop-in type-checks on its own under the
-  app's strict settings, imports only react/react-dom/motion, loads on the server, and a sample renders inside the
+  app's strict settings, imports only react/react-dom (motion in extras only), loads on the server, and a sample renders inside the
   `UIProvider` of `ui-provider.tsx`), a CLI smoke test into a temporary project, and `pnpm typecheck:docs && pnpm docs:build`.
 - **`pages.yml`:** on pushes to `main` and by hand, builds the docs, the showcase and the registry (with the Pages
   URL in `registryDependencies`) and deploys them to GitHub Pages (`pages: write` and `id-token: write` only in the

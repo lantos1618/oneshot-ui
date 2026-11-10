@@ -283,14 +283,14 @@ function Home() {
         <h1 className="m-0 mb-2 text-[28px] leading-tight font-semibold tracking-tight">@lyndon/ui</h1>
         <p className="m-0 text-sm text-[var(--fg2)]">
           Animated React 19 components with themes, in the shadcn style: forms, overlays, navigation, a data grid, charts, diagrams,
-          maps, media and AI chat. Styled with Tailwind, animated with motion, themed by CSS variables. Every component is also a
+          maps, media and AI chat. Styled with Tailwind, themed by CSS variables; core animates with CSS (no animation library), the extras with motion. Every component is also a
           self-contained drop-in file ({ITEMS.length} of them; median ~{tok(median.tokens)} tokens).
         </p>
       </div>
       <Section title="Install the package">
         <CodeTabs tabs={[
-          { label: 'npm', code: 'npm i @lyndon/ui motion', language: 'sh' },
-          { label: 'pnpm', code: 'pnpm add @lyndon/ui motion', language: 'sh' },
+          { label: 'npm', code: 'npm i @lyndon/ui\n# extras (@lyndon/ui/charts, /datagrid, /aichat, …) also need: npm i motion', language: 'sh' },
+          { label: 'pnpm', code: 'pnpm add @lyndon/ui\n# extras (@lyndon/ui/charts, /datagrid, /aichat, …) also need: pnpm add motion', language: 'sh' },
           { label: 'App', code: `import { UIProvider, Button } from '@lyndon/ui'\n\nexport function App() {\n  return (\n    <UIProvider>\n      <Button variant="primary">Save</Button>\n    </UIProvider>\n  )\n}`, language: 'ts' },
         ]} />
         <p className="m-0 text-[13px] text-[var(--fg2)]">Tailwind v4: add <code>@source "../node_modules/@lyndon/ui/dist";</code> to your CSS. No Tailwind: <code>import '@lyndon/ui/styles.css'</code>.</p>
@@ -301,7 +301,7 @@ function Home() {
           { label: 'shadcn', code: `npx shadcn add ${here()}/r/data-grid.json`, language: 'sh' },
         ]} />
         <p className="m-0 text-[13px] text-[var(--fg2)]">
-          Each file includes exactly the helpers it needs and imports only react, react-dom and motion. Files share one
+          Each file includes exactly the helpers it needs and imports only react and react-dom (extras also motion). Files share one
           <code> &lt;UIProvider&gt;</code> (the ui-provider item, added automatically). For AI tools: <a href="./llms.txt">llms.txt</a> lists every
           file with its size in tokens.
         </p>
@@ -373,7 +373,7 @@ function ItemPage({ item }: { item: DocsItem }) {
       </header>
       <Section title="Install">
         <CodeTabs tabs={[
-          ...(block ? [] : [{ label: 'npm', code: `npm i @lyndon/ui motion\n\n${importLine}`, language: 'ts' as const }]),
+          ...(block ? [] : [{ label: 'npm', code: `npm i @lyndon/ui${item.dependencies.includes('motion') ? ' motion' : ''}\n\n${importLine}`, language: 'ts' as const }]),
           { label: 'Drop-in (CLI)', code: `npx @lyndon/ui add ${item.name}`, language: 'sh' },
           { label: 'shadcn', code: `npx shadcn add ${here()}/r/${item.name}.json`, language: 'sh' },
         ]} />

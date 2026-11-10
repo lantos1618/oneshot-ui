@@ -475,7 +475,7 @@ function ShowcaseBody() {
       <header className="sticky top-[env(safe-area-inset-top,0px)] z-40 border-b border-[var(--line)] bg-[color-mix(in_srgb,var(--bg)_85%,transparent)] backdrop-blur-md">
         <div className="mx-auto flex h-14 max-w-[1320px] items-center gap-2 pr-[max(16px,env(safe-area-inset-right))] pl-[max(16px,env(safe-area-inset-left))] sm:gap-3 sm:px-5">
           <span role="heading" aria-level={1} className="flex items-center gap-2 font-semibold tracking-tight whitespace-nowrap"><i className="inline-block h-[18px] w-[18px] rounded-[var(--r-sm)] bg-[var(--primary)]" />{'UI library'}</span>
-          <span className="hidden text-xs text-[var(--fg3)] sm:inline">{'React · Motion · Tailwind'}</span>
+          <span className="hidden text-xs text-[var(--fg3)] sm:inline">{'React · Tailwind'}</span>
           <span className="flex-1" />
           <Button onClick={() => setPalette(true)} className="max-[900px]:!w-9 max-[900px]:!px-0 min-[900px]:min-w-[220px] min-[900px]:!justify-between">
             {/* the visible words are the name (no aria-label to mismatch); below 900px only the icon shows, so the words stay for screen readers */}

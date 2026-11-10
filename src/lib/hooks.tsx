@@ -586,6 +586,13 @@ export function useRequiredContext<T>(ctx: Context<T | null>, part: string, wher
   return c
 }
 
+/** False until `value` first differs from what it was on mount: gates one-shot animations that play on a change, never on mount. */
+export function useChanged(value: unknown) {
+  const [first] = useState(value), [changed, setChanged] = useState(false)
+  if (!changed && !Object.is(value, first)) setChanged(true)
+  return changed
+}
+
 /** `value`, kept in a ref that is updated after each render (in a layout effect, never during render): for handlers and effects that need the latest value without re-subscribing. */
 export function useLatest<T>(value: T): { readonly current: T } {
   const ref = useRef(value)

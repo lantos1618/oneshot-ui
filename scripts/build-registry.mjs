@@ -3,7 +3,7 @@
 //   dist-registry/files/<name>.tsx          one self-contained drop-in per component (or small family): the
 //                                           component plus exactly the library helpers it needs (the transitive
 //                                           closure of top-level declarations, in source order); imports only
-//                                           react, react-dom and motion
+//                                           react and react-dom (extras, and blocks that animate with it, also motion)
 //   dist-registry/files/<name>.package.tsx  blocks only: the block as written, importing from '@lyndon/ui'
 //   dist-registry/index.json                name, title, description, tier, family, import, kind, area, tags, exports, embedded
 //                                           components, npm dependencies, bytes, approximate tokens (bytes / 3.6),
@@ -171,7 +171,7 @@ function build() {
     if (e.packageFile) {
       // blocks: the package-importing file is the default; the self-contained one is <name>-standalone
       const pcontent = readFileSync(join(out, e.packageFile), 'utf8')
-      const item = shadcnItem(e, { content: pcontent, file: `blocks/${e.name}.tsx`, deps: [pkg.name, 'motion'], standalone: false })
+      const item = shadcnItem(e, { content: pcontent, file: `blocks/${e.name}.tsx`, deps: [pkg.name, ...ext.filter(d => d === 'motion')], standalone: false })
       registryItems.push(item)
       registryItems.push(shadcnItem(e, { content, file: `blocks/${e.name}.tsx`, deps: ext, name: `${e.name}-standalone` }))
     } else registryItems.push(shadcnItem(e, { content, file: `${e.name}.tsx`, deps: ext }))
@@ -366,15 +366,15 @@ function writeLlms(index) {
   const vocab = TAG_FACETS.filter(f => f.id !== 'area').map(f => `- ${f.label}: ${TAGS.filter(t => t.facet === f.id).map(t => t.id).join(', ')}`).join('\n')
   const intro = `# @lyndon/ui
 
-> Animated React 19 components in the shadcn style: Tailwind CSS (v4 or v3) for styling, motion for animation, themes as
-> CSS variables (seven palette families, light and dark). Forms, overlays, navigation, data grid, charts, diagrams, maps,
+> Animated React 19 components in the shadcn style: Tailwind CSS (v4 or v3) for styling, CSS and the Web Animations API
+> for animation (no animation library in core; the extras use motion), themes as CSS variables (seven palette families, light and dark). Forms, overlays, navigation, data grid, charts, diagrams, maps,
 > media, AI chat and agent UIs. Every component is also a self-contained .tsx drop-in file.
 
 Version ${pkg.version}. Source: ${repo}. Docs: ${BASE}/. Licence: MIT with a revenue threshold (free up to USD 200k ARR).
 
 ## Use it
 
-- Install: \`npm i @lyndon/ui motion\` (peer deps react@19, react-dom@19). Core components come from \`@lyndon/ui\`; extras from their own subpath (\`@lyndon/ui/charts\`, \`@lyndon/ui/kanban\`, …), named in each group below.
+- Install: \`npm i @lyndon/ui\` (peer deps react@19, react-dom@19). Core components come from \`@lyndon/ui\` and need nothing else; extras come from their own subpath (\`@lyndon/ui/charts\`, \`@lyndon/ui/kanban\`, …), named in each group below, and most of them animate with motion: \`npm i motion\` when you use one.
 - Styles: Tailwind v4 \`@source "../node_modules/@lyndon/ui/dist";\`, or without Tailwind \`import '@lyndon/ui/styles.css'\`.
 - Wrap the app once in \`<UIProvider>\`: it injects the theme tokens, applies the theme (light/dark/system), hosts toasts.
 - Colours only through tokens: \`bg-[var(--card)]\`, \`text-[var(--fg2)]\`, \`border-[var(--line)]\`, \`var(--accent)\`, \`var(--ok|warn|bad)\`. Override a component's class with Tailwind's \`!\` prefix.
@@ -382,8 +382,8 @@ Version ${pkg.version}. Source: ${repo}. Docs: ${BASE}/. Licence: MIT with a rev
 
 ## Drop-in files (for AI chats and copy-paste)
 
-Each file below is one component (or a small family) with exactly the helpers it needs, importing only react, react-dom
-and motion. Attach the ones you need plus ui-provider.tsx; they share one UIProvider. Sizes are approximate tokens.
+Each file below is one component (or a small family) with exactly the helpers it needs, importing only react and
+react-dom (core) or those plus motion (most extras). Attach the ones you need plus ui-provider.tsx; they share one UIProvider. Sizes are approximate tokens.
 
 - CLI (offline, from the installed package): \`npx @lyndon/ui add data-grid dialog --dir src/components/ui\`, \`npx @lyndon/ui list\`, \`npx @lyndon/ui info data-grid\`
 - shadcn CLI: \`npx shadcn add ${BASE}/r/data-grid.json\` (pulls in ui-provider)
