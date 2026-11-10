@@ -189,9 +189,7 @@ describe('sanitizeRichText', () => {
 
   it('survives absurd nesting without a stack overflow', () => {
     const deep = '<div>'.repeat(5000) + 'core' + '</div>'.repeat(5000)
-    const t0 = performance.now()
     const out = sanitizeRichText(deep)
-    expect(performance.now() - t0).toBeLessThan(15_000)
     expect(out).toContain('core')
     expectInert(out)
   }, 20_000) // jsdom parsing 5000 levels is slow on a loaded machine; the assertion is about not overflowing the stack

@@ -2,16 +2,13 @@
 import '@testing-library/jest-dom/vitest'
 import { cleanup } from '@testing-library/react'
 import { afterEach, vi } from 'vitest'
+import { REDUCED_MOTION, mediaQueryList } from './helpers'
 
 afterEach(() => { cleanup(); localStorage.clear(); vi.useRealTimers() })
 
 // matchMedia: no media query matches except prefers-reduced-motion, so motion skips transform animations.
-if (!window.matchMedia) {
-  window.matchMedia = (query: string) => ({
-    matches: /prefers-reduced-motion:\s*reduce/.test(query), media: query, onchange: null,
-    addEventListener: () => {}, removeEventListener: () => {}, addListener: () => {}, removeListener: () => {}, dispatchEvent: () => false,
-  }) as MediaQueryList
-}
+// tests/helpers.ts mockMedia() swaps the answers for one test.
+window.matchMedia ??= (query: string) => mediaQueryList(query, REDUCED_MOTION.test(query))
 
 class NoopObserver {
   constructor(_cb?: unknown) {}
@@ -40,3 +37,6 @@ doc.execCommand ??= () => false
 doc.queryCommandState ??= () => false
 doc.queryCommandValue ??= () => ''
 window.scrollTo = () => {}
+// Defined so tests can spy on them (mockObjectUrls); jsdom leaves them out.
+URL.createObjectURL ??= () => 'blob:jsdom'
+URL.revokeObjectURL ??= () => {}

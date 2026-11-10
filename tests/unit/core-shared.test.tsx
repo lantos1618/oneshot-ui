@@ -1,5 +1,5 @@
-// Core: page-wide shared state (uiShared, the UIProvider host outlet and the toast queue), icon registry,
-// and the direction/locale behaviour of the core primitives (Spinner, DeltaBadge, AnimatedNumber, AvatarStack, Kbd, useRoving).
+// Core: page-wide shared state (uiShared, the UIProvider host outlet and the toast queue), the icon registry, and the
+// accessible names and number formatting of Spinner, DeltaBadge, AnimatedNumber and AvatarStack.
 import { fireEvent, render, screen, within } from '@testing-library/react'
 import { describe, expect, it } from 'vitest'
 import { AnimatedNumber, AvatarStack, DeltaBadge, Icon, IconButton, Spinner, UIProvider, iconPath, isIconName, registerIcons, uiShared, useToast } from '../../src/lib'
@@ -58,9 +58,9 @@ describe('core primitives', () => {
   })
   it('AnimatedNumber rolls one column per digit', () => {
     const { container } = render(<AnimatedNumber value={1234} />)
-    expect(container.querySelector('.sr-only')!.textContent).toBe('1,234')
-    expect(container.querySelectorAll('.flex-col').length).toBe(4)
-    expect(container.querySelector('.flex-col')!.textContent).toBe('0123456789')
+    expect(container).toHaveTextContent(/^1,234/) // read once, as the number
+    const columns = container.querySelector('[aria-hidden]')!.textContent!.match(/0123456789/g)
+    expect(columns).toHaveLength(4)
   })
   it('AvatarStack names the group with a count and a list', () => {
     render(<AvatarStack names={['Ada', 'Bo', 'Cy']} />)

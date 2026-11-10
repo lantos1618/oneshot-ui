@@ -58,6 +58,8 @@ export const test = base.extend<ShowcaseOptions & { showcase: Showcase }>({
 export { expect }
 
 export type AxeCounts = Record<string, number>
+/** Where axe looks: a section or element id, the first element matching a selector, or (null) the page chrome. */
+export type AxeScope = string | { selector: string } | null
 export type AxeViolation = { id: string; impact: string | null; help: string; nodes: { target: string; html: string; summary: string }[] }
 
 export class Showcase {
@@ -71,7 +73,7 @@ export class Showcase {
   async open(section?: string) {
     await this.page.goto('/', { waitUntil: 'load' })
     await this.page.locator(section ? `section#${section}` : 'section[id]').first().waitFor({ state: 'attached', timeout: 30_000 })
-    await this.page.waitForTimeout(500)
+    await this.settleAnimations()
   }
 
   /** True when the dev server hot-reloaded the page since `since`: measurements taken across it are meaningless. */
@@ -125,7 +127,7 @@ export class Showcase {
    * axe twice, a moment apart, keeping per rule the run with fewer nodes: entry animations and scripted demos make
    * colour-contrast flicker, and a real violation shows up in both runs.
    */
-  async axeStable(id: string | null, gap = 1500): Promise<AxeViolation[]> {
+  async axeStable(id: AxeScope, gap = 1500): Promise<AxeViolation[]> {
     await this.settleAnimations()
     const a = await this.axe(id)
     await this.page.waitForTimeout(gap)
@@ -135,14 +137,14 @@ export class Showcase {
     return a.flatMap(v => { const w = byId.get(v.id); return w ? [w.nodes.length <= v.nodes.length ? w : v] : [] })
   }
 
-  /** axe-core violations inside one element (by id), or the page chrome outside the sections when `id` is null. */
-  async axe(id: string | null): Promise<AxeViolation[]> {
+  /** axe-core violations inside one element (by id or `{ selector }`), or the page chrome outside the sections when null. */
+  async axe(id: AxeScope): Promise<AxeViolation[]> {
     const page = this.page
     if (!(await page.evaluate(() => 'axe' in window))) await page.addScriptTag({ path: AXE_PATH })
     return page.evaluate(async id => {
       const axe = (window as unknown as { axe: { run: (ctx: unknown, opts: unknown) => Promise<{ violations: { id: string; impact: string | null; help: string; nodes: { target: unknown[]; html: string; failureSummary?: string }[] }[] }> } }).axe
       const chrome = ['header', 'aside', 'nav'].filter(sel => document.querySelector(sel)).map(sel => [sel])
-      const ctx = id ? document.getElementById(id) : { include: chrome.length ? chrome : [['body']], exclude: [['section[id]']] }
+      const ctx = typeof id === 'string' ? document.getElementById(id) : id ? document.querySelector(id.selector) : { include: chrome.length ? chrome : [['body']], exclude: [['section[id]']] }
       const res = await axe.run(ctx, { resultTypes: ['violations'], rules: { region: { enabled: false } } })
       return res.violations.map(v => ({
         id: v.id, impact: v.impact, help: v.help,

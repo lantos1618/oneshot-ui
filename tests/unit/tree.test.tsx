@@ -1,6 +1,6 @@
 // TreeView thread lines (0.5): opt-in `lines`, one collapse button per ancestor level a row's thread passes through
 // (an elbow into the row from its parent), click collapses that folder, not in the Tab order, names unchanged, no
-// layout shift (the indent is the same with and without lines), compact and virtual (10k) trees, RTL logical offsets.
+// layout shift (the indent is the same with and without lines), compact and virtual (10k) trees.
 import { act, fireEvent, render, screen, within } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { describe, expect, it } from 'vitest'

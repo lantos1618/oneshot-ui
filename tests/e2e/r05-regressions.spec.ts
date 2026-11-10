@@ -10,7 +10,7 @@ test.describe('0.5 regressions', () => {
     await showcase.open('data')
     const card = page.locator('[data-spec="Data grid · 50k rows"]')
     await card.scrollIntoViewIfNeeded()
-    await page.waitForTimeout(800)
+    await showcase.settleAnimations()
     const table = card.getByRole('grid')
     await expect(table).toBeVisible()
     /** For the header and the first body rows: the gap between each pair of neighbouring cells, in reading order. */
@@ -34,9 +34,9 @@ test.describe('0.5 regressions', () => {
     })
     expect(await gaps(), 'gaps between adjacent pinned cells').toEqual([])
     // scroll sideways: pinned cells stick and still touch
-    await table.evaluate(t => { t.parentElement!.scrollLeft = 240 })
-    await page.waitForTimeout(200)
-    expect(await gaps(), 'gaps between adjacent pinned cells after scrolling sideways').toEqual([])
+    const scrolled = await table.evaluate(t => { const s = t.parentElement!; s.scrollLeft = 240; return s.scrollWidth > s.clientWidth + 1 })
+    if (scrolled) await expect.poll(() => table.evaluate(t => t.parentElement!.scrollLeft)).toBeGreaterThan(0)
+    await expect.poll(gaps, 'gaps between adjacent pinned cells after scrolling sideways').toEqual([])
     // the table lays out at its declared column widths, which the sticky offsets are computed from
     const widths = await table.evaluate(t => ({
       declared: [...t.querySelectorAll('col')].map(c => Math.round(parseFloat((c as HTMLElement).style.width))),
@@ -51,13 +51,18 @@ test.describe('0.5 regressions', () => {
     await showcase.open('feedback')
     const card = page.locator('[data-spec="Offline indicator"]')
     await card.scrollIntoViewIfNeeded()
-    await page.waitForTimeout(800)
+    await showcase.settleAnimations()
     const t0 = await showcase.now()
     const sw = card.getByRole('switch')
-    await sw.click(); await page.waitForTimeout(500) // offline → back online
-    await sw.click(); await page.waitForTimeout(700) // back → offline while "Back online" shows
-    await sw.click(); await page.waitForTimeout(2800) // back online, then the bar slides away
-    await sw.click(); await page.waitForTimeout(800) // offline again
+    // the live region names each state; the bar (and its Retry now button) leaves once "Back online" has shown
+    const live = card.locator('[role=status].sr-only'), bar = card.getByRole('button', { name: 'Retry now', includeHidden: true })
+    await sw.click(); await expect(live).toHaveText('Back online.') // offline → back online
+    await sw.click(); await expect(live).toHaveText(/offline/) // back → offline while "Back online" shows
+    await sw.click(); await expect(live).toHaveText('Back online.')
+    await expect(bar).toHaveCount(0, { timeout: 5000 }) // then the bar slides away
+    await sw.click(); await expect(bar).toHaveCount(1); await expect(live).toHaveText(/offline/) // offline again
+    await showcase.settleAnimations()
+    // scrolled away (the countdown pauses) and back: the card is observed for a while each way
     await page.evaluate(() => scrollBy(0, 2500)); await page.waitForTimeout(1200)
     await page.evaluate(() => scrollBy(0, -2500)); await page.waitForTimeout(1200)
     // every layout shift attributed to the card, with or without recent input
@@ -65,8 +70,7 @@ test.describe('0.5 regressions', () => {
       .filter(s => s.t >= t0 && s.sources.includes('c-offline-indicator')).reduce((a, s) => a + s.v, 0), t0)
     expect(shift, 'layout shift in the offline indicator card').toBe(0)
     // the live region speaks the state, never the countdown
-    const live = card.locator('[role=status].sr-only')
-    await expect(live).not.toHaveText(/\d|[٠-٩]/)
+    await expect(live).not.toHaveText(/\d/)
   })
 
   test('tree view lines toggle without moving rows and collapse on click, section layout', async ({ showcase }) => {
@@ -74,20 +78,21 @@ test.describe('0.5 regressions', () => {
     await showcase.open('layout')
     const card = page.locator('[data-spec="Tree view"]')
     await card.scrollIntoViewIfNeeded()
-    await page.waitForTimeout(800)
+    await showcase.settleAnimations()
     const tree = card.getByRole('tree')
     // row boxes relative to the tree (the page may scroll while the switch is tapped)
     const rects = () => tree.evaluate(t => { const o = t.getBoundingClientRect(); return [...t.querySelectorAll('[role=treeitem]')].map(r => { const b = r.getBoundingClientRect(); return [Math.round(b.top - o.top), Math.round(b.left - o.left), Math.round(b.width)].join(',') }) })
     const on = await rects()
     const sw = card.getByRole('switch')
     await expect(sw).toBeChecked()
-    await sw.click(); await page.waitForTimeout(300)
+    await sw.click()
     await expect(tree.getByRole('button', { name: /^Collapse / })).toHaveCount(0)
-    expect(await rects()).toEqual(on)
-    await sw.click(); await page.waitForTimeout(300)
+    await expect.poll(rects).toEqual(on)
+    await sw.click()
+    await expect(tree.getByRole('button', { name: /^Collapse / }).first()).toBeAttached()
     const folder = tree.getByRole('treeitem', { name: /^components/ })
     await expect(folder).toHaveAttribute('aria-expanded', 'true')
-    const line = tree.getByRole('button', { name: /^Collapse components$|^طي components$/ }).first()
+    const line = tree.getByRole('button', { name: /^Collapse components$/ }).first()
     const box = (await line.boundingBox())!
     expect(box.width).toBeGreaterThanOrEqual(12)
     await line.click()

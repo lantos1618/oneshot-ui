@@ -1,4 +1,4 @@
-import { clearParts } from './baseline'
-import { clearQaParts } from './design-qa-baseline'
+import { axeBaseline } from './baseline'
+import { qaBaseline } from './design-qa-baseline'
 
-export default function globalSetup() { clearParts(); clearQaParts() }
+export default function globalSetup() { axeBaseline.clearParts(); qaBaseline.clearParts() }

@@ -3,22 +3,18 @@
 // around DST, FormData for every date control, and the async MultiSelect.
 import { act, fireEvent, render, screen, waitFor, within } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
-import { useState, type ReactNode } from 'react'
+import { useState } from 'react'
 import { describe, expect, it, vi } from 'vitest'
 import {
   Calendar, DateField, DatePicker, DateRangePicker, DateTimeField, DateTimePicker, Form, FormField, MonthPicker, MultiSelect, type Option, TimeField, TimePicker,
   TimeZonePicker, YearPicker, timeZoneOptions, toZonedISO, zonedDate, zonedParts, zoneOffset,
 } from '../../src/lib/forms'
+import { fakeTimersUser, inForm, tick } from '../helpers'
 
 /** A day button by its label; CLDR versions differ on the comma after the weekday ("Friday, 6 November 2026"). */
 const day = (name: RegExp | string) => screen.getByRole('button', { name: typeof name === 'string' && !name.includes(',') ? new RegExp(`^${name.replace(' ', ',? ')}$`) : name })
 const headers = () => screen.getAllByRole('columnheader').slice(0, 7).map(h => h.getAttribute('aria-label'))
 const seg = (name: string | RegExp) => screen.getByRole('spinbutton', { name })
-function inForm(children: ReactNode) {
-  const r = render(<form data-testid="f">{children}</form>)
-  const form = screen.getByTestId('f') as HTMLFormElement
-  return { ...r, form, data: () => new FormData(form) }
-}
 
 describe('Calendar constraints', () => {
   it('disables days outside min/max and unavailable days: announced, focusable, not selectable', async () => {
@@ -419,7 +415,7 @@ const PEOPLE: Option[] = [
 
 describe('async MultiSelect', () => {
   it('debounces, aborts superseded queries, groups results, toggles picks and submits each value', async () => {
-    const user = userEvent.setup()
+    const user = fakeTimersUser()
     const calls: string[] = [], aborted: string[] = []
     const load = vi.fn((q: string, { signal }: { signal: AbortSignal }) => {
       calls.push(q)
@@ -430,17 +426,24 @@ describe('async MultiSelect', () => {
     expect(screen.getByText('Dieter Rams')).toBeInTheDocument() // labelled from defaultOptions
     const input = screen.getByRole('combobox', { name: 'Reviewers' })
     await user.type(input, 'a')
+    await tick(19)
+    expect(calls).toEqual([])
+    await tick(1) // debounced: 'a' loads (30 ms)
+    expect(calls).toEqual(['a'])
     await user.type(input, 'l')
-    await waitFor(() => expect(screen.getByRole('option', { name: 'Alan Turing' })).toBeInTheDocument())
-    expect(calls.at(-1)).toBe('al')
-    expect(calls.filter(q => q !== 'al').every(q => aborted.includes(q))).toBe(true) // superseded requests were aborted
+    await tick(20) // 'al' supersedes it before it answers
+    expect(calls).toEqual(['a', 'al'])
+    expect(aborted).toEqual(['a'])
+    await tick(30)
+    expect(screen.getByRole('option', { name: 'Alan Turing' })).toBeInTheDocument()
     expect(screen.getByRole('group', { name: 'Engineering' })).toBeInTheDocument()
     await user.keyboard('{Enter}')
     expect(screen.getByRole('listbox')).toBeInTheDocument() // stays open for more picks
     expect(data().getAll('who')).toEqual(['dieter', 'alan'])
     await user.clear(input)
     await user.type(input, 'ada')
-    await waitFor(() => expect(screen.getByRole('option', { name: 'Ada Lovelace' })).toBeInTheDocument())
+    await tick(50)
+    expect(screen.getByRole('option', { name: 'Ada Lovelace' })).toBeInTheDocument()
     await user.click(screen.getByRole('option', { name: 'Ada Lovelace' }))
     expect(data().getAll('who')).toEqual(['dieter', 'alan', 'ada'])
     await user.click(screen.getByRole('option', { name: 'Ada Lovelace' }))
@@ -448,7 +451,8 @@ describe('async MultiSelect', () => {
     // chips keep their labels after the query changes
     await user.clear(input)
     await user.type(input, 'zzz')
-    await waitFor(() => expect(screen.getByText('No matches for “zzz”')).toBeInTheDocument())
+    await tick(50)
+    expect(screen.getByText('No matches for “zzz”')).toBeInTheDocument()
     expect(screen.getByText('Alan Turing')).toBeInTheDocument()
     await user.clear(input)
     await user.keyboard('{Backspace}')

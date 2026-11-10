@@ -46,24 +46,22 @@ for (const f of files) {
   for (const re of SECRET) if (re.test(text)) problems.push(`possible secret in ${f} (${re})`)
 }
 
-// 4. dist-single/SHA256SUMS matches the bundles
-for (const line of readFileSync(join(root, 'dist-single/SHA256SUMS'), 'utf8').trim().split('\n')) {
-  const [sum, name] = line.trim().split(/\s+/)
-  const actual = createHash('sha256').update(readFileSync(join(root, 'dist-single', name))).digest('hex')
-  if (actual !== sum) problems.push(`dist-single/SHA256SUMS: ${name} does not match (rebuild with pnpm build:single)`)
+/** Each line of `dir`/SHA256SUMS matches its file; a missing file is reported, not thrown. */
+function checkSums(dir, rebuild) {
+  let sums
+  try { sums = readFileSync(join(root, dir, 'SHA256SUMS'), 'utf8') } catch { problems.push(`${dir}/SHA256SUMS is missing (${rebuild})`); return }
+  for (const line of sums.trim().split('\n')) {
+    const [sum, name] = line.trim().split(/\s+/)
+    let bytes
+    try { bytes = readFileSync(join(root, dir, name)) } catch { problems.push(`${dir}/SHA256SUMS lists ${name}, which is missing (${rebuild})`); continue }
+    if (createHash('sha256').update(bytes).digest('hex') !== sum) problems.push(`${dir}/SHA256SUMS: ${name} does not match (${rebuild})`)
+  }
 }
 
-// 5. dist-registry/index.json matches the files (sha256), so `npx @lyndon/ui add` copies what the index describes
-for (const e of registry.items) {
-  const actual = createHash('sha256').update(readFileSync(join(root, 'dist-registry', e.file))).digest('hex')
-  if (actual !== e.sha256) problems.push(`dist-registry/index.json: ${e.file} does not match (rebuild with pnpm build:registry)`)
-}
-// and dist-registry/SHA256SUMS (`sha256sum -c` in node_modules) matches them too
-for (const line of readFileSync(join(root, 'dist-registry/SHA256SUMS'), 'utf8').trim().split('\n')) {
-  const [sum, name] = line.trim().split(/\s+/)
-  const actual = createHash('sha256').update(readFileSync(join(root, 'dist-registry', name))).digest('hex')
-  if (actual !== sum) problems.push(`dist-registry/SHA256SUMS: ${name} does not match (rebuild with pnpm build:registry)`)
-}
+// 4. the SHA256SUMS files (`sha256sum -c` in node_modules) match the single-file bundles and the registry drop-ins;
+// the registry index's own sha256 fields are checked by scripts/check-registry.mjs
+checkSums('dist-single', 'rebuild with pnpm build:single')
+checkSums('dist-registry', 'rebuild with pnpm build:registry')
 if (registry.version !== pkg.version) problems.push(`dist-registry/index.json is for ${registry.version}, package.json is ${pkg.version}`)
 
 const kb = n => `${(n / 1024).toFixed(0)} KB`

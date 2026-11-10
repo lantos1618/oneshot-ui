@@ -1,20 +1,7 @@
 // The showcase's tag filter in a real browser: ?tags= in the URL filters the page before it paints, card chips and
 // facet chips write it back, synonyms search, and the empty state clears everything. Desktop light and iPhone 13 only.
 import { TAG_BY_ID, TAG_CARDS, type TagId, tagCardTags, tagFilterMatch } from '../../src/showcase/tags'
-import { createRequire } from 'node:module'
 import { expect, test } from './fixtures'
-
-const AXE = createRequire(import.meta.url).resolve('axe-core/axe.min.js')
-/** axe-core violations inside the first element matching `selector`. */
-async function axeIn(page: import('@playwright/test').Page, selector: string) {
-  if (!(await page.evaluate(() => 'axe' in window))) await page.addScriptTag({ path: AXE })
-  await page.waitForTimeout(400) // the sheet's entry animation
-  return page.evaluate(async sel => {
-    const axe = (window as unknown as { axe: { run: (ctx: unknown, opts: unknown) => Promise<{ violations: { id: string; nodes: { target: unknown[] }[] }[] }> } }).axe
-    const res = await axe.run(document.querySelector(sel), { resultTypes: ['violations'] })
-    return res.violations.map(v => `${v.id}: ${v.nodes.map(n => String(n.target)).join(', ')}`)
-  }, selector)
-}
 
 test.describe('tag filter', () => {
 
@@ -38,7 +25,8 @@ test.describe('tag filter', () => {
       const sheet = page.getByRole('dialog', { name: 'Filter by tag' })
       await sheet.getByRole('button', { name: /^Statistics \d/ }).click()
       await expect(page).toHaveURL(/\?tags=charts,statistics,keyboard$/)
-      expect(await axeIn(page, '[role="dialog"]'), 'axe violations in the tag sheet').toEqual([])
+      const found = await showcase.axeStable({ selector: '[role="dialog"]' })
+      expect(found.map(v => `${v.id}: ${v.nodes.map(n => n.target).join(', ')}`), 'axe violations in the tag sheet').toEqual([])
       await sheet.getByRole('button', { name: /^Show \d+ components?$/ }).click()
       await expect(sheet).toBeHidden()
       await expect.poll(async () => (await visible(page)).sort()).toEqual(expected(['charts', 'statistics', 'keyboard']))

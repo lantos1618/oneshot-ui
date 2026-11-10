@@ -1,4 +1,4 @@
-// Git graph: the pure layout (lane assignment, edges, colours, order), the log parser, history filters and ranges, then
+// Git graph: the layout adapter over layoutLanes (edges, refs, colours), the log parser, history filters and ranges, then
 // the component: accessible names, keyboard navigation (rows, parents, children), selection, compare, the actions menu,
 // search and virtualisation.
 import { act, fireEvent, render, screen, within } from '@testing-library/react'
@@ -19,7 +19,7 @@ function expectContinuous(L: GitGraphLayout) {
     const top = new Set<number>(), bottom = new Set<number>()
     for (const e of r.edges) {
       if (e.part === 'through') { top.add(e.fromLane); bottom.add(e.toLane) }
-      else if (e.part === 'top') { top.add(e.fromLane); expect(e.toLane).toBe(r.lane) }
+      else if (e.part === 'top') { expect(e.toLane).toBe(r.lane); if (!e.missing) top.add(e.fromLane) }
       else { expect(e.fromLane).toBe(r.lane); if (!e.missing) bottom.add(e.toLane) }
     }
     expect([...top].sort()).toEqual([...below].sort())
@@ -32,6 +32,8 @@ function expectTopological(L: GitGraphLayout) {
   for (const r of L.rows) for (const p of r.parents) if (p >= 0) expect(p).toBeGreaterThan(r.index)
 }
 
+// layoutGitGraph is layoutLanes (tested in lanes.test.ts) behind an adapter: these check the git view of its rows
+// (type/part/missing edges, rowOf as a Map, commits) and the git-only options (pinned refs, branch colours, merge names).
 describe('layoutGitGraph', () => {
   it('lays out a linear history in one lane', () => {
     const L = layoutGitGraph([c('a', [], 0), c('b', ['a'], 1), c('c', ['b'], 2)])
@@ -41,6 +43,8 @@ describe('layoutGitGraph', () => {
     expect(L.rows[0].edges).toEqual([{ fromLane: 0, toLane: 0, type: 'straight', part: 'bottom', color: L.rows[0].color, child: 0, parent: 1, firstParent: true }])
     expect(L.rows[2].edges.map(e => e.part)).toEqual(['top']) // the root ends its lane
     expect(L.rows[1].children).toEqual([0])
+    expect(L.rowOf).toBeInstanceOf(Map)
+    expect(Object.fromEntries(L.rowOf)).toEqual({ c: 0, b: 1, a: 2 })
     expectContinuous(L)
   })
 
@@ -62,23 +66,6 @@ describe('layoutGitGraph', () => {
     expect(m.commit.hash).toBe('m')
     expect(m.edges.filter(e => e.type === 'merge').map(e => e.toLane)).toEqual([1, 2, 3])
     expect(L.laneCount).toBe(4)
-    expectContinuous(L)
-  })
-
-  it('handles criss-cross merges', () => {
-    const L = layoutGitGraph([c('a', [], 0), c('b1', ['a'], 1), c('c1', ['a'], 2), c('b2', ['b1', 'c1'], 3), c('c2', ['c1', 'b1'], 4)])
-    expectContinuous(L)
-    expectTopological(L)
-    expect(byHash(L, 'b2').parents).toEqual([L.rowOf.get('b1'), L.rowOf.get('c1')])
-    expect(L.laneCount).toBeLessThanOrEqual(3)
-  })
-
-  it('reuses freed lanes for later branches', () => {
-    // main: a → c → m1 → e → m2; feature 1 from a merged at m1, feature 2 from e merged at m2
-    const L = layoutGitGraph([c('a', [], 0), c('f1', ['a'], 1), c('c', ['a'], 2), c('m1', ['c', 'f1'], 3), c('e', ['m1'], 4), c('f2', ['e'], 5), c('m2', ['e', 'f2'], 6)])
-    expect(byHash(L, 'f1').lane).toBe(1)
-    expect(byHash(L, 'f2').lane).toBe(1)
-    expect(L.laneCount).toBe(2)
     expectContinuous(L)
   })
 
@@ -110,13 +97,6 @@ describe('layoutGitGraph', () => {
     }
   })
 
-  it('topo order keeps a branch together; date order interleaves by time', () => {
-    // two branches from a, commits alternating in time
-    const commits = [c('a', [], 0), c('x1', ['a'], 1), c('y1', ['a'], 2), c('x2', ['x1'], 3), c('y2', ['y1'], 4)]
-    expect(layoutGitGraph(commits, { order: 'date' }).rows.map(r => r.commit.hash)).toEqual(['y2', 'x2', 'y1', 'x1', 'a'])
-    expect(layoutGitGraph(commits, { order: 'topo' }).rows.map(r => r.commit.hash)).toEqual(['y2', 'y1', 'x2', 'x1', 'a'])
-  })
-
   it('gives branches stable colours: new commits on top do not reshuffle them', () => {
     expect(gitLaneColor('main')).toBe(0)
     expect(gitLaneColor('feature/x')).toBe(gitLaneColor('feature/x'))
@@ -133,15 +113,6 @@ describe('layoutGitGraph', () => {
   it('names merged-in lanes after the branch in the merge subject', () => {
     const L = layoutGitGraph([c('a', [], 0), c('f', ['a'], 1), c('m', ['a', 'f'], 2, { subject: "Merge branch 'feature/login' into main" })])
     expect(byHash(L, 'f').color).toBe(gitLaneColor('feature/login'))
-  })
-
-  it('lays out 50k commits quickly', () => {
-    const big = gitHistory(50_000)
-    const t = performance.now()
-    const L = layoutGitGraph(big, { pin: ['main', 'develop'] })
-    expect(L.rows.length).toBe(big.length)
-    expect(performance.now() - t).toBeLessThan(2000)
-    expectTopological(L)
   })
 })
 

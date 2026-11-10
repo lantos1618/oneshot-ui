@@ -2,6 +2,7 @@
 import { act, render, screen } from '@testing-library/react'
 import { describe, expect, it, vi } from 'vitest'
 import { MARKDOWN_MAX_CHARS, Markdown, parseMarkdown, type MdBlock, type MdInline } from '../../src/lib/markdown'
+import { expectLinear } from '../helpers'
 
 /** Plain text of inline nodes (for compact assertions). */
 const text = (ns: MdInline[]): string => ns.map(n => n.type === 'text' || n.type === 'code' ? n.text : n.type === 'break' ? '\n' : n.type === 'citation' ? `[${n.n}]` : n.type === 'image' ? n.alt : text(n.children)).join('')
@@ -23,7 +24,6 @@ const inl = (src: string, streaming = false) => {
   return p && (p.type === 'paragraph' || p.type === 'heading') ? shape(p.children) : ''
 }
 const types = (bs: MdBlock[]) => bs.map(b => b.type)
-const time = (fn: () => void) => { const t = performance.now(); fn(); return performance.now() - t }
 
 describe('parseMarkdown: blocks', () => {
   it('headings, paragraphs, rules', () => {
@@ -222,35 +222,35 @@ describe('parseMarkdown: streaming partials', () => {
 
 describe('parseMarkdown: limits and adversarial input', () => {
   const N = 100_000
-  const cases: [string, string][] = [
-    ['stars', '*'.repeat(N)],
-    ['star-a', '*a'.repeat(N / 2)],
-    ['nested stars', '*'.repeat(N / 2) + 'a' + '*'.repeat(N / 2)],
-    ['underscores', '_a'.repeat(N / 2)],
-    ['open brackets', '['.repeat(N)],
-    ['bracket-paren', '[a]('.repeat(N / 4)],
-    ['nested link parens', '[a]('.repeat(N / 8) + ')'.repeat(N / 8)],
-    ['close brackets', ']'.repeat(N)],
-    ['quotes', '>'.repeat(N)],
-    ['quote lines', '> '.repeat(500).concat('x\n').repeat(100)],
-    ['backtick runs', Array.from({ length: 2000 }, (_, i) => '`'.repeat((i % 40) + 1) + 'x').join('')],
-    ['long backticks', '`'.repeat(N)],
-    ['angle', '<a'.repeat(N / 2)],
-    ['pipes', '|'.repeat(N) + '\n' + '|-'.repeat(N / 2)],
-    ['list nesting', Array.from({ length: 2000 }, (_, i) => ' '.repeat(Math.min(i * 2, 400)) + '- x').join('\n')],
-    ['tildes', '~~a'.repeat(N / 3)],
-    ['escapes', '\\'.repeat(N)],
-    ['autolinks', 'https://a.b/('.repeat(N / 13)],
-    ['heading hashes', '# ' + '#'.repeat(N) + ' x'],
-    ['fences', '```\n'.repeat(N / 4)],
+  /** Adversarial inputs as a function of their size n (about n characters). */
+  // Runs of unmatched emphasis delimiters (*a, _a, ~~a) grow about quadratically today: some 50 ms at 100k chars,
+  // bounded by MARKDOWN_MAX_CHARS. They are allowed that much, and no more.
+  const QUADRATIC = 32
+  const cases: [string, (n: number) => string, ratio?: number][] = [
+    ['stars', n => '*'.repeat(n)],
+    ['star-a', n => '*a'.repeat(n / 2), QUADRATIC],
+    ['nested stars', n => '*'.repeat(n / 2) + 'a' + '*'.repeat(n / 2)],
+    ['underscores', n => '_a'.repeat(n / 2), QUADRATIC],
+    ['open brackets', n => '['.repeat(n)],
+    ['bracket-paren', n => '[a]('.repeat(n / 4)],
+    ['nested link parens', n => '[a]('.repeat(n / 8) + ')'.repeat(n / 8)],
+    ['close brackets', n => ']'.repeat(n)],
+    ['quotes', n => '>'.repeat(n)],
+    ['quote lines', n => '> '.repeat(500).concat('x\n').repeat(n / 1000)],
+    ['backtick runs', n => Array.from({ length: n / 50 }, (_, i) => '`'.repeat((i % 40) + 1) + 'x').join('')],
+    ['long backticks', n => '`'.repeat(n)],
+    ['angle', n => '<a'.repeat(n / 2)],
+    ['pipes', n => '|'.repeat(n) + '\n' + '|-'.repeat(n / 2)],
+    ['list nesting', n => Array.from({ length: n / 50 }, (_, i) => ' '.repeat(Math.min(i * 2, 400)) + '- x').join('\n')],
+    ['tildes', n => '~~a'.repeat(n / 3), QUADRATIC],
+    ['escapes', n => '\\'.repeat(n)],
+    ['autolinks', n => 'https://a.b/('.repeat(n / 13)],
+    ['heading hashes', n => '# ' + '#'.repeat(n) + ' x'],
+    ['fences', n => '```\n'.repeat(n / 4)],
   ]
-  for (const [name, src] of cases) {
-    it(`${name} (${src.length.toLocaleString('en')} chars) parses in < 500 ms`, () => {
-      parseMarkdown(src.slice(0, 1000)) // warm up
-      // best of three runs per mode (GC and JIT noise from parallel test files), slower of the two modes
-      const best = (streaming: boolean) => Math.min(...[0, 1, 2].map(() => time(() => parseMarkdown(src, { streaming }))))
-      const ms = Math.max(best(false), best(true))
-      expect(ms).toBeLessThan(process.env.CI ? 1000 : 500) // linear input stays far below; quadratic takes seconds. Headroom for loaded machines
+  for (const [name, make, ratio] of cases) {
+    it(`${name} (${make(N).length.toLocaleString('en')} chars) parses in ${ratio ? 'at most quadratic' : 'about linear'} time, streaming or not`, () => {
+      for (const streaming of [false, true]) expectLinear(n => { const src = make(n); return () => parseMarkdown(src, { streaming }) }, N / 4, `${name}${streaming ? ' (streaming)' : ''}`, ratio)
     })
   }
 
