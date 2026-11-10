@@ -32,8 +32,8 @@ export type UIProviderProps = LocaleSettings & {
   injectStyles?: boolean
 }
 
-/** The page background and text colour, on `html`: added with target="html" (dist/tokens.css carries the same rule). */
-const PROVIDER_PAGE_CSS = 'html{background:var(--bg);color:var(--fg)}'
+/** The page background and text colour, on `html` and `body` (so a host page's own body background can't show through): added with target="html" (dist/tokens.css carries the same rule). */
+const PROVIDER_PAGE_CSS = 'html,html body{background:var(--bg);color:var(--fg)}'
 
 /** The Google Fonts stylesheet behind FONT_CSS, for a `<link>` when inline styles are off. */
 const PROVIDER_FONT_HREF = 'https://fonts.googleapis.com/css2?family=Geist:wght@400;500;600&family=Geist+Mono:wght@400;500&display=swap'
