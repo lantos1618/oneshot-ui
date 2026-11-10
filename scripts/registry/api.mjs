@@ -1,6 +1,6 @@
 // The API of a library export as the docs site and the showcase's code drawer show it, read with the TypeScript 7 API
-// from an analyze() graph (scripts/registry/analyze.mjs). Used by scripts/build-docs-data.mjs and
-// scripts/showcase-code.mjs.
+// from an analyze() graph (scripts/registry/analyze.mjs). Used by scripts/build-docs-data.mjs, scripts/showcase-code.ts
+// and (isComponentDecl) scripts/build-registry.mjs.
 import { SymbolFlags } from 'typescript/unstable/sync'
 import { SyntaxKind } from 'typescript/unstable/ast'
 import { isComponentName } from './items.mjs'
@@ -42,6 +42,10 @@ export function apiOfDecl(graph, name) {
   if (signature.length > 400) signature = signature.slice(0, 397) + '…'
   return { name, kind: /^use[A-Z]/.test(name) ? 'hook' : fn ? 'function' : 'value', doc: d.doc, signature }
 }
+
+/** Whether a top-level declaration is a React component: a PascalCase function, or a const holding one (memo(),
+ * forwardRef(), Object.assign(Config, { Root, … })). The registry and the docs props tables decide alike. */
+export const isComponentDecl = (graph, d) => !d.isType && isComponentName(d.name) && !!functionNode(graph, d.node, d.name)
 
 /** The function behind a declaration: `function X`, `const X = (…) =>`, `const X = memo(function …)`. */
 function functionNode(graph, node, name) {

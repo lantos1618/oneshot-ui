@@ -1,68 +1,23 @@
 // Build-time data for the showcase's view-code drawer (src/showcase/CodeDrawer.tsx), served by a Vite plugin so the page
-// ships each card's usage example and the props of the components it renders, not raw source: the drawer used to bundle
-// every *Section.tsx as text (~520 KB, eager) and read props by parsing ~2.9 MB of library source in the browser.
+// ships each card's usage example and the props of the components it renders, not the section sources.
 //
 // The drawer imports `import.meta.glob('./*Section.tsx', { query: '?showcase-code', import: 'default' })`: lazy, so a
 // section's data loads the first time the drawer opens. This plugin answers those ids with that section's data:
 //   { examples: { [card title]: { code, file, components } }, props: { [component]: api } }
 // Usage examples are sliced from the card's own JSX (its <Spec> children, plus the state, helpers and imports they use);
 // props come from the TypeScript types (scripts/registry/api.mjs, the same tables as the docs site).
-import { readFileSync, readdirSync, statSync } from 'node:fs'
+import { readdirSync, statSync } from 'node:fs'
 import { join } from 'node:path'
 import type { Plugin } from 'vite'
 import { analyze } from './registry/analyze.mjs'
 import { apiOfDecl } from './registry/api.mjs'
+import { codeFindSpec, codeSpecs, showcaseSections } from './showcase-sections.ts'
 import { bundleOf } from './tiers.mjs'
 
 /** A card's usage example: the code, the section file it came from, and the library components it renders (in order). */
 export type CodeExample = { code: string; file: string; components: string[] }
 
 /* Source scanning ───────────────────────────────────────────────────────────── */
-
-/** Skip a `{…}` expression starting at `i` (strings and template literals inside are skipped whole). Returns the index after `}`. */
-function codeSkipBraces(s: string, i: number) {
-  let depth = 0
-  for (; i < s.length; i++) {
-    const c = s[i]
-    if (c === '"' || c === "'" || c === '`') { const q = c; for (i++; i < s.length && s[i] !== q; i++) if (s[i] === '\\') i++; continue }
-    if (c === '{') depth++
-    else if (c === '}' && --depth === 0) return i + 1
-  }
-  return s.length
-}
-/** End of a JSX opening tag whose attributes start at `i`: index after `>`, and whether it was `/>`. */
-function codeTagEnd(s: string, i: number) {
-  for (; i < s.length; i++) {
-    const c = s[i]
-    if (c === '"' || c === "'") { const q = c; for (i++; i < s.length && s[i] !== q; i++); continue }
-    if (c === '{') { i = codeSkipBraces(s, i) - 1; continue }
-    if (c === '>') return { end: i + 1, self: s[i - 1] === '/' }
-  }
-  return { end: s.length, self: true }
-}
-export const codeTitleOf = (tag: string) => {
-  const m = tag.match(/\btitle=(?:"([^"]*)"|\{\s*'([^']*)'\s*\}|\{\s*"([^"]*)"\s*\}|\{\s*`([^`]*)`\s*\})/)
-  return m ? (m[1] ?? m[2] ?? m[3] ?? m[4]) : null
-}
-
-/** The children of `<Spec title="…">…</Spec>` in `src`, tracking nested Specs so the right `</Spec>` closes it. */
-function codeFindSpec(src: string, title: string): { inner: string; at: number } | null {
-  const open = /<Spec\b/g
-  for (let m = open.exec(src); m; m = open.exec(src)) {
-    const tag = codeTagEnd(src, m.index + 5)
-    if (codeTitleOf(src.slice(m.index, tag.end)) !== title) continue
-    if (tag.self) return { inner: '', at: m.index }
-    const tok = /<Spec\b|<\/Spec\s*>/g
-    tok.lastIndex = tag.end
-    let depth = 1
-    for (let t = tok.exec(src); t; t = tok.exec(src)) {
-      if (t[0].startsWith('</')) { if (--depth === 0) return { inner: src.slice(tag.end, t.index), at: m.index } }
-      else { const inner = codeTagEnd(src, t.index + 5); if (!inner.self) depth++; tok.lastIndex = inner.end }
-    }
-    return null
-  }
-  return null
-}
 
 /** Remove the common indent and blank edges. */
 function codeDedent(s: string) {
@@ -185,6 +140,12 @@ function codeSingleRoot(jsx: string) {
   return roots.length === 1 && /^<[A-Za-z]/.test(roots[0]) && !/(\/>|<\/[\w.]*>)\s*\S/.test(roots[0].replace(/(\/>|<\/[\w.]*>)\s*$/, ''))
 }
 
+/** What a reader needs to know about an example's relative imports that aren't the single-file bundles. */
+const CODE_LOCAL: Record<string, string> = {
+  '../examples': 'sample data from the repository (src/examples), not part of the package',
+  '../blocks': 'copy-in blocks: npx @lyndon/ui add <name>',
+}
+
 const codePascal = (t: string) => t.replace(/[^A-Za-z0-9]+/g, ' ').trim().split(' ').map(w => w[0].toUpperCase() + w.slice(1)).join('') || 'Component'
 const CODE_ROW_CLASS = 'flex flex-wrap items-center gap-2'
 
@@ -220,8 +181,8 @@ export function codeExampleFor(title: string, sources: Record<string, string>): 
     if (needRow) need.add('cn')
     const paramNames = comp?.params ? codeIdents(comp.params.split(/\)\s*:|}\s*:/)[0]) : new Set<string>()
     const usesParams = [...paramNames].some(p => need.has(p) && !bound.has(p))
-    // keep only the imported names that are used; library imports point at the single-file build
-    // library imports point at the single-file bundles: core at ./ui, each extras module at its bundle (ui-charts …)
+    // keep only the imported names that are used; library imports point at the single-file bundles: core at ./ui,
+    // each extras module at its bundle (ui-charts …)
     const byFrom = new Map<string, string[]>()
     for (const imp of imports) {
       const m = imp.match(/^import\s+(type\s+)?\{([\s\S]*)\}\s*from\s*'([^']+)'/)
@@ -237,7 +198,8 @@ export function codeExampleFor(title: string, sources: Record<string, string>): 
     }
     if (needRow && !byFrom.get('./ui')?.includes('cn')) byFrom.set('./ui', [...(byFrom.get('./ui') ?? []), 'cn'])
     const importLines = [...byFrom].filter(([, names]) => names.length).map(([from, names]) =>
-      names.every(n => n.startsWith('type ')) ? `import type { ${names.map(n => n.slice(5)).join(', ')} } from '${from}'` : `import { ${names.join(', ')} } from '${from}'`)
+      (names.every(n => n.startsWith('type ')) ? `import type { ${names.map(n => n.slice(5)).join(', ')} } from '${from}'` : `import { ${names.join(', ')} } from '${from}'`) +
+      (from.startsWith('.') && !/^\.\/ui(-\w+)?$/.test(from) ? ` // ${CODE_LOCAL[from] ?? 'a showcase file, not part of the package'}` : ''))
     if (needRow) {
       const r = importLines.findIndex(l => / from 'react'$/.test(l) && l.startsWith('import {'))
       if (r >= 0) { if (!/\bReactNode\b/.test(importLines[r])) importLines[r] = importLines[r].replace(' }', ', type ReactNode }') }
@@ -277,11 +239,7 @@ function showcaseExamples(file: string, raw: string): Record<string, CodeExample
     src = `${[...lazy.values()].map(({ name, mod }) => `import { ${name} } from '../lib/${mod}'`).join('\n')}\n${src}`
     src = src.replace(new RegExp(`\\b(${[...lazy.keys()].join('|')})\\b`, 'g'), l => lazy.get(l)!.name)
   }
-  const open = /<Spec\b/g
-  for (let m = open.exec(src); m; m = open.exec(src)) {
-    const title = codeTitleOf(src.slice(m.index, codeTagEnd(src, m.index + 5).end))
-    if (title && !out[title]) { const ex = codeExampleFor(title, { [file]: src }); if (ex) out[title] = ex }
-  }
+  for (const { title } of codeSpecs(src)) if (!out[title]) { const ex = codeExampleFor(title, { [file]: src }); if (ex) out[title] = ex }
   return out
 }
 
@@ -290,17 +248,16 @@ type ShowcaseCodeData = { stamp: number; sections: Map<string, { examples: Recor
 /** Serves `src/showcase/XSection.tsx?showcase-code`. Everything is worked out once (one TypeScript program for the props) and
  * again only when a section or library file has changed since. */
 export function showcaseCode({ root }: { root: string }): Plugin {
-  const showcase = join(root, 'src/showcase'), dirs = ['src/lib', 'src/blocks', 'src/showcase'].map(d => join(root, d))
+  const dirs = ['src/lib', 'src/blocks', 'src/examples', 'src/showcase'].map(d => join(root, d))
   let data: ShowcaseCodeData | null = null
   const stampNow = () => Math.max(...dirs.flatMap(d => readdirSync(d).filter(f => /\.tsx?$/.test(f)).map(f => statSync(join(d, f)).mtimeMs)))
   const build = (): ShowcaseCodeData => {
     const stamp = stampNow()
     if (data && data.stamp === stamp) return data
-    const files = readdirSync(showcase).filter(f => /Section\.tsx$/.test(f)).sort()
-    const examples = new Map(files.map(f => [f, showcaseExamples(`./${f}`, readFileSync(join(showcase, f), 'utf8'))]))
+    const examples = new Map(showcaseSections(root).map(s => [`${s.file}.tsx`, showcaseExamples(`./${s.file}.tsx`, s.source)]))
     const names = new Set([...examples.values()].flatMap(e => Object.values(e).flatMap(x => x.components)))
     const api = new Map<string, unknown>()
-    const graph = analyze(root, { extraDirs: ['src/blocks'] })
+    const graph = analyze(root)
     try { for (const n of names) { const a = apiOfDecl(graph, n); if (a?.kind === 'component') api.set(n, a) } } finally { graph.close() }
     const sections = new Map([...examples].map(([f, ex]) => {
       const props = Object.fromEntries([...new Set(Object.values(ex).flatMap(x => x.components))].filter(n => api.has(n)).map(n => [n, api.get(n)]))

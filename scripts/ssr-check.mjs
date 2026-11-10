@@ -1,12 +1,12 @@
 // Server-render check: renders <UIProvider><Button/></UIProvider>, ThemeScript, every showcase section and the whole
 // page with react-dom/server renderToString (modules loaded through Vite SSR, so the TSX sources are used as they are).
 // Usage: node scripts/ssr-check.mjs [SectionName …]   Exit code 1 if anything throws.
-import { createServer } from 'vite'
-import { readdirSync } from 'node:fs'
 import { join } from 'node:path'
 import { createRequire } from 'node:module'
+import { root } from './paths.mjs'
+import { showcaseSectionFiles } from './showcase-sections.ts'
+import { withSsr } from './ssr.mjs'
 
-const root = new URL('..', import.meta.url).pathname
 const only = process.argv.slice(2)
 // React throws when useSyncExternalStore has no getServerSnapshot. The showcase's own spec registry (kit.tsx) has
 // none, which would hide everything below it, so fall back to getSnapshot and report each call site instead.
@@ -17,30 +17,27 @@ React.useSyncExternalStore = (sub, get, server) => {
   if (!server) { noServerSnapshot.add((new Error().stack ?? '').split('\n').slice(2).find(l => l.includes('/src/'))?.trim().replace(/^at /, '') ?? '?'); server = get }
   return uses(sub, get, server)
 }
-const vite = await createServer({ root, configFile: false, logLevel: 'error', appType: 'custom', server: { middlewareMode: true, hmr: false, ws: false } })
 const { createElement: h } = await import('react')
 const { renderToString } = await import('react-dom/server')
 
-const errors = [] // console.error during render: React warnings, failed effects …
-const origError = console.error
-console.error = (...a) => { errors.push(a.map(String).join(' ').split('\n')[0]) }
-
 const results = []
 const expect = (name, ok, detail) => results.push(ok ? { name, ok: true, size: 0, warnings: [] } : { name, ok: false, error: detail, warnings: [] })
-async function check(name, make) {
-  if (only.length && !only.includes(name)) return
-  errors.length = 0
-  try {
-    const html = renderToString(await make())
-    results.push({ name, ok: true, size: html.length, warnings: [...errors] })
-  } catch (e) {
-    const where = String(e?.stack ?? '').split('\n').find(l => l.includes('/src/')) ?? ''
-    results.push({ name, ok: false, error: `${e?.message ?? e}`.split('\n')[0], where: where.trim(), warnings: [...errors] })
-  }
+const failure = (name, e, warnings = []) => {
+  const where = String(e?.stack ?? '').split('\n').find(l => l.includes('/src/')) ?? ''
+  results.push({ name, ok: false, error: `${e?.message ?? e}`.split('\n')[0], where: where.trim(), warnings })
 }
 
-try {
-  const lib = await vite.ssrLoadModule('/src/lib/all.ts')
+await withSsr(root, async ({ load, render }) => {
+  // console.error during a render (React warnings, failed effects …) is reported with it
+  async function check(name, make) {
+    if (only.length && !only.includes(name)) return
+    let el
+    try { el = await make() } catch (e) { failure(name, e); return }
+    const { html, errors, error } = render(el)
+    if (error) failure(name, error, errors)
+    else results.push({ name, ok: true, size: html.length, warnings: errors })
+  }
+  const lib = await load('/src/lib/all.ts')
   await check('UIProvider + Button', () => h(lib.UIProvider, null, h(lib.Button, null, 'Save')))
   await check('UIProvider target=self, fonts=false', () => h(lib.UIProvider, { target: 'self', fonts: false, persist: false }, h(lib.ThemeToggle)))
   await check('ThemeScript', () => h(lib.ThemeScript, { storageKey: 'app-theme', defaultTheme: { theme: 'nord' } }))
@@ -75,20 +72,16 @@ try {
     const src = lib.themeScriptSource()
     expect('ThemeScript reads ui-theme:v1 and validates css', src.includes('"ui-theme:v1"') && src.includes('"ui-theme"') && src.includes('R.test'), src.slice(0, 120))
   }
-  const dir = join(root, 'src/showcase')
   // card bodies mount lazily in the browser; render them eagerly here so every component is server-rendered
-  const { SpecEagerContext } = await vite.ssrLoadModule('/src/showcase/kit.tsx')
+  const { SpecEagerContext } = await load('/src/showcase/kit.tsx')
   const eager = el => h(SpecEagerContext.Provider, { value: true }, el)
-  for (const f of readdirSync(dir).filter(f => f.endsWith('Section.tsx')).sort()) {
-    const mod = await vite.ssrLoadModule(`/src/showcase/${f}`).catch(e => ({ __loadError: e }))
+  for (const f of showcaseSectionFiles(root)) {
+    const mod = await load(`/src/showcase/${f}`).catch(e => ({ __loadError: e }))
     if (mod.__loadError) { results.push({ name: f, ok: false, error: `import failed: ${mod.__loadError.message}`, warnings: [] }); continue }
     for (const [name, C] of Object.entries(mod)) if (/Section$/.test(name) && typeof C === 'function') await check(name, () => h(lib.UIProvider, null, eager(h(C))))
   }
-  await check('Showcase (whole page)', async () => eager(h((await vite.ssrLoadModule('/src/showcase/index.tsx')).default)))
-} finally {
-  console.error = origError
-  await vite.close()
-}
+  await check('Showcase (whole page)', async () => eager(h((await load('/src/showcase/index.tsx')).default)))
+})
 
 for (const r of results) {
   console.log(`${r.ok ? 'ok  ' : 'FAIL'} ${r.name}${r.ok ? ` (${(r.size / 1024).toFixed(0)} KB)` : `: ${r.error}${r.where ? `\n       at ${r.where}` : ''}`}`)

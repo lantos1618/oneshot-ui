@@ -21,27 +21,26 @@
 // To keep the files small: ICONS keeps only the icons a file draws (the rest resolve through the page-wide icon
 // registry; icon.tsx has them all), and embedded helpers keep only a one-sentence summary of their docs
 // (scripts/registry/diet.mjs; the item's own exports keep theirs).
-import { readFileSync, readdirSync, writeFileSync, mkdirSync, rmSync } from 'node:fs'
+import { readFileSync, writeFileSync, mkdirSync, rmSync } from 'node:fs'
 import { join } from 'node:path'
-import { commit, dirty, header, pkg, sha256 } from './registry/stamp.mjs'
+import { assertProvenance, commit, dirty, header, pkg, sha256 } from './registry/stamp.mjs'
 import { analyze, closure } from './registry/analyze.mjs'
+import { isComponentDecl } from './registry/api.mjs'
 import { dietPart } from './registry/diet.mjs'
 import { FAMILIES, BLOCKS, EXCLUDE, kebab, humanize, isComponentName } from './registry/items.mjs'
+import { libFiles, requireBuilt, root, warnOrFail } from './paths.mjs'
 import { EXTRAS, assertPlaced, familyOf, importOf, tierOf } from './tiers.mjs'
 // the tag vocabulary shared with the showcase and the docs (a .ts file: Node strips its types)
 import { TAGS, TAG_FACETS, TAG_BY_ID, tagRegistryMeta } from '../src/showcase/tags.ts'
 
-const root = new URL('..', import.meta.url).pathname
 const out = join(root, 'dist-registry')
 const repo = pkg.homepage.replace(/#readme$/, '')
 const BASE = (process.env.REGISTRY_BASE_URL ?? 'https://lantos1618.github.io/oneshot-ui').replace(/\/$/, '')
-// llms.txt links: the files as deployed with the docs (pages.yml); after a release also on unpkg (see the README)
-const RAW = BASE
 const minor = pkg.version.split('.').slice(0, 2).join('.')
 const t0 = Date.now()
 
 const tokensOf = bytes => Math.round(bytes / 3.6)
-const warn = msg => console.warn(`build-registry: ${msg}`)
+const warn = msg => warnOrFail('build-registry', msg)
 
 function build() {
   const { decls, modules } = graph
@@ -77,10 +76,7 @@ function build() {
   }
   const autos = []
   for (const d of decls.values()) {
-    if (d.dir !== 'lib' || !graph.publicNames.has(d.name) || d.isType || !isComponentName(d.name) || claimed.has(d.name)) continue
-    // a const is a component when it is a function, memo()/forwardRef() of one, or Object.assign(Config, { Root, … }) (composable parts)
-    if (d.kind === 'FirstStatement' && !/^\s*(\/\*[\s\S]*?\*\/\s*)?export const \w+\s*(:[^=]+)?=\s*((memo|forwardRef)?\(?\s*(\(|function)|Object\.assign\()/m.test(d.parts[0].text)) continue // constants
-    autos.push(d.name)
+    if (d.dir === 'lib' && graph.publicNames.has(d.name) && !claimed.has(d.name) && isComponentDecl(graph, d)) autos.push(d.name)
   }
   // composable parts join their component's item: DialogRoot, DialogContent → dialog; AlertDialogAction → alert-dialog
   const hosts = new Map(items.flatMap(it => it.roots.filter(isComponentName).map(r => [r, it])))
@@ -135,7 +131,10 @@ function build() {
     }
     if (it.type === 'registry:block' && first.dir === 'extra') {
       const mod = modules.find(m => m.name === first.module)
-      const src = readFileSync(mod.file, 'utf8').replace(/(from\s+['"])\.\.\/lib(\/[\w-]+)?(['"])/g, (_, a, sub = '', z) => `${a}@lyndon/ui${sub}${z}`)
+      const src = readFileSync(mod.file, 'utf8').replace(/(from\s+['"])\.\.\/lib(\/[\w-]+)?(['"])/g, (_, a, sub = '', z) => {
+        if (sub && !pkg.exports[`.${sub}`]) throw new Error(`block ${it.name} imports ../lib${sub}, which package.json doesn't export`)
+        return `${a}@lyndon/ui${sub}${z}`
+      })
       const ptext = stamp(it.name, src.replace(/^'use client'\n?/, ''))
       writeFileSync(join(out, 'files', `${it.name}.package.tsx`), ptext)
       entry.packageFile = `files/${it.name}.package.tsx`
@@ -146,7 +145,7 @@ function build() {
   }
 
   // ── shadcn registry ──────────────────────────────────────────────────────────────────────────────────────────────
-  const tokensCss = readFileSync(join(root, 'dist/tokens.css'), 'utf8')
+  const tokensCss = readFileSync(requireBuilt('dist/tokens.css', 'pnpm build:css'), 'utf8')
   const shadcnItem = (e, { content, file, deps, name = e.name, standalone = true }) => ({
     $schema: 'https://ui.shadcn.com/schema/registry-item.json',
     name, type: e.type, title: e.title, description: e.description,
@@ -363,7 +362,7 @@ function writeLlms(index) {
   ].filter(([, list]) => list.length)
   const heading = (label, from) => `\n## ${label}\n\nImport from: ${from}.\n`
   const allLines = groups.flatMap(([label, list, from]) => [heading(label, from), ...list.map(e =>
-    `- [${e.name}](${RAW}/${e.file}): ${first(e.description)} (${e.kind}, ~${fmtTok(e.tokens)} tokens${tagList(e) ? `; tags: ${tagList(e)}` : ''})`)])
+    `- [${e.name}](${BASE}/${e.file}): ${first(e.description)} (${e.kind}, ~${fmtTok(e.tokens)} tokens${tagList(e) ? `; tags: ${tagList(e)}` : ''})`)])
   const vocab = TAG_FACETS.filter(f => f.id !== 'area').map(f => `- ${f.label}: ${TAGS.filter(t => t.facet === f.id).map(t => t.id).join(', ')}`).join('\n')
   const intro = `# @lyndon/ui
 
@@ -388,7 +387,7 @@ and motion. Attach the ones you need plus ui-provider.tsx; they share one UIProv
 
 - CLI (offline, from the installed package): \`npx @lyndon/ui add data-grid dialog --dir src/components/ui\`, \`npx @lyndon/ui list\`, \`npx @lyndon/ui info data-grid\`
 - shadcn CLI: \`npx shadcn add ${BASE}/r/data-grid.json\` (pulls in ui-provider)
-- Index with sizes, exports and embedded components: ${RAW}/index.json
+- Index with sizes, exports and embedded components: ${BASE}/index.json
 - The same files from npm: https://unpkg.com/${pkg.name}@${pkg.version}/dist-registry/files/<name>.tsx
 - Whole library in one file (dist-single/ui-all.tsx, ~${fmtTok(tokensOf(sizeOf('dist-single/ui-all.tsx')))} tokens): only for tools with a very large context; prefer the drop-ins
 
@@ -402,15 +401,16 @@ ${vocab}
   writeFileSync(join(root, 'llms.txt'), intro + allLines.join('\n') + '\n')
   // llms-full.txt: the same, plus each item's exports and embedded components
   const full = intro + groups.flatMap(([label, list, from]) => [heading(label, from), ...list.map(e =>
-    `### ${e.title} (\`${e.name}\`, ~${fmtTok(e.tokens)} tokens)\n\n${e.description}\n\n- File: ${RAW}/${e.file}\n- Kind: ${e.kind}; area: ${e.area}${tagList(e) ? `; tags: ${tagList(e)}` : ''}${e.import ? `\n- Import: \`${e.import}\`` : ''}\n- Exports: ${e.exports.join(', ')}` +
+    `### ${e.title} (\`${e.name}\`, ~${fmtTok(e.tokens)} tokens)\n\n${e.description}\n\n- File: ${BASE}/${e.file}\n- Kind: ${e.kind}; area: ${e.area}${tagList(e) ? `; tags: ${tagList(e)}` : ''}${e.import ? `\n- Import: \`${e.import}\`` : ''}\n- Exports: ${e.exports.join(', ')}` +
     (e.embeds.length ? `\n- Embeds: ${e.embeds.join(', ')}` : '') + (e.dependencies.length ? `\n- npm: ${e.dependencies.join(', ')}` : '') + '\n')]).join('\n')
   writeFileSync(join(root, 'llms-full.txt'), full + '\n')
 }
 
-function sizeOf(rel) { try { return readFileSync(join(root, rel)).length } catch { return 0 } }
+const sizeOf = rel => readFileSync(requireBuilt(rel, 'pnpm build:single')).length
 
-assertPlaced(readdirSync(join(root, 'src/lib')).filter(f => /\.tsx?$/.test(f)), 'build-registry')
-const graph = analyze(root, { extraDirs: ['src/blocks'] })
+assertProvenance()
+assertPlaced(libFiles(), 'build-registry')
+const graph = analyze(root)
 try {
   build()
 } finally {

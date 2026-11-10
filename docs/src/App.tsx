@@ -10,36 +10,31 @@ import {
 import { CodeBlock, CodeTabs } from '../../src/lib/code'
 import { ShellContext } from '../../src/showcase/kit'
 import {
-  TAG_BY_ID, type TagFacet, type TagId, tagFacetCounts, tagMatches, tagParseUrl, tagSearchString, tagToggle, tagsOfFacet,
+  TAG_BY_ID, TAG_FACETS, type TagId, tagFacetCounts, tagMatches, tagParseUrl, tagSearchString, tagToggle, tagsOfFacet,
 } from '../../src/showcase/tags'
-import data from '../generated/items.json'
+import type { DocsData, DocsDemo, DocsDemos, DocsItem } from '../../scripts/docs-data.mjs'
+import type { Api, ApiProp } from '../../scripts/registry/api.mjs'
+import items from '../generated/items.json'
 import demos from '../generated/demos.json'
 
-type Prop = { name: string; type: string; required: boolean; default: string | null; doc: string }
-type Api = { name: string; kind: 'component' | 'hook' | 'function' | 'value'; doc: string; props?: Prop[]; inherited?: number; inheritedFrom?: string[]; signature?: string }
-type Item = {
-  name: string; title: string; type: string; description: string; tier: 'core' | 'extras' | 'block'; family: string | null; import: string | null
-  kind: TagId; area: TagId; tags: TagId[]; module?: string; exports: string[]; embeds: string[]
-  dependencies: string[]; requires: string[]; bytes: number; tokens: number; file: string; packageFile: string | null; api: Api[]
-}
-type Demo = { section: string; file: string; exportName: string; titles: string[] }
-
-const ITEMS = data.items as unknown as Item[]
-const AREAS = (data.areas as [string, string][]).filter(([id]) => ITEMS.some(i => i.area === id))
+// JSON imports are typed from their content (kind: string), so they go through the generator's declared shapes
+const data = items as unknown as DocsData
+const ITEMS = data.items
+const AREAS = data.areas.filter(([id]) => ITEMS.some(i => i.area === id))
+const tagLabel = (id: TagId) => TAG_BY_ID[id]?.label ?? id
 const FAMILY_LABEL: Record<string, string> = { ai: 'AI', vizkit: 'Chart math' }
 /** Sidebar groups by tier: core by area, then each extras family, then the copy-in blocks. */
-const TIERS: { label: string; groups: { key: string; label: string; match: (i: Item) => boolean }[] }[] = [
+const TIERS: { label: string; groups: { key: string; label: string; match: (i: DocsItem) => boolean }[] }[] = [
   { label: 'Core', groups: AREAS.map(([id, label]) => ({ key: `core-${id}`, label, match: i => i.tier === 'core' && i.area === id })) },
   { label: 'Extras', groups: (data.families as string[]).map(f => ({ key: `extras-${f}`, label: FAMILY_LABEL[f] ?? f[0].toUpperCase() + f.slice(1), match: i => i.family === f })) },
   { label: 'Blocks', groups: [{ key: 'blocks', label: 'Copy-in blocks', match: i => i.tier === 'block' }] },
 ]
-const DEMOS = demos as Record<string, Demo>
+const DEMOS = demos as DocsDemos
 const BY_NAME = new Map(ITEMS.map(i => [i.name, i]))
-const REPO = 'https://github.com/lantos1618/oneshot-ui'
+const REPO = data.repo
 // the registry is deployed next to the docs (docs-dist/r, docs-dist/files): links stay relative to the page
 const here = () => new URL('.', location.href).href.replace(/\/$/, '')
 
-const TYPE_LABEL: Record<string, string> = { 'registry:ui': 'component', 'registry:block': 'block (copy-in)', 'registry:lib': 'utilities', 'registry:hook': 'hooks' }
 /** The first sentence or two of a long description (the API section below has all of it). */
 const lead = (s: string) => {
   if (s.length <= 240) return s
@@ -68,8 +63,9 @@ const go = (name?: string) => { location.hash = name ? `/c/${name}` : '/' }
 type DocsFilterValue = { q: string; tags: TagId[]; setQ: (q: string) => void; toggle: (id: TagId) => void; pick: (id: TagId) => void; clear: () => void }
 const DocsFilter = createContext<DocsFilterValue>({ q: '', tags: [], setQ: () => {}, toggle: () => {}, pick: () => {}, clear: () => {} })
 /** What search reads for an item, plus its kind and tags (their labels and synonyms count too). */
-const searchable = (i: Item) => ({ text: `${i.name} ${i.title} ${i.exports.join(' ')} ${i.description}`, tags: [i.kind, ...i.tags] })
-const DOCS_FACETS: [TagFacet, string][] = [['use', 'Use case'], ['capability', 'Capability'], ['kind', 'Kind'], ['status', 'Status']]
+const searchable = (i: DocsItem) => ({ text: `${i.name} ${i.title} ${i.exports.join(' ')} ${i.description}`, tags: [i.kind, ...i.tags] })
+/** The tag facets of the filter; areas are the sidebar's groups instead. */
+const DOCS_FACETS = TAG_FACETS.filter(f => f.id !== 'area')
 const tagHref = (id: TagId) => `${tagSearchString('', [id], '')}#/`
 
 function useDocsFilter(): DocsFilterValue {
@@ -108,7 +104,7 @@ function TagFacets({ counts }: { counts: Record<TagId, number> }) {
   const { tags, toggle } = useContext(DocsFilter)
   return (
     <div className="flex flex-col gap-3">
-      {DOCS_FACETS.map(([facet, label]) => (
+      {DOCS_FACETS.map(({ id: facet, label }) => (
         <div key={facet} role="group" aria-label={label} className="flex flex-col gap-1.5">
           <span className="px-0.5 text-[11px] font-semibold tracking-wide text-[var(--fg3)] uppercase">{label}</span>
           <div className="flex flex-wrap gap-1">
@@ -147,7 +143,7 @@ function Docs() {
   const item = route.startsWith('c/') ? BY_NAME.get(route.slice(2)) : undefined
   useEffect(() => { document.title = item ? `${item.title} · @lyndon/ui docs` : '@lyndon/ui docs' }, [item])
   const commands = useMemo<Command[]>(() => ITEMS.map(i => ({
-    id: i.name, label: i.title, group: AREAS.find(([a]) => a === i.area)?.[1], hint: `~${tok(i.tokens)} tokens`,
+    id: i.name, label: i.title, group: tagLabel(i.area), hint: `~${tok(i.tokens)} tokens`,
     keywords: [i.name, ...i.exports, ...i.tags.flatMap(t => [TAG_BY_ID[t].label, ...TAG_BY_ID[t].synonyms])], run: () => go(i.name),
   })), [])
   return (
@@ -265,7 +261,7 @@ function Results() {
         {shown.map(i => (
           <Card key={i.name} className="flex flex-col gap-1.5">
             <a href={`#/c/${i.name}`} className="text-sm font-semibold text-[var(--fg)]">{i.title}</a>
-            <p className="m-0 text-xs text-[var(--fg3)]">{AREAS.find(([a]) => a === i.area)?.[1]} · {i.kind}</p>
+            <p className="m-0 text-xs text-[var(--fg3)]">{tagLabel(i.area)} · {tagLabel(i.kind)}</p>
             <p className="m-0 line-clamp-2 text-[13px] text-[var(--fg2)]">{lead(i.description)}</p>
             <div className="flex flex-wrap gap-1">{i.tags.filter(t => t !== i.area).slice(0, 4).map(t => <TagLink key={t} id={t} />)}</div>
           </Card>
@@ -350,12 +346,11 @@ function Section({ title, children, id }: { title: string; children: ReactNode; 
   )
 }
 
-function ItemPage({ item }: { item: Item }) {
+function ItemPage({ item }: { item: DocsItem }) {
   const demo = DEMOS[item.name]
-  const area = AREAS.find(([a]) => a === item.area)?.[1]
+  const area = tagLabel(item.area)
   const components = item.api.filter(a => a.kind === 'component').map(a => a.name)
   const block = item.type === 'registry:block'
-  const source = `src/${block ? 'blocks' : 'lib'}/${item.module ?? 'core'}.tsx`
   const importLine = `import { ${(components.length ? components : item.exports).slice(0, 6).join(', ')} } from '${item.import ?? '@lyndon/ui'}'`
   return (
     <article className="flex max-w-[960px] flex-col gap-8">
@@ -364,7 +359,7 @@ function ItemPage({ item }: { item: Item }) {
         <h1 className="m-0 text-[28px] leading-tight font-semibold tracking-tight">{item.title}</h1>
         <p className="m-0 max-w-[72ch] text-sm text-[var(--fg2)]">{lead(item.description)}</p>
         <div className="flex flex-wrap gap-1.5">
-          <Badge>{TYPE_LABEL[item.type] ?? item.type.replace('registry:', '')}</Badge>
+          <Badge>{tagLabel(item.kind)}</Badge>
           <Badge>~{tok(item.tokens)} tokens</Badge>
           <Badge>{kb(item.bytes)}</Badge>
           {item.requires.includes('ui-provider') && <Badge tone="accent">inside &lt;UIProvider&gt;</Badge>}
@@ -384,7 +379,7 @@ function ItemPage({ item }: { item: Item }) {
         ]} />
       </Section>
       <Section title="Example">
-        {demo ? <DocsDemo demo={demo} /> : (
+        {demo ? <DocsDemoView demo={demo} /> : (
           <p className="m-0 text-[13px] text-[var(--fg2)]">No dedicated example card; it appears inside other components. See the <a href="./showcase/">showcase</a>.</p>
         )}
       </Section>
@@ -401,7 +396,7 @@ function ItemPage({ item }: { item: Item }) {
             const target = ITEMS.find(x => x.exports.includes(e))
             return <span key={e}>{i > 0 && ', '}{target ? <a href={`#/c/${target.name}`}>{e}</a> : e}</span>
           })}</dd></>}
-          <dt className="text-[var(--fg3)]">Source</dt><dd className="m-0"><a href={`${REPO}/blob/main/${source}`}>{source}</a></dd>
+          {item.sourcePath && <><dt className="text-[var(--fg3)]">Source</dt><dd className="m-0"><a href={`${REPO}/blob/${data.ref}/${item.sourcePath}`}>{item.sourcePath}</a></dd></>}
         </dl>
       </Section>
     </article>
@@ -416,14 +411,14 @@ function ApiEntry({ api }: { api: Api }) {
         <span className="ml-2 font-[family-name:var(--font)] text-[11px] font-normal text-[var(--fg3)]">{api.kind}</span>
       </h3>
       {api.doc && <p className="m-0 max-w-[80ch] text-[13px] text-[var(--fg2)]">{api.doc}</p>}
-      {api.signature && <CodeBlock code={api.signature} language="ts" lineNumbers={false} collapseAt={false} />}
-      {api.props && (api.props.length ? <PropsTable props={api.props} /> : <p className="m-0 text-[13px] text-[var(--fg3)]">No props of its own.</p>)}
-      {api.inherited ? <p className="m-0 text-xs text-[var(--fg3)]">Also takes {api.inherited} props from React's DOM attribute types (passed to the root element).</p> : null}
+      {api.kind !== 'component' && api.signature && <CodeBlock code={api.signature} language="ts" lineNumbers={false} collapseAt={false} />}
+      {api.kind === 'component' && (api.props.length ? <PropsTable props={api.props} /> : <p className="m-0 text-[13px] text-[var(--fg3)]">No props of its own.</p>)}
+      {api.kind === 'component' && api.inherited ? <p className="m-0 text-xs text-[var(--fg3)]">Also takes {api.inherited} props from React's DOM attribute types (passed to the root element).</p> : null}
     </div>
   )
 }
 
-function PropsTable({ props }: { props: Prop[] }) {
+function PropsTable({ props }: { props: ApiProp[] }) {
   return (
     <div className="overflow-x-auto rounded-[var(--r-lg)] border border-[var(--line)]">
       <table className="w-full border-collapse text-left text-[13px]">
@@ -456,7 +451,7 @@ const lazySection = (file: string, exportName: string) => lazy(async () => {
 })
 const lazyCache = new Map<string, ReturnType<typeof lazySection>>()
 
-function DocsDemo({ demo }: { demo: Demo }) {
+function DocsDemoView({ demo }: { demo: DocsDemo }) {
   const { pick } = useContext(DocsFilter)
   // the cards' tag chips filter this site's list instead of linking to the showcase
   const shell = useMemo(() => ({ query: '', tags: [], setQuery: () => {}, focusFilter: () => {}, pickTag: pick, tagHref }), [pick])

@@ -10,7 +10,7 @@
  * like saved settings (themeLoad), with a note for each colour it had to guess, blend, clip or nudge for contrast.
  * Part of @lyndon/ui/themeexport (also in @lyndon/ui/utils).
  */
-import { type CustomTheme, DEFAULT_THEME, FONTS, type Palette, THEMES, type ThemeSettings, contrast, derive, hex, luminance, mix, rgb, themeLoad, themeSafeTokens, themeTokens } from './core'
+import { type CustomTheme, DEFAULT_THEME, FONTS, MONO_STACK, type Palette, THEMES, type ThemeSettings, contrast, derive, hex, hslToRgb, luminance, mix, parseRgba, rgb, srgbToLinear, themeLoad, themeRadii, themeSafeTokens, themeTokens } from './core'
 
 export type ThemeExportMode = 'light' | 'dark'
 
@@ -33,9 +33,6 @@ export const THEME_EXPORT_FORMATS = [
 ] as const
 
 export type ThemeExportFormat = (typeof THEME_EXPORT_FORMATS)[number]['id']
-
-/** The font stack of --mono (not a theme setting: the same in every theme). */
-const TX_MONO = '"Geist Mono",ui-monospace,"SF Mono",Menlo,monospace'
 
 /** Colour tokens in export order: the 15 base colours, then what derive() adds. */
 const TX_COLOURS = ['bg', 'card', 'muted', 'line', 'line2', 'fg', 'fg2', 'fg3', 'primary', 'on-primary', 'accent', 'accent-soft', 'ok', 'ok-soft',
@@ -84,22 +81,23 @@ const txNum = (n: number, d: number) => { const v = Number(n.toFixed(d)); return
 /** A px token ('8px') as a number. */
 const txPx = (v: string | undefined, fallback: number) => { const n = parseFloat(v ?? ''); return Number.isFinite(n) ? n : fallback }
 
+/** The default theme's radii, for tokens a source leaves out. */
+const TX_RADII = themeRadii(DEFAULT_THEME.radius)
+
+/** A radius token in px, or the default theme's. */
+const txRadius = (t: Record<string, string>, k: 'r-sm' | 'r-md' | 'r-lg') => txPx(t[k], parseFloat(TX_RADII[k]))
+
+/** shadcn's --radius is the theme radius plus this (its buttons use radius − 2px); the importer subtracts it again. */
+const TX_SHADCN_RADIUS_OFFSET = 2
+
 /** The families of a CSS font stack, unquoted. */
 const txFamilies = (stack: string) => stack.split(',').map(f => f.trim().replace(/^["']|["']$/g, '')).filter(Boolean)
 
-/** An rgba()/hex token value as [r, g, b] (0–255) and alpha. */
-function txRgba(v: string): { c: number[]; a: number } {
-  const m = /^rgba?\((\d{1,3}),(\d{1,3}),(\d{1,3})(?:,([\d.]+))?\)$/.exec(v.replace(/\s+/g, ''))
-  if (m) return { c: [+m[1], +m[2], +m[3]], a: m[4] === undefined ? 1 : Math.min(1, Number(m[4])) }
-  return { c: rgb(v), a: 1 }
-}
-
-const txLinear = (v: number) => (v <= 0.04045 ? v / 12.92 : ((v + 0.055) / 1.055) ** 2.4)
 const txGamma = (v: number) => (v <= 0.0031308 ? 12.92 * v : 1.055 * Math.sign(v) * Math.abs(v) ** (1 / 2.4) - 0.055)
 
 /** sRGB (0–255) → OKLab [L, a, b] (Björn Ottosson's matrices). */
 function txOklab(c: number[]): [number, number, number] {
-  const [r, g, b] = c.map(v => txLinear(v / 255))
+  const [r, g, b] = c.map(v => srgbToLinear(v / 255))
   const l = Math.cbrt(0.4122214708 * r + 0.5363325363 * g + 0.0514459929 * b)
   const m = Math.cbrt(0.2119034982 * r + 0.6806995451 * g + 0.1073969566 * b)
   const s = Math.cbrt(0.0883024619 * r + 0.2817188376 * g + 0.6299787005 * b)
@@ -112,7 +110,7 @@ function txFromOklab(L: number, A: number, B: number): number[] {
   return [4.0767416621 * l - 3.3077115913 * m + 0.2309699292 * s, -1.2684380046 * l + 2.6097574011 * m - 0.3413193965 * s, -0.0041960863 * l - 0.7034186147 * m + 1.707614701 * s].map(v => txGamma(v) * 255)
 }
 
-/** '#RRGGBB' → OKLCH [L 0–1, C, H 0–360] (H is 0 for greys). */
+/** A colour ('#RRGGBB', short hex, rgb()) → OKLCH [L 0–1, C, H 0–360] (H is 0 for greys). */
 export function hexToOklch(color: string): [number, number, number] {
   const [L, A, B] = txOklab(rgb(color)), C = Math.hypot(A, B)
   return [L, C, C < 5e-5 ? 0 : ((Math.atan2(B, A) * 180) / Math.PI + 360) % 360]
@@ -126,9 +124,10 @@ export function oklchToHex(L: number, C: number, H: number): string {
 
 /**
  * A colour as CSS `oklch()`, like shadcn/ui writes it (`oklch(0.141 0.005 285.8)`, `oklch(1 0 0 / 10%)`): L and C get
- * the fewest decimals (3 to 6) that convert back to the same '#RRGGBB', the hue three.
+ * the fewest decimals (3 to 6) that convert back to the same '#RRGGBB', the hue three. `alpha` defaults to the
+ * colour's own ('#FFFFFF80', rgba()).
  */
-export function oklchString(color: string, alpha = 1) {
+export function oklchString(color: string, alpha = parseRgba(color)?.[3] ?? 1) {
   const [L, C, H] = hexToOklch(color), want = hex(rgb(color))
   let d = 3
   while (d < 6 && oklchToHex(Number(L.toFixed(d)), Number(C.toFixed(d)), Number(H.toFixed(3))) !== want) d++
@@ -184,7 +183,7 @@ export function themeToTailwind(input: ThemeExportInput, { dark = 'data-theme', 
   if (inline) {
     return `${txComment(txTitle(s, 'Tailwind CSS v4, mapped onto the variables UIProvider sets'))}\n@theme inline {\n${TX_TAILWIND.map(([k, n]) => `  --${n}: var(--${k});`).join('\n')}\n}\n`
   }
-  const { first, second, changed } = txModes(s), all = { ...first, mono: TX_MONO }
+  const { first, second, changed } = txModes(s), all = { ...first, mono: MONO_STACK }
   const variant = dark === 'class' ? '@custom-variant dark (&:where(.dark, .dark *));\n\n' : dark === 'media' ? '' : '@custom-variant dark (&:where([data-theme=dark], [data-theme=dark] *));\n\n'
   let out = `${txComment(txTitle(s, 'Tailwind CSS v4'))}\n${second ? variant : ''}@theme {\n${TX_TAILWIND.filter(([k]) => all[k as keyof typeof all] !== undefined).map(([k, n]) => `  --${n}: ${all[k as keyof typeof all]};`).join('\n')}\n}\n`
   if (second) {
@@ -218,15 +217,15 @@ const TX_SHADCN_INLINE = `@theme inline {\n  --radius-sm: calc(var(--radius) - 4
  */
 export function themeToShadcn(input: ThemeExportInput, { themeInline = false }: { themeInline?: boolean } = {}): string {
   const s = txSource(input), { first, second } = txModes(s)
-  const block = (sel: string, t: Record<string, string>, radius: boolean) => `${sel} {\n${radius ? `  --radius: ${txNum((txPx(t['r-md'], 8) + 2) / 16, 4)}rem;\n` : ''}${
-    TX_SHADCN.filter(([, k]) => t[k]).map(([n, k]) => `  --${n}: ${oklchString(t[k])};`).join('\n')}\n}\n`
+  const block = (sel: string, t: Record<string, string>, radius: boolean) => `${sel} {\n${radius ? `  --radius: ${txNum((txRadius(t, 'r-md') + TX_SHADCN_RADIUS_OFFSET) / 16, 4)}rem;\n` : ''}${
+    TX_SHADCN.filter(([, k]) => parseRgba(t[k])).map(([n, k]) => `  --${n}: ${oklchString(t[k])};`).join('\n')}\n}\n`
   const head = txComment(txTitle(s, s.base === 'dark' && !second ? 'shadcn/ui variables (one dark palette, in :root)' : 'shadcn/ui variables'))
   return `${head}\n${block(':root', first, true)}${second ? `\n${block('.dark', second, false)}` : ''}${themeInline ? `\n${TX_SHADCN_INLINE}` : ''}`
 }
 
-/** A DTCG colour value (2025.10: colour space, components and the hex fallback). */
+/** A DTCG colour value (2025.10: colour space, components and the hex fallback). Tokens are validated, so `v` parses. */
 function txDtcgColour(v: string) {
-  const { c, a } = txRgba(v)
+  const [r, g, b, a] = parseRgba(v) ?? [0, 0, 0, 1], c = [r, g, b]
   return { colorSpace: 'srgb', components: c.map(x => Number((x / 255).toFixed(4))), ...(a < 1 ? { alpha: a } : {}), hex: hex(c).toLowerCase() }
 }
 
@@ -243,9 +242,9 @@ const txDim = (n: number) => ({ value: n, unit: 'px' })
 /** The DTCG tree of one mode's tokens. */
 function txDtcgTree(t: Record<string, string>) {
   return {
-    color: Object.fromEntries(TX_COLOURS.filter(k => t[k]).map(k => [k, txDtcgColour(t[k])])),
-    radius: { sm: txDim(txPx(t['r-sm'], 4)), md: txDim(txPx(t['r-md'], 8)), lg: txDim(txPx(t['r-lg'], 14)) },
-    font: { sans: txFamilies(t.font ?? ''), mono: txFamilies(TX_MONO) },
+    color: Object.fromEntries(TX_COLOURS.filter(k => parseRgba(t[k])).map(k => [k, txDtcgColour(t[k])])),
+    radius: { sm: txDim(txRadius(t, 'r-sm')), md: txDim(txRadius(t, 'r-md')), lg: txDim(txRadius(t, 'r-lg')) },
+    font: { sans: txFamilies(t.font ?? ''), mono: txFamilies(MONO_STACK) },
     shadow: { card: txShadowLayers(t.shadow ?? '').map(l => ({ color: txDtcgColour(l.color), offsetX: txDim(l.x), offsetY: txDim(l.y), blur: txDim(l.blur), spread: txDim(l.spread) })) },
   }
 }
@@ -301,7 +300,7 @@ export function themeToTokensStudio(input: ThemeExportInput): string {
   })
   const global = {
     radius: Object.fromEntries((['sm', 'md', 'lg'] as const).map(k => [k, { value: first[`r-${k}`] ?? '', type: 'borderRadius' }])),
-    font: { sans: { value: txFamilies(first.font ?? '').join(', '), type: 'fontFamilies' }, mono: { value: txFamilies(TX_MONO).join(', '), type: 'fontFamilies' } },
+    font: { sans: { value: txFamilies(first.font ?? '').join(', '), type: 'fontFamilies' }, mono: { value: txFamilies(MONO_STACK).join(', '), type: 'fontFamilies' } },
   }
   const modes: ThemeExportMode[] = second ? ['light', 'dark'] : [s.base]
   const sets = Object.fromEntries(modes.map(m => [m, set(m === s.base ? first : { ...first, ...second })]))
@@ -312,15 +311,13 @@ export function themeToTokensStudio(input: ThemeExportInput): string {
   })
 }
 
-/** One export by format id (what the appearance panel's tabs show). */
+/** The exporter of each format: a format added to THEME_EXPORT_FORMATS without one fails to compile. */
+const TX_EXPORTERS = { css: themeToCSS, tailwind: themeToTailwind, shadcn: themeToShadcn, dtcg: themeToDTCG, 'tokens-studio': themeToTokensStudio } satisfies Record<ThemeExportFormat, (input: ThemeExportInput) => string>
+
+/** One export by format id (what the appearance panel's tabs show). Throws for an unknown format. */
 export function themeExport(format: ThemeExportFormat, input: ThemeExportInput): string {
-  switch (format) {
-    case 'tailwind': return themeToTailwind(input)
-    case 'shadcn': return themeToShadcn(input)
-    case 'dtcg': return themeToDTCG(input)
-    case 'tokens-studio': return themeToTokensStudio(input)
-    default: return themeToCSS(input)
-  }
+  if (!Object.hasOwn(TX_EXPORTERS, format)) throw new Error(`themeExport: unknown format "${String(format)}"`)
+  return TX_EXPORTERS[format](input)
 }
 
 export type ThemeImportFormat = 'shadcn' | 'css' | 'tailwind' | 'dtcg' | 'tokens-studio'
@@ -438,12 +435,6 @@ const txArg = (s: string | undefined, pct: number) => {
   return /^-?[\d.]+(e-?\d+)?%$/.test(s) ? (n * pct) / 100 : /^-?[\d.]+(e-?\d+)?(deg)?$/.test(s) ? n : NaN
 }
 
-/** HSL (degrees, 0–1, 0–1) → sRGB 0–255. */
-const txHsl = (h: number, s: number, l: number) => {
-  const k = (n: number) => (n + h / 30) % 12, a = s * Math.min(l, 1 - l)
-  return [0, 8, 4].map(n => (l - a * Math.max(-1, Math.min(k(n) - 3, 9 - k(n), 1))) * 255)
-}
-
 /**
  * A CSS colour: hex (3, 4, 6 or 8 digits), rgb()/rgba(), hsl()/hsla(), shadcn's old bare `H S% L%`, oklch(), oklab(),
  * white, black or transparent. Anything else (other names, color-mix(), var() left over) is null.
@@ -453,12 +444,7 @@ function txParseColour(raw: string): TxColour | null {
   if (!v || v.length > 200) return null
   if (v === 'white' || v === 'black') return { c: v === 'white' ? [255, 255, 255] : [0, 0, 0], a: 1, clipped: false }
   if (v === 'transparent') return { c: [0, 0, 0], a: 0, clipped: false }
-  const h = /^#([0-9a-f]{3,8})$/.exec(v)?.[1]
-  if (h) {
-    if (h.length === 5 || h.length === 7) return null
-    const full = h.length <= 4 ? [...h].map(x => x + x).join('') : h
-    return { c: rgb('#' + full.slice(0, 6)), a: full.length === 8 ? parseInt(full.slice(6), 16) / 255 : 1, clipped: false }
-  }
+  if (v.startsWith('#')) { const p = parseRgba(v); return p ? { c: p.slice(0, 3), a: p[3], clipped: false } : null }
   const fn = /^(rgba?|hsla?|oklch|oklab)\(([^()]*)\)$/.exec(v)
   const bare = !fn && /^-?[\d.]+(deg)?\s+[\d.]+%\s+[\d.]+%(\s*\/\s*[\d.]+%?)?$/.test(v)
   if (!fn && !bare) return null
@@ -470,7 +456,7 @@ function txParseColour(raw: string): TxColour | null {
   const a = alphaStr === undefined ? 1 : txArg(alphaStr, 1)
   let c: number[]
   if (kind === 'rgb') c = parts.map(p => txArg(p, 255))
-  else if (kind === 'hsl') c = txHsl(txArg(parts[0], 360), txArg(parts[1], 1), txArg(parts[2], 1))
+  else if (kind === 'hsl') c = hslToRgb(txArg(parts[0], 360), txArg(parts[1], 1), txArg(parts[2], 1))
   else if (kind === 'oklch') { const L = txArg(parts[0], 1), C = txArg(parts[1], 0.4), H = (txArg(parts[2], 360) * Math.PI) / 180; c = txFromOklab(L, C * Math.cos(H), C * Math.sin(H)) }
   else c = txFromOklab(txArg(parts[0], 1), txArg(parts[1], 0.4), txArg(parts[2], 0.4))
   if (![...c, a].every(Number.isFinite)) return null
@@ -581,7 +567,7 @@ export function themeImport(text: string): ThemeImportResult {
   if (!light && !dark) return { ok: false, error: 'unrecognised' }
   const all = darkVars ?? vars.light, get = (...names: string[]) => names.map(n => all.get(n) ?? vars.light.get(n)).find(Boolean)
   const shadcnR = txLength(get('radius')), libR = txLength(get('r-md', 'radius-md', 'radius.md'))
-  const radius = libR ?? (shadcnR === null ? null : shadcnR - 2)
+  const radius = libR ?? (shadcnR === null ? null : shadcnR - TX_SHADCN_RADIUS_OFFSET)
   const family = txFamilies(get('font', 'font-sans', 'font.sans') ?? '')[0]
   let font: string | null = null
   if (family) {

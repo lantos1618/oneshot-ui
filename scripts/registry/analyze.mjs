@@ -12,8 +12,14 @@ import { SyntaxKind } from 'typescript/unstable/ast'
 
 const ALIAS = SymbolFlags.Alias
 
+/** The library module a relative specifier names: './x', './x.tsx' and '../lib/x' → 'x', '../lib' → 'index'; else null. */
+export function libModuleOf(spec) {
+  if (spec === '../lib') return 'index'
+  return /^(?:\.\/|\.\.\/lib\/)([\w-]+?)(?:\.tsx?)?$/.exec(spec)?.[1] ?? null
+}
+
 /** @param {string} root repository root */
-export function analyze(root, { tsconfig = 'tsconfig.app.json', extraDirs = [] } = {}) {
+export function analyze(root, { tsconfig = 'tsconfig.app.json', extraDirs = ['src/blocks'] } = {}) {
   const libDir = join(root, 'src/lib')
   const moduleFiles = readdirSync(libDir).filter(f => f.endsWith('.tsx')).map(f => join(libDir, f))
   const extraFiles = extraDirs.filter(d => existsSync(join(root, d))).flatMap(d => readdirSync(join(root, d)).filter(f => f.endsWith('.tsx')).map(f => join(root, d, f)))
@@ -44,7 +50,8 @@ export function analyze(root, { tsconfig = 'tsconfig.app.json', extraDirs = [] }
           case SyntaxKind.ImportDeclaration: {
             const from = s.moduleSpecifier.text
             const clause = s.importClause
-            if (from.startsWith('.')) { mod.relImports.add(from.replace(/^\.\.?\/(lib\/)?/, '').replace(/^\.\//, '').replace(/\.tsx?$/, '')) }
+            const rel = libModuleOf(from)
+            if (rel) mod.relImports.add(rel)
             if (!clause) { if (!from.startsWith('.')) mod.imports.push({ from, sideEffect: true }); return }
             if (clause.name) mod.imports.push({ from, kind: 'default', local: clause.name.text, typeOnly: !!clause.isTypeOnly, node: clause.name })
             const nb = clause.namedBindings
@@ -54,7 +61,8 @@ export function analyze(root, { tsconfig = 'tsconfig.app.json', extraDirs = [] }
           }
           case SyntaxKind.ExportDeclaration: { // `export … from './x'`: the names already exist; remember for the public API
             const from = s.moduleSpecifier?.text
-            if (from?.startsWith('.')) mod.reexports.push({ from: from.replace(/^\.\//, '').replace(/\.tsx?$/, ''), names: s.exportClause?.elements?.map(e => (e.propertyName ?? e.name).text) ?? null })
+            const rel = from && libModuleOf(from)
+            if (rel) mod.reexports.push({ from: rel, names: s.exportClause?.elements?.map(e => (e.propertyName ?? e.name).text) ?? null })
             return
           }
           case SyntaxKind.FunctionDeclaration: case SyntaxKind.ClassDeclaration:
@@ -88,7 +96,7 @@ export function analyze(root, { tsconfig = 'tsconfig.app.json', extraDirs = [] }
         const own = new Set(st.names)
         const walk = n => {
           if (n.kind === SyntaxKind.Identifier) { if (!own.has(n) && (topNames.has(n.text) || localImportNames.has(n.text))) ids.push(n) }
-          else if (n.kind === SyntaxKind.CallExpression && n.expression.kind === SyntaxKind.ImportKeyword && n.arguments?.[0]?.text?.startsWith('.')) dyn.add(n.arguments[0].text.replace(/^\.\//, '').replace(/\.tsx?$/, ''))
+          else if (n.kind === SyntaxKind.CallExpression && n.expression.kind === SyntaxKind.ImportKeyword && n.arguments?.[0]?.text?.startsWith('.')) dyn.add(libModuleOf(n.arguments[0].text) ?? n.arguments[0].text)
           n.forEachChild(walk)
         }
         st.node.forEachChild(walk)
@@ -121,7 +129,7 @@ export function analyze(root, { tsconfig = 'tsconfig.app.json', extraDirs = [] }
           exported.forEach(n => deps.add(n))
         }
         const names = st.names.map(n => n.text)
-        const order = modIndex * 1e5 + st.index
+        const order = { mod: modIndex, index: st.index } // shared by every name the statement declares
         const exported = st.node.modifiers?.some(m => m.kind === SyntaxKind.ExportKeyword) ?? false
         const isType = st.node.kind === SyntaxKind.InterfaceDeclaration || st.node.kind === SyntaxKind.TypeAliasDeclaration
         if (!names.length) { sideEffects.push({ module: mod.name, dir: mod.dir, order, text: st.text, deps, ext, dynImports }); return }
@@ -193,7 +201,6 @@ export function closure(graph, roots, moduleOrder) {
     for (const dep of d.deps) if (!seen.has(dep)) stack.push(dep)
     for (const se of sideEffects) if (!effects.has(se) && se.deps.has(n)) { effects.add(se); for (const dep of se.deps) if (!seen.has(dep)) stack.push(dep) }
   }
-  const rank = o => { const m = Math.floor(o / 1e5); return moduleOrder[m] * 1e5 + (o % 1e5) }
   const parts = []
   const ext = []
   const seenParts = new Set()
@@ -209,6 +216,6 @@ export function closure(graph, roots, moduleOrder) {
     }
   }
   for (const se of effects) { ext.push(...se.ext); Object.assign(dynImports, se.dynImports); parts.push({ order: se.order, text: se.text }) }
-  parts.sort((a, b) => rank(a.order) - rank(b.order))
+  parts.sort((a, b) => moduleOrder[a.order.mod] - moduleOrder[b.order.mod] || a.order.index - b.order.index)
   return { names: seen, parts, ext, dynImports }
 }

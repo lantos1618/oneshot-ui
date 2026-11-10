@@ -23,7 +23,7 @@ and motion. Attach the ones you need plus ui-provider.tsx; they share one UIProv
 - shadcn CLI: `npx shadcn add https://lantos1618.github.io/oneshot-ui/r/data-grid.json` (pulls in ui-provider)
 - Index with sizes, exports and embedded components: https://lantos1618.github.io/oneshot-ui/index.json
 - The same files from npm: https://unpkg.com/@lyndon/ui@0.11.0/dist-registry/files/<name>.tsx
-- Whole library in one file (dist-single/ui-all.tsx, ~648.0k tokens): only for tools with a very large context; prefer the drop-ins
+- Whole library in one file (dist-single/ui-all.tsx, ~647.8k tokens): only for tools with a very large context; prefer the drop-ins
 
 ## Tags
 
@@ -2474,7 +2474,7 @@ Chat on the left, a living document on the right. Asking for a change streams th
 
 Import from: @lyndon/ui/appearance.
 
-### Appearance menu (`appearance-menu`, ~53.6k tokens)
+### Appearance menu (`appearance-menu`, ~53.5k tokens)
 
 The appearance panel behind a gear button for your app header (the gear turns while it is open). Controlled with `open`/`onOpenChange` so a command palette entry can open it too.
 
@@ -2485,7 +2485,7 @@ The appearance panel behind a gear button for your app header (the gear turns wh
 - Embeds: ActiveIndicator, AppearancePanel, Badge, Button, Collapse, CopyButton, FloatingPanel, FormFieldContext, Icon, IconButton, MagnetBubble, MagnetMarks, PartButton, Popover, PopoverClose, PopoverContent, PopoverRoot, PopoverTrigger, ScrollEdges, SegmentedControl, Slider, Slot, Spinner, TabsContent, TabsList, TabsRoot, TabsTrigger, ThemeExportPanel, ThemePreview
 - npm: motion, react
 
-### Appearance panel (`appearance-panel`, ~49.5k tokens)
+### Appearance panel (`appearance-panel`, ~49.4k tokens)
 
 Everything in the appearance panel, without the popover: mode, theme families with split previews, variant chips (Ayu Mirage / Dark, Tokyo Night / Storm), a Customise grid that creates a Custom theme, corner radius, font, an "Export and share" section (ThemeExportPanel: CSS, Tailwind, shadcn, DTCG and Figma tokens, import, share link), Reset and Copy CSS. Use it inside your own panel, or use AppearanceMenu. Font previews load from Google Fonts only when the provider has `fonts` on; otherwise each font shows in the system fallback.
 
