@@ -8,28 +8,29 @@
 // Usage: node scripts/check-registry.mjs [--no-tsc] [--no-ssr]
 import { readFileSync, readdirSync, existsSync } from 'node:fs'
 import { join } from 'node:path'
-import { createHash } from 'node:crypto'
 import { execFileSync } from 'node:child_process'
+import { requireBuilt, root } from './paths.mjs'
+import { sha256 } from './registry/stamp.mjs'
+import { withSsr } from './ssr.mjs'
 
-const root = new URL('..', import.meta.url).pathname
 const dir = join(root, 'dist-registry')
 const args = new Set(process.argv.slice(2))
 const problems = []
 const t0 = Date.now()
 
 // 1. index and files
-const index = JSON.parse(readFileSync(join(dir, 'index.json'), 'utf8'))
+const index = JSON.parse(readFileSync(requireBuilt('dist-registry/index.json', 'pnpm build:registry'), 'utf8'))
 const ALLOWED = /^(react|react-dom|react-dom\/[\w-]+|react\/jsx-runtime|motion|motion\/react)$/
 for (const e of index.items) {
   const file = join(dir, e.file)
   if (!existsSync(file)) { problems.push(`${e.name}: missing ${e.file}`); continue }
   const text = readFileSync(file, 'utf8')
   if (Buffer.byteLength(text) !== e.bytes) problems.push(`${e.name}: bytes ${Buffer.byteLength(text)} ≠ index ${e.bytes}`)
-  if (createHash('sha256').update(text).digest('hex') !== e.sha256) problems.push(`${e.name}: sha256 does not match index.json`)
+  if (sha256(text) !== e.sha256) problems.push(`${e.name}: sha256 does not match index.json`)
   if (!text.startsWith("'use client'\n")) problems.push(`${e.name}: no 'use client' directive`)
   for (const m of text.matchAll(/^import\s[^'"]*?from\s+'([^']+)'/gm)) if (!ALLOWED.test(m[1])) problems.push(`${e.name}: imports ${m[1]}`)
   for (const m of text.matchAll(/\bimport\(\s*(['"])([^'"]+)\1\s*\)/g)) if (!ALLOWED.test(m[2])) problems.push(`${e.name}: dynamic import('${m[2]}')`)
-  for (const name of e.exports) if (!new RegExp(`^export (async )?(function|const|class|type|interface) ${name}\\b`, 'm').test(text)) problems.push(`${e.name}: does not export ${name}`)
+  for (const name of e.exports) if (!new RegExp(`^export (?:declare )?(?:async )?(?:function\\s*\\*?|const|let|class|type|interface|enum) ?${name}\\b`, 'm').test(text)) problems.push(`${e.name}: does not export ${name}`)
   if (!existsSync(join(dir, 'r', `${e.name}.json`))) problems.push(`${e.name}: no r/${e.name}.json`)
 }
 for (const f of readdirSync(join(dir, 'r')).filter(f => f.endsWith('.json') && f !== 'registry.json')) {
@@ -54,15 +55,9 @@ if (!args.has('--no-tsc')) {
 
 // 3. server rendering
 if (!args.has('--no-ssr')) {
-  const { createServer } = await import('vite')
-  const vite = await createServer({ root, configFile: false, logLevel: 'error', appType: 'custom', server: { middlewareMode: true, hmr: false, ws: false } })
-  const errors = []
-  const origError = console.error
-  console.error = (...a) => { errors.push(a.map(String).join(' ').split('\n')[0]) }
-  try {
+  await withSsr(root, async ({ load: loadPath, render }) => {
     const { createElement: h } = await import('react')
-    const { renderToString } = await import('react-dom/server')
-    const load = name => vite.ssrLoadModule(`/dist-registry/files/${name}.tsx`)
+    const load = name => loadPath(`/dist-registry/files/${name}.tsx`)
     let loaded = 0
     for (const e of index.items) {
       try { await load(e.name); loaded++ } catch (err) { problems.push(`${e.name}: fails to load on the server: ${String(err?.message ?? err).split('\n')[0]}`) }
@@ -88,19 +83,16 @@ if (!args.has('--no-ssr')) {
     let rendered = 0
     for (const [name, make] of Object.entries(SAMPLE)) {
       if (!index.items.some(e => e.name === name)) { problems.push(`ssr sample: no item ${name}`); continue }
-      errors.length = 0
-      try {
-        const html = renderToString(h(UIProvider, { persist: false }, make(await load(name))))
-        if (!html.includes('ui-root')) problems.push(`ssr ${name}: no .ui-root wrapper`)
-        if (errors.length) problems.push(`ssr ${name}: console.error ${errors[0].slice(0, 160)}`)
-        rendered++
-      } catch (err) { problems.push(`ssr ${name}: ${String(err?.message ?? err).split('\n')[0]}`) }
+      let el
+      try { el = h(UIProvider, { persist: false }, make(await load(name))) } catch (err) { problems.push(`ssr ${name}: ${String(err?.message ?? err).split('\n')[0]}`); continue }
+      const { html, errors, error } = render(el)
+      if (error) { problems.push(`ssr ${name}: ${String(error?.message ?? error).split('\n')[0]}`); continue }
+      if (!html.includes('ui-root')) problems.push(`ssr ${name}: no .ui-root wrapper`)
+      if (errors.length) problems.push(`ssr ${name}: console.error ${errors[0].slice(0, 160)}`)
+      rendered++
     }
     console.log(`ssr: ${rendered}/${Object.keys(SAMPLE).length} sample components render inside ui-provider.tsx's UIProvider`)
-  } finally {
-    console.error = origError
-    await vite.close()
-  }
+  })
 }
 
 if (problems.length) {

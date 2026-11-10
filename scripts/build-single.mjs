@@ -17,31 +17,42 @@
 // Modules were split from one file and every top-level name is unique, so concatenation is safe;
 // we only rewrite imports. An add-on imports from another bundle only what it uses.
 import { readFileSync, writeFileSync, mkdirSync, readdirSync } from 'node:fs'
-import { join } from 'node:path'
-import { commit, dirty, header, pkg, sha256 } from './registry/stamp.mjs'
+import { join, relative } from 'node:path'
+import { libModuleOf } from './registry/analyze.mjs'
+import { assertProvenance, commit, dirty, header, pkg, sha256 } from './registry/stamp.mjs'
+import { libFiles, root } from './paths.mjs'
 import { BUNDLES, assertPlaced, bundleOf } from './tiers.mjs'
 
-const root = new URL('..', import.meta.url).pathname
 const LIB = Object.values(BUNDLES).flat()
-assertPlaced(readdirSync(join(root, 'src/lib')).filter(f => /\.tsx?$/.test(f)), 'build-single')
+assertProvenance()
+assertPlaced(libFiles(), 'build-single')
 
 // every `import … from '…'` statement, including ones spread over several lines
-const IMPORT = /^import\s+(type\s+)?(?:\{([^}]*)\}|(\*\s+as\s+\w+)|(\w+))\s*from\s*'([^']+)';?[ \t]*\n?/gm
-const REEXPORT = /^export\s+(type\s+)?(\{[^}]*\}|\*)\s*from\s*'\.[^']*';?[ \t]*\n?/gm
+const IMPORT = /^import\s+(type\s+)?(?:\{([^}]*)\}|(\*\s+as\s+\w+)|(\w+))\s*from\s*(['"])([^'"]+)\5;?[ \t]*\n?/gm
+const REEXPORT = /^export\s+(type\s+)?(\{[^}]*\}|\*)\s*from\s*(['"])\.[^'"]*\3;?[ \t]*\n?/gm
+/** The value names a module exports (what a lazy `import('./x')` resolves to). */
+const EXPORTED_VALUE = /^export\s+(?:async\s+)?(?:function\s*\*?|const|let|class)\s*(\w+)/gm
 
 function load(file) {
+  const where = relative(root, file)
   // a lazily imported library module (geo's map data, the showcase's specLazy cards) is concatenated into the same
   // bundle: resolve it in place
-  const src = readFileSync(file, 'utf8').replace(/\bimport\('(?:\.\/|\.\.\/lib\/)(\w+)'\)/g, (_, m) =>
-    `Promise.resolve({ ${[...readFileSync(libFile(m), 'utf8').matchAll(/^export (?:const|function) (\w+)/gm)].map(x => x[1]).join(', ')} })`)
+  const src = readFileSync(file, 'utf8').replace(/\bimport\((['"])(\.[^'"]+)\1\)/g, (_, _q, spec) => {
+    const m = libModuleOf(spec)
+    if (!m || !LIB.includes(m)) throw new Error(`build-single: ${where} lazily imports ${spec}, which is not a bundled library module`)
+    return `Promise.resolve({ ${[...readFileSync(libFile(m), 'utf8').matchAll(EXPORTED_VALUE)].map(x => x[1]).join(', ')} })`
+  })
   const imports = []
   // intra-library re-exports (`export { x } from './core'`, `export * from './y'`): in the concatenated
   // output those names already exist, so the line is dropped
-  const body = src.replace(REEXPORT, '').replace(IMPORT, (_, typeOnly, named, star, def, from) => {
+  const body = src.replace(REEXPORT, '').replace(IMPORT, (_, typeOnly, named, star, def, _q, from) => {
     if (named) imports.push({ from, names: named.split(',').map(s => s.trim()).filter(Boolean).map(n => (typeOnly && !n.startsWith('type ') ? `type ${n}` : n)) })
     else imports.push({ from, raw: `import ${typeOnly ?? ''}${star ?? def} from '${from}'` })
     return ''
   })
+  // anything the patterns above don't read (`import X, { y }`, side-effect imports) would stay mid-file
+  const left = /^(?:import\s+[^(\s]|export\s+(?:type\s+)?(?:\{[^}]*\}|\*(?:\s+as\s+\w+)?)\s*from\s*['"])[^\n]*/m.exec(body)
+  if (left) throw new Error(`build-single: ${where}: can't merge \`${left[0].trim()}\``)
   return { imports, body: body.trim() }
 }
 
@@ -53,9 +64,10 @@ function render(files, { self, exampleDefault }) {
     for (const imp of imports) {
       if (imp.raw) { raw.add(imp.raw); continue }
       if (imp.from.startsWith('.')) {
-        const mod = imp.from.replace(/^\.\.?\/(lib\/?)?/, '').replace(/^\.\//, '')
-        const target = bundleOf(mod)
-        if (!self || !target || self.includes(target)) continue // same bundle: already in this file
+        if (!self) continue // ui-all and ui-with-examples hold every module, and the showcase files they import
+        const target = bundleOf(libModuleOf(imp.from) ?? '')
+        if (!target) throw new Error(`build-single: ${relative(root, f)} imports ${imp.from}, which is in no bundle (scripts/tiers.mjs)`)
+        if (self.includes(target)) continue // same bundle: already in this file
         if (!cross.has(target)) cross.set(target, new Set())
         imp.names.forEach(n => cross.get(target).add(n))
         continue
@@ -72,7 +84,7 @@ function render(files, { self, exampleDefault }) {
     ...[...cross].map(([b, names]) => `import { ${sort(names).join(', ')} } from './${b}'`),
   ].join('\n')
   let out = bodies.join('\n\n')
-  if (!exampleDefault) out = out.replace(/^export default /m, 'export ')
+  if (!exampleDefault) out = out.replace(/^export default /gm, 'export ')
   // keep the library's doc comment (top of core.tsx) first
   if (out.startsWith('/**')) { const end = out.indexOf('*/') + 2; return out.slice(0, end) + '\n' + head + '\n' + out.slice(end) + '\n' }
   return head + '\n\n' + out + '\n'

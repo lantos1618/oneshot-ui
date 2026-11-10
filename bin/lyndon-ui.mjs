@@ -85,7 +85,7 @@ switch (command) {
   case 'list': {
     if (opt.json) { out(JSON.stringify(index.items.map(({ name, type, title, description, bytes, tokens }) => ({ name, type, title, description, bytes, tokens })), null, 2)); break }
     const w = Math.max(...index.items.map(e => e.name.length))
-    out(`${index.name} ${index.version}: ${index.items.length} drop-ins (sizes are the whole self-contained file; tokens ≈ bytes / 3.6)\n`)
+    out(`${index.name} ${index.version}: ${index.items.length} drop-ins (sizes are the whole self-contained file; tokens ≈ bytes / ${+(1 / index.tokensPerByte).toFixed(2)})\n`)
     out(`${'name'.padEnd(w)}  ${'size'.padStart(8)}  ${'tokens'.padStart(7)}  description`)
     for (const e of index.items) {
       const desc = e.description.length > 70 ? e.description.slice(0, 69) + '…' : e.description

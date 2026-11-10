@@ -27,7 +27,7 @@ export default defineConfig(({ mode }): UserConfig => mode === 'utils' || mode =
       build: {
         outDir: 'dist', emptyOutDir: false, sourcemap: false, minify: false,
         lib: { entry: { [mode]: `src/lib/${mode}.ts` }, formats: ['es'] },
-        rolldownOptions: { external, treeshake: { moduleSideEffects: false, manualPureFunctions: ['createContext', 'cn', 'memo', 'uiShared', 'defineMessages', 'registerIcons'] } },
+        rolldownOptions: { external, treeshake: { moduleSideEffects: false, manualPureFunctions: ['createContext', 'cn', 'memo', 'uiShared', 'registerIcons'] } },
       },
     }
   : {

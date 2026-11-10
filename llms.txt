@@ -23,7 +23,7 @@ and motion. Attach the ones you need plus ui-provider.tsx; they share one UIProv
 - shadcn CLI: `npx shadcn add https://lantos1618.github.io/oneshot-ui/r/data-grid.json` (pulls in ui-provider)
 - Index with sizes, exports and embedded components: https://lantos1618.github.io/oneshot-ui/index.json
 - The same files from npm: https://unpkg.com/@lyndon/ui@0.11.0/dist-registry/files/<name>.tsx
-- Whole library in one file (dist-single/ui-all.tsx, ~648.0k tokens): only for tools with a very large context; prefer the drop-ins
+- Whole library in one file (dist-single/ui-all.tsx, ~647.8k tokens): only for tools with a very large context; prefer the drop-ins
 
 ## Tags
 
@@ -369,8 +369,8 @@ Import from: @lyndon/ui/agentrun, @lyndon/ui/aiagent.
 
 Import from: @lyndon/ui/appearance.
 
-- [appearance-menu](https://lantos1618.github.io/oneshot-ui/files/appearance-menu.tsx): The appearance panel behind a gear button for your app header (the gear turns while it is open). (component, ~53.6k tokens; tags: settings)
-- [appearance-panel](https://lantos1618.github.io/oneshot-ui/files/appearance-panel.tsx): Everything in the appearance panel, without the popover: mode, theme families with split previews, variant chips (Ayu Mirage / Dark, Tokyo Night / Storm), a Customise grid that creates a Custom theme, corner radius, font, an "Export and share" section (ThemeExportPanel: CSS, Tailwind, shadcn, DTCG and Figma tokens, import, share link), Reset and Copy CSS. (component, ~49.5k tokens; tags: settings)
+- [appearance-menu](https://lantos1618.github.io/oneshot-ui/files/appearance-menu.tsx): The appearance panel behind a gear button for your app header (the gear turns while it is open). (component, ~53.5k tokens; tags: settings)
+- [appearance-panel](https://lantos1618.github.io/oneshot-ui/files/appearance-panel.tsx): Everything in the appearance panel, without the popover: mode, theme families with split previews, variant chips (Ayu Mirage / Dark, Tokyo Night / Storm), a Customise grid that creates a Custom theme, corner radius, font, an "Export and share" section (ThemeExportPanel: CSS, Tailwind, shadcn, DTCG and Figma tokens, import, share link), Reset and Copy CSS. (component, ~49.4k tokens; tags: settings)
 - [theme-export-panel](https://lantos1618.github.io/oneshot-ui/files/theme-export-panel.tsx): Export, import and share for the current theme (the appearance panel's "Export and share" section; also usable on its own, e.g. (component, ~37.5k tokens)
 
 ## Blocks

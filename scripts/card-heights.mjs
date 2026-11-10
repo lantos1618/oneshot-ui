@@ -5,11 +5,10 @@
 //   pnpm dev                                   (or: pnpm exec vite build && pnpm exec vite preview)
 //   node scripts/card-heights.mjs [url]        (default http://localhost:5173)
 import { writeFileSync } from 'node:fs'
-import { dirname, join } from 'node:path'
-import { fileURLToPath } from 'node:url'
+import { join } from 'node:path'
 import { chromium, devices } from '@playwright/test'
+import { root } from './paths.mjs'
 
-const root = join(dirname(fileURLToPath(import.meta.url)), '..')
 const url = process.argv[2] ?? 'http://localhost:5173'
 const out = join(root, 'src/showcase/cardHeights.ts')
 

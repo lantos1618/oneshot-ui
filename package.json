@@ -327,7 +327,7 @@
     "typecheck:docs": "node scripts/build-docs-data.mjs && tsc -p docs/tsconfig.json --noEmit",
     "lint": "oxlint",
     "preview": "vite preview",
-    "check": "tsc -b && pnpm typecheck:tests && pnpm build && pnpm test:registry && pnpm test:ssr && pnpm test"
+    "check": "pnpm lint && tsc -b && pnpm typecheck:tests && pnpm build && pnpm typecheck:docs && pnpm test:registry && pnpm test:ssr && pnpm test && pnpm test:pack"
   },
   "peerDependencies": {
     "motion": "^13.0.0 || ^14.0.0",

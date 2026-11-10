@@ -2,25 +2,17 @@
 // registry, llms.txt and the showcase). The data under docs/generated/ comes from scripts/build-docs-data.mjs.
 import react from '@vitejs/plugin-react'
 import tailwindcss from '@tailwindcss/vite'
-import { readFileSync } from 'node:fs'
-import { defineConfig, type Plugin } from 'vite'
+import { join } from 'node:path'
+import { defineConfig } from 'vite'
 import { showcaseCode } from '../scripts/showcase-code.ts'
+import { themeScript } from '../scripts/theme-script.ts'
 
-const root = new URL('..', import.meta.url).pathname
-
-// the same theme script as the showcase's index.html (ThemeScript's output), so the saved theme applies before paint
-const themeScript = (): Plugin => ({
-  name: 'docs-theme-script',
-  transformIndexHtml(html) {
-    const script = /<script>\(function\(k,l,d,N,V\)[\s\S]*?<\/script>/.exec(readFileSync(`${root}index.html`, 'utf8'))?.[0] ?? ''
-    return html.replace('<!-- theme-script -->', script)
-  },
-})
+const root = join(import.meta.dirname, '..')
 
 export default defineConfig({
-  root: `${root}docs`,
+  root: join(root, 'docs'),
   base: './',
-  plugins: [react(), tailwindcss(), themeScript(), showcaseCode({ root })],
+  plugins: [react(), tailwindcss(), themeScript({ root }), showcaseCode({ root })],
   server: { fs: { allow: [root] } },
-  build: { outDir: `${root}docs-dist`, emptyOutDir: true, chunkSizeWarningLimit: 1500 },
+  build: { outDir: join(root, 'docs-dist'), emptyOutDir: true, chunkSizeWarningLimit: 1500 },
 })

@@ -3,8 +3,9 @@
 // work with every resolution mode (the files next to them are dist/*.js).
 import { readFileSync, writeFileSync, readdirSync } from 'node:fs'
 import { join } from 'node:path'
+import { requireBuilt } from './paths.mjs'
 
-const dir = new URL('../dist', import.meta.url).pathname
+const dir = requireBuilt('dist', 'pnpm build:lib')
 const SPEC = /((?:from|import)\s*\(?\s*)(['"])(\.\.?\/[^'"]+?)\2/g
 let n = 0
 for (const f of readdirSync(dir, { recursive: true })) {
