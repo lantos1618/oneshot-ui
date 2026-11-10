@@ -1,6 +1,7 @@
 import { useMemo, useRef, useState } from 'react'
 import { Button, Checkbox, Combobox, DatePicker, DateTimePicker, Field, Form, FormField, Input, MultiSelect, type Option, PhoneInput, RangeSlider, Rating, SegmentedControl, TagInput, Select, Switch, Textarea, sleep, useToast } from '../lib'
 import { AddressAutocomplete, type AddressRecord, EmojiInput, MentionsInput, RichTextEditor, SignaturePad, UnsavedChangesBar, useFormDraft } from '../lib/editor'
+import { fakeLatency } from '../examples/latency'
 import { MENTION_COMMANDS, MENTION_PEOPLE, RTE_SAMPLE } from '../examples'
 import { Section, Spec } from './kit'
 
@@ -95,14 +96,14 @@ const FS_SKUS: Option[] = Array.from({ length: 10_000 }, (_, i) => {
 function AsyncComboDemo() {
   const [fail, setFail] = useState(false), [calls, setCalls] = useState({ sent: 0, aborted: 0 })
   const failRef = useRef(fail); failRef.current = fail
-  const load = useMemo(() => (q: string, { signal }: { signal: AbortSignal }) => new Promise<Option[]>((resolve, reject) => {
+  const load = useMemo(() => (q: string, { signal }: { signal: AbortSignal }) => {
     setCalls(c => ({ ...c, sent: c.sent + 1 }))
-    const t = setTimeout(() => {
-      if (failRef.current) return reject(new Error('Network error'))
-      resolve(FS_CITIES.filter(c => c.toLowerCase().includes(q.toLowerCase())).map(c => ({ value: c.toLowerCase().replace(/\W+/g, '-'), label: c, group: c[0] })))
-    }, 450 + Math.random() * 400)
-    signal.addEventListener('abort', () => { clearTimeout(t); setCalls(c => ({ ...c, aborted: c.aborted + 1 })); reject(signal.reason) })
-  }), [])
+    signal.addEventListener('abort', () => setCalls(c => ({ ...c, aborted: c.aborted + 1 })), { once: true })
+    return fakeLatency(signal, [450, 850], (): Option[] => {
+      if (failRef.current) throw new Error('Network error')
+      return FS_CITIES.filter(c => c.toLowerCase().includes(q.toLowerCase())).map(c => ({ value: c.toLowerCase().replace(/\W+/g, '-'), label: c, group: c[0] }))
+    })
+  }, [])
   return (
     <div className="grid gap-4 md:grid-cols-2">
       <div className="flex flex-col gap-3">
@@ -132,9 +133,9 @@ const FS_PEOPLE: Option[] = [
 function AsyncMultiDemo() {
   const [fail, setFail] = useState(false), [picked, setPicked] = useState<string[]>(['grace-hopper', 'dieter-rams'])
   const failRef = useRef(fail); failRef.current = fail
-  const load = useMemo(() => (q: string, { signal }: { signal: AbortSignal }) => new Promise<Option[]>((resolve, reject) => {
-    const t = setTimeout(() => failRef.current ? reject(new Error('Network error')) : resolve(FS_PEOPLE.filter(p => p.label.toLowerCase().includes(q.toLowerCase()))), 350 + Math.random() * 350)
-    signal.addEventListener('abort', () => { clearTimeout(t); reject(signal.reason) })
+  const load = useMemo(() => (q: string, { signal }: { signal: AbortSignal }) => fakeLatency(signal, [350, 700], () => {
+    if (failRef.current) throw new Error('Network error')
+    return FS_PEOPLE.filter(p => p.label.toLowerCase().includes(q.toLowerCase()))
   }), [])
   return (
     <div className="grid gap-4 md:grid-cols-[1fr_minmax(200px,0.6fr)]">

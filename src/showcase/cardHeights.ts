@@ -171,7 +171,7 @@ export const CARD_HEIGHTS: Readonly<Record<string, readonly [phone: number, desk
   'c-tree-view': [504, 392],
   'c-tree-view-10k-nodes': [384, 376],
   'c-treemap': [222, 212],
-  'c-typed-dates-in-any-locale': [600, 307],
+  'c-typed-dates': [600, 307],
   'c-upgrade-prompt': [82, 80],
   'c-variants': [132, 176],
   'c-video-player': [182, 366],

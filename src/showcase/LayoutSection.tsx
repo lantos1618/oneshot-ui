@@ -3,6 +3,7 @@ import { SortableList, SplitPane, Switch, Timeline, type TimelineItem, type Tree
 import { highlightCode } from '../lib/code'
 import { Kanban, type KanbanColumn } from '../lib/kanban'
 import { type OrgNode, type SchedulerEvent } from '../lib/scheduler'
+import { seeded } from '../examples/random'
 import { Section, Spec, SpecAction, specLazy } from './kit'
 
 /* The scheduler module (calendar and org chart) loads when one of their cards first mounts. */
@@ -66,7 +67,7 @@ function layoutEvents(): SchedulerEvent[] {
     [2, 9.5, 0.75, '1:1 with Bea', 'var(--fg2)', ['BK']], [2, 14, 1, 'Sprint planning', 'var(--accent)', ['AL', 'BK', 'CM', 'DN', 'EP']], [3, 11, 1.25, 'Pricing workshop', 'var(--c3)', ['CM', 'EP']],
     [4, 15, 1, 'Demo day', 'var(--ok)', ['AL', 'DN', 'EP', 'BK']], [5, 10, 1.5, 'Hike', 'var(--c4)', ['AL', 'CM']],
   ] as const).map(([d, s, du, t, c, who]) => ({ id: `e${seq++}`, date: day(wk0, d), start: s, duration: du, title: t, color: c, attendees: lp(...who) }))
-  let r = 7; const R = () => (r = (r * 9301 + 49297) % 233280) / 233280
+  const R = seeded(7)
   const TPL = [['Standup', 'var(--accent)', 9, 0.5], ['Design review', 'var(--c3)', 13, 1.5], ['Customer call', 'var(--c4)', 11, 1], ['1:1', 'var(--fg2)', 15, 0.5], ['Planning', 'var(--accent)', 14, 1], ['Investor update', 'var(--ok)', 16, 1], ['Workshop', 'var(--c3)', 10, 2]] as const
   for (let w = -45; w <= 8; w++) {
     if (w === 0) continue
@@ -114,7 +115,7 @@ const LAYOUT_DIRS = ['components', 'hooks', 'utils', 'api', 'types', 'styles', '
 const LAYOUT_WORDS = ['Button', 'Panel', 'Table', 'List', 'Header', 'Footer', 'Modal', 'Form', 'Field', 'Card', 'Badge', 'Menu', 'Tabs', 'Toolbar', 'Chart', 'Filter', 'Row', 'Cell', 'Item', 'View']
 const LAYOUT_EXT: Record<string, string> = { components: 'tsx', hooks: 'ts', utils: 'ts', api: 'ts', types: 'ts', styles: 'css', tests: 'tsx', fixtures: 'json' }
 function layoutBigTree(): TreeNode[] {
-  let s0 = 42; const R = () => (s0 = (s0 * 9301 + 49297) % 233280) / 233280
+  const R = seeded(42)
   return [{ id: 'mono', label: 'monorepo', children: [{ id: 'packages', label: 'packages', children: LAYOUT_PKGS.map(pk => ({
     id: pk, label: pk, children: LAYOUT_DIRS.map(d => ({
       id: `${pk}/${d}`, label: d, children: Array.from({ length: 50 }, (_, i) => {

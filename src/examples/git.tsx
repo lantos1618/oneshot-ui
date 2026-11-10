@@ -1,4 +1,5 @@
 import type { GitChanges, GitCommit, GitFileChange, GitRef } from '../lib/gitgraph'
+import { seeded } from './random'
 
 /* Sample git history for the showcase's GitGraph: a deterministic, realistic repository (main + develop + feature
  * branches, releases with tags, hotfixes merged into both, a revert, an octopus merge, a stale remote branch, a stash
@@ -32,12 +33,6 @@ const GIT_SAMPLE_FEATURE_AREA: Record<string, string> = {
   'pdf-invoices': 'billing', 'two-factor': 'auth', 'team-roles': 'auth', 'api-keys': 'api', 'commit-graph': 'ui',
 }
 
-/** mulberry32: a small seeded PRNG, so the history is the same on every load (and in tests). */
-function gitSampleRng(seed: number) {
-  let a = seed >>> 0
-  return () => { a = (a + 0x6d2b79f5) >>> 0; let t = a; t = Math.imul(t ^ (t >>> 15), t | 1); t ^= t + Math.imul(t ^ (t >>> 7), t | 61); return ((t ^ (t >>> 14)) >>> 0) / 4294967296 }
-}
-
 type GitSampleMeta = { area: string; subject: string; files: number }
 /** What the fake loaders know about each generated commit (its area and how many files it touched). */
 const gitSampleMeta = new Map<string, GitSampleMeta>()
@@ -49,7 +44,7 @@ const gitSampleMeta = new Map<string, GitSampleMeta>()
  * feature branch that is two commits ahead of its remote. Newest first, like `git log`.
  */
 export function gitHistory(n = 300, { seed = 7, now = GIT_SAMPLE_NOW }: { seed?: number; now?: number } = {}): GitCommit[] {
-  const rnd = gitSampleRng(seed), pick = <T,>(xs: readonly T[]) => xs[Math.floor(rnd() * xs.length)]
+  const rnd = seeded(seed), pick = <T,>(xs: readonly T[]) => xs[Math.floor(rnd() * xs.length)]
   const hex = () => Array.from({ length: 5 }, () => Math.floor(rnd() * 0x100000000).toString(16).padStart(8, '0')).join('')
   const out: GitCommit[] = []
   let t = 0
@@ -186,7 +181,7 @@ export const GIT_SAMPLE: GitCommit[] = /* @__PURE__ */ gitHistory(300)
 
 /** A new commit on top of `parent` (the showcase's "push" button), dated `at`. */
 export function gitSampleCommit(parent: GitCommit, at: number, n: number): GitCommit {
-  const rnd = gitSampleRng(n * 7919 + 3)
+  const rnd = seeded(n * 7919 + 3)
   const hash = Array.from({ length: 5 }, () => Math.floor(rnd() * 0x100000000).toString(16).padStart(8, '0')).join('')
   const things = GIT_SAMPLE_AREAS.ui.things
   const c: GitCommit = { hash, parents: [parent.hash], subject: `feat(ui): ${['polish', 'animate', 'test', 'document'][n % 4]} ${things[n % things.length]}`, author: GIT_SAMPLE_AUTHORS[n % GIT_SAMPLE_AUTHORS.length], date: at }
@@ -198,7 +193,7 @@ export function gitSampleCommit(parent: GitCommit, at: number, n: number): GitCo
 
 /** A small, plausible source file for `path`, varied by `seed`. */
 function gitSampleSource(path: string, seed: number): string {
-  const rnd = gitSampleRng(seed), name = (path.split('/').pop() ?? 'file').replace(/\.\w+$/, '')
+  const rnd = seeded(seed), name = (path.split('/').pop() ?? 'file').replace(/\.\w+$/, '')
   if (path.endsWith('.md')) return `# ${name}\n\n## Setup\n\nRun \`pnpm install\`, then \`pnpm dev\`.\n\n## Notes\n\n- Requires Node ${20 + Math.floor(rnd() * 3)}\n- Set \`API_URL\` in \`.env\`\n`
   if (path.endsWith('.json')) return `{\n  "name": "${name}",\n  "version": "1.${Math.floor(rnd() * 9)}.0",\n  "private": true,\n  "scripts": {\n    "dev": "vite",\n    "build": "vite build",\n    "test": "vitest run"\n  }\n}`
   if (path.endsWith('.yml')) return `name: CI\non: [push, pull_request]\njobs:\n  test:\n    runs-on: ubuntu-latest\n    steps:\n      - uses: actions/checkout@v4\n      - uses: pnpm/action-setup@v4\n      - run: pnpm install --frozen-lockfile\n      - run: pnpm test\n`
@@ -225,7 +220,7 @@ export async function ${id}(input: { id: string; force?: boolean }) {
 }
 /** `before` with a few edits: a changed constant, an added guard, a removed log line. */
 function gitSampleEdit(before: string, seed: number): string {
-  const rnd = gitSampleRng(seed), lines = before.split('\n')
+  const rnd = seeded(seed), lines = before.split('\n')
   const edits = 1 + Math.floor(rnd() * 3)
   for (let k = 0; k < edits; k++) {
     const i = 1 + Math.floor(rnd() * Math.max(1, lines.length - 2))
@@ -240,7 +235,7 @@ const pick2 = <T,>(rnd: () => number, xs: readonly T[]) => xs[Math.floor(rnd() *
 const gitSampleSeed = (hash: string) => parseInt(hash.slice(0, 8), 16) || 1
 
 function gitSampleFiles(hash: string, count?: number): GitFileChange[] {
-  const meta = gitSampleMeta.get(hash), seed = gitSampleSeed(hash), rnd = gitSampleRng(seed)
+  const meta = gitSampleMeta.get(hash), seed = gitSampleSeed(hash), rnd = seeded(seed)
   if (meta?.subject.startsWith('Merge')) return []
   const area = GIT_SAMPLE_AREAS[meta?.area ?? 'ui'] ?? GIT_SAMPLE_AREAS.ui
   const n = Math.min(area.files.length, count ?? meta?.files ?? 2), start = Math.floor(rnd() * area.files.length)

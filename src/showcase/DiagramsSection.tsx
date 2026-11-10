@@ -4,6 +4,7 @@ import { type TimeTag, type TimeTagKind } from '../lib/annotate'
 import { Gantt, type GanttPhase } from '../lib/gantt'
 import { Globe, type GlobeHub, type GlobeRoute, type WorldMapData, WorldMap, useWorldMap } from '../lib/geo'
 import { type DiagramState, type DiagramTransition, StateDiagram, StateMachine } from '../lib/statechart'
+import { seeded } from '../examples/random'
 import { TraceWaterfall, type TraceSpan } from '../lib/trace'
 import { AGENT_WORKFLOWS, AGENT_WORKFLOW_ORDER, type TagsDayVariant } from '../examples'
 import { Section, Spec, type SpecNotes, specLazy } from './kit'
@@ -102,8 +103,7 @@ const mapDemoData = (world: WorldMapData | null) => {
   const out: Record<string, Record<string, number> | null> = {}
   ;(world?.countries.map(c => c[1]) ?? Object.keys(MAP_KEY)).forEach(n => {
     // seeded per country, so a market's numbers are the same before and after the outlines arrive
-    let sd = [...n].reduce((h, c) => (h * 31 + c.charCodeAt(0)) % 233280, 17)
-    const R = () => (sd = (sd * 9301 + 49297) % 233280) / 233280
+    const R = seeded([...n].reduce((h, c) => Math.imul(h, 31) + c.charCodeAt(0), 17))
     const base = MAP_KEY[n] ?? (R() < 0.55 ? Math.round(R() * 12) : null)
     out[n] = base == null ? null : { users: base, rev: Math.max(1, Math.round(base * (0.6 + R() * 0.8))), growth: Math.round((MAP_KEY[n] ? 30 : 60) - base * 0.25 + R() * 25) }
   })

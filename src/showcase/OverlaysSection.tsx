@@ -3,7 +3,9 @@ import { AnimatePresence, motion } from 'motion/react'
 import {
   AlertDialog, Avatar, Badge, Banner, Button, type Command, CommandPalette, CopyButton, DateRangePicker, Dialog, DropdownMenu, Field, HoldToConfirm, HoverCard, Icon, IconButton, InlineEdit, Input, Kbd, MenuItem, MenuSeparator, type Notification, NotificationBell, Popover, PopoverContent, PopoverTrigger, Select, Sheet, Switch, Tooltip, Tour, type TourStep, cn, menuItemClass, useToast, surface,
 } from '../lib'
-import { Row, Section, Spec, SpecPreview } from './kit'
+import { Row, Section, Spec, SpecPreview, mountSpec } from './kit'
+import { fakeLatency } from '../examples/latency'
+import { DEMO_PEOPLE } from '../examples/people'
 
 const OV_TOUR: TourStep[] = [
   { target: 'title', title: 'Your projects', body: 'Everything you’re working on lives here.' },
@@ -89,10 +91,10 @@ function OvAlertDemo() {
   const [open, setOpen] = useState(false)
   const [fail, setFail] = useState(true)
   const [revoked, setRevoked] = useState(false)
-  const revoke = () => new Promise<void>((resolve, reject) => setTimeout(() => {
-    if (fail) { setFail(false); reject(new Error('Couldn’t reach the API, so nothing was revoked. Try again.')) }
-    else { setRevoked(true); toast({ title: 'API key revoked', description: 'sk_live_…4f2a', tone: 'bad' }); resolve() }
-  }, 1100))
+  const revoke = () => fakeLatency(undefined, 1100, () => {
+    if (fail) { setFail(false); throw new Error('Couldn’t reach the API, so nothing was revoked. Try again.') }
+    setRevoked(true); toast({ title: 'API key revoked', description: 'sk_live_…4f2a', tone: 'bad' })
+  })
   return (
     <>
       <Row>
@@ -118,20 +120,14 @@ function OvAlertDemo() {
 const OV_VERBS = ['Fix', 'Add', 'Remove', 'Refactor', 'Document', 'Speed up', 'Test', 'Polish', 'Migrate', 'Localise']
 const OV_NOUNS = ['date picker', 'billing page', 'search index', 'login flow', 'CSV export', 'dark mode', 'onboarding tour', 'data grid', 'webhooks', 'chart tooltips', 'file upload', 'notifications', 'API keys', 'audit log', 'mobile nav', 'command palette']
 const OV_ISSUES = Array.from({ length: 2400 }, (_, i) => ({ n: 1000 + i, title: `${OV_VERBS[i % 10]} ${OV_NOUNS[(i * 7) % 16]}`, team: ['Web', 'Platform', 'Design', 'Mobile'][i % 4] }))
-const OV_PEOPLE = ['Alex Lee', 'Bea Kim', 'Chris Moe', 'Dana Ng', 'Eli Park', 'Fay Ito', 'Gus Roy', 'Hana Ali', 'Ivo Berg', 'Jo Marsh', 'Kai Sun', 'Lea Brun']
-/** A fake search API: 250–400 ms, honours the abort signal. */
-const ovDelay = <T,>(ms: number, signal: AbortSignal, value: () => T) => new Promise<T>((resolve, reject) => {
-  const t = setTimeout(() => resolve(value()), ms)
-  signal.addEventListener('abort', () => { clearTimeout(t); reject(new DOMException('Aborted', 'AbortError')) })
-})
 function OvPaletteDemo() {
   const [open, setOpen] = useState(false)
   const [last, setLast] = useState('')
   const did = (what: string) => () => setLast(what)
   const commands = useMemo<Command[]>(() => [
     { id: 'new-issue', label: 'New issue', group: 'Actions', icon: 'plus', shortcut: 'C', run: did('Created a new issue') },
-    { id: 'assign', label: 'Assign to…', group: 'Actions', icon: 'user', placeholder: 'Search people…', loadChildren: (q, { signal }) => ovDelay(250, signal, () =>
-      OV_PEOPLE.filter(p => p.toLowerCase().includes(q.toLowerCase().trim())).map(p => ({ id: `p:${p}`, label: p, group: 'People', run: did(`Assigned to ${p}`) }))) },
+    { id: 'assign', label: 'Assign to…', group: 'Actions', icon: 'user', placeholder: 'Search people…', loadChildren: (q, { signal }) => fakeLatency(signal, 250, () =>
+      DEMO_PEOPLE.filter(p => p.toLowerCase().includes(q.toLowerCase().trim())).map(p => ({ id: `p:${p}`, label: p, group: 'People', run: did(`Assigned to ${p}`) }))) },
     { id: 'status', label: 'Change status…', group: 'Actions', icon: 'check', children: ['Backlog', 'Todo', 'In progress', 'In review', 'Done'].map(st => ({ id: `s:${st}`, label: st, group: 'Status', run: did(`Status set to ${st}`) })) },
     { id: 'labels', label: 'Add label…', group: 'Actions', icon: 'star', children: [
       { id: 'l-type', label: 'Type…', group: 'Labels', children: ['Bug', 'Feature', 'Chore'].map(l => ({ id: `lt:${l}`, label: l, run: did(`Labelled ${l}`) })) },
@@ -141,7 +137,7 @@ function OvPaletteDemo() {
     { id: 'settings', label: 'Go to settings', group: 'Navigation', icon: 'settings', shortcut: 'G S', run: did('Opened settings') },
     { id: 'theme', label: 'Switch theme…', group: 'Preferences', icon: 'sun', children: ['Light', 'Dark', 'System'].map(t => ({ id: `t:${t}`, label: t, run: did(`Theme: ${t}`) })) },
   ], []) // eslint-disable-line react-hooks/exhaustive-deps
-  const loadItems = (q: string, { signal }: { signal: AbortSignal }) => ovDelay(300 + q.length * 10, signal, () => {
+  const loadItems = (q: string, { signal }: { signal: AbortSignal }) => fakeLatency(signal, 300 + q.length * 10, () => {
     const w = q.toLowerCase().trim(); if (!w) return []
     return OV_ISSUES.filter(x => `${x.title} ${x.team} ${x.n}`.toLowerCase().includes(w)).slice(0, 400)
       .map((x): Command => ({ id: `i:${x.n}`, label: x.title, hint: `#${x.n} · ${x.team}`, group: 'Issues', icon: 'file', run: did(`Opened #${x.n} ${x.title}`) }))
@@ -226,7 +222,7 @@ function OvPartsDemo() {
             <AlertDialog.Description>It leaves the sidebar and stops syncing. You can restore it from Settings.</AlertDialog.Description>
             <AlertDialog.Footer>
               <AlertDialog.Cancel />
-              <AlertDialog.Action tone="default" onConfirm={() => new Promise<void>(r => setTimeout(() => { setArchived(true); r() }, 700))}>Archive</AlertDialog.Action>
+              <AlertDialog.Action tone="default" onConfirm={() => fakeLatency(undefined, 700, () => setArchived(true))}>Archive</AlertDialog.Action>
             </AlertDialog.Footer>
           </AlertDialog.Content>
         </AlertDialog.Root>
@@ -264,7 +260,8 @@ export function OverlaysSection({ openPalette }: { openPalette: () => void }) {
   const [title, setTitle] = useState('Q4 planning notes')
   const pick = (n: string) => () => setPicked(`Selected: ${n}`)
   useEffect(() => {
-    const on = (e: Event) => { const d = (e as CustomEvent<OverlayDemo>).detail; if (d === 'modal') setModal(true); else if (d === 'sheet') setSheet(true) }
+    // the dialog and sheet sit in lazily mounted cards: mount the card first, so the command opens one now or not at all
+    const on = (e: Event) => { const d = (e as CustomEvent<OverlayDemo>).detail; if (d === 'modal' && mountSpec('Modal')) setModal(true); else if (d === 'sheet' && mountSpec('Sheet / drawer')) setSheet(true) }
     addEventListener(OVERLAY_DEMO_EVENT, on); return () => removeEventListener(OVERLAY_DEMO_EVENT, on)
   }, [])
   return (

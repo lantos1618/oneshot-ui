@@ -7,19 +7,18 @@ import { TagGlyph, type TimeTag, type TimeTagStyle } from '../lib/annotate'
 import { BarList, BoxViolinChart, BulletChart, CalendarHeatmap, Chart, DensityHistogram, DonutChart, ForestPlot, FunnelChart, Gauge, Heatmap, RadarChart, RegressionChart, ScatterChart, SparkTile, TickerTable, Treemap, type ChartDatum, type TickerRow } from '../lib/charts'
 import { ChartWithJournal, StateRibbon, Swimlanes } from '../lib/timeline'
 import { TAGS_EVENT_KINDS, TAGS_KINDS, describeSample, tagsDay, type TagsDayVariant } from '../examples'
+import { seeded } from '../examples/random'
 import { Row, Section, Spec, SpecAction } from './kit'
 
 /* Demo data mirrors the original page: same generators and seeds, so the shapes match. */
-const chartsLcg = (seed: number) => () => (seed = (seed * 9301 + 49297) % 233280) / 233280
-const chartsPark = (seed: number) => () => (seed = (seed * 16807) % 2147483647) / 2147483647
-const statRnd = chartsPark(11)
+const statRnd = seeded(11)
 const statNormal = () => Math.sqrt(-2 * Math.log(statRnd() + 1e-9)) * Math.cos(6.2832 * statRnd())
 const CHART_MONTHS = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug']
 const CHART_DAYS = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun']
 
 // line with forecast band: actuals, a forecast from today and a widening 80% range, for each range
 const FORECAST: Record<string, ChartDatum[]> = (() => {
-  const rnd = chartsLcg(5), out: Record<string, ChartDatum[]> = {}
+  const rnd = seeded(5), out: Record<string, ChartDatum[]> = {}
   for (const n of [7, 30, 90]) {
     let v = 50
     const a: number[] = [], lo: number[] = [], hi: number[] = [], fc: number[] = []
@@ -35,7 +34,7 @@ const FORECAST: Record<string, ChartDatum[]> = (() => {
 })()
 const QUARTERS = [['Q1', 32, 40], ['Q2', 45, 52], ['Q3', 41, 60], ['Q4', 58, 71]].map(([q, a, b]) => ({ q, y2025: a, y2026: b }))
 const AREA = CHART_MONTHS.map((m, i) => ({ m, web: [12, 15, 14, 18, 20, 24, 23, 27][i], mobile: [8, 9, 11, 10, 13, 14, 16, 17][i], api: [5, 6, 6, 8, 9, 9, 11, 12][i] }))
-const SCATTER = (() => { const r = chartsLcg(9); return Array.from({ length: 40 }, () => { const x = r() * 100; return { x: +x.toFixed(1), y: +(x * 0.6 + r() * 35).toFixed(1) } }) })()
+const SCATTER = (() => { const r = seeded(9); return Array.from({ length: 40 }, () => { const x = r() * 100; return { x: +x.toFixed(1), y: +(x * 0.6 + r() * 35).toFixed(1) } }) })()
 const BUBBLES = [[20, 30, 10], [35, 55, 18], [50, 40, 8], [62, 70, 22], [75, 35, 12], [85, 60, 6], [40, 80, 14], [15, 65, 9]].map(([x, y, r]) => ({ x, y, r }))
 const WATERFALL: ChartDatum[] = (() => {
   const steps: [string, number][] = [['Start', 40], ['New', 25], ['Churn', -10], ['Fees', -6], ['Upsell', 18]], rows: ChartDatum[] = []
@@ -51,14 +50,14 @@ const WATERFALL_COLORS: Record<string, string> = { total: 'var(--line2)', up: 'v
 const COMBO = CHART_DAYS.map((d, i) => ({ d, orders: [120, 150, 132, 170, 190, 90, 80][i], conv: [3.1, 3.4, 3.2, 3.9, 4.2, 2.8, 2.6][i] }))
 const HISTOGRAM = Array.from({ length: 18 }, (_, i) => ({ b: `${i * 5}ms`, n: Math.round(60 * Math.exp(-(((i - 8) / 3.6) ** 2)) + (i % 3) * 2 + 2) }))
 const CANDLES: ChartDatum[] = (() => {
-  const r = chartsLcg(3), out: ChartDatum[] = []
+  const r = seeded(3), out: ChartDatum[] = []
   let p = 100
   for (let i = 0; i < 22; i++) { const o = p, c = p + (r() - 0.45) * 7, h = Math.max(o, c) + r() * 3, l = Math.min(o, c) - r() * 3; out.push({ t: i + 1, o, c, h, l }); p = c }
   return out
 })()
 // heatmap and calendar share one generator, in that order, like the original
 const { HEAT, CALENDAR } = (() => {
-  const R = chartsLcg(21)
+  const R = seeded(21)
   const HEAT = CHART_DAYS.map((_, y) => Array.from({ length: 12 }, (_, x) => Math.round(120 * Math.max(0.06, Math.min(1, (y < 5 ? 1 : 0.35) * Math.exp(-(((x - 5) / 3.5) ** 2)) * (0.6 + R() * 0.6))))))
   const CALENDAR: Record<string, number> = {}
   for (let w = 0; w < 26; w++) for (let d = 0; d < 7; d++) {
@@ -69,13 +68,13 @@ const { HEAT, CALENDAR } = (() => {
 })()
 const TREEMAP_START = [['Engineering', 'var(--c2)', 42], ['Sales', 'var(--c3)', 24], ['Design', 'var(--c4)', 14], ['Ops', 'var(--c-neutral)', 11], ['Other', 'var(--fg3)', 9]].map(([label, color, value]) => ({ label: label as string, color: color as string, value: value as number }))
 const TICKERS: TickerRow[] = ([['NOVA', 'Nova Systems', 142.3], ['QLX', 'Quill Labs', 58.9], ['ARC', 'Arcwise', 311.6], ['MRD', 'Meridian Co', 23.4], ['HLX', 'Helix Bio', 87.2]] as const).map(([symbol, name, p], k) => {
-  const r = chartsPark(100 + k), a: number[] = []
+  const r = seeded(100 + k), a: number[] = []
   let x = p * 0.94
   for (let i = 0; i < 30; i++) { x *= 1 + (r() - 0.48) * 0.03; a.push(x) }
   a[29] = p
   return { symbol, name, data: a }
 })
-const SPARK_VARIANTS = (() => { const r = chartsPark(7), v: number[] = []; let x = 50; for (let i = 0; i < 28; i++) { x += (r() - 0.48) * 8; v.push(x) } return v })()
+const SPARK_VARIANTS = (() => { const r = seeded(7), v: number[] = []; let x = 50; for (let i = 0; i < 28; i++) { x += (r() - 0.48) * 8; v.push(x) } return v })()
 
 const EB_GROUPS = ['Control', 'Variant A', 'Variant B', 'Variant C'], EB_COLORS = ['var(--fg3)', 'var(--accent)', 'var(--c3)', 'var(--c4)']
 const genErrorBars = () => EB_GROUPS.map((_, i) => { const n = 18 + Math.floor(statRnd() * 20), base = [42, 51, 47, 56][i]; return Array.from({ length: n }, () => base + statNormal() * (8 + i * 1.5)) })

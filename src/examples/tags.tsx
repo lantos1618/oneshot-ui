@@ -2,6 +2,7 @@
  * light and a busy variant. Used by the "Tags over time" cards (Chart annotations, Swimlanes, StateRibbon, journal).
  * Deterministic: the same times on server and client (local wall-clock times on a fixed date). */
 import type { TimeTag, TimeTagKind } from '../lib/annotate'
+import { seeded } from './random'
 
 /** Which sample day: a handful of logged events, or about five times as many with clusters a few minutes apart. */
 export type TagsDayVariant = 'light' | 'busy'
@@ -51,9 +52,8 @@ const TAGS_LIGHT_POSTURE: TagsRaw[] = [
 ]
 
 // Busy day: ~5× the events, with clusters a minute or two apart (a water round, push-up sets, a snack run)
-const tagsLcg = (seed: number) => () => (seed = (seed * 9301 + 49297) % 233280) / 233280
 const TAGS_BUSY_RAW: TagsRaw[] = (() => {
-  const r = tagsLcg(17), out: TagsRaw[] = []
+  const r = seeded(17), out: TagsRaw[] = []
   const hm = (min: number) => `${Math.floor(min / 60)}:${String(Math.round(min % 60)).padStart(2, '0')}`
   const detail: Record<string, () => string> = {
     water: () => `${[150, 250, 330, 500][Math.floor(r() * 4)]} ml`, snack: () => ['Apple', 'Banana', 'Nuts', 'Yoghurt', 'Crackers'][Math.floor(r() * 5)],
