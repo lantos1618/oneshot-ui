@@ -23,7 +23,7 @@ and motion. Attach the ones you need plus ui-provider.tsx; they share one UIProv
 - shadcn CLI: `npx shadcn add https://lantos1618.github.io/oneshot-ui/r/data-grid.json` (pulls in ui-provider)
 - Index with sizes, exports and embedded components: https://lantos1618.github.io/oneshot-ui/index.json
 - The same files from npm: https://unpkg.com/@lyndon/ui@0.11.0/dist-registry/files/<name>.tsx
-- Whole library in one file (dist-single/ui-all.tsx, ~648.0k tokens): only for tools with a very large context; prefer the drop-ins
+- Whole library in one file (dist-single/ui-all.tsx, ~651.2k tokens): only for tools with a very large context; prefer the drop-ins
 
 ## Tags
 
@@ -201,34 +201,35 @@ Import from: @lyndon/ui.
 Import from: @lyndon/ui/vizkit.
 
 - [track-grid](https://lantos1618.github.io/oneshot-ui/files/track-grid.tsx): Faint vertical grid lines across a time track, at `at` (fractions of its width, 0…1). (chart, ~183 tokens)
+- [viz-tip](https://lantos1618.github.io/oneshot-ui/files/viz-tip.tsx): The tooltip of charts and timelines: overlay's PointerTooltip at `at()`, read on every render and again when anything scrolls or resizes, so it stays on its mark (keyboard, hover and linked views alike). (chart, ~964 tokens)
 
 ## Extras: charts
 
 Import from: @lyndon/ui/annotate, @lyndon/ui/charts, @lyndon/ui/timeline.
 
-- [bar-list](https://lantos1618.github.io/oneshot-ui/files/bar-list.tsx): Ranked horizontal bars: top pages, countries, referrers. (chart, ~17.5k tokens; tags: dashboards, keyboard, formatting)
-- [box-violin-chart](https://lantos1618.github.io/oneshot-ui/files/box-violin-chart.tsx): Distributions per group: box (median, quartiles, 1.5 × IQR whiskers), KDE violin, or both, with outliers as dots. (chart, ~20.9k tokens; tags: statistics, comparison)
-- [bullet-chart](https://lantos1618.github.io/oneshot-ui/files/bullet-chart.tsx): Bullet chart: qualitative bands, the actual bar (green when it meets its target, neutral grey when not) and a target tick, one row per measure. (chart, ~18.3k tokens; tags: dashboards, monitoring)
-- [calendar-heatmap](https://lantos1618.github.io/oneshot-ui/files/calendar-heatmap.tsx): GitHub-style contribution grid in 4 levels with a Less → More legend. (chart, ~19.7k tokens; tags: dashboards, monitoring, scheduling)
-- [chart](https://lantos1618.github.io/oneshot-ui/files/chart.tsx): The cartesian chart. (chart, ~31.7k tokens; tags: dashboards, statistics, keyboard, comparison, accessible, finance, monitoring)
-- [chart-with-journal](https://lantos1618.github.io/oneshot-ui/files/chart-with-journal.tsx): A chart and its journal side by side (pattern H), linked both ways: hovering, focusing or tapping a tag on either side lights it on the other, and the list scrolls the lit row into view without moving focus. (chart, ~17.1k tokens; tags: monitoring, keyboard, new)
-- [density-histogram](https://lantos1618.github.io/oneshot-ui/files/density-histogram.tsx): Histogram with a kernel-density curve, mean (dashed), median and a ±1σ shaded band. (chart, ~20.5k tokens; tags: statistics, dashboards)
-- [donut-chart](https://lantos1618.github.io/oneshot-ui/files/donut-chart.tsx): Share of a total. (chart, ~19.3k tokens; tags: comparison, dashboards, accessible)
-- [forest-plot](https://lantos1618.github.io/oneshot-ui/files/forest-plot.tsx): Forest plot: effect sizes with 95% CI whiskers, squares sized by inverse-variance weight, a pooled diamond and a zero line. (chart, ~19.8k tokens; tags: statistics, comparison)
-- [funnel-chart](https://lantos1618.github.io/oneshot-ui/files/funnel-chart.tsx): Funnel with step-to-step conversion. (chart, ~17.7k tokens; tags: marketing, dashboards)
+- [bar-list](https://lantos1618.github.io/oneshot-ui/files/bar-list.tsx): Ranked horizontal bars: top pages, countries, referrers. (chart, ~19.2k tokens; tags: dashboards, keyboard, formatting)
+- [box-violin-chart](https://lantos1618.github.io/oneshot-ui/files/box-violin-chart.tsx): Distributions per group: box (median, quartiles, 1.5 × IQR whiskers), KDE violin, or both, with outliers as dots (past a dozen, the farthest are drawn and the rest counted). (chart, ~23.1k tokens; tags: statistics, comparison)
+- [bullet-chart](https://lantos1618.github.io/oneshot-ui/files/bullet-chart.tsx): Bullet chart: qualitative bands, the actual bar (green when it meets its target, neutral grey when not) and a target tick, one row per measure. (chart, ~20.1k tokens; tags: dashboards, monitoring)
+- [calendar-heatmap](https://lantos1618.github.io/oneshot-ui/files/calendar-heatmap.tsx): GitHub-style contribution grid in 4 levels with a Less → More legend. (chart, ~21.6k tokens; tags: dashboards, monitoring, scheduling)
+- [chart](https://lantos1618.github.io/oneshot-ui/files/chart.tsx): The cartesian chart. (chart, ~34.7k tokens; tags: dashboards, statistics, keyboard, comparison, accessible, finance, monitoring)
+- [chart-with-journal](https://lantos1618.github.io/oneshot-ui/files/chart-with-journal.tsx): A chart and its journal side by side (pattern H), linked both ways: hovering, focusing or tapping a tag on either side lights it on the other, and the list scrolls the lit row into view without moving focus. (chart, ~17.4k tokens; tags: monitoring, keyboard, new)
+- [density-histogram](https://lantos1618.github.io/oneshot-ui/files/density-histogram.tsx): Histogram with a kernel-density curve, mean (dashed), median and a ±1σ shaded band. (chart, ~22.4k tokens; tags: statistics, dashboards)
+- [donut-chart](https://lantos1618.github.io/oneshot-ui/files/donut-chart.tsx): Share of a total. (chart, ~21.1k tokens; tags: comparison, dashboards, accessible)
+- [forest-plot](https://lantos1618.github.io/oneshot-ui/files/forest-plot.tsx): Forest plot: effect sizes with 95% CI whiskers, squares sized by inverse-variance weight, a pooled diamond and a zero line. (chart, ~22.5k tokens; tags: statistics, comparison)
+- [funnel-chart](https://lantos1618.github.io/oneshot-ui/files/funnel-chart.tsx): Funnel with step-to-step conversion. (chart, ~19.6k tokens; tags: marketing, dashboards)
 - [gauge](https://lantos1618.github.io/oneshot-ui/files/gauge.tsx): Half-circle gauge. (chart, ~3.9k tokens; tags: dashboards, monitoring, animated)
-- [heatmap](https://lantos1618.github.io/oneshot-ui/files/heatmap.tsx): Matrix heatmap: rows × columns. (chart, ~18.9k tokens; tags: dashboards, monitoring)
-- [radar-chart](https://lantos1618.github.io/oneshot-ui/files/radar-chart.tsx): Radar / spider chart for comparing a few profiles across the same axes. (chart, ~19.2k tokens; tags: comparison, statistics)
-- [regression-chart](https://lantos1618.github.io/oneshot-ui/files/regression-chart.tsx): Scatter with a least-squares fit, the 95% confidence band for the mean and (optionally) the wider 95% prediction interval. (chart, ~20.9k tokens; tags: statistics, comparison)
-- [scatter-chart](https://lantos1618.github.io/oneshot-ui/files/scatter-chart.tsx): Scatter plot; give points an `r` for a bubble chart and a `group` for colours. (chart, ~20.6k tokens; tags: statistics, comparison, accessible, finance)
-- [spark-tile](https://lantos1618.github.io/oneshot-ui/files/spark-tile.tsx): Stat tile: label, value that rolls up when scrolled into view, and a curved area sparkline under it. (chart, ~21.2k tokens; tags: dashboards, monitoring)
-- [state-ribbon](https://lantos1618.github.io/oneshot-ui/files/state-ribbon.tsx): What you were doing all day in one strip (pattern F: sleep stages, Toggl and RescueTime day bars): contiguous states coloured by kind, optional pins above for point tags (merged into counts when crowded) and bars below for spans. (chart, ~12.8k tokens; tags: monitoring, keyboard, new)
-- [swimlanes](https://lantos1618.github.io/oneshot-ui/files/swimlanes.tsx): One lane per kind of tag on a shared time axis (pattern E: Dynatrace annotation tracks, LifeLines): dots for point tags, rounded pills for spans, an icon and label at the start of each lane, an optional chart on top (`top`) aligned to the same `start`–`end`. (component, ~11.5k tokens; tags: monitoring, keyboard, new)
-- [tag-glyph](https://lantos1618.github.io/oneshot-ui/files/tag-glyph.tsx): A tag's icon in a coloured ring; `active` grows it with a halo, `more` adds a "+N" badge on its end side (timeTagBadge wide). (chart, ~765 tokens; tags: monitoring, keyboard, new)
-- [tag-journal](https://lantos1618.github.io/oneshot-ui/files/tag-journal.tsx): A time-ordered list of tags (pattern H: Oura and WHOOP journals): time, glyph, label and detail, optionally grouped by hour, virtualised so long days stay fast. (chart, ~16.7k tokens; tags: monitoring, keyboard, new)
-- [tag-tooltip](https://lantos1618.github.io/oneshot-ui/files/tag-tooltip.tsx): Tooltip body for a tag: icon and label, the time (or from–to for a span) and the detail. (chart, ~2.3k tokens; tags: monitoring, keyboard, new)
-- [ticker-table](https://lantos1618.github.io/oneshot-ui/files/ticker-table.tsx): Live price table: symbol, name, sparkline with an end dot, rolling last price and a % change pill (up/down coloured). (chart, ~4.4k tokens; tags: finance, real-time, monitoring, dashboards)
-- [treemap](https://lantos1618.github.io/oneshot-ui/files/treemap.tsx): Squarified treemap: area ∝ value. (chart, ~19.4k tokens; tags: dashboards, finance, hierarchy)
+- [heatmap](https://lantos1618.github.io/oneshot-ui/files/heatmap.tsx): Matrix heatmap: rows × columns. (chart, ~20.7k tokens; tags: dashboards, monitoring)
+- [radar-chart](https://lantos1618.github.io/oneshot-ui/files/radar-chart.tsx): Radar / spider chart for comparing a few profiles across the same axes. (chart, ~21.0k tokens; tags: comparison, statistics)
+- [regression-chart](https://lantos1618.github.io/oneshot-ui/files/regression-chart.tsx): Scatter with a least-squares fit, the 95% confidence band for the mean and (optionally) the wider 95% prediction interval. (chart, ~23.2k tokens; tags: statistics, comparison)
+- [scatter-chart](https://lantos1618.github.io/oneshot-ui/files/scatter-chart.tsx): Scatter plot; give points an `r` for a bubble chart and a `group` for colours. (chart, ~22.5k tokens; tags: statistics, comparison, accessible, finance)
+- [spark-tile](https://lantos1618.github.io/oneshot-ui/files/spark-tile.tsx): Stat tile: label, value that rolls up when scrolled into view, and a curved area sparkline under it. (chart, ~22.9k tokens; tags: dashboards, monitoring)
+- [state-ribbon](https://lantos1618.github.io/oneshot-ui/files/state-ribbon.tsx): What you were doing all day in one strip (pattern F: sleep stages, Toggl and RescueTime day bars): contiguous states coloured by kind, optional pins above for point tags (merged into counts when crowded) and bars below for spans. (chart, ~13.9k tokens; tags: monitoring, keyboard, new)
+- [swimlanes](https://lantos1618.github.io/oneshot-ui/files/swimlanes.tsx): One lane per kind of tag on a shared time axis (pattern E: Dynatrace annotation tracks, LifeLines): dots for point tags, rounded pills for spans, an icon and label at the start of each lane, an optional chart on top (`top`) aligned to the same `start`–`end`. (component, ~12.7k tokens; tags: monitoring, keyboard, new)
+- [tag-glyph](https://lantos1618.github.io/oneshot-ui/files/tag-glyph.tsx): A tag's icon in a coloured ring; `active` grows it with a halo, `more` adds a "+N" badge on its end side (countChipPx wide). (chart, ~854 tokens; tags: monitoring, keyboard, new)
+- [tag-journal](https://lantos1618.github.io/oneshot-ui/files/tag-journal.tsx): A time-ordered list of tags (pattern H: Oura and WHOOP journals): time, glyph, label and detail, optionally grouped by hour, virtualised so long days stay fast. (chart, ~17.0k tokens; tags: monitoring, keyboard, new)
+- [tag-tooltip](https://lantos1618.github.io/oneshot-ui/files/tag-tooltip.tsx): Tooltip body for a tag: icon and label, the time (or from–to for a span) and the detail. (chart, ~2.7k tokens; tags: monitoring, keyboard, new)
+- [ticker-table](https://lantos1618.github.io/oneshot-ui/files/ticker-table.tsx): Live price table: symbol, name, sparkline with an end dot, rolling last price and a % change pill (up/down coloured). (chart, ~4.5k tokens; tags: finance, real-time, monitoring, dashboards)
+- [treemap](https://lantos1618.github.io/oneshot-ui/files/treemap.tsx): Squarified treemap: area ∝ value. (chart, ~21.2k tokens; tags: dashboards, finance, hierarchy)
 
 ## Extras: diagrams
 
@@ -242,7 +243,7 @@ Import from: @lyndon/ui/gantt, @lyndon/ui/statechart, @lyndon/ui/trace, @lyndon/
 - [state-diagram](https://lantos1618.github.io/oneshot-ui/files/state-diagram.tsx): Interactive UML state diagram. (diagram, ~10.3k tokens; tags: workflows, keyboard)
 - [state-machine](https://lantos1618.github.io/oneshot-ui/files/state-machine.tsx): Live statechart of workflow machines, switchable with a segmented control. (diagram, ~19.3k tokens; tags: workflows, agents, real-time)
 - [statechart](https://lantos1618.github.io/oneshot-ui/files/statechart.tsx): SVG statechart: composite states, states, pseudo states (initial, final, history), labelled transitions, and dots that travel along a transition (each dot calls onDone when it arrives). (diagram, ~5.1k tokens; tags: workflows, keyboard, agents, real-time)
-- [trace-waterfall](https://lantos1618.github.io/oneshot-ui/files/trace-waterfall.tsx): Nested spans on one streaming timeline (agent runs, API requests, jobs). (diagram, ~23.2k tokens; tags: monitoring, agents, streaming)
+- [trace-waterfall](https://lantos1618.github.io/oneshot-ui/files/trace-waterfall.tsx): Nested spans on one streaming timeline (agent runs, API requests, jobs). (diagram, ~24.0k tokens; tags: monitoring, agents, streaming)
 
 ## Extras: geo
 

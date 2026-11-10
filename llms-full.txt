@@ -23,7 +23,7 @@ and motion. Attach the ones you need plus ui-provider.tsx; they share one UIProv
 - shadcn CLI: `npx shadcn add https://lantos1618.github.io/oneshot-ui/r/data-grid.json` (pulls in ui-provider)
 - Index with sizes, exports and embedded components: https://lantos1618.github.io/oneshot-ui/index.json
 - The same files from npm: https://unpkg.com/@lyndon/ui@0.11.0/dist-registry/files/<name>.tsx
-- Whole library in one file (dist-single/ui-all.tsx, ~648.0k tokens): only for tools with a very large context; prefer the drop-ins
+- Whole library in one file (dist-single/ui-all.tsx, ~651.2k tokens): only for tools with a very large context; prefer the drop-ins
 
 ## Tags
 
@@ -1241,12 +1241,23 @@ Faint vertical grid lines across a time track, at `at` (fractions of its width, 
 - Import: `@lyndon/ui/vizkit`
 - Exports: TrackGrid
 
+### Viz tip (`viz-tip`, ~964 tokens)
+
+The tooltip of charts and timelines: overlay's PointerTooltip at `at()`, read on every render and again when anything scrolls or resizes, so it stays on its mark (keyboard, hover and linked views alike).
+
+- File: https://lantos1618.github.io/oneshot-ui/files/viz-tip.tsx
+- Kind: chart; area: charts
+- Import: `@lyndon/ui/vizkit`
+- Exports: VizTip
+- Embeds: PointerTooltip
+- npm: react, react-dom
+
 
 ## Extras: charts
 
 Import from: @lyndon/ui/annotate, @lyndon/ui/charts, @lyndon/ui/timeline.
 
-### Bar list (`bar-list`, ~17.5k tokens)
+### Bar list (`bar-list`, ~19.2k tokens)
 
 Ranked horizontal bars: top pages, countries, referrers. Bars grow in when scrolled into view (a clip-path wipe, no reflow). Hover a row or arrow-key through them to highlight one; the values are always printed.
 
@@ -1254,21 +1265,21 @@ Ranked horizontal bars: top pages, countries, referrers. Bars grow in when scrol
 - Kind: chart; area: charts; tags: dashboards, keyboard, formatting
 - Import: `@lyndon/ui/charts`
 - Exports: BarList
-- Embeds: Button, Icon, IconButton, Slot, Spinner
-- npm: motion, react
+- Embeds: Button, Icon, IconButton, PointerTooltip, Slot, Spinner, VizTip
+- npm: motion, react, react-dom
 
-### Box violin chart (`box-violin-chart`, ~20.9k tokens)
+### Box violin chart (`box-violin-chart`, ~23.1k tokens)
 
-Distributions per group: box (median, quartiles, 1.5 × IQR whiskers), KDE violin, or both, with outliers as dots. Hover or tap a box or outlier for numbers. New values morph in place.
+Distributions per group: box (median, quartiles, 1.5 × IQR whiskers), KDE violin, or both, with outliers as dots (past a dozen, the farthest are drawn and the rest counted). Hover or tap a box or outlier for numbers. Groups without values are left out. New values morph in place.
 
 - File: https://lantos1618.github.io/oneshot-ui/files/box-violin-chart.tsx
 - Kind: chart; area: charts; tags: statistics, comparison
 - Import: `@lyndon/ui/charts`
 - Exports: BoxViolinChart
-- Embeds: Button, Icon, IconButton, Slot, Spinner
-- npm: motion, react
+- Embeds: Button, Icon, IconButton, PointerTooltip, Slot, Spinner, VizTip
+- npm: motion, react, react-dom
 
-### Bullet chart (`bullet-chart`, ~18.3k tokens)
+### Bullet chart (`bullet-chart`, ~20.1k tokens)
 
 Bullet chart: qualitative bands, the actual bar (green when it meets its target, neutral grey when not) and a target tick, one row per measure. Bars grow in when scrolled into view; hover, tap or arrow-key a row for numbers.
 
@@ -1276,10 +1287,10 @@ Bullet chart: qualitative bands, the actual bar (green when it meets its target,
 - Kind: chart; area: charts; tags: dashboards, monitoring
 - Import: `@lyndon/ui/charts`
 - Exports: BulletChart
-- Embeds: Button, Icon, IconButton, Slot, Spinner
-- npm: motion, react
+- Embeds: Button, Icon, IconButton, PointerTooltip, Slot, Spinner, VizTip
+- npm: motion, react, react-dom
 
-### Calendar heatmap (`calendar-heatmap`, ~19.7k tokens)
+### Calendar heatmap (`calendar-heatmap`, ~21.6k tokens)
 
 GitHub-style contribution grid in 4 levels with a Less → More legend. `values` maps core dayKey(date) → count. `end` is the last day shown (default: today, read after mount so server and client render the same). Built on Heatmap; cells size to fit, and on touch screens stay tappable and scroll inside the card (newest week in view, days pinned).
 
@@ -1287,10 +1298,10 @@ GitHub-style contribution grid in 4 levels with a Less → More legend. `values`
 - Kind: chart; area: charts; tags: dashboards, monitoring, scheduling
 - Import: `@lyndon/ui/charts`
 - Exports: CalendarHeatmap
-- Embeds: Button, Heatmap, Icon, IconButton, Slot, Spinner
-- npm: motion, react
+- Embeds: Button, Heatmap, Icon, IconButton, PointerTooltip, Slot, Spinner, VizTip
+- npm: motion, react, react-dom
 
-### Chart (`chart`, ~31.7k tokens)
+### Chart (`chart`, ~34.7k tokens)
 
 The cartesian chart. Mix series types freely: line <Chart data x="month" series={[{ key: 'revenue' }]} curve="monotone" /> stacked area series={[{ key: 'a', type: 'area' }, { key: 'b', type: 'area' }]} stacked grouped / stacked bars series={[{ key: 'a', type: 'bar' }, { key: 'b', type: 'bar' }]} (stacked) combo, two axes series={[{ key: 'orders', type: 'bar' }, { key: 'rate', axis: 'right', points: true }]} forecast / confidence band={{ lower: 'lo', upper: 'hi' }} plus a dashed series; nulls leave gaps histogram bars with gap={0} (1px separators) waterfall { type: 'float', from: 'start', key: 'end', connectors: true, labelOf, colorOf } candlestick { type: 'float', from: 'open', key: 'close', whisker: { low: 'low', high: 'high' }, axis: 'right' } error bars { type: 'float', from: 'floor', key: 'mean', whisker: { low: 'lo', high: 'hi', caps: true } } Hover, tap or drag a finger sideways for a crosshair and tooltip (`tooltip` replaces its body); tap outside to dismiss. Keyboard: the chart is one Tab stop; arrows, Home and End move the same crosshair and tooltip (useChartShell). Draws in when scrolled into view.
 
@@ -1298,10 +1309,10 @@ The cartesian chart. Mix series types freely: line <Chart data x="month" series=
 - Kind: chart; area: charts; tags: dashboards, statistics, keyboard, comparison, accessible, finance, monitoring
 - Import: `@lyndon/ui/charts`
 - Exports: Chart, Legend, useChartShell, exportChart, niceTicks, compact, chartDownsample, PALETTE, CHART_NEUTRAL
-- Embeds: Button, Icon, IconButton, Slot, Spinner, TagGlyph, TagTooltip
-- npm: motion, react
+- Embeds: Button, Icon, IconButton, PointerTooltip, Slot, Spinner, TagGlyph, TagTooltip, VizTip
+- npm: motion, react, react-dom
 
-### Chart with journal (`chart-with-journal`, ~17.1k tokens)
+### Chart with journal (`chart-with-journal`, ~17.4k tokens)
 
 A chart and its journal side by side (pattern H), linked both ways: hovering, focusing or tapping a tag on either side lights it on the other, and the list scrolls the lit row into view without moving focus. Below 640 px of width the list stacks under the chart. The chart is a render prop, so any annotated chart works: `<ChartWithJournal tags={tags} chart={link => <Chart data={day} x="t" series={…} annotations={{ ...link, style: 'dots' }} />} />`.
 
@@ -1312,18 +1323,18 @@ A chart and its journal side by side (pattern H), linked both ways: hovering, fo
 - Embeds: Button, EmptyState, Icon, IconButton, Slot, Spinner, TagGlyph, TagJournal, VirtualList
 - npm: motion, react, react-dom
 
-### Density histogram (`density-histogram`, ~20.5k tokens)
+### Density histogram (`density-histogram`, ~22.4k tokens)
 
-Histogram with a kernel-density curve, mean (dashed), median and a ±1σ shaded band. `bins` is usually driven by a slider; bins, density and markers all morph when it or the data changes. Hover or tap a bar for its range and count.
+Histogram with a kernel-density curve, mean (dashed), median and a ±1σ shaded band. `bins` is usually driven by a slider; heights, density and markers all morph when it or the data changes. Hover or tap a bar for its range and count.
 
 - File: https://lantos1618.github.io/oneshot-ui/files/density-histogram.tsx
 - Kind: chart; area: charts; tags: statistics, dashboards
 - Import: `@lyndon/ui/charts`
 - Exports: DensityHistogram
-- Embeds: Button, Icon, IconButton, Slot, Spinner
-- npm: motion, react
+- Embeds: Button, Icon, IconButton, PointerTooltip, Slot, Spinner, VizTip
+- npm: motion, react, react-dom
 
-### Donut chart (`donut-chart`, ~19.3k tokens)
+### Donut chart (`donut-chart`, ~21.1k tokens)
 
 Share of a total. variant 'donut' (default; pie with thickness = size/2) or 'polar' (polar area: equal angles, radius by value). Hover or tap a slice or legend row to focus it (tap outside to clear). Sweeps in when scrolled into view.
 
@@ -1331,21 +1342,21 @@ Share of a total. variant 'donut' (default; pie with thickness = size/2) or 'pol
 - Kind: chart; area: charts; tags: comparison, dashboards, accessible
 - Import: `@lyndon/ui/charts`
 - Exports: DonutChart
-- Embeds: AnimatedNumber, Button, Icon, IconButton, Slot, Spinner
-- npm: motion, react
+- Embeds: AnimatedNumber, Button, Icon, IconButton, PointerTooltip, Slot, Spinner, VizTip
+- npm: motion, react, react-dom
 
-### Forest plot (`forest-plot`, ~19.8k tokens)
+### Forest plot (`forest-plot`, ~22.5k tokens)
 
-Forest plot: effect sizes with 95% CI whiskers, squares sized by inverse-variance weight, a pooled diamond and a zero line. Rows whose interval clears 0 are coloured as significant. New rows morph in place; hover or tap a row for its numbers. Below 400px wide the right column shows the effect only (the interval stays drawn and is in the tooltip).
+Forest plot: effect sizes with 95% CI whiskers, squares sized by inverse-variance weight, a pooled diamond and a zero line. Rows whose interval clears 0 are coloured as significant. The domain covers every interval unless `domain` is given; then an interval that runs past it ends in an arrow at the edge. New rows morph in place; hover or tap a row for its numbers. Below 400px wide the right column shows the effect only (the interval stays drawn and is in the tooltip).
 
 - File: https://lantos1618.github.io/oneshot-ui/files/forest-plot.tsx
 - Kind: chart; area: charts; tags: statistics, comparison
 - Import: `@lyndon/ui/charts`
 - Exports: ForestPlot
-- Embeds: Button, Icon, IconButton, Slot, Spinner
-- npm: motion, react
+- Embeds: Button, Icon, IconButton, PointerTooltip, Slot, Spinner, VizTip
+- npm: motion, react, react-dom
 
-### Funnel chart (`funnel-chart`, ~17.7k tokens)
+### Funnel chart (`funnel-chart`, ~19.6k tokens)
 
 Funnel with step-to-step conversion. Bars grow in when scrolled into view (a clip-path wipe from the centre, so nothing reflows); hover, tap or arrow-key a step for its share of the first step.
 
@@ -1353,8 +1364,8 @@ Funnel with step-to-step conversion. Bars grow in when scrolled into view (a cli
 - Kind: chart; area: charts; tags: marketing, dashboards
 - Import: `@lyndon/ui/charts`
 - Exports: FunnelChart
-- Embeds: Button, Icon, IconButton, Slot, Spinner
-- npm: motion, react
+- Embeds: Button, Icon, IconButton, PointerTooltip, Slot, Spinner, VizTip
+- npm: motion, react, react-dom
 
 ### Gauge (`gauge`, ~3.9k tokens)
 
@@ -1367,7 +1378,7 @@ Half-circle gauge. The arc sweeps and the number rolls up when scrolled into vie
 - Embeds: AnimatedNumber
 - npm: motion, react
 
-### Heatmap (`heatmap`, ~18.9k tokens)
+### Heatmap (`heatmap`, ~20.7k tokens)
 
 Matrix heatmap: rows × columns. Cells fade in when scrolled into view; hover or tap a cell (slide a finger across) for its value in the footer, or focus the grid and move with the arrow keys. `shade` maps value/max → colour. On touch screens cells grow to at least `touchCell`; when the grid is wider than its box it scrolls inside it with the row labels pinned (`scrollTo` picks the start edge).
 
@@ -1375,10 +1386,10 @@ Matrix heatmap: rows × columns. Cells fade in when scrolled into view; hover or
 - Kind: chart; area: charts; tags: dashboards, monitoring
 - Import: `@lyndon/ui/charts`
 - Exports: Heatmap
-- Embeds: Button, Icon, IconButton, Slot, Spinner
-- npm: motion, react
+- Embeds: Button, Icon, IconButton, PointerTooltip, Slot, Spinner, VizTip
+- npm: motion, react, react-dom
 
-### Radar chart (`radar-chart`, ~19.2k tokens)
+### Radar chart (`radar-chart`, ~21.0k tokens)
 
 Radar / spider chart for comparing a few profiles across the same axes. Vertex dots, dashed or unfilled series; hover or tap an axis for its values.
 
@@ -1386,10 +1397,10 @@ Radar / spider chart for comparing a few profiles across the same axes. Vertex d
 - Kind: chart; area: charts; tags: comparison, statistics
 - Import: `@lyndon/ui/charts`
 - Exports: RadarChart
-- Embeds: Button, Icon, IconButton, Legend, Slot, Spinner
-- npm: motion, react
+- Embeds: Button, Icon, IconButton, Legend, PointerTooltip, Slot, Spinner, VizTip
+- npm: motion, react, react-dom
 
-### Regression chart (`regression-chart`, ~20.9k tokens)
+### Regression chart (`regression-chart`, ~23.2k tokens)
 
 Scatter with a least-squares fit, the 95% confidence band for the mean and (optionally) the wider 95% prediction interval. Hover, tap or slide a finger for a crosshair readout; a stats footer shows slope, intercept, R², residual SE and n. New `points` morph in place.
 
@@ -1397,10 +1408,10 @@ Scatter with a least-squares fit, the 95% confidence band for the mean and (opti
 - Kind: chart; area: charts; tags: statistics, comparison
 - Import: `@lyndon/ui/charts`
 - Exports: RegressionChart
-- Embeds: Button, Icon, IconButton, Slot, Spinner
-- npm: motion, react
+- Embeds: Button, Icon, IconButton, PointerTooltip, Slot, Spinner, VizTip
+- npm: motion, react, react-dom
 
-### Scatter chart (`scatter-chart`, ~20.6k tokens)
+### Scatter chart (`scatter-chart`, ~22.5k tokens)
 
 Scatter plot; give points an `r` for a bubble chart and a `group` for colours. Points pop in when scrolled into view. Hover or tap near a point (or slide a finger) for its tooltip; touch uses a wider catch radius.
 
@@ -1408,10 +1419,10 @@ Scatter plot; give points an `r` for a bubble chart and a `group` for colours. P
 - Kind: chart; area: charts; tags: statistics, comparison, accessible, finance
 - Import: `@lyndon/ui/charts`
 - Exports: ScatterChart
-- Embeds: Button, Icon, IconButton, Legend, Slot, Spinner
-- npm: motion, react
+- Embeds: Button, Icon, IconButton, Legend, PointerTooltip, Slot, Spinner, VizTip
+- npm: motion, react, react-dom
 
-### Spark tile (`spark-tile`, ~21.2k tokens)
+### Spark tile (`spark-tile`, ~22.9k tokens)
 
 Stat tile: label, value that rolls up when scrolled into view, and a curved area sparkline under it. The tile is one Tab stop: arrows walk the sparkline's points (a marker and readout follow), Home/End jump to the ends.
 
@@ -1419,10 +1430,10 @@ Stat tile: label, value that rolls up when scrolled into view, and a curved area
 - Kind: chart; area: charts; tags: dashboards, monitoring
 - Import: `@lyndon/ui/charts`
 - Exports: SparkTile
-- Embeds: AnimatedNumber, Button, Icon, IconButton, Slot, SparkChart, Spinner
-- npm: motion, react
+- Embeds: AnimatedNumber, Button, Icon, IconButton, PointerTooltip, Slot, SparkChart, Spinner, VizTip
+- npm: motion, react, react-dom
 
-### State ribbon (`state-ribbon`, ~12.8k tokens)
+### State ribbon (`state-ribbon`, ~13.9k tokens)
 
 What you were doing all day in one strip (pattern F: sleep stages, Toggl and RescueTime day bars): contiguous states coloured by kind, optional pins above for point tags (merged into counts when crowded) and bars below for spans. Slivers too thin to see get a minimum width, runs of them merge into one "mixed" segment, and on touch every thin mark has a finger-sized hit area. Hover, focus or tap for state and duration. Keyboard: one Tab stop, ←/→ along a row, ↑/↓ between pins, states and bars. `size="compact"` suits phones and widgets.
 
@@ -1430,23 +1441,23 @@ What you were doing all day in one strip (pattern F: sleep stages, Toggl and Res
 - Kind: chart; area: charts; tags: monitoring, keyboard, new
 - Import: `@lyndon/ui/timeline`
 - Exports: StateRibbon
-- Embeds: Legend, TagGlyph, TagTooltip
-- npm: motion, react
+- Embeds: Legend, PointerTooltip, TagGlyph, TagTooltip, VizTip
+- npm: react, react-dom
 
-### Swimlanes (`swimlanes`, ~11.5k tokens)
+### Swimlanes (`swimlanes`, ~12.7k tokens)
 
-One lane per kind of tag on a shared time axis (pattern E: Dynatrace annotation tracks, LifeLines): dots for point tags, rounded pills for spans, an icon and label at the start of each lane, an optional chart on top (`top`) aligned to the same `start`–`end`. Dots closer than `mergePx` merge into a count chip; empty lanes say "None" (or hide with `hideEmpty`); more than `maxLanes` lanes scroll. Hover, focus or tap a mark for its tooltip. Keyboard: the lanes are one Tab stop, ←/→ move along a lane, ↑/↓ between lanes, Enter selects, Escape clears. Link it to other views with `activeId` / `onActiveChange`. The plot runs left to right in every locale; labels and tooltips follow the locale. `labels="always"` keeps lane names on phones (a compact column) instead of the icon alone.
+One lane per kind of tag on a shared time axis (pattern E: Dynatrace annotation tracks, LifeLines): dots for point tags, rounded pills for spans, an icon and label at the start of each lane, an optional chart on top (`top`) aligned to the same `start`–`end`. Dots closer than `mergePx` merge into a count chip; empty lanes say "None" (or hide with `hideEmpty`); more than `maxLanes` lanes scroll. Hover, focus or tap a mark for its tooltip. Keyboard: the lanes are one Tab stop, ←/→ move along a lane, ↑/↓ between lanes, Enter selects, Escape clears. Link it to other views with `activeId` / `onActiveChange`. `labels="always"` keeps lane names on phones (a compact column) instead of the icon alone.
 
 - File: https://lantos1618.github.io/oneshot-ui/files/swimlanes.tsx
 - Kind: component; area: charts; tags: monitoring, keyboard, new
 - Import: `@lyndon/ui/timeline`
 - Exports: Swimlanes
-- Embeds: TagGlyph, TagTooltip, TrackGrid
-- npm: motion, react
+- Embeds: PointerTooltip, TagGlyph, TagTooltip, TrackGrid, VizTip
+- npm: react, react-dom
 
-### Tag glyph (`tag-glyph`, ~765 tokens)
+### Tag glyph (`tag-glyph`, ~854 tokens)
 
-A tag's icon in a coloured ring; `active` grows it with a halo, `more` adds a "+N" badge on its end side (timeTagBadge wide). Decorative unless given a role.
+A tag's icon in a coloured ring; `active` grows it with a halo, `more` adds a "+N" badge on its end side (countChipPx wide). Decorative unless given a role.
 
 - File: https://lantos1618.github.io/oneshot-ui/files/tag-glyph.tsx
 - Kind: chart; area: charts; tags: monitoring, keyboard, new
@@ -1454,7 +1465,7 @@ A tag's icon in a coloured ring; `active` grows it with a halo, `more` adds a "+
 - Exports: TagGlyph
 - npm: react
 
-### Tag journal (`tag-journal`, ~16.7k tokens)
+### Tag journal (`tag-journal`, ~17.0k tokens)
 
 A time-ordered list of tags (pattern H: Oura and WHOOP journals): time, glyph, label and detail, optionally grouped by hour, virtualised so long days stay fast. Hovering or focusing a row lights that tag (`activeId` / `onActiveChange`), and when the active tag changes elsewhere (a linked chart) the list scrolls it into view without moving focus. `onEdit` / `onDelete` add labelled icon buttons. Keyboard: the list is one Tab stop (then the row's buttons), ↑/↓ move between rows, Home/End jump, Enter selects, Escape clears.
 
@@ -1465,7 +1476,7 @@ A time-ordered list of tags (pattern H: Oura and WHOOP journals): time, glyph, l
 - Embeds: Button, EmptyState, Icon, IconButton, Slot, Spinner, TagGlyph, VirtualList
 - npm: motion, react, react-dom
 
-### Tag tooltip (`tag-tooltip`, ~2.3k tokens)
+### Tag tooltip (`tag-tooltip`, ~2.7k tokens)
 
 Tooltip body for a tag: icon and label, the time (or from–to for a span) and the detail. Put it in any tooltip surface.
 
@@ -1475,7 +1486,7 @@ Tooltip body for a tag: icon and label, the time (or from–to for a span) and t
 - Exports: TagTooltip
 - npm: react
 
-### Ticker table (`ticker-table`, ~4.4k tokens)
+### Ticker table (`ticker-table`, ~4.5k tokens)
 
 Live price table: symbol, name, sparkline with an end dot, rolling last price and a % change pill (up/down coloured). Feed it new `data` to tick. Price and change cells have a fixed width with tabular digits, so a tick never moves a column.
 
@@ -1486,7 +1497,7 @@ Live price table: symbol, name, sparkline with an end dot, rolling last price an
 - Embeds: AnimatedNumber, DeltaBadge, SparkChart
 - npm: motion, react
 
-### Treemap (`treemap`, ~19.4k tokens)
+### Treemap (`treemap`, ~21.2k tokens)
 
 Squarified treemap: area ∝ value. Tiles grow out of their centres when scrolled into view and re-flow with a spring when values change; both run on transforms (motion layout animations), never on left/top/width/height. Hover, tap or arrow-key a tile to highlight it and see its share. `show` picks the second line: value or percent.
 
@@ -1494,8 +1505,8 @@ Squarified treemap: area ∝ value. Tiles grow out of their centres when scrolle
 - Kind: chart; area: charts; tags: dashboards, finance, hierarchy
 - Import: `@lyndon/ui/charts`
 - Exports: Treemap
-- Embeds: AnimatedNumber, Button, Icon, IconButton, Slot, Spinner
-- npm: motion, react
+- Embeds: AnimatedNumber, Button, Icon, IconButton, PointerTooltip, Slot, Spinner, VizTip
+- npm: motion, react, react-dom
 
 
 ## Extras: diagrams
@@ -1590,7 +1601,7 @@ SVG statechart: composite states, states, pseudo states (initial, final, history
 - Embeds: Icon, ScrollEdges
 - npm: motion, react
 
-### Trace waterfall (`trace-waterfall`, ~23.2k tokens)
+### Trace waterfall (`trace-waterfall`, ~24.0k tokens)
 
 Nested spans on one streaming timeline (agent runs, API requests, jobs). Plays when scrolled into view: bars grow with a cursor, the stat strip rolls (duration, cost, tokens, calls, errors) and a Live badge settles to Complete. Groups collapse. `failure` lets Simulate failure fail a span part-way and reveal its retry. Spawn connectors run from each parent bar, at the moment a child starts, down to that child's bar; hovering or tapping a span highlights its chain back to the root. Hover or tap a span for its numbers. On phones the timeline scrolls sideways with the span names pinned. `annotations` (deploys, approvals, retries; `at` in ms from the trace start) draw as dashed rules over the time grid with flags in a row of their own (reserved up front, so rows never move); flags that would overlap drop out to a dot on their rule, and `annotationStyle="rug"` shows icons instead, folding crowded ones into "+N". Hover, tap or focus a flag for its tooltip; the flag row is one Tab stop (←/→, Home/End, Escape). `run` draws an agent run instead of `spans` + `total` (a TraceRun: an AgentRun from useAgentRun or an adapter): spans become rows (agents and chains as groups, retrievals and human waits as tools), failed spans show their error, and the run's events (approvals, handoffs, errors, retries) become flags. A finished run plays like a trace; a running one grows live, its clock following the latest moment the run reported, with room ahead on the axis that extends as it fills.
 

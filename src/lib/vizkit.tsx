@@ -1,5 +1,7 @@
 /** Chart and diagram math: series colours, linear scales, polar points and pie wedges, axis ticks, track grid lines. Used by the viz modules, never by core. */
-import { cn, svgN } from './core'
+import { useEffect, useReducer, type ReactNode } from 'react'
+import { FOCUS, cn, svgN } from './core'
+import { PointerTooltip } from './overlay'
 
 /** A linear scale from the domain [d0, d1] onto [r0, r1]: `linScale(0, 100, 0, 320)(50)` → 160. A flat domain maps to the middle. */
 export function linScale(d0: number, d1: number, r0: number, r1: number) {
@@ -50,7 +52,57 @@ export function niceTicks(min: number, max: number, count = 4) {
 /** niceTicks clipped to [lo, hi]. */
 export const ticksIn = (lo: number, hi: number, count = 4) => niceTicks(lo, hi, count).filter(t => t >= lo - 1e-9 && t <= hi + 1e-9)
 
+/** Decimals that tell values `step` apart: tickDecimals(5) → 0, tickDecimals(0.2) → 1, tickDecimals(0.05) → 2. */
+export function tickDecimals(step: number) {
+  if (!(step > 0) || !Number.isFinite(step)) return 0
+  return Math.min(10, Math.max(0, Math.ceil(-Math.log10(step) - 1e-9)))
+}
+/** The step between ticks from niceTicks or ticksIn (1 for fewer than two). */
+export const tickStep = (ticks: readonly number[]) => (ticks.length > 1 ? Math.abs(ticks[1] - ticks[0]) : 1)
+
+/** Estimated width of one character of 10–11px chart text, px. */
+export const CHAR_PX = 6.5
+/** Estimated width of `chars` characters of chart text plus `pad`, px (axis gutters, label skipping, flags, chips). */
+export const textPx = (chars: number, pad = 0) => chars * CHAR_PX + pad
+
+/** Keyboard focus ring on a chart, timeline or mark (an outline, so it never fights a mark's own shadow). */
+export const VIZ_FOCUS = cn('outline-none focus-visible:outline-solid focus-visible:outline-offset-2', FOCUS.outline)
+/** Ring on the lit (hovered, focused or linked) mark of a chart or timeline. */
+export const VIZ_LIT_RING = 'shadow-[0_0_0_2px_var(--card),0_0_0_3.5px_var(--fg2)]'
+
 /** Faint vertical grid lines across a time track, at `at` (fractions of its width, 0…1). Place inside a relative box. */
 export function TrackGrid({ at, className }: { at: readonly number[]; className?: string }) {
   return <>{at.map(f => <span key={f} aria-hidden className={cn('pointer-events-none absolute inset-y-0 w-px bg-[var(--line)]', className)} style={{ left: `${f * 100}%` }} />)}</>
+}
+
+/** Where a viz tooltip points, in client coordinates (`touch` lifts it clear of a finger). */
+export type VizTipAnchor = { x: number; y: number; touch?: boolean }
+/** The client point a tooltip for element `el` points at: a little in from its left edge, at its top. */
+export function vizTipAnchor(el: Element | null | undefined): VizTipAnchor | null {
+  if (!el) return null
+  const r = el.getBoundingClientRect()
+  return { x: r.left + Math.min(r.width / 2, 60), y: r.top }
+}
+/**
+ * The tooltip of charts and timelines: overlay's PointerTooltip at `at()`, read on every render and again when anything
+ * scrolls or resizes, so it stays on its mark (keyboard, hover and linked views alike).
+ */
+export function VizTip({ at, children }: { at: () => VizTipAnchor | null; children: ReactNode }) {
+  const [, redraw] = useReducer((n: number) => n + 1, 0)
+  useEffect(() => {
+    let raf = 0
+    const on = () => {
+      cancelAnimationFrame(raf)
+      raf = requestAnimationFrame(redraw)
+    }
+    addEventListener('scroll', on, { capture: true, passive: true })
+    addEventListener('resize', on)
+    return () => {
+      cancelAnimationFrame(raf)
+      removeEventListener('scroll', on, { capture: true })
+      removeEventListener('resize', on)
+    }
+  }, [])
+  const p = at()
+  return p && <PointerTooltip tip={{ x: p.x, y: p.y, touch: p.touch, content: children }} />
 }

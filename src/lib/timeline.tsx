@@ -2,29 +2,20 @@
  * Swimlanes, state ribbons and linked event lists on a shared time axis. Tags are TimeTag (annotate.tsx): point
  * events (`at`) and spans (`at` → `end`) grouped by `kind`. Every view here is a plot: time runs left to right.
  */
-import { useEffect, useId, useLayoutEffect, useMemo, useRef, useState, type CSSProperties, type FocusEvent as ReactFocusEvent, type KeyboardEvent as ReactKeyboardEvent, type PointerEvent as ReactPointerEvent, type ReactNode, type RefObject } from 'react'
-import { motion } from 'motion/react'
-import { IconButton, cn, isTouch, safeColor, spring, surface, useControllable, useOutside, useWidth, type LocaleFmt, plural, fmt, Legend } from './core'
+import { useEffect, useId, useLayoutEffect, useMemo, useRef, useState, type CSSProperties, type FocusEvent as ReactFocusEvent, type KeyboardEvent as ReactKeyboardEvent, type PointerEvent as ReactPointerEvent, type ReactNode } from 'react'
+import { IconButton, cn, gridKeyMove, isTouch, safeColor, useControllable, useOutside, useWidth, plural, fmt, Legend } from './core'
 import { EmptyState } from './feedback'
 import { VirtualList, type VirtualListHandle } from './virtual'
-import { TrackGrid, seriesColor } from './vizkit'
-import { TagGlyph, TagTooltip, layoutTimeTags, timeTagMs, timeTicks, type TimeTag, type TimeTagKind } from './annotate'
+import { TrackGrid, VIZ_FOCUS, VIZ_LIT_RING, VizTip, linScale, vizTipAnchor } from './vizkit'
+import { TagGlyph, TagTooltip, countChipPx, layoutTimeTags, resolveTagKinds, timeTagLook, timeTagMs, timeTagTint, timeTicks, type TagKinds, type TimeTag, type TimeTagKind } from './annotate'
 
 export type { TimeTag, TimeTagKind } from './annotate'
 
 /** Default lane height for swimlanes, px. */
 export const TIMELINE_LANE_HEIGHT = 22
 
-type TlKind = TimeTagKind & { color: string }
-/** Kind lookup with a palette colour for kinds that don't name one; kinds only seen on tags take their first tag's label. */
-function timelineKinds(kinds: TimeTagKind[] | undefined, tags: TimeTag[]) {
-  const map = new Map<string, TlKind>()
-  const add = (k: TimeTagKind) => { if (!map.has(k.kind)) map.set(k.kind, { ...k, color: seriesColor(map.size, k.color) }) }
-  kinds?.forEach(add)
-  tags.forEach(t => add({ kind: t.kind, label: t.label }))
-  return map
-}
-const timelineColor = (tag: TimeTag, k?: TlKind) => safeColor(tag.color ?? k?.color, 'var(--c-neutral)')
+/** Time → px across `width` (a flat range maps to the start). */
+const timelineX = (start: number, end: number, width: number) => linScale(start, Math.max(end, start + 1), 0, width)
 
 /** One mark placed on a row: the tags it stands for (several when merged), its time span and its px box. */
 export type TimelineMark = { key: string; tags: TimeTag[]; from: number; to: number; x: number; w: number }
@@ -34,9 +25,9 @@ export type TimelineMark = { key: string; tags: TimeTag[]; from: number; to: num
  * between their edges (closer ones merge), `chip(n)` the width of a count chip for n tags. Merges the closest pair first and repeats,
  * so a chip that grows into its neighbour swallows it too. Pure (exported for tests and custom views).
  */
-export function clusterTimeMarks(tags: TimeTag[], { start, end, width, size = 6, gap = 0, chip = n => 14 + String(n).length * 6 }:
+export function clusterTimeMarks(tags: TimeTag[], { start, end, width, size = 6, gap = 0, chip = countChipPx }:
   { start: number; end: number; width: number; size?: number; gap?: number; chip?: (n: number) => number }): TimelineMark[] {
-  const span = Math.max(1, end - start), X = (t: number) => ((t - start) / span) * width
+  const X = timelineX(start, end, width)
   const sorted = [...tags].sort((a, b) => timeTagMs(a.at) - timeTagMs(b.at))
   const out: (TimelineMark & { sx: number })[] = sorted.map(t => { const at = timeTagMs(t.at), x = X(at); return { key: t.id, tags: [t], from: at, to: at, x, w: size, sx: x } })
   for (;;) {
@@ -60,7 +51,7 @@ export type RibbonSegment = TimelineMark & { mixed: boolean }
  * `minPx` wide; a run of two or more such slivers merges into one `mixed` segment that lists them all. Pure.
  */
 export function ribbonSegments(states: TimeTag[], { start, end, width, minPx = 4 }: { start: number; end: number; width: number; minPx?: number }): RibbonSegment[] {
-  const span = Math.max(1, end - start), X = (t: number) => ((t - start) / span) * width
+  const X = timelineX(start, end, width)
   const sorted = [...states].sort((a, b) => timeTagMs(a.at) - timeTagMs(b.at))
   const raw = sorted.map((s, i) => {
     const from = Math.max(start, timeTagMs(s.at)), to = Math.min(end, s.end !== undefined ? timeTagMs(s.end) : i < sorted.length - 1 ? timeTagMs(sorted[i + 1].at) : end)
@@ -81,44 +72,43 @@ export function ribbonSegments(states: TimeTag[], { start, end, width, minPx = 4
   return out
 }
 
-/** Ticks for a plot `width` px wide (annotate's timeTicks, in the locale's clock). */
-const timelineTicks = (start: number, end: number, width: number, fmt: LocaleFmt, minPx = 64) => timeTicks(start, end, width, t => fmt.time(t), minPx)
-
 /** "1 h 35 min" from milliseconds. */
-function timelineDuration(ms: number, fmt: LocaleFmt) {
+function timelineDuration(ms: number) {
   const min = Math.max(0, Math.round(ms / 60e3)), h = Math.floor(min / 60), mm = min % 60
   return [h && `${fmt.number(h)} h`, (mm || !h) && `${fmt.number(mm)} min`].filter(Boolean).join(' ')
 }
 
-/** What a mark is called: one tag, a span, or a merged cluster. */
-function useTimelineText(kinds: Map<string, TlKind>) {
-  const time = (t: number) => fmt.time(t)
-  const tagText = (t: TimeTag) => {
-    const at = timeTagMs(t.at)
-    return t.end !== undefined ? `${t.label}, ${time(at)} to ${time(timeTagMs(t.end))}, ${timelineDuration(timeTagMs(t.end) - at, fmt)}` : `${t.label}, ${time(at)}`
-  }
-  const markText = (mk: Pick<TimelineMark, 'tags' | 'from' | 'to'>) => {
-    if (mk.tags.length === 1) return tagText(mk.tags[0])
-    const one = mk.tags.every(t => t.kind === mk.tags[0].kind)
-    const to = Math.max(...mk.tags.map(t => timeTagMs(t.end ?? t.at)))
-    return one ? `${plural(mk.tags.length, 'tag')}: ${kinds.get(mk.tags[0].kind)?.label ?? mk.tags[0].label}, ${time(mk.from)} to ${time(to)}`
-      : `${plural(mk.tags.length, 'tag')}, ${time(mk.from)} to ${time(to)}`
-  }
-  return { fmt, time, tagText, markText }
+/** What a tag is called: "Lunch, 12:30 to 13:05, 35 min" or "Water, 10:40". */
+function timelineTagText(t: TimeTag) {
+  const at = timeTagMs(t.at)
+  if (t.end === undefined) return `${t.label}, ${fmt.time(at)}`
+  return `${t.label}, ${fmt.time(at)} to ${fmt.time(timeTagMs(t.end))}, ${timelineDuration(timeTagMs(t.end) - at)}`
 }
+/** What a mark is called: one tag, or a merged cluster ("3 tags: Water, 15:00 to 15:02"). */
+function timelineMarkText(mk: Pick<TimelineMark, 'tags' | 'from' | 'to'>, kinds: TagKinds) {
+  if (mk.tags.length === 1) return timelineTagText(mk.tags[0])
+  const one = mk.tags.every(t => t.kind === mk.tags[0].kind)
+  const to = Math.max(...mk.tags.map(t => timeTagMs(t.end ?? t.at)))
+  const what = one ? `${plural(mk.tags.length, 'tag')}: ${kinds.get(mk.tags[0].kind)?.label ?? mk.tags[0].label}` : plural(mk.tags.length, 'tag')
+  return `${what}, ${fmt.time(mk.from)} to ${fmt.time(to)}`
+}
+/** How the timeline keyboard works, read after each view's summary. */
+const TL_HELP = 'Arrow keys move between tags, up and down between rows. Enter selects, Escape clears.'
+/** "12 tags from 09:00 to 17:30." */
+const timelineSummary = (n: number, start: number, end: number) => `${plural(n, 'tag', 'tags', { zero: 'No tags' })} from ${fmt.time(start)} to ${fmt.time(end)}.`
 
 /** annotate's TagGlyph in the tag's (or its kind's) colour and icon. */
-function TimelineGlyph({ tag, kind, size = 18, active, more, className }: { tag: TimeTag; kind?: TlKind; size?: number; active?: boolean; more?: number; className?: string }) {
-  return <TagGlyph aria-hidden icon={tag.icon ?? kind?.icon} color={timelineColor(tag, kind)} size={size} active={active} more={more} className={className} />
+function TimelineGlyph({ tag, kinds, size = 18, active, more, className }: { tag: TimeTag; kinds: TagKinds; size?: number; active?: boolean; more?: number; className?: string }) {
+  const { icon, color } = timeTagLook(tag, kinds)
+  return <TagGlyph aria-hidden icon={icon} color={color} size={size} active={active} more={more} className={className} />
 }
 
 /** Tooltip body for one or more tags: glyph, label, time (and duration for spans), detail; long lists roll up. */
-function TimelineTipBody({ tags, kinds, extra }: { tags: TimeTag[]; kinds: Map<string, TlKind>; extra?: ReactNode }) {
-  const { fmt } = useTimelineText(kinds)
+function TimelineTipBody({ tags, kinds, extra }: { tags: TimeTag[]; kinds: TagKinds; extra?: ReactNode }) {
   const shown = tags.slice(0, 5)
   if (tags.length === 1) {
     const t = tags[0]
-    return <TagTooltip tag={t} kinds={[...kinds.values()]} extra={t.end !== undefined || extra ? <>{t.end !== undefined && timelineDuration(timeTagMs(t.end) - timeTagMs(t.at), fmt)}{extra}</> : undefined} />
+    return <TagTooltip tag={t} kinds={kinds} extra={t.end !== undefined || extra ? <>{t.end !== undefined && timelineDuration(timeTagMs(t.end) - timeTagMs(t.at))}{extra}</> : undefined} />
   }
   return (
     <div className="flex flex-col gap-1">
@@ -126,50 +116,31 @@ function TimelineTipBody({ tags, kinds, extra }: { tags: TimeTag[]; kinds: Map<s
         const at = timeTagMs(t.at)
         return (
           <div key={t.id} className="flex items-start gap-2">
-            <TimelineGlyph tag={t} kind={kinds.get(t.kind)} size={16} className="mt-px" />
+            <TimelineGlyph tag={t} kinds={kinds} size={16} className="mt-px" />
             <div className="min-w-0">
               <b className="font-medium">{t.label}</b> <span className="ui-num text-[var(--fg2)]">{fmt.time(at)}{t.end !== undefined && <>–{fmt.time(timeTagMs(t.end))}</>}</span>
             </div>
           </div>
         )
       })}
-      {tags.length > shown.length && <div className="text-[var(--fg3)]">{`+${tags.length - shown.length} more`}</div>}
+      {tags.length > shown.length && <div className="text-[var(--fg3)]">+{tags.length - shown.length} more</div>}
       {extra}
     </div>
   )
 }
 
-/** In-box tooltip above (or below) an anchor element, clamped to the box; text follows the locale. */
-function TimelineTip({ box, anchor, children }: { box: RefObject<HTMLElement | null>; anchor: HTMLElement | null; children: ReactNode }) {
-  const ref = useRef<HTMLDivElement>(null)
-  const [pos, setPos] = useState<{ left: number; top: number } | null>(null)
-  useLayoutEffect(() => {
-    const b = box.current, el = ref.current
-    if (!b || !el || !anchor) { if (pos) setPos(null); return }
-    const br = b.getBoundingClientRect(), ar = anchor.getBoundingClientRect(), tw = el.offsetWidth, th = el.offsetHeight
-    const cx = ar.left + ar.width / 2 - br.left, above = ar.top - br.top - th - 8
-    const left = Math.max(0, Math.min(br.width - tw, cx - tw / 2)), top = above >= -th / 2 ? above : ar.bottom - br.top + 8
-    if (!pos || Math.abs(pos.left - left) > 0.5 || Math.abs(pos.top - top) > 0.5) setPos({ left, top })
-  })
-  if (!anchor) return null
-  return (
-    <motion.div ref={ref} aria-hidden className={cn(surface.floating, 'pointer-events-none absolute top-0 left-0 z-20 w-max max-w-[min(280px,calc(100vw-40px))] rounded-[var(--r-md)] px-2.5 py-1.5 text-xs leading-snug text-[var(--fg)]')}
-      initial={false} animate={pos ? { x: pos.left, y: pos.top, opacity: 1 } : { opacity: 0 }} transition={pos ? spring(0.1, 0.25) : { duration: 0 }}>
-      {children}
-    </motion.div>
-  )
-}
-
 type TlSource = 'hover' | 'focus' | 'tap' | null
+/**
+ * The page's last pointermove position (one shared capture listener): a pointerenter at exactly that spot came from
+ * content scrolling under a resting cursor (page or list scroll), not from the pointer crossing into the element.
+ */
+let timelineLastPointer: { x: number; y: number } | null = null, timelinePointerWatch = false
 /**
  * Hover only counts as intent after real pointer movement. When a list or lane scrolls itself (keyboard moves, a
  * linked view bringing a row into view), rows slide under a resting cursor and fire pointerenter; `arm()` before such
  * a scroll makes `allow()` refuse those until a pointermove at new coordinates (browsers' synthetic moves after a
  * scroll repeat the old ones).
  */
-/** The page's last pointermove position (one shared capture listener): a pointerenter at exactly that spot came from
- * content scrolling under a resting cursor (page or list scroll), not from the pointer crossing into the element. */
-let timelineLastPointer: { x: number; y: number } | null = null, timelinePointerWatch = false
 function useTimelineHoverGuard() {
   const pos = useRef<{ x: number; y: number } | null>(null), armed = useRef<{ x: number; y: number } | null | false>(false)
   useEffect(() => {
@@ -189,10 +160,10 @@ function useTimelineHoverGuard() {
 }
 type TlRow = { key: string; marks: TimelineMark[] }
 /**
- * Roving focus over rows of marks (lanes, or the ribbon's pin / state / bar rows): the group is one Tab stop, ←/→ move
- * along a row (later is →, as the plot runs left to right in every locale), ↑/↓ jump to the nearest mark in the next
- * row that has any, Home/End go to the row's ends, Enter or a click selects, Escape clears. Hover, focus and tap set
- * the active tag; leaving clears what that same pointer or focus set.
+ * Roving focus over rows of marks (lanes, or the ribbon's pin / state / bar rows; real buttons, so roving tabindex
+ * rather than a chart's activedescendant): the group is one Tab stop, ←/→ move along a row, ↑/↓ jump to the nearest
+ * mark in the next row that has any, Home/End go to the row's ends, Enter or a click selects, Escape clears. Hover,
+ * focus and tap set the active tag; leaving clears what that same pointer or focus set.
  */
 function useTimelineNav(rows: TlRow[], active: string | null, setActive: (id: string | null) => void, onSelect?: (tag: TimeTag) => void) {
   const els = useRef(new Map<string, HTMLElement>())
@@ -209,26 +180,26 @@ function useTimelineNav(rows: TlRow[], active: string | null, setActive: (id: st
     const row = rows[at.ri].marks, mid = (mk: TimelineMark) => (mk.from + mk.to) / 2
     const nearest = (step: 1 | -1) => {
       for (let r = at.ri + step; r >= 0 && r < rows.length; r += step) {
-        const ms = rows[r].marks; if (!ms.length) continue
+        const ms = rows[r].marks
+        if (!ms.length) continue
         const c = mid(at.mk)
         return ms.reduce((b, q) => (Math.abs(mid(q) - c) < Math.abs(mid(b) - c) ? q : b), ms[0])
       }
       return undefined
     }
-    let next: TimelineMark | undefined
-    switch (e.key) {
-      case 'ArrowRight': next = row[Math.min(row.length - 1, at.ci + 1)]; break
-      case 'ArrowLeft': next = row[Math.max(0, at.ci - 1)]; break
-      case 'ArrowDown': next = nearest(1) ?? at.mk; break
-      case 'ArrowUp': next = nearest(-1) ?? at.mk; break
-      case 'Home': next = row[0]; break
-      case 'End': next = row[row.length - 1]; break
-      case 'Escape': if (active !== null) { e.preventDefault(); set(null, null) } return
-      default: return
+    if (e.key === 'Escape') {
+      if (active !== null) { e.preventDefault(); set(null, null) }
+      return
     }
+    // ↑/↓ go to the nearest mark in time on another row, not to the same index (rows differ in length)
+    const vertical = e.key === 'ArrowDown' ? 1 : e.key === 'ArrowUp' ? -1 : 0
+    const along = vertical ? null : gridKeyMove(e.key, at.ci, row.length, row.length)
+    const next = vertical ? nearest(vertical) ?? at.mk : along === null ? undefined : row[along]
+    if (!next) return
     e.preventDefault()
     if (next === at.mk) { set(next.tags[0].id, 'focus'); return }
-    if (next) { guard.arm(); els.current.get(next.key)?.focus() } // focusing may scroll the lanes under the cursor
+    guard.arm() // focusing may scroll the lanes under the cursor
+    els.current.get(next.key)?.focus()
   }
   const groupProps = {
     onKeyDown,
@@ -247,17 +218,13 @@ function useTimelineNav(rows: TlRow[], active: string | null, setActive: (id: st
   })
   return {
     groupProps, markProps, activeKey: activeMark?.mk.key ?? null,
-    anchor: activeMark ? els.current.get(activeMark.mk.key) ?? null : null,
+    anchor: () => (activeMark ? els.current.get(activeMark.mk.key) ?? null : null),
     clearTap: () => { if (source.current === 'tap') set(null, null) },
   }
 }
 
 /** Diameter of a swimlane dot, px. */
 const TL_DOT = 10
-/** Focus ring for marks inside a timeline. */
-const TL_FOCUS = 'outline-none focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-solid focus-visible:outline-[var(--accent)]'
-/** Ring on the lit mark. */
-const TL_LIT = 'shadow-[0_0_0_2px_var(--card),0_0_0_3.5px_var(--fg2)]'
 
 /** Shared linking props: the tag that is lit (hover, focus, tap or a linked view) and what happens on select. */
 export type TimelineLinkProps = {
@@ -271,7 +238,7 @@ export type TimelineLinkProps = {
 
 /** Time axis labels under a plot column (percent positions, so it needs no measuring). */
 function TimelineAxis({ ticks, start, end, className }: { ticks: { ms: number; label: string }[]; start: number; end: number; className?: string }) {
-  const f = (t: number) => (t - start) / Math.max(1, end - start)
+  const f = timelineX(start, end, 1)
   // labels centre on their tick; the ones at the very ends hug the edge instead of spilling out of the box
   return (
     <div aria-hidden className={cn('relative h-5 text-[10px] text-[var(--fg3)] ui-num', className)}>
@@ -294,7 +261,7 @@ export type SwimlanesProps = TimelineLinkProps & {
   hideEmpty?: boolean
   /** a chart (or anything) drawn above the lanes on the same x range */
   top?: ReactNode
-  /** px between `top`'s box edges and its plot (Chart's default gutters: 40 left, 10 right) */
+  /** px between `top`'s box edges and its plot (default: read from a Chart in `top`, else 40 left and 10 right) */
   topInset?: { left?: number; right?: number }
   /** lanes shown before the lane area scrolls (default 8) */
   maxLanes?: number
@@ -313,6 +280,21 @@ export type SwimlanesProps = TimelineLinkProps & {
   className?: string
 }
 
+/** How a swimlane mark draws: a span pill (tinted, stronger when lit), a count chip for merged dots, or a dot. */
+function swimMarkLook(mk: TimelineMark, color: string, lit: boolean, left: number, pct: (t: number) => number): { className: string; style: CSSProperties } {
+  if (mk.tags[0].end !== undefined) {
+    const from = pct(mk.from)
+    return { className: 'h-2.5 rounded-full', style: { left: `${from}%`, width: `max(8px, ${pct(mk.to) - from}%)`, background: timeTagTint(color, lit ? 85 : 60) } }
+  }
+  if (mk.tags.length > 1) {
+    return {
+      className: 'ui-num grid h-4 min-w-[18px] -translate-x-1/2 place-items-center rounded-full border-[1.5px] border-solid bg-[var(--card)] px-1 text-[10px] leading-none font-semibold text-[var(--fg)]',
+      style: { left: `${left}%`, borderColor: color },
+    }
+  }
+  return { className: '-translate-x-1/2 rounded-full', style: { left: `${left}%`, width: TL_DOT, height: TL_DOT, background: color } }
+}
+
 /** Swimlanes' label column width per `labels` mode (literal class strings for Tailwind). */
 const SWIM_LABEL_COL = { auto: '[--tl-lw:30px] @[480px]:[--tl-lw:112px]', always: '[--tl-lw:84px] @[480px]:[--tl-lw:112px]', icon: '[--tl-lw:30px]' } as const
 /** Swimlanes' label text per `labels` mode: hidden on narrow widths, compact and wrapping, or never shown. */
@@ -328,17 +310,16 @@ const SWIM_LABEL_TEXT = {
  * to the same `start`–`end`. Dots closer than `mergePx` merge into a count chip; empty lanes say "None" (or hide with
  * `hideEmpty`); more than `maxLanes` lanes scroll. Hover, focus or tap a mark for its tooltip. Keyboard: the lanes are
  * one Tab stop, ←/→ move along a lane, ↑/↓ between lanes, Enter selects, Escape clears. Link it to other views with
- * `activeId` / `onActiveChange`. The plot runs left to right in every locale; labels and tooltips follow the locale.
- * `labels="always"` keeps lane names on phones (a compact column) instead of the icon alone.
+ * `activeId` / `onActiveChange`. `labels="always"` keeps lane names on phones (a compact column) instead of the icon alone.
  */
 export function Swimlanes({ tags, kinds: kindsProp, start: startProp, end: endProp, order = 'kinds', hideEmpty, top, topInset, maxLanes = 8, mergePx = 6, axis = true, labels = 'auto',
   activeId, defaultActiveId = null, onActiveChange, onSelect, label, className }: SwimlanesProps) {
-  const start = timeTagMs(startProp), end = timeTagMs(endProp), span = Math.max(1, end - start)
-  const kinds = useMemo(() => timelineKinds(kindsProp, tags), [kindsProp, tags])
-  const { fmt, markText } = useTimelineText(kinds)
+  const start = timeTagMs(startProp), end = timeTagMs(endProp)
+  const kinds = useMemo(() => resolveTagKinds(kindsProp, tags), [kindsProp, tags])
   const [active, setActive] = useControllable(activeId, defaultActiveId, onActiveChange)
   const [plotRef, plotW] = useWidth<HTMLDivElement>()
   const box = useRef<HTMLDivElement>(null)
+  const topBox = useRef<HTMLDivElement>(null)
   const scroller = useRef<HTMLDivElement>(null)
   const [fade, setFade] = useState({ top: false, bottom: false })
   const ids = useId()
@@ -359,49 +340,54 @@ export function Swimlanes({ tags, kinds: kindsProp, start: startProp, end: endPr
   }), [lanes, plotW, start, end, mergePx])
   const nav = useTimelineNav(rows, active, setActive, onSelect)
   useOutside([box], nav.clearTap, active !== null)
-  const ticks = useMemo(() => timelineTicks(start, end, plotW, fmt), [start, end, plotW, fmt])
-  const pct = (t: number) => ((Math.min(end, Math.max(start, t)) - start) / span) * 100
+  const ticks = useMemo(() => timeTicks(start, end, plotW), [start, end, plotW])
+  const toPct = timelineX(start, end, 100), pct = (t: number) => toPct(Math.min(end, Math.max(start, t)))
   const scrolls = lanes.length > maxLanes
   useEffect(() => {
-    const el = scroller.current; if (!el || !scrolls) return
+    const el = scroller.current
+    if (!el || !scrolls) return
     const upd = () => setFade(f => { const t = el.scrollTop > 2, b = el.scrollTop < el.scrollHeight - el.clientHeight - 2; return f.top === t && f.bottom === b ? f : { top: t, bottom: b } })
-    upd(); el.addEventListener('scroll', upd, { passive: true }); return () => el.removeEventListener('scroll', upd)
+    upd()
+    el.addEventListener('scroll', upd, { passive: true })
+    return () => el.removeEventListener('scroll', upd)
   }, [scrolls, lanes.length])
+  // a Chart on top reports its plot gutters (data-plot-inset), so the lanes line up with it without guessing
+  const [chartInset, setChartInset] = useState<[number, number] | null>(null)
+  useLayoutEffect(() => {
+    const v = topBox.current?.querySelector('[data-plot-inset]')?.getAttribute('data-plot-inset')?.split(' ').map(Number)
+    const next: [number, number] | null = v && v.length === 2 && v.every(Number.isFinite) ? [v[0], v[1]] : null
+    setChartInset(c => (c?.[0] === next?.[0] && c?.[1] === next?.[1] ? c : next))
+  })
   const activeMark = rows.flatMap(r => r.marks).find(mk => mk.key === nav.activeKey)
-  const insetL = topInset?.left ?? 40, insetR = topInset?.right ?? 10
+  const insetL = topInset?.left ?? chartInset?.[0] ?? 40, insetR = topInset?.right ?? chartInset?.[1] ?? 10
   const laneH = TIMELINE_LANE_HEIGHT + 4
 
   return (
     <div className={cn('@container', className)}>
-      {/* the plot runs left to right in every locale; lane labels and tooltips follow the locale */}
       <div ref={box} className={cn('relative [--tl-rp:16px]', SWIM_LABEL_COL[labels] ?? SWIM_LABEL_COL.auto)}>
-        {top && <div style={{ marginLeft: `calc(var(--tl-lw) - ${insetL}px)`, marginRight: `calc(var(--tl-rp) - ${insetR}px)` }}>{top}</div>}
-        <div role="group" aria-roledescription={'timeline'} aria-label={label ?? 'Tags by kind'} aria-describedby={`${ids}-sum`} {...nav.groupProps} className="relative">
-          <span id={`${ids}-sum`} className="sr-only">{`${tags.length === 0 ? 'No tags' : tags.length === 1 ? `${tags.length} tag` : `${tags.length} tags`} from ${fmt.time(start)} to ${fmt.time(end)}.`} {'Arrow keys move between tags, up and down between rows. Enter selects, Escape clears.'}</span>
+        {top && <div ref={topBox} style={{ marginLeft: `calc(var(--tl-lw) - ${insetL}px)`, marginRight: `calc(var(--tl-rp) - ${insetR}px)` }}>{top}</div>}
+        <div role="group" aria-roledescription="timeline" aria-label={label ?? 'Tags by kind'} aria-describedby={`${ids}-sum`} {...nav.groupProps} className="relative">
+          <span id={`${ids}-sum`} className="sr-only">{timelineSummary(tags.length, start, end)} {TL_HELP}</span>
           <div ref={scroller} className={cn('relative', scrolls && 'overflow-y-auto overscroll-contain')} style={scrolls ? { maxHeight: maxLanes * laneH + 4 } : undefined}>
             <div className="relative py-0.5">
               <div className="pointer-events-none absolute inset-y-0 start-[var(--tl-lw)] end-[var(--tl-rp)]"><TrackGrid at={ticks.map(k => (k.ms - start) / Math.max(1, end - start))} /></div>
               {lanes.map((l, li) => (
-                <div key={l.kind.kind} role="group" aria-label={`${l.kind.label}: ${l.tags.length === 0 ? 'no tags' : l.tags.length === 1 ? `${l.tags.length} tag` : `${l.tags.length} tags`}`}
-                  className="grid grid-cols-[var(--tl-lw)_minmax(0,1fr)_var(--tl-rp)] items-center [contain-intrinsic-size:auto_26px] [content-visibility:auto]" style={{ height: laneH }}>
+                <div key={l.kind.kind} role="group" aria-label={`${l.kind.label}: ${plural(l.tags.length, 'tag', 'tags', { zero: 'no tags' })}`}
+                  className="grid grid-cols-[var(--tl-lw)_minmax(0,1fr)_var(--tl-rp)] items-center [content-visibility:auto]" style={{ height: laneH, containIntrinsicSize: `auto ${laneH}px` }}>
                   <div aria-hidden title={l.kind.label} className="flex min-w-0 items-center gap-1.5 pe-2 text-xs text-[var(--fg2)]">
                     <span className="grid h-4 w-4 flex-none place-items-center text-[13px] leading-none" style={{ color: safeColor(l.kind.color) }}>{l.kind.icon ?? <span className="h-2 w-2 rounded-full" style={{ background: safeColor(l.kind.color) }} />}</span>
                     <span className={SWIM_LABEL_TEXT[labels] ?? SWIM_LABEL_TEXT.auto}>{l.kind.label}</span>
                   </div>
-                  <div className="relative h-[22px] rounded-full bg-[color-mix(in_srgb,var(--muted)_75%,transparent)]">
-                    {!l.tags.length && <span className="absolute inset-y-0 start-2.5 flex items-center text-[11px] text-[var(--fg3)] italic">{'None'}</span>}
+                  <div className="relative rounded-full bg-[color-mix(in_srgb,var(--muted)_75%,transparent)]" style={{ height: TIMELINE_LANE_HEIGHT }}>
+                    {!l.tags.length && <span className="absolute inset-y-0 start-2.5 flex items-center text-[11px] text-[var(--fg3)] italic">None</span>}
                     {rows[li].marks.map(mk => {
-                      const t0 = mk.tags[0], color = timelineColor(t0, kinds.get(t0.kind)), isSpan = t0.end !== undefined, n = mk.tags.length
-                      const left = isSpan || !(plotW > 0) ? pct(mk.from) : (mk.x / plotW) * 100
-                      const lit = nav.activeKey === mk.key
-                      const style: CSSProperties = isSpan
-                        ? { left: `${left}%`, width: `max(8px, ${pct(mk.to) - left}%)`, background: `color-mix(in srgb, ${color} ${lit ? 85 : 60}%, var(--card))` }
-                        : n > 1 ? { left: `${left}%`, borderColor: color } : { left: `${left}%`, background: color }
+                      const t0 = mk.tags[0], { color } = timeTagLook(t0, kinds), lit = nav.activeKey === mk.key
+                      const look = swimMarkLook(mk, color, lit, plotW > 0 ? (mk.x / plotW) * 100 : pct(mk.from), pct)
                       return (
-                        <button key={mk.key} type="button" {...nav.markProps(mk)} style={style}
-                          className={cn('ui-target absolute top-1/2 -translate-y-1/2 cursor-pointer border-0 p-0 transition-[box-shadow] duration-150', TL_FOCUS,
- isSpan ? 'h-2.5 rounded-full' : n > 1 ? 'ui-num grid h-4 min-w-[18px] -translate-x-1/2 place-items-center rounded-full border-[1.5px] border-solid bg-[var(--card)] px-1 text-[10px] leading-none font-semibold text-[var(--fg)]' : 'h-2.5 w-2.5 -translate-x-1/2 rounded-full',
-                            lit && TL_LIT)}>{n > 1 && <span aria-hidden>{n}</span>}<span className="sr-only">{markText(mk)}</span></button>
+                        <button key={mk.key} type="button" {...nav.markProps(mk)} style={look.style}
+                          className={cn('ui-target absolute top-1/2 -translate-y-1/2 cursor-pointer border-0 p-0 transition-[box-shadow] duration-150', VIZ_FOCUS, look.className, lit && VIZ_LIT_RING)}>
+                          {mk.tags.length > 1 && <span aria-hidden>{mk.tags.length}</span>}<span className="sr-only">{timelineMarkText(mk, kinds)}</span>
+                        </button>
                       )
                     })}
                   </div>
@@ -416,7 +402,7 @@ export function Swimlanes({ tags, kinds: kindsProp, start: startProp, end: endPr
           </>}
         </div>
         <div className="grid grid-cols-[var(--tl-lw)_minmax(0,1fr)_var(--tl-rp)]"><span /><div ref={plotRef}>{axis && <TimelineAxis ticks={ticks} start={start} end={end} />}</div><span /></div>
-        {activeMark && <TimelineTip box={box} anchor={nav.anchor}><TimelineTipBody tags={activeMark.tags} kinds={kinds} /></TimelineTip>}
+        {activeMark && <VizTip at={() => vizTipAnchor(nav.anchor())}><TimelineTipBody tags={activeMark.tags} kinds={kinds} /></VizTip>}
       </div>
     </div>
   )
@@ -460,10 +446,9 @@ export type StateRibbonProps = TimelineLinkProps & {
  */
 export function StateRibbon({ states, pins = [], bars = [], kinds: kindsProp, start: startProp, end: endProp, size = 'md', minPx = 4, legend = true, axis = true,
   activeId, defaultActiveId = null, onActiveChange, onSelect, label, className }: StateRibbonProps) {
-  const start = timeTagMs(startProp), end = timeTagMs(endProp), span = Math.max(1, end - start)
+  const start = timeTagMs(startProp), end = timeTagMs(endProp)
   const all = useMemo(() => [...states, ...pins, ...bars], [states, pins, bars])
-  const kinds = useMemo(() => timelineKinds(kindsProp, all), [kindsProp, all])
-  const { fmt, markText } = useTimelineText(kinds)
+  const kinds = useMemo(() => resolveTagKinds(kindsProp, all), [kindsProp, all])
   const [active, setActive] = useControllable(activeId, defaultActiveId, onActiveChange)
   const [plotRef, w] = useWidth<HTMLDivElement>()
   const box = useRef<HTMLDivElement>(null)
@@ -475,18 +460,18 @@ export function StateRibbon({ states, pins = [], bars = [], kinds: kindsProp, st
   const pinMarks = useMemo(() => {
     if (!(w > 0)) return pins.map(t => ({ key: t.id, tags: [t], from: timeTagMs(t.at), to: timeTagMs(t.at), x: NaN, w: 0, row: 0 }))
     const byId = new Map(pins.map(t => [t.id, t]))
-    return layoutTimeTags(pins, { x: ms => ((ms - start) / span) * w, width: w, style: 'rug', maxStack: S.stack, size: S.pin, minGap: 10 }).points.filter(p => !p.hidden).map(p => {
-      const more = (p.more ?? []).map(id => byId.get(id)!).filter(Boolean)
+    return layoutTimeTags(pins, { x: timelineX(start, end, w), width: w, style: 'rug', maxStack: S.stack, size: S.pin, minGap: 10 }).points.filter(p => !p.hidden).map(p => {
+      const more = (p.more ?? []).flatMap(id => byId.get(id) ?? [])
       return { key: p.tag.id, tags: [p.tag, ...more], from: p.ms, to: Math.max(p.ms, ...more.map(q => timeTagMs(q.at))), x: p.x, w: S.pin, row: p.row }
     })
-  }, [pins, start, span, w, S.pin, S.stack])
+  }, [pins, start, end, w, S.pin, S.stack])
   const pinStep = S.pin + 6 // room for a "+N" badge between rows (it also takes the 10px minGap beside a glyph)
   const barMarks = useMemo(() => bars.map(t => ({ key: t.id, tags: [t], from: Math.max(start, timeTagMs(t.at)), to: Math.min(end, timeTagMs(t.end ?? t.at)), x: NaN, w: 0 })), [bars, start, end])
   const rows: TlRow[] = [{ key: 'pins', marks: pinMarks }, { key: 'states', marks: segs }, { key: 'bars', marks: barMarks }]
   const nav = useTimelineNav(rows, active, setActive, onSelect)
   useOutside([box], nav.clearTap, active !== null)
-  const ticks = useMemo(() => timelineTicks(start, end, w, fmt, size === 'compact' ? 56 : 64), [start, end, w, fmt, size])
-  const pct = (t: number) => ((Math.min(end, Math.max(start, t)) - start) / span) * 100
+  const ticks = useMemo(() => timeTicks(start, end, w, undefined, size === 'compact' ? 56 : 64), [start, end, w, size])
+  const toPct = timelineX(start, end, 100), pct = (t: number) => toPct(Math.min(end, Math.max(start, t)))
   const at = (mk: TimelineMark, t: number) => (w > 0 && Number.isFinite(mk.x) ? (mk.x / w) * 100 : pct(t))
   const totals = useMemo(() => {
     const by = new Map<string, number>()
@@ -499,18 +484,18 @@ export function StateRibbon({ states, pins = [], bars = [], kinds: kindsProp, st
   return (
     <div className={className}>
       <div ref={box} className="relative">
-        <div role="group" aria-roledescription={'timeline'} aria-label={label ?? 'States over time'} aria-describedby={`${ids}-sum`} {...nav.groupProps} className={cn('relative flex flex-col', S.gap)}>
-          <span id={`${ids}-sum`} className="sr-only">{`${all.length === 0 ? 'No tags' : all.length === 1 ? `${all.length} tag` : `${all.length} tags`} from ${fmt.time(start)} to ${fmt.time(end)}.`} {'Arrow keys move between tags, up and down between rows. Enter selects, Escape clears.'}</span>
+        <div role="group" aria-roledescription="timeline" aria-label={label ?? 'States over time'} aria-describedby={`${ids}-sum`} {...nav.groupProps} className={cn('relative flex flex-col', S.gap)}>
+          <span id={`${ids}-sum`} className="sr-only">{timelineSummary(all.length, start, end)} {TL_HELP}</span>
           {pins.length > 0 && (
             <div className="relative" style={{ height: S.stack * pinStep + 4 }}>
               {pinMarks.map(mk => {
                 const t0 = mk.tags[0]
                 return (
                   <button key={mk.key} type="button" {...nav.markProps(mk)} style={{ left: `${at(mk, mk.from)}%` }}
-                    className={cn( 'ui-target absolute bottom-0 flex -translate-x-1/2 cursor-pointer flex-col items-center rounded-full border-0 bg-transparent p-0', TL_FOCUS)}>
-                    <TimelineGlyph tag={t0} kind={kinds.get(t0.kind)} size={S.pin} active={nav.activeKey === mk.key} more={mk.tags.length - 1} />
+                    className={cn('ui-target absolute bottom-0 flex -translate-x-1/2 cursor-pointer flex-col items-center rounded-full border-0 bg-transparent p-0', VIZ_FOCUS)}>
+                    <TimelineGlyph tag={t0} kinds={kinds} size={S.pin} active={nav.activeKey === mk.key} more={mk.tags.length - 1} />
                     <span aria-hidden className="w-px bg-[var(--line2)]" style={{ height: 4 + mk.row * pinStep }} />
-                    <span className="sr-only">{markText(mk)}</span>
+                    <span className="sr-only">{timelineMarkText(mk, kinds)}</span>
                   </button>
                 )
               })}
@@ -520,12 +505,12 @@ export function StateRibbon({ states, pins = [], bars = [], kinds: kindsProp, st
             {segs.map((sg, i) => {
               const t0 = sg.tags[0], left = at(sg, sg.from), width = w > 0 ? (sg.w / w) * 100 : pct(sg.to) - pct(sg.from)
               const dom = sg.mixed ? sg.tags.reduce((b, q) => (timeTagMs(q.end ?? q.at) - timeTagMs(q.at) > timeTagMs(b.end ?? b.at) - timeTagMs(b.at) ? q : b), t0) : t0
-              const color = timelineColor(dom, kinds.get(dom.kind)), lit = nav.activeKey === sg.key, thin = w > 0 && sg.w < 24
+              const { color } = timeTagLook(dom, kinds), lit = nav.activeKey === sg.key, thin = w > 0 && sg.w < 24
               return (
-                <button key={sg.key} type="button" {...nav.markProps(sg)} aria-label={sg.mixed ? `Several short states: ${markText(sg)}` : markText(sg)}
-                  className={cn('absolute inset-y-0 cursor-pointer border-0 p-0 transition-[box-shadow] duration-150', TL_FOCUS, thin && 'ui-hit', lit && cn('z-[2]', TL_LIT),
- i === 0 && 'rounded-l-[var(--r-sm)]', i === segs.length - 1 && 'rounded-r-[var(--r-sm)]')}
-                  style={{ left: `${left}%`, width: `${width}%`, background: sg.mixed ? `repeating-linear-gradient(135deg, ${color} 0 3px, color-mix(in srgb, ${color} 40%, var(--card)) 3px 6px)` : color }} />
+                <button key={sg.key} type="button" {...nav.markProps(sg)} aria-label={sg.mixed ? `Several short states: ${timelineMarkText(sg, kinds)}` : timelineMarkText(sg, kinds)}
+                  className={cn('absolute inset-y-0 cursor-pointer border-0 p-0 transition-[box-shadow] duration-150', VIZ_FOCUS, thin && 'ui-hit', lit && cn('z-[2]', VIZ_LIT_RING),
+                    i === 0 && 'rounded-l-[var(--r-sm)]', i === segs.length - 1 && 'rounded-r-[var(--r-sm)]')}
+                  style={{ left: `${left}%`, width: `${width}%`, background: sg.mixed ? `repeating-linear-gradient(135deg, ${color} 0 3px, ${timeTagTint(color, 40)} 3px 6px)` : color }} />
               )
             })}
           </div>
@@ -533,22 +518,22 @@ export function StateRibbon({ states, pins = [], bars = [], kinds: kindsProp, st
             <div className={cn('relative', S.bar)}>
               {barMarks.map(mk => {
                 const t0 = mk.tags[0]
-                return <button key={mk.key} type="button" {...nav.markProps(mk)} aria-label={markText(mk)}
-                  className={cn('ui-target absolute inset-y-0 cursor-pointer rounded-full border-0 p-0', TL_FOCUS, nav.activeKey === mk.key && TL_LIT)}
-                  style={{ left: `${pct(mk.from)}%`, width: `max(6px, ${pct(mk.to) - pct(mk.from)}%)`, background: timelineColor(t0, kinds.get(t0.kind)) }} />
+                return <button key={mk.key} type="button" {...nav.markProps(mk)} aria-label={timelineMarkText(mk, kinds)}
+                  className={cn('ui-target absolute inset-y-0 cursor-pointer rounded-full border-0 p-0', VIZ_FOCUS, nav.activeKey === mk.key && VIZ_LIT_RING)}
+                  style={{ left: `${pct(mk.from)}%`, width: `max(6px, ${pct(mk.to) - pct(mk.from)}%)`, background: timeTagLook(t0, kinds).color }} />
               })}
             </div>
           )}
         </div>
         {axis && <TimelineAxis ticks={ticks} start={start} end={end} className="mt-0.5" />}
         {activeMark && (
-          <TimelineTip box={box} anchor={nav.anchor}>
-            <TimelineTipBody tags={activeMark.tags} kinds={kinds} extra={activeSeg?.mixed ? <div className="text-[var(--fg3)]">{'Several short states'} · {timelineDuration(activeSeg.to - activeSeg.from, fmt)}</div> : undefined} />
-          </TimelineTip>
+          <VizTip at={() => vizTipAnchor(nav.anchor())}>
+            <TimelineTipBody tags={activeMark.tags} kinds={kinds} extra={activeSeg?.mixed ? <div className="text-[var(--fg3)]">Several short states · {timelineDuration(activeSeg.to - activeSeg.from)}</div> : undefined} />
+          </VizTip>
         )}
       </div>
       {legend && totals.length > 0 && (
-        <Legend items={totals.map(({ k, ms }) => ({ key: k.kind, label: k.label, color: k.color, value: timelineDuration(ms, fmt) }))} />
+        <Legend items={totals.map(({ k, ms }) => ({ key: k.kind, label: k.label, color: k.color, value: timelineDuration(ms) }))} />
       )}
     </div>
   )
@@ -574,6 +559,7 @@ export type TagJournalProps = TimelineLinkProps & {
   className?: string
 }
 
+/** TagJournal row and hour-header heights, px (they size the rows and the virtual list's estimates). */
 const JOURNAL_ROW = 36, JOURNAL_HEAD = 28
 
 /**
@@ -584,8 +570,7 @@ const JOURNAL_ROW = 36, JOURNAL_HEAD = 28
  * buttons), ↑/↓ move between rows, Home/End jump, Enter selects, Escape clears.
  */
 export function TagJournal({ tags, kinds: kindsProp, groupBy, height, maxHeight = 320, onEdit, onDelete, empty, activeId, defaultActiveId = null, onActiveChange, onSelect, label, className }: TagJournalProps) {
-  const kinds = useMemo(() => timelineKinds(kindsProp, tags), [kindsProp, tags])
-  const { fmt, tagText } = useTimelineText(kinds)
+  const kinds = useMemo(() => resolveTagKinds(kindsProp, tags), [kindsProp, tags])
   const [active, setActive] = useControllable(activeId, defaultActiveId, onActiveChange)
   const list = useRef<VirtualListHandle>(null)
   const box = useRef<HTMLDivElement>(null)
@@ -597,7 +582,11 @@ export function TagJournal({ tags, kinds: kindsProp, groupBy, height, maxHeight 
     const sorted = [...tags].sort((a, b) => timeTagMs(a.at) - timeTagMs(b.at)), out: Item[] = []
     let hour = NaN
     sorted.forEach(t => {
-      if (groupBy === 'hour') { const d = new Date(timeTagMs(t.at)); d.setMinutes(0, 0, 0); if (d.getTime() !== hour) { hour = d.getTime(); out.push({ head: hour }) } }
+      if (groupBy === 'hour') {
+        const d = new Date(timeTagMs(t.at))
+        d.setMinutes(0, 0, 0)
+        if (d.getTime() !== hour) { hour = d.getTime(); out.push({ head: hour }) }
+      }
       out.push({ tag: t })
     })
     return out
@@ -617,21 +606,31 @@ export function TagJournal({ tags, kinds: kindsProp, groupBy, height, maxHeight 
   useOutside([box], () => { if (source.current === 'tap') set(null, null) }, active !== null)
   const est = items.reduce((s, it) => s + ('head' in it ? JOURNAL_HEAD : JOURNAL_ROW), 0) + 2
   const h = height ?? Math.min(maxHeight, Math.max(est, 80))
+  // a row the keyboard moved to that wasn't mounted yet takes focus once it renders (the list keeps the stop row mounted)
+  const focusNext = useRef<string | null>(null)
+  useLayoutEffect(() => {
+    const id = focusNext.current
+    focusNext.current = null
+    if (id) rowEls.current.get(id)?.focus()
+  })
   const onKeyDown = (e: ReactKeyboardEvent<HTMLElement>) => {
     const i = rowIds.indexOf(lastFocus.current ?? '')
     if (i < 0 || e.altKey || e.ctrlKey || e.metaKey || !(e.target as HTMLElement).dataset.row) return
-    const go = (j: number) => {
-      e.preventDefault()
-      const id = rowIds[Math.max(0, Math.min(rowIds.length - 1, j))]
-      guard.arm(); list.current?.scrollToIndex(indexOf(id), { align: 'auto' })
-      lastFocus.current = id; set(id, 'focus')
-      requestAnimationFrame(() => rowEls.current.get(id)?.focus())
+    if (e.key === 'Escape') {
+      if (active !== null) { e.preventDefault(); set(null, null) }
+      return
     }
-    if (e.key === 'ArrowDown') go(i + 1)
-    else if (e.key === 'ArrowUp') go(i - 1)
-    else if (e.key === 'Home') go(0)
-    else if (e.key === 'End') go(rowIds.length - 1)
-    else if (e.key === 'Escape' && active !== null) { e.preventDefault(); set(null, null) }
+    const j = e.key === 'ArrowLeft' || e.key === 'ArrowRight' ? null : gridKeyMove(e.key, i, rowIds.length)
+    if (j === null) return
+    e.preventDefault()
+    const id = rowIds[j]
+    guard.arm()
+    list.current?.scrollToIndex(indexOf(id), { align: 'auto' })
+    lastFocus.current = id
+    set(id, 'focus')
+    const el = rowEls.current.get(id)
+    if (el) el.focus()
+    else focusNext.current = id
   }
   if (!tags.length) return <EmptyState size="sm" className={cn('grid min-h-20 place-items-center', className)} title={empty ?? 'Nothing logged yet'} />
   return (
@@ -643,26 +642,26 @@ export function TagJournal({ tags, kinds: kindsProp, groupBy, height, maxHeight 
         estimateSize={i => ('head' in items[i] ? JOURNAL_HEAD : JOURNAL_ROW)}
         renderItem={i => {
           const it = items[i]
-          if ('head' in it) return <div className="ui-num flex h-7 items-end px-2 pb-1 text-[11px] font-semibold text-[var(--fg3)]">{fmt.time(it.head)}</div>
+          if ('head' in it) return <div className="ui-num flex items-end px-2 pb-1 text-[11px] font-semibold text-[var(--fg3)]" style={{ height: JOURNAL_HEAD }}>{fmt.time(it.head)}</div>
           const t = it.tag, at = timeTagMs(t.at), lit = t.id === active, tab = t.id === stop ? 0 : -1
           return (
-            <div className={cn('flex min-h-9 items-center gap-0.5 rounded-[var(--r-md)] pe-1 transition-colors duration-150', lit ? 'bg-[var(--muted)]' : 'hover:bg-[color-mix(in_srgb,var(--muted)_60%,transparent)]')}
-              onPointerEnter={e => { if (!isTouch(e) && guard.allow(e)) set(t.id, 'hover') }}>
+            <div className={cn('flex items-center gap-0.5 rounded-[var(--r-md)] pe-1 transition-colors duration-150', lit ? 'bg-[var(--muted)]' : 'hover:bg-[color-mix(in_srgb,var(--muted)_60%,transparent)]')}
+              style={{ minHeight: JOURNAL_ROW }} onPointerEnter={e => { if (!isTouch(e) && guard.allow(e)) set(t.id, 'hover') }}>
               <button type="button" data-row="1" tabIndex={tab} aria-current={lit || undefined}
                 ref={el => { if (el) rowEls.current.set(t.id, el); else rowEls.current.delete(t.id) }}
                 onFocus={e => { lastFocus.current = t.id; if (e.currentTarget.matches(':focus-visible')) set(t.id, 'focus') }}
                 onPointerDown={e => { if (isTouch(e)) set(t.id, 'tap') }}
                 onClick={() => { lastFocus.current = t.id; set(t.id, source.current ?? 'tap'); onSelect?.(t) }}
-                className={cn('flex min-w-0 flex-1 cursor-pointer items-center gap-2.5 rounded-[var(--r-md)] border-0 bg-transparent px-2 py-1.5 text-start text-[13px] text-[var(--fg)] [@media(pointer:coarse)]:min-h-10', TL_FOCUS, 'focus-visible:outline-offset-0')}>
-                <span className="ui-num w-[4.25rem] flex-none [unicode-bidi:isolate] text-xs text-[var(--fg3)]">{fmt.time(at)}</span>
-                <TimelineGlyph tag={t} kind={kinds.get(t.kind)} size={18} />
+                className={cn('flex min-w-0 flex-1 cursor-pointer items-center gap-2.5 rounded-[var(--r-md)] border-0 bg-transparent px-2 py-1.5 text-start text-[13px] text-[var(--fg)] [@media(pointer:coarse)]:min-h-10', VIZ_FOCUS, 'focus-visible:outline-offset-0')}>
+                <span className="ui-num w-[4.25rem] flex-none text-xs text-[var(--fg3)]">{fmt.time(at)}</span>
+                <TimelineGlyph tag={t} kinds={kinds} size={18} />
                 <span className="min-w-0 flex-1">
-                  <span className="block truncate">{t.label}{t.end !== undefined && <span className="ms-1.5 text-xs text-[var(--fg3)]">{timelineDuration(timeTagMs(t.end) - at, fmt)}</span>}</span>
+                  <span className="block truncate">{t.label}{t.end !== undefined && <span className="ms-1.5 text-xs text-[var(--fg3)]">{timelineDuration(timeTagMs(t.end) - at)}</span>}</span>
                   {t.detail && <span className="block truncate text-xs text-[var(--fg3)]">{t.detail}</span>}
                 </span>
               </button>
-              {onEdit && <IconButton icon="edit" size="icon-xs" label={`Edit ${tagText(t)}`} tabIndex={tab} onClick={() => onEdit(t)} className="flex-none [@media(pointer:coarse)]:size-8" />}
-              {onDelete && <IconButton icon="trash" size="icon-xs" label={`Delete ${tagText(t)}`} tabIndex={tab} onClick={() => onDelete(t)} className="flex-none hover:text-[var(--bad)] [@media(pointer:coarse)]:size-8" />}
+              {onEdit && <IconButton icon="edit" size="icon-xs" label={`Edit ${timelineTagText(t)}`} tabIndex={tab} onClick={() => onEdit(t)} className="flex-none [@media(pointer:coarse)]:size-8" />}
+              {onDelete && <IconButton icon="trash" size="icon-xs" label={`Delete ${timelineTagText(t)}`} tabIndex={tab} onClick={() => onDelete(t)} className="flex-none hover:text-[var(--bad)] [@media(pointer:coarse)]:size-8" />}
             </div>
           )
         }} />
