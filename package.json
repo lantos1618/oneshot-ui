@@ -1,6 +1,6 @@
 {
   "name": "@lyndon/ui",
-  "version": "0.7.0",
+  "version": "0.8.0",
   "description": "Animated React 19 components with themes, in the shadcn style: forms, overlays, data grids, charts, diagrams, maps, AI chat. Also ships as drop-in single files for AI tools.",
   "keywords": [
     "react",
@@ -236,6 +236,10 @@
     "./geoland": {
       "types": "./dist/geoland.d.ts",
       "default": "./dist/geoland.js"
+    },
+    "./lanes": {
+      "types": "./dist/lanes.d.ts",
+      "default": "./dist/lanes.js"
     },
     "./gitgraph": {
       "types": "./dist/gitgraph.d.ts",

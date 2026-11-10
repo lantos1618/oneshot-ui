@@ -603,11 +603,72 @@ Put events and periods on a time axis. One tag type, `TimeTag` (`{ id, at, end?,
   stop; ←/→ move through tags in time order (↑/↓ between lanes), Enter selects, Escape clears.
 - Plots stay left to right in RTL; labels, legends and lists mirror. Strings: `ANNOTATE_MESSAGES`, `TIMELINE_MESSAGES`.
 
-## Git graph
+## Graphs as rows (lane graphs)
 
-A commit history graph in the style of VS Code's Git Graph, GitKraken or `git log --graph`: lanes, merge and fork
-edges, ref chips, search, a branch filter, details with diffs and a compare mode. It is virtualised (50k commits scroll
-like 50) and never runs git: every action is a callback.
+Many graphs are read one node at a time: commits, chat messages that branch when you edit or regenerate, the steps of
+an agent run, a syntax tree, a dependency chain. A lane graph draws them as a **list**: one row per node, your content
+in the row, and the edges in a narrow gutter of vertical lanes beside it, like `git log --graph`. Because every row
+carries its own slice of the graph, the list virtualises (100k rows render ~40) and rows can be any height.
+
+Three layers in `@lyndon/ui/lanes`, each usable on its own:
+
+- `layoutLanes(nodes, options)`: headless and pure (no React). A node is `{ id, parents, time?, group? }` (extend it with
+  anything); you get `{ rows, laneCount, rowOf(id) }`, each row `{ node, index, lane, color, edges, parents, children }`
+  with edges `{ fromLane, toLane, kind: 'pass' | 'merge' | 'fork' | 'missing', half: 'top' | 'bottom' | 'full', color,
+  firstParent }`. Options: `order: 'time' | 'topo' | 'input'`, `direction: 'down'` (newest first, like git) or `'up'`
+  (oldest first, like a chat), `pin` (groups that keep the leftmost lanes), `palette` and `color(group)`.
+- `<LaneGutter row laneWidth rowHeight? />`: one row's SVG slice (lanes passing by, rounded elbows, the node, stubs for
+  missing parents). Without `rowHeight` it stretches to the row, so a 400px chat message stays joined to the next row.
+- `<LaneGraph nodes renderRow />`: the virtualised list of gutter + your row, with selection, hover/focus lighting a
+  node's ancestry, ↑/↓, Home/End, ← parent / → child along edges, `onContextMenu`, `rowHeight="auto"` for rows sized by
+  their content, `anchor="end"` for chat-like lists, and rows inserted above keeping the reader's place.
+  `useLaneGraph(nodes, options)` gives the same layout and state for your own markup.
+
+```tsx
+import { LaneGraph } from '@lyndon/ui/lanes'
+import { Message } from '@lyndon/ui/aichat'
+
+// a chat where editing a question or regenerating an answer forks a branch: each message names its parent
+const nodes = messages.map(m => ({ id: m.id, parents: m.parentId ? [m.parentId] : [], message: m }))
+
+<LaneGraph
+  nodes={nodes}
+  order="input" direction="up"               // your order, oldest first
+  pin={['active']} pinStart={() => leafId}   // the thread being read keeps lane 0
+  rowHeight="auto" anchor="end"              // rows as tall as the message; start at the bottom
+  selected={leafId} onActivate={row => setLeafId(latestLeafUnder(row.node.id))}
+  renderRow={row => <Message message={row.node.message} />}
+/>
+```
+
+**How the layout works** (one pass, O(n · lanes); 50k nodes in about 50 ms):
+
+1. *Order.* Children come before parents (Kahn's algorithm). `'time'` takes the newest ready node next, `'topo'` the
+   one readied last (a branch's nodes stay together), `'input'` keeps your order wherever it is already valid.
+2. *Walk the rows* with a list of open lanes, each heading for the parent it waits for.
+3. *Take a lane.* A node takes the lane waiting for it; if several wait (branches that started here), the one that came
+   through a first parent, so a branch's own line stays straight; the others end in it as forks. If none waits, the
+   node is a tip and takes the leftmost free lane (pinned groups have theirs reserved).
+4. *Continue.* Its first parent continues in its lane; each further parent (a merge) joins the lane already heading
+   there or opens the leftmost free lane. Parents that aren't in the list end in a short fading stub.
+5. *Rows record their own strokes:* lanes passing by, edges into the node from above, edges out below. No row needs
+   another's geometry. Colours belong to groups (a branch, a thread), not lane numbers, so new rows don't reshuffle them.
+   `direction: 'up'` runs the same pass and flips the result.
+
+**Examples** (`@lyndon/ui/examples`, the showcase's "Graphs as rows" card; each is a data builder plus a `renderRow`):
+
+- *Git*: `GitGraph`, the built-in preset below.
+- *Chat branches*: `chatBranchGraph(messages, leaf)` over `AiMessage & { parentId? | parents? }` (what `useAiChat` keeps,
+  plus where it hangs); rows render `Message` at full height, `‹ 2 / 3 ›` switches branches, one message combines two.
+- *AST*: `parseAst(source)` (a small JavaScript subset) and `astLaneNodes(tree)`; hover a node to light its code.
+- *Agent run*: steps with `after: [...]`, fanning out to tools and back in, with `StatusIcon` and durations.
+- *Dependencies*: packages above the packages they use (`parents` = dependencies); shared ones show up as merges.
+
+### GitGraph (the built-in preset)
+
+A commit history graph in the style of VS Code's Git Graph, GitKraken or `git log --graph`: `LaneGraph` plus commit
+columns (refs, subject, author, date, hash), search, a branch filter, details with diffs and a compare mode. It is
+virtualised (50k commits scroll like 50) and never runs git: every action is a callback.
 
 ```tsx
 import { GitGraph, parseGitLog } from '@lyndon/ui/gitgraph'
@@ -630,26 +691,12 @@ Fields are split by `\x1f` and records by `\x1e`, so subjects can hold anything.
 branches from local ones without guessing (otherwise `origin/` and `upstream/` prefixes mark remotes), `%x1f%b` before
 `%x1e` to include bodies, and `-n 50000` to cap the history.
 
-**How the graph is made** (`layoutGitGraph(commits, { order, pin, firstParentLanes })`, pure and O(n · lanes)):
-
-1. *Order.* A topological order, children above parents (Kahn's algorithm). `order: 'date'` takes the newest ready
-   commit next (`git log --date-order`); `'topo'` the most recently readied one, which keeps a branch's commits together
-   (`--topo-order`). Ties break on the hash, so the input order never matters.
-2. *Lanes.* One pass down the rows with an array of active lanes, each holding the commit it waits for. A commit takes
-   the lane waiting for it (the leftmost reached through a first parent, so first-parent chains stay straight); other
-   lanes waiting for it end there (fork edges). A commit nobody waits for is a branch tip and takes the leftmost free
-   lane. Its first parent continues its lane; every further parent (several for octopus merges) joins the lane already
-   waiting for it or opens the leftmost lane that was free above the row (merge edges). Roots end their lane; parents
-   missing from the input (shallow clones, filters) end it with a fading stub. `pin` reserves the leftmost lanes for
-   long-lived branches (default: whichever of main/master/trunk exists).
-3. *Colours* belong to branches, not lane numbers: a commit carrying a branch ref starts that branch's colour (a hash of
-   its name into `GIT_LANE_COLORS`, theme tokens; main/master/trunk get `--c1`), merge lanes take the name from
-   "Merge branch 'x'", so commits arriving on top don't reshuffle them.
-4. *Rows draw themselves.* Each row gets its own SVG slice: lanes passing through, edges into its node from the row's
-   top, edges out to its parents' lanes at its bottom (rounded elbows, like TraceWaterfall's connectors). No row needs
-   another's geometry, so `useVirtual` renders ~40 rows of 100k, and edges are kept packed in typed arrays and decoded
-   only for rows on screen. Lanes past `maxLanes` (12; 6 on phones) fold into a dashed "+n lanes" gutter; its header
-   button shows them all and the list then scrolls sideways.
+**What the preset adds to the lane layout** (`layoutGitGraph(commits, { order, pin, firstParentLanes })` maps commits to
+lane nodes and calls `layoutLanes`): `order: 'date'` is `'time'` (`git log --date-order`); a commit's group is the
+branch it carries (`origin/x` counts as `x`), so a branch ref starts that branch's colour (main/master/trunk get `--c1`);
+`pin` reserves the leftmost lanes for long-lived branches (default: whichever of main/master/trunk exists), starting at
+the local branch; a lane opened for a merge takes the branch named in "Merge branch 'x'". Lanes past `maxLanes` (12; 6
+on phones) fold into a dashed "+n lanes" gutter; its header button shows them all and the list then scrolls sideways.
 
 Also exported: `filterGitHistory` (branch filter, `firstParent`, `hideMerged`), `gitRange` (git's `a..b`),
 `gitFirstParentPath`, `gitLaneColor`, `GIT_GRAPH_MESSAGES`.
@@ -662,8 +709,9 @@ Also exported: `filterGitHistory` (branch filter, `firstParent`, `hideMerged`), 
   lines at 52 px under 640 px). Details are a side panel from 900 px and a sheet below. Rows are named
   "Commit a1b2c3d: Fix login, by Ana, 2 days ago"; the graph is an LTR island, the columns mirror in RTL.
 - New commits added at the top keep the reader's place (when scrolled) and fade in; a polite live region counts them.
-- Size: the `git-graph` drop-in is about 280 KB (~80k tokens; it embeds the virtualiser, menus, sheet, Markdown and Diff).
-- Limits: the layout runs on the main thread (~0.1 s per 50k commits on a laptop); for bigger logs, filter by branch or
+- Size: the `git-graph` drop-in is about 317 KB (~90k tokens; it embeds the lane graph, the virtualiser, menus, sheet,
+  Markdown and Diff); `lanes` alone is about 89 KB (~25k tokens).
+- Limits: the layout runs on the main thread (~0.05 s per 50k commits on a laptop); for bigger logs, filter by branch or
   page the history (missing parents render as stubs).
 
 ## Magnets (snapping for sliders and drags)

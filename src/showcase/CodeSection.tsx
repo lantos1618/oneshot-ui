@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useState } from 'react'
 import { useReducedMotion } from 'motion/react'
-import { Citation, CodeBlock, CodeTabs, Diff, GitGraph, type GitCommit, InlineCode, InstallCommand, Kbd, Markdown, type Source, Switch, Terminal, markdownCodeBlock, useToast, useViewport } from '../lib'
-import { GIT_SAMPLE, GIT_SAMPLE_NOW, gitHistory, gitSampleCommit, gitSampleLoadCommit, gitSampleLoadDiff } from '../examples'
+import { Citation, CodeBlock, CodeTabs, Diff, GitGraph, type GitCommit, InlineCode, InstallCommand, Kbd, Markdown, type Source, Switch, Tabs, Terminal, markdownCodeBlock, useToast, useViewport } from '../lib'
+import { AgentRunExample, AstGraphExample, ChatBranchesExample, DependencyGraphExample, chatTreeHistory, GIT_SAMPLE, GIT_SAMPLE_NOW, gitHistory, gitSampleCommit, gitSampleLoadCommit, gitSampleLoadDiff } from '../examples'
 import { Section, Spec, SpecAction } from './kit'
 
 const IMPORT_CODE = `import { createFlow } from './flow';
@@ -174,11 +174,32 @@ function GitGraphDemo({ big, pushes }: { big: boolean; pushes: number }) {
   )
 }
 
+/** The tabs of the "Graphs as rows" card: one LaneGraph idea, five kinds of data. Only the open tab is mounted. */
+const GRAPH_TABS = [
+  { value: 'git', label: 'Git' }, { value: 'chat', label: 'Chat' }, { value: 'ast', label: 'AST' },
+  { value: 'agent', label: 'Agent run' }, { value: 'deps', label: 'Dependencies' },
+] as const
+const GRAPH_TAB_DESC: Record<(typeof GRAPH_TABS)[number]['value'], string> = {
+  git: 'GitGraph, the built-in preset: refs, search, branch filter and compare. Click a commit for its diff; Shift+click a second to compare; right-click for actions.',
+  chat: 'Editing a question or regenerating an answer forks a branch; the last message combines two. The active thread stays in the left lane; ‹ n / m › switches branches.',
+  ast: 'A three-line snippet parsed into a syntax tree. Hover or focus a node: its lines light up in the code.',
+  agent: 'An agent run that fans out to three tools, joins, fails a test, fixes it and carries on.',
+  deps: 'Packages above the packages they use: react is shared by four, so its lane merges in from all of them.',
+}
+
+/** The Chat tab: the sample tree, or a 2k-message conversation (built once, on first use). */
+function ChatBigDemo({ big }: { big: boolean }) {
+  const history = useMemo(() => (big ? chatTreeHistory(2000) : undefined), [big])
+  return <ChatBranchesExample key={big ? 'big' : 'sample'} messages={history} />
+}
+
 export function CodeSection() {
   const [mdRun, setMdRun] = useState(0)
   const [mdStill, setMdStill] = useState(false)
   const [gitBig, setGitBig] = useState(false)
   const [gitPushes, setGitPushes] = useState(0)
+  const [graphTab, setGraphTab] = useState<(typeof GRAPH_TABS)[number]['value']>('git')
+  const [chatBig, setChatBig] = useState(false)
   return (
     <Section id="code" title="Code" desc="Highlighted blocks, tabs, diffs, a terminal and streamed Markdown. Tokenised in the page, no highlighter library.">
       <Spec title="Code block" desc="File name, language, line numbers, highlighted lines, wrap, copy, expand" span={2}>
@@ -217,18 +238,26 @@ export function CodeSection() {
         </>}>
         <MarkdownStreamDemo key={mdRun} still={mdStill} />
       </Spec>
-      <Spec title="Git graph" span={3}
-        desc="Commit history with lanes and merges, refs, search, branch filter and compare. Click a commit for its diff; Shift+click a second to compare; right-click for actions"
-        keys={[[['↑', '↓'], 'Commits'], [['←', '→'], 'Parent, child'], [['↵'], 'Details'], [['⇧', 'Click'], 'Compare'], [['/'], 'Search'], [['n', 'N'], 'Next match'], [['⇧', 'F10'], 'Actions'], [['Esc'], 'Close']]}
+      <Spec title="Graphs as rows" span={3}
+        desc="Any graph as a list: one row per node, with its edges in a narrow lane gutter (layoutLanes + LaneGraph). The same component draws a git history, a branching chat, a syntax tree, an agent run and a dependency graph; only renderRow changes."
+        keys={[[['↑', '↓'], 'Rows'], [['←', '→'], 'Parent, child'], [['↵'], 'Open'], [['⇧', 'F10'], 'Actions'], [['/'], 'Search (git)'], [['Esc'], 'Close']]}
         notes={{
-          good: 'Reading how branches came together: lanes keep first-parent chains straight, main and develop stay pinned left, and hovering a commit lights its ancestry. Rows draw their own slice of the graph, so 50k commits scroll like 50.',
-          breaks: 'Very wide histories (dozens of live branches) fold into a "+n lanes" gutter, and the layout is computed in one pass on the main thread (about 0.1 s per 50k commits), so for monorepo-sized logs filter by branch or load the history in pages.',
+          good: 'Anything shaped like history or a tree where people read the nodes: commits, chat branches, agent steps, syntax trees, dependency chains. Rows can be any height (a chat message, a card), the layout is one O(n · lanes) pass (50k nodes in about 50 ms), and only the rows on screen render, so long graphs scroll like short ones.',
+          breaks: 'Graphs that are mostly cross-links (social networks, call graphs with cycles): every extra edge becomes a lane, and past a dozen lanes they fold into a "+n" gutter. Cycles are drawn as stubs rather than lines. Use a node-link diagram for those, and lanes when the order of rows means something.',
         }}
-        actions={<>
+        actions={graphTab === 'git' ? <>
           <SpecAction onClick={() => setGitPushes(n => n + 1)}>Push a commit</SpecAction>
           <Switch label={<span className="text-xs text-[var(--fg2)]">50k commits</span>} checked={gitBig} onChange={v => { setGitBig(v); setGitPushes(0) }} />
-        </>}>
-        <GitGraphDemo big={gitBig} pushes={gitPushes} />
+        </> : graphTab === 'chat' ? <Switch label={<span className="text-xs text-[var(--fg2)]">2k messages</span>} checked={chatBig} onChange={setChatBig} /> : undefined}>
+        <Tabs.Root value={graphTab} onValueChange={v => setGraphTab(v as typeof graphTab)}>
+          <Tabs.List aria-label="Graph examples">{GRAPH_TABS.map(t => <Tabs.Trigger key={t.value} value={t.value}>{t.label}</Tabs.Trigger>)}</Tabs.List>
+          <p className="m-0 pt-2 text-xs text-[var(--fg2)]">{GRAPH_TAB_DESC[graphTab]}</p>
+          <Tabs.Content value="git"><GitGraphDemo big={gitBig} pushes={gitPushes} /></Tabs.Content>
+          <Tabs.Content value="chat"><ChatBigDemo big={chatBig} /></Tabs.Content>
+          <Tabs.Content value="ast"><AstGraphExample /></Tabs.Content>
+          <Tabs.Content value="agent"><AgentRunExample /></Tabs.Content>
+          <Tabs.Content value="deps"><DependencyGraphExample /></Tabs.Content>
+        </Tabs.Root>
       </Spec>
     </Section>
   )

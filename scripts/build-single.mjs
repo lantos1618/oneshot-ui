@@ -23,7 +23,7 @@ const root = new URL('..', import.meta.url).pathname
 const BUNDLES = {
   ui: ['core', 'helpers', 'shared', 'locale', 'safe', 'theme', 'hooks', 'icons', 'slot', 'primitives', 'formcontrol', 'motion', 'virtual', 'magnet', 'overlay', 'formkit', 'fields', 'select', 'inputs', 'pickers', 'upload', 'forms', 'navigation', 'feedback', 'data', 'layout', 'appearance', 'provider'],
   'ui-charts': ['annotate', 'charts', 'timeline', 'diagramkit', 'gantt', 'statechart', 'trace', 'network', 'diagrams', 'geoworld', 'geoland', 'geo'],
-  'ui-content': ['editor', 'datagrid', 'scheduler', 'code', 'markdown', 'media', 'collab', 'pages', 'gitgraph'],
+  'ui-content': ['editor', 'datagrid', 'scheduler', 'code', 'markdown', 'media', 'collab', 'pages', 'lanes', 'gitgraph'],
   'ui-ai': ['aistream', 'ai', 'aichat', 'aiagent'],
 }
 const LIB = Object.values(BUNDLES).flat()

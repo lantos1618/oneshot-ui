@@ -64,6 +64,8 @@ export const FAMILIES = {
   conversation: { roots: ['Conversation', 'useStickToBottom', 'aiNearBottom'] },
   'suggested-edit': { roots: ['SuggestedEdit', 'wordDiff'] },
   'state-machine': { roots: ['StateMachine', 'WorkflowEngine'] },
+  // graphs as rows
+  lanes: { roots: ['LaneGraph', 'LaneGutter', 'useLaneGraph', 'layoutLanes', 'laneAncestry', 'laneColor', 'laneHash', 'laneGutterWidth', 'LANE_COLORS', 'LANE_MESSAGES'], title: 'Lane graph', description: 'Any DAG as rows: layoutLanes (headless: order, lanes, colours and each row\'s edges, O(n · lanes)), LaneGutter (one row\'s SVG slice, stretches to tall rows) and LaneGraph (a virtualised list of gutter + your renderRow, with selection, hover ancestry, keyboard moves along edges and live inserts). GitGraph is a preset of it.' },
 }
 
 /** Copy-in page sections: `registry:block` items. */

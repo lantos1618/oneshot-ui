@@ -3,6 +3,21 @@
 All notable changes to `@lyndon/ui`, newest first. While on 0.x, a minor release may break APIs; each breaking
 change is listed with how to migrate.
 
+## 0.8.0
+
+Graphs as rows: the Git graph's lanes are now a general-purpose component.
+
+### Added
+- `@lyndon/ui/lanes`: draw any directed graph as a list, one row per node with its edges in a lane gutter.
+  - `layoutLanes(nodes, options)`: headless layout for any `{ id, parents }` nodes (`order`, `direction: 'down' | 'up'`, `pin`, `palette`).
+  - `<LaneGutter row />`: one row's slice of the graph, stretching to the row's height.
+  - `<LaneGraph nodes renderRow />`: virtualised list with your own row content, variable row heights, ancestry highlighting, keyboard that follows edges, selection and context menu; `useLaneGraph` for your own markup.
+- Examples in `@lyndon/ui/examples`: chat branches, a syntax tree, an agent run and a dependency graph, each a data builder plus a `renderRow`.
+
+### Changed
+- `GitGraph` is built on `LaneGraph`; its API and behaviour are unchanged.
+- The showcase's "Graphs as rows" card replaces the "Git graph" card, with tabs for Git, Chat, AST, Agent run and Dependencies.
+
 ## 0.7.0
 
 A Git graph, and live demos that are much lighter on phones.

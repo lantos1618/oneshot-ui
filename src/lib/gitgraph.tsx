@@ -1,7 +1,6 @@
-import { memo, useCallback, useDeferredValue, useEffect, useImperativeHandle, useLayoutEffect, useMemo, useRef, useState, type CSSProperties, type KeyboardEvent as RKeyboardEvent, type MouseEvent as RMouseEvent, type ReactNode, type Ref } from 'react'
-import { motion } from 'motion/react'
+import { memo, useCallback, useDeferredValue, useEffect, useImperativeHandle, useMemo, useRef, useState, type CSSProperties, type KeyboardEvent as RKeyboardEvent, type ReactNode, type Ref } from 'react'
 import { Avatar, Badge, Button, Chip, Icon, IconButton, Kbd, Spinner, TOUCH, cn, defineMessages, inputClass, useCoarsePointer, useControllable, useLocale, useMessages, useWidth, type IconName } from './core'
-import { useVirtual } from './virtual'
+import { LANE_COLORS, LaneGraph, laneAncestry, laneColor, laneGutterWidth, laneHash, layoutLanes, type LaneEdge, type LaneGraphHandle, type LaneNode, type LaneRow, type LaneRowState } from './lanes'
 // the parts, not the ContextMenu/DropdownMenu/Sheet objects: those reference every menu part, which drop-in files would carry
 import { ContextMenuContent, ContextMenuRoot, ContextMenuTrigger, DialogClose, DialogRoot, DialogTitle, DropdownMenuContent, DropdownMenuRoot, DropdownMenuTrigger, MenuCheckboxItem, MenuItem, MenuLabel, MenuSeparator, SheetContent, SheetHeader } from './overlay'
 import { CopyButton, useCopy } from './feedback'
@@ -9,40 +8,23 @@ import { Diff } from './code'
 import { Markdown } from './markdown'
 
 /* ════════════════════════════════════════════════════════════════════════════
- * GIT GRAPH: a commit history graph (VS Code's Git Graph, GitKraken, Sourcetree, `git log --graph`).
- *
- * How the graph is made, code-wise:
+ * GIT GRAPH: a commit history graph (VS Code's Git Graph, GitKraken, Sourcetree, `git log --graph`), built as a preset
+ * of the lane graph in lanes.tsx: layoutLanes does the order and the lanes, LaneGraph the virtualised rows, the gutter,
+ * keyboard moves along edges and hover ancestry. This file adds what is git's own:
  *
  * 1. Data. `GitCommit = { hash, parents, subject, body?, author, date, refs? }`, in any order. `parseGitLog(text)`
  *    reads the output of GIT_LOG_COMMAND (fields split by \x1f, records by \x1e), so a real repository pipes in:
  *      git log --all --date-order --pretty=format:'%H%x1f%P%x1f%an%x1f%ae%x1f%at%x1f%D%x1f%s%x1e' > log.txt
  *
- * 2. Order (gitOrder). Rows are a topological order: every child above all of its parents. Kahn's algorithm over
- *    the "children not yet placed" counts; `order: 'date'` takes the newest ready commit next (a heap, like
- *    `git log --date-order`), `order: 'topo'` takes the most recently readied one (a stack, like `--topo-order`, which
- *    keeps a branch's commits together). Ties break on the hash, so the result does not depend on the input order.
+ * 2. Commits as lane nodes (gitLanes): id = hash, time = date, group = the branch a commit carries (origin/x counts as
+ *    x), so a branch ref starts that branch's colour; `pin` names branches (main, develop) whose first-parent lines keep
+ *    the leftmost lanes, starting at the local branch (else the remote); a lane opened for a merge takes the branch
+ *    named in "Merge branch 'x'". `order: 'date'` is layoutLanes' 'time' (`git log --date-order`), 'topo' its 'topo'.
  *
- * 3. Lanes (layoutGitGraph), one pass over the rows, O(n · lanes). `lanes[k]` holds the commit lane k is waiting for.
- *    A commit takes a lane waiting for it (the leftmost one reached through a first parent, so first-parent chains stay
- *    straight; with none, the leftmost); every other lane waiting for it ends there (a fork: the branch started here).
- *    A commit nobody waits for is a branch tip and takes the leftmost free lane. Its first parent continues in its lane;
- *    each further parent (a merge; octopus merges have several) joins the lane already waiting for it, or opens a new one
- *    (the leftmost lane that was already free above this row, so a merge never doubles back over a fork). Root commits
- *    end their lane; parents that aren't loaded (shallow history, a filter) end it with a fading stub. `pin` reserves the
- *    leftmost lanes for long-lived branches (main, develop): their first-parent chains always run there.
- *    Colours belong to branches, not lane numbers: a commit carrying a branch ref starts that branch's colour (a hash of
- *    its name; origin/x counts as x), a lane opened for a merge takes the name in "Merge branch 'x'", a ref-less tip its
- *    hash, and lanes pass their colour down otherwise. So new commits arriving on top don't reshuffle them.
- *
- * 4. Rows draw themselves. Each row has its own small SVG: lanes passing through, edges into its node from above (the
- *    top half), edges out of it to its parents' lanes (the bottom half) and the node. No row needs another row's
- *    geometry, so the list virtualises (useVirtual: 100k commits render ~40 rows) and edges are stored packed in typed
- *    arrays, decoded only for rows on screen. Lanes past `maxLanes` fold into one dashed "+n" gutter.
- *
- * 5. The component around it: search (message, author, hash prefix, ref), branch filter, first-parent and hide-merged
- *    views (filterGitHistory), hover/focus highlights the first-parent ancestry, details (side panel or a sheet on
- *    phones) with Markdown body and diffs from `loadCommit`, Shift+click compares two commits (`loadDiff`), a context menu
- *    whose actions call the host (the component never runs git), and new commits on top keep the reader's place.
+ * 3. The component around the rows: refs, subject, author, date and hash columns; search (message, author, hash
+ *    prefix, ref), branch filter, first-parent and hide-merged views (filterGitHistory); details (side panel or a sheet
+ *    on phones) with Markdown body and diffs from `loadCommit`; Shift+click compares two commits (`loadDiff`); a context
+ *    menu whose actions call the host (the component never runs git); new commits on top keep the reader's place.
  * ══════════════════════════════════════════════════════════════════════════ */
 
 /** What a ref is: a local branch, a remote-tracking branch, a tag, HEAD (`name` is the checked-out branch, or "HEAD" when detached), or the stash. */
@@ -74,15 +56,13 @@ export type GitGraphLayout = { rows: GitGraphRow[]; laneCount: number; rowOf: Ma
 /**
  * layoutGitGraph options. `order`: 'date' (default) or 'topo'. `firstParentLanes` (default true): a commit waited for by
  * several lanes takes the one its child reached through a first parent. `pin`: branch names whose first-parent chains get
- * the leftmost lanes, in this order. `colorOf`: colour index for a branch key (default: main/master/trunk 0, others hashed).
+ * the leftmost lanes, in this order. `colorOf`: colour index for a branch key (default: pinned branches take the first
+ * colours in pin order and the others hash into the rest; with nothing pinned, gitLaneColor).
  */
 export type GitLayoutOptions = { order?: 'date' | 'topo'; firstParentLanes?: boolean; pin?: readonly string[]; colorOf?: (key: string) => number }
 
 /** Lane colours, theme tokens only (light and dark): main gets the strongest, the rest are spread by hashing branch names. */
-export const GIT_LANE_COLORS = [
-  'var(--c1)', 'var(--c2)', 'var(--c3)', 'var(--c4)', 'var(--bad)',
-  'color-mix(in oklab, var(--c2) 55%, var(--bad))', 'color-mix(in oklab, var(--c4) 55%, var(--c2))', 'color-mix(in oklab, var(--c4) 45%, var(--c3))',
-] as const
+export const GIT_LANE_COLORS = LANE_COLORS
 
 /** The command whose output parseGitLog reads (add `--decorate=full` for unambiguous ref names, `-n 50000` to cap it). */
 export const GIT_LOG_COMMAND = "git log --all --date-order --pretty=format:'%H%x1f%P%x1f%an%x1f%ae%x1f%at%x1f%D%x1f%s%x1e'"
@@ -92,14 +72,8 @@ export const gitShortHash = (hash: string) => hash.slice(0, 7)
 const gitTime = (d: number | Date) => (typeof d === 'number' ? d : d.getTime())
 const GIT_MAIN = /^(main|master|trunk)$/
 
-/** FNV-1a: a stable small hash for colour keys. */
-function gitHashStr(s: string) {
-  let h = 0x811c9dc5
-  for (let i = 0; i < s.length; i++) { h ^= s.charCodeAt(i); h = Math.imul(h, 0x01000193) }
-  return h >>> 0
-}
 /** Default lane colour for a branch key: main/master/trunk get colour 0, anything else a stable hash over the others. */
-export const gitLaneColor = (key: string) => (GIT_MAIN.test(key) ? 0 : 1 + (gitHashStr(key) % (GIT_LANE_COLORS.length - 1)))
+export const gitLaneColor = (key: string) => (GIT_MAIN.test(key) ? 0 : 1 + (laneHash(key) % (GIT_LANE_COLORS.length - 1)))
 
 /** A ref's branch name for matching and colours: remote "origin/x" → "x", HEAD → its branch; null for tags, the stash and a detached HEAD. */
 function gitRefBranch(r: GitRef): string | null {
@@ -111,7 +85,8 @@ function gitRefBranch(r: GitRef): string | null {
 /** The branch a tip commit carries, for its lane colour: a local branch, else a remote one. */
 function gitTipKey(c: GitCommit): string | null {
   let remote: string | null = null
-  for (const r of c.refs ?? []) {
+  if (!c.refs) return null
+  for (const r of c.refs) {
     if (r.type === 'branch' || (r.type === 'head' && r.name !== 'HEAD')) return r.name
     if (r.type === 'remote' && !remote) remote = gitRefBranch(r)
   }
@@ -125,230 +100,65 @@ function gitMergeNames(subject: string): string[] {
   return [...subject.matchAll(/'([^']+)'/g)].map(m => m[1].replace(/^origin\//, ''))
 }
 
-/* ── order ─────────────────────────────────────────────────────────────────── */
+/* ── commits as lane nodes ─────────────────────────────────────────────────── */
 
-/**
- * Commits deduplicated and in display order (children before parents). Parents are kept flat (CSR): commit i's are
- * `pv[pAt[i] .. pAt[i + 1])`, each an index into `list`, -1 when not loaded, -2 when dropped (listed twice, or itself).
- */
-function gitOrder(input: readonly GitCommit[], order: 'date' | 'topo') {
-  const at = new Map<string, number>(), list: GitCommit[] = []
-  for (const c of input) if (!at.has(c.hash)) { at.set(c.hash, list.length); list.push(c) }
-  const n = list.length, time = new Float64Array(n), indeg = new Int32Array(n), pAt = new Int32Array(n + 1)
-  let total = 0
-  for (let i = 0; i < n; i++) total += list[i].parents.length
-  const pv = new Int32Array(total)
-  let o = 0
-  for (let i = 0; i < n; i++) {
-    const c = list[i]; time[i] = gitTime(c.date); pAt[i] = o
-    for (let k = 0; k < c.parents.length; k++) {
-      let j = at.get(c.parents[k]) ?? -1
-      // a parent listed twice (or a commit naming itself) would never become ready: keep the first mention only
-      if (j === i) j = -2
-      else if (j >= 0) for (let q = pAt[i]; q < o; q++) if (pv[q] === j) { j = -2; break }
-      pv[o++] = j
-      if (j >= 0) indeg[j]++
-    }
+/** A commit as a lane node (what the GitGraph's LaneGraph rows carry). */
+type GitLaneNode = LaneNode & { commit: GitCommit }
+
+/** Where a pinned branch's line starts: the newest commit carrying it as a local branch (or HEAD), else as a remote one. */
+function gitPinStart(name: string, commits: readonly GitLaneNode[]): string | undefined {
+  let remote: string | undefined
+  for (const { commit } of commits) if (commit.refs) for (const ref of commit.refs) {
+    if ((ref.type === 'branch' || ref.type === 'head') && ref.name === name) return commit.hash
+    if (remote === undefined && ref.type === 'remote' && gitRefBranch(ref) === name) remote = commit.hash
   }
-  pAt[n] = o
-  /** a goes first: newer, then by hash */
-  const first = (a: number, b: number) => (time[a] !== time[b] ? time[a] > time[b] : list[a].hash < list[b].hash)
-  const out = new Int32Array(n)
-  let len = 0
-  if (order === 'topo') {
-    const stack: number[] = []
-    for (let i = 0; i < n; i++) if (!indeg[i]) stack.push(i)
-    stack.sort((a, b) => (first(a, b) ? 1 : -1)) // newest on top
-    while (stack.length) {
-      const i = stack.pop()!; out[len++] = i
-      for (let q = pAt[i]; q < pAt[i + 1]; q++) { const j = pv[q]; if (j >= 0 && --indeg[j] === 0) stack.push(j) }
-    }
-  } else {
-    const heap: number[] = []
-    const add = (x: number) => {
-      let k = heap.length; heap.push(x)
-      while (k > 0) { const p = (k - 1) >> 1; if (!first(heap[k], heap[p])) break; const t = heap[k]; heap[k] = heap[p]; heap[p] = t; k = p }
-    }
-    const take = () => {
-      const top = heap[0], last = heap.pop()!
-      if (heap.length) {
-        heap[0] = last
-        for (let k = 0; ;) {
-          const l = 2 * k + 1, r = l + 1; let m = k
-          if (l < heap.length && first(heap[l], heap[m])) m = l
-          if (r < heap.length && first(heap[r], heap[m])) m = r
-          if (m === k) break
-          const t = heap[k]; heap[k] = heap[m]; heap[m] = t; k = m
-        }
-      }
-      return top
-    }
-    for (let i = 0; i < n; i++) if (!indeg[i]) add(i)
-    while (heap.length) {
-      const i = take(); out[len++] = i
-      for (let q = pAt[i]; q < pAt[i + 1]; q++) { const j = pv[q]; if (j >= 0 && --indeg[j] === 0) add(j) }
-    }
-  }
-  if (len < n) { // a cycle (bad input): place the rest by date rather than drop them
-    const placed = new Uint8Array(n); for (let k = 0; k < len; k++) placed[out[k]] = 1
-    for (const i of Array.from({ length: n }, (_, i) => i).filter(i => !placed[i]).sort((a, b) => (first(a, b) ? -1 : 1))) out[len++] = i
-  }
-  return { list, pv, pAt, out, at }
+  return remote
+}
+/** A lane opened for a merge's extra parent is named after the branch in the merge subject. */
+const gitMergeLane = (child: GitLaneNode, parentIndex: number) => gitMergeNames(child.commit.subject)[parentIndex - 1]
+/** Pinned branches take the first colours, the rest hash into the others; with nothing pinned, main is colour 0 (gitLaneColor). */
+const gitColor = (key: string, pinned: readonly string[]) => (pinned.length ? laneColor(key, pinned, GIT_LANE_COLORS.length) : gitLaneColor(key))
+
+/** layoutGitGraph's edge from a lane edge. */
+function gitEdge(e: LaneEdge): GitGraphEdge {
+  const part = e.half === 'full' ? 'through' : e.half
+  const type: GitEdgeType = e.kind === 'pass' ? 'straight' : e.kind === 'missing' ? (e.firstParent ? 'straight' : 'merge') : e.kind
+  const edge: GitGraphEdge = { fromLane: e.fromLane, toLane: e.toLane, type, part, color: e.color, child: e.child, parent: e.parent, firstParent: e.firstParent }
+  if (e.kind === 'missing') edge.missing = true
+  return edge
 }
 
-/* ── layout ────────────────────────────────────────────────────────────────── */
-
-const GIT_TYPES: GitEdgeType[] = ['straight', 'merge', 'fork'], GIT_PARTS = ['through', 'top', 'bottom'] as const
-/** Packed per-layout storage: 6 ints per edge (from, to, flags, colour, child, parent) and children in CSR form. */
-type GitStore = { e: Int32Array; eAt: Int32Array; kids: Int32Array; kAt: Int32Array }
-
-class GitRowImpl implements GitGraphRow {
-  readonly commit: GitCommit; readonly index: number; readonly lane: number; readonly color: number; readonly parents: readonly number[]
-  #s: GitStore
-  constructor(commit: GitCommit, index: number, lane: number, color: number, parents: number[], store: GitStore) {
-    this.commit = commit; this.index = index; this.lane = lane; this.color = color; this.parents = parents; this.#s = store
+/** A GitGraphRow over a lane row; its edges and children are read only when asked for (rows off screen never are). */
+class GitRow implements GitGraphRow {
+  readonly commit: GitCommit; readonly index: number; readonly lane: number; readonly color: number
+  readonly parents: readonly number[]
+  readonly #row: LaneRow<GitLaneNode>
+  constructor(r: LaneRow<GitLaneNode>) {
+    this.commit = r.node.commit; this.index = r.index; this.lane = r.lane; this.color = r.color; this.parents = r.parents; this.#row = r
   }
-  get edges(): GitGraphEdge[] {
-    const { e, eAt } = this.#s, out: GitGraphEdge[] = []
-    for (let o = eAt[this.index]; o < eAt[this.index + 1]; o += 6) {
-      const f = e[o + 2], edge: GitGraphEdge = { fromLane: e[o], toLane: e[o + 1], type: GIT_TYPES[f & 3], part: GIT_PARTS[(f >> 2) & 3], color: e[o + 3], child: e[o + 4], parent: e[o + 5], firstParent: !!(f & 32) }
-      if (f & 16) edge.missing = true
-      out.push(edge)
-    }
-    return out
-  }
-  get children(): number[] { const { kids, kAt } = this.#s; return Array.from(kids.subarray(kAt[this.index], kAt[this.index + 1])) }
+  get edges(): GitGraphEdge[] { return this.#row.edges.map(gitEdge) }
+  get children(): readonly number[] { return this.#row.children }
+}
+
+/** Both views of a history: the lane layout GitGraph draws, and the GitGraphLayout the exported helpers take. */
+function gitLanes(commits: readonly GitCommit[], { order = 'date', firstParentLanes = true, pin = [], colorOf }: GitLayoutOptions = {}) {
+  const nodes: GitLaneNode[] = commits.map(c => ({ id: c.hash, parents: c.parents, time: gitTime(c.date), group: gitTipKey(c) ?? undefined, commit: c }))
+  const lanes = layoutLanes(nodes, {
+    order: order === 'topo' ? 'topo' : 'time', pin, pinStart: gitPinStart, palette: GIT_LANE_COLORS,
+    color: colorOf ? key => colorOf(key) : gitColor, laneGroup: gitMergeLane, firstParentLanes,
+  })
+  const rows: GitGraphRow[] = lanes.rows.map(r => new GitRow(r))
+  // the same id → row map layoutLanes keeps (GitGraphLayout's type says Map; nobody writes to it)
+  return { lanes, git: { rows, laneCount: lanes.laneCount, rowOf: lanes.index as Map<string, number> } satisfies GitGraphLayout }
 }
 
 /**
  * Lay out a commit graph: rows in topological order (children first; `order` 'date' or 'topo'), a lane per commit and
- * each row's edges (see the module header for the algorithm). Pure and O(n · lanes); input order doesn't matter.
+ * each row's edges (layoutLanes does the work; see lanes.tsx). Pure and O(n · lanes); input order doesn't matter.
  *   const { rows, laneCount } = layoutGitGraph(commits, { pin: ['main'] })
  */
-export function layoutGitGraph(commits: readonly GitCommit[], { order = 'date', firstParentLanes = true, pin = [], colorOf = gitLaneColor }: GitLayoutOptions = {}): GitGraphLayout {
-  const { list, pv, pAt, out, at } = gitOrder(commits, order)
-  const n = out.length, rowOf = at, rowAt = new Int32Array(list.length) // `at` (hash → input index) becomes hash → row
-  for (let r = 0; r < n; r++) { const ci = out[r]; rowOf.set(list[ci].hash, r); rowAt[ci] = r }
-  const rowCommit = (r: number) => list[out[r]]
-  const P: number[][] = new Array(n)
-  for (let r = 0; r < n; r++) {
-    const ci = out[r], ps: number[] = []
-    for (let q = pAt[ci]; q < pAt[ci + 1]; q++) { const j = pv[q]; if (j !== -2) ps.push(j >= 0 ? rowAt[j] : -1) }
-    P[r] = ps
-  }
-
-  // pinned branches: their first-parent chains get the reserved lanes 0..pins-1 (an earlier pin wins a shared commit)
-  const pinLane = new Int32Array(n).fill(-1), pinKeys: string[] = []
-  const tipOf = (name: string) => {
-    let remote = -1
-    for (let r = 0; r < n; r++) {
-      const refs = rowCommit(r).refs
-      if (refs) for (const ref of refs) {
-        if ((ref.type === 'branch' || ref.type === 'head') && ref.name === name) return r
-        if (remote < 0 && ref.type === 'remote' && gitRefBranch(ref) === name) remote = r
-      }
-    }
-    return remote
-  }
-  for (const name of pin) {
-    const tip = tipOf(name)
-    if (tip < 0) continue
-    const k = pinKeys.length; pinKeys.push(name)
-    for (let r = tip; r >= 0 && pinLane[r] < 0; r = P[r][0] ?? -1) pinLane[r] = k
-  }
-  const reserved = pinKeys.length
-
-  // children, CSR
-  const kAt = new Int32Array(n + 1)
-  for (let r = 0; r < n; r++) for (const p of P[r]) if (p >= 0) kAt[p + 1]++
-  for (let r = 0; r < n; r++) kAt[r + 1] += kAt[r]
-  const kids = new Int32Array(kAt[n]), fill = kAt.slice(0, n)
-  for (let r = 0; r < n; r++) for (const p of P[r]) if (p >= 0) kids[fill[p]++] = r
-
-  // lanes: the row each waits for, the child row it came from, its colour, whether it is a first-parent link, and the
-  // row (+1) that freed it (a lane freed by a row isn't reused for that row's merge parents)
-  const want: number[] = [], from: number[] = [], col: number[] = [], firstLink: boolean[] = [], freedBy: number[] = []
-  // with the default colours, pinned branches take the first colours in pin order (main ink, develop blue…) and the other
-  // branches hash into the rest, so a feature branch never wears develop's colour
-  const N = GIT_LANE_COLORS.length, own = colorOf === gitLaneColor && reserved > 0 && reserved < N
-  const pinColor = (k: number) => (own ? (GIT_MAIN.test(pinKeys[k]) ? 0 : k === 0 || pinKeys.slice(0, k).some(p => GIT_MAIN.test(p)) ? k : k + 1) % N : colorOf(pinKeys[k]))
-  const taken = new Set(pinKeys.map((_, k) => pinColor(k))), hues: number[] = []
-  for (let i = 1; i < N; i++) if (!taken.has(i)) hues.push(i)
-  const hue = (key: string) => {
-    if (!own) return colorOf(key)
-    const pk = pinKeys.indexOf(key)
-    return pk >= 0 ? pinColor(pk) : hues.length ? hues[gitHashStr(key) % hues.length] : colorOf(key)
-  }
-  for (let k = 0; k < reserved; k++) { want.push(-1); from.push(-1); col.push(pinColor(k)); firstLink.push(true); freedBy.push(0) }
-  let e = new Int32Array(Math.max(64, n * 18)), len = 0
-  const eAt = new Int32Array(n + 1)
-  let maxLane = reserved - 1
-  const push = (a: number, b: number, type: number, part: number, color: number, child: number, parent: number, first: boolean, missing = false) => {
-    if (len + 6 > e.length) { const g = new Int32Array(e.length * 2); g.set(e); e = g }
-    e[len] = a; e[len + 1] = b; e[len + 2] = type | (part << 2) | (missing ? 16 : 0) | (first ? 32 : 0); e[len + 3] = color; e[len + 4] = child; e[len + 5] = parent
-    len += 6
-    if (a > maxLane) maxLane = a
-    if (b > maxLane) maxLane = b
-  }
-  /** the leftmost free lane right of the reserved ones (not one `stamp` just freed), else a new one */
-  const free = (stamp: number) => {
-    for (let k = reserved; k < want.length; k++) if (want[k] < 0 && freedBy[k] !== stamp) return k
-    want.push(-1); from.push(-1); col.push(0); firstLink.push(true); freedBy.push(0)
-    return want.length - 1
-  }
-  const lanes = new Int32Array(n), colors = new Int32Array(n), waiting: number[] = []
-  for (let r = 0; r < n; r++) {
-    eAt[r] = len
-    const c = rowCommit(r)
-    let nw = 0, leftmost = -1, leftFirst = -1
-    for (let k = 0; k < want.length; k++) if (want[k] === r) { waiting[nw++] = k; if (leftmost < 0) leftmost = k; if (leftFirst < 0 && firstLink[k]) leftFirst = k }
-    let lane: number
-    const pk = pinLane[r]
-    if (pk >= 0 && (want[pk] < 0 || want[pk] === r)) lane = pk
-    else if (nw) lane = firstParentLanes && leftFirst >= 0 ? leftFirst : leftmost
-    else lane = free(-1)
-    // a lane's colour is its branch's: pinned lanes keep theirs, a commit carrying a branch ref starts that branch's
-    // colour, a lane reaching a ref-less commit passes its colour on, and a ref-less tip is coloured by its hash
-    const key = lane < reserved ? null : gitTipKey(c)
-    const color = lane < reserved ? col[lane] : key !== null ? hue(key) : want[lane] === r ? col[lane] : hue(c.hash)
-    // top half: lanes passing through, lanes ending in this commit
-    for (let k = 0; k < want.length; k++) {
-      const w = want[k]
-      if (w < 0) continue
-      if (w === r) push(k, lane, k === lane ? 0 : firstLink[k] ? 2 : 1, 1, col[k], from[k], r, firstLink[k])
-      else push(k, k, 0, 0, col[k], from[k], w, firstLink[k])
-    }
-    for (let i = 0; i < nw; i++) { want[waiting[i]] = -1; freedBy[waiting[i]] = r + 1 }
-    // bottom half: the first parent continues in this lane, the others join the lane waiting for them or open one
-    const ps = P[r]
-    let names: string[] | null = null
-    for (let i = 0; i < ps.length; i++) {
-      const p = ps[i]
-      if (p < 0) { push(lane, lane, i ? 1 : 0, 2, color, r, -1, i === 0, true); continue }
-      if (i === 0) {
-        want[lane] = p; from[lane] = r; col[lane] = color; firstLink[lane] = true
-        push(lane, lane, 0, 2, color, r, p, true)
-        continue
-      }
-      let j = -1
-      for (let k = 0; k < want.length; k++) if (want[k] === p) { j = k; break }
-      if (j < 0) {
-        j = free(r + 1)
-        names ??= gitMergeNames(c.subject)
-        want[j] = p; from[j] = r; firstLink[j] = false
-        col[j] = hue(names[i - 1] ?? gitTipKey(rowCommit(p)) ?? rowCommit(p).hash)
-      }
-      push(lane, j, 1, 2, col[j], r, p, false)
-    }
-    while (want.length > reserved && want[want.length - 1] < 0) { want.pop(); from.pop(); col.pop(); firstLink.pop(); freedBy.pop() }
-    lanes[r] = lane; colors[r] = color
-    if (lane > maxLane) maxLane = lane
-  }
-  eAt[n] = len
-  const store: GitStore = { e, eAt, kids, kAt }
-  const rows: GitGraphRow[] = new Array(n)
-  for (let r = 0; r < n; r++) rows[r] = new GitRowImpl(rowCommit(r), r, lanes[r], colors[r], P[r], store)
-  return { rows, laneCount: n ? maxLane + 1 : 0, rowOf }
+export function layoutGitGraph(commits: readonly GitCommit[], options: GitLayoutOptions = {}): GitGraphLayout {
+  return gitLanes(commits, options).git
 }
 
 /* ── filters, ranges, paths ────────────────────────────────────────────────── */
@@ -411,11 +221,7 @@ export function gitRange(layout: GitGraphLayout, a: number, b: number): { marks:
 }
 
 /** The first-parent ancestry of row `r` (itself, its first parent, its first parent's first parent…), as marks. */
-export function gitFirstParentPath(layout: GitGraphLayout, r: number): Uint8Array {
-  const marks = new Uint8Array(layout.rows.length)
-  for (let i = r; i >= 0 && i < marks.length && !marks[i]; i = layout.rows[i].parents[0] ?? -1) marks[i] = 1
-  return marks
-}
+export const gitFirstParentPath = (layout: GitGraphLayout, r: number): Uint8Array => laneAncestry(layout, r)
 
 /* ── parser ────────────────────────────────────────────────────────────────── */
 
@@ -506,58 +312,7 @@ type GitT = (key: keyof typeof GIT_GRAPH_MESSAGES.en, vars?: Record<string, stri
 
 /* ── drawing ───────────────────────────────────────────────────────────────── */
 
-/** Corner radius of edge elbows (the same rounded elbow as TraceWaterfall's connectors). */
-const GIT_R = 6
 const gitStroke = (color: number) => GIT_LANE_COLORS[color % GIT_LANE_COLORS.length]
-
-/** The SVG path of one edge in a row `h` px tall, lanes at `x(lane)`. */
-function gitEdgePath(e: GitGraphEdge, a: number, b: number, h: number, lw: number) {
-  const m = h / 2
-  if (e.part === 'through') return `M${a} 0V${h}`
-  if (e.part === 'top') {
-    if (a === b) return `M${a} 0V${m}`
-    const s = Math.sign(b - a), r = Math.min(GIT_R, Math.abs(b - a), m)
-    return `M${a} 0V${m - r}Q${a} ${m} ${a + s * r} ${m}H${b}`
-  }
-  if (e.missing) return e.type === 'merge' ? `M${a} ${m}L${a + lw * 0.7} ${m + h * 0.32}` : `M${a} ${m}V${m + h * 0.38}`
-  if (a === b) return `M${a} ${m}V${h}`
-  const s = Math.sign(b - a), r = Math.min(GIT_R, Math.abs(b - a), m)
-  return `M${a} ${m}H${b - s * r}Q${b} ${m} ${b} ${m + r}V${h}`
-}
-
-type GitRowGeo = { h: number; lw: number; cap: number; width: number }
-
-/** One row's slice of the graph: lanes passing, edges into and out of its node, and the node. */
-function GitRowGraph({ row, geo, path, head }: { row: GitGraphRow; geo: GitRowGeo; path: Uint8Array | null; head: boolean }) {
-  const { h, lw, cap, width } = geo, m = h / 2
-  const vis = (l: number) => Math.min(l, cap), x = (l: number) => 4 + lw / 2 + vis(l) * lw
-  const seen = new Set<string>(), parts: ReactNode[] = []
-  // on the highlighted ancestry: a first-parent link out of a commit on the path (its parent is then on the path too)
-  const onPath = (e: GitGraphEdge) => !!path && e.firstParent && e.parent >= 0 && !!path[e.child]
-  for (const e of row.edges) {
-    const folded = e.fromLane >= cap && e.toLane >= cap
-    const d = gitEdgePath(e, x(e.fromLane), x(e.toLane), h, lw)
-    const key = (folded ? 'f' : String(e.color)) + d
-    if (seen.has(key)) continue
-    seen.add(key)
-    const lit = onPath(e), dim = !!path && !lit
-    parts.push(<path key={key} d={d} fill="none" strokeLinecap="round" strokeWidth={lit ? 2.5 : 2}
-      stroke={folded ? 'var(--c-neutral)' : gitStroke(e.color)} strokeDasharray={folded || e.missing ? '2 3' : undefined}
-      opacity={dim ? 0.22 : e.missing ? 0.6 : 1} />)
-  }
-  const nx = x(row.lane), merge = row.parents.length > 1, dimNode = !!path && !path[row.index], c = row.lane >= cap ? 'var(--c-neutral)' : gitStroke(row.color)
-  return (
-    <svg width={width} height={h} className="block overflow-visible" aria-hidden focusable="false">
-      {parts}
-      <g opacity={dimNode ? 0.35 : 1}>
-        {head && <circle cx={nx} cy={m} r={7.5} fill="none" stroke="var(--accent)" strokeWidth={1.5} />}
-        {merge
-          ? <circle cx={nx} cy={m} r={3.5} fill="var(--card)" stroke={c} strokeWidth={2} />
-          : <circle cx={nx} cy={m} r={head ? 5 : 4} fill={c} stroke="var(--card)" strokeWidth={1.5} />}
-      </g>
-    </svg>
-  )
-}
 
 /* ── refs ──────────────────────────────────────────────────────────────────── */
 
@@ -607,15 +362,13 @@ function gitMark(text: string, q: string): ReactNode {
   return <>{text.slice(0, i)}<mark className="rounded-[var(--r-sm)] bg-[var(--warn-soft)] text-[var(--fg)]">{text.slice(i, i + q.length)}</mark>{text.slice(i + q.length)}</>
 }
 
-type GitRowProps = {
-  row: GitGraphRow; start: number; geo: GitRowGeo; cols: string; narrow: boolean; showAuthor: boolean
-  active: boolean; selected: boolean; inRange: boolean; match: boolean; fresh: boolean; head: boolean
-  path: Uint8Array | null; query: string; label: string; when: string; absolute: string
-  onRowClick: (i: number, e: RMouseEvent) => void; onHover: (i: number | null) => void
+type GitRowCellsProps = {
+  row: GitGraphRow; narrow: boolean; showAuthor: boolean; match: boolean; query: string; when: string; absolute: string
   onCopy: (i: number) => void; copied: boolean; copyLabel: string
 }
 
-const GitRowView = memo(function GitRowView({ row, start, geo, cols, narrow, showAuthor, active, selected, inRange, match, fresh, head, path, query, label, when, absolute, onRowClick, onHover, onCopy, copied, copyLabel }: GitRowProps) {
+/** A commit's cells beside its gutter (LaneGraph draws the row, the gutter and the selection): refs, subject, author, date, hash. */
+function GitRowCells({ row, narrow, showAuthor, match, query, when, absolute, onCopy, copied, copyLabel }: GitRowCellsProps) {
   const c = row.commit, chips = gitChips(c.refs), short = gitShortHash(c.hash), shown = chips.slice(0, narrow ? 2 : 3)
   const refs = shown.length > 0 && (
     <span className="flex min-w-0 flex-none items-center gap-1">
@@ -625,54 +378,41 @@ const GitRowView = memo(function GitRowView({ row, start, geo, cols, narrow, sho
   )
   const subject = <span dir="auto" className={cn('min-w-0 truncate', row.parents.length > 1 ? 'text-[var(--fg2)]' : 'text-[var(--fg)]')}>{gitMark(c.subject, query)}</span>
   const time = <time dateTime={new Date(gitTime(c.date)).toISOString()} title={absolute} className="truncate">{when}</time>
-  const inner = (
+  const marker = match && <span aria-hidden className="pointer-events-none absolute inset-y-1 start-0 w-[3px] rounded-full bg-[var(--warn)]" />
+  if (narrow) return (
     <>
-      {match && <span aria-hidden className="pointer-events-none absolute inset-y-1 start-0 w-[3px] rounded-full bg-[var(--warn)]" />}
-      <div role="gridcell" dir="ltr" className="h-full overflow-hidden">
-        <GitRowGraph row={row} geo={geo} path={path} head={head} />
+      {marker}
+      <div role="gridcell" className="flex min-w-0 flex-col justify-center gap-0.5 pe-3">
+        <span className="flex min-w-0 items-center gap-1.5">{refs}{subject}</span>
+        <span className="flex min-w-0 items-center gap-1.5 text-[11px] text-[var(--fg3)] group-aria-selected:text-[var(--fg2)] group-data-[range]:text-[var(--fg2)]">
+          <Avatar name={c.author.name} src={c.author.avatar} size={16} className="!border-0" />
+          <span className="min-w-0 truncate">{c.author.name}</span><span aria-hidden>·</span>{time}<span aria-hidden>·</span>
+          <span dir="ltr" className="font-[family-name:var(--mono)]">{gitMark(short, /^[0-9a-f]+$/.test(query) ? query : '')}</span>
+        </span>
       </div>
-      {narrow ? (
-        <div role="gridcell" className="flex min-w-0 flex-col justify-center gap-0.5 pe-3">
-          <span className="flex min-w-0 items-center gap-1.5">{refs}{subject}</span>
-          <span className="flex min-w-0 items-center gap-1.5 text-[11px] text-[var(--fg3)] group-aria-selected:text-[var(--fg2)] group-data-[range]:text-[var(--fg2)]">
-            <Avatar name={c.author.name} src={c.author.avatar} size={16} className="!border-0" />
-            <span className="min-w-0 truncate">{c.author.name}</span><span aria-hidden>·</span>{time}<span aria-hidden>·</span>
-            <span dir="ltr" className="font-[family-name:var(--mono)]">{gitMark(short, /^[0-9a-f]+$/.test(query) ? query : '')}</span>
-          </span>
-        </div>
-      ) : (
-        <>
-          <div role="gridcell" className="flex min-w-0 items-center gap-1.5 pe-3">{refs}{subject}</div>
-          {showAuthor && (
-            <div role="gridcell" className="flex min-w-0 items-center gap-1.5 pe-2 text-xs text-[var(--fg2)]">
-              <Avatar name={c.author.name} src={c.author.avatar} size={20} className="!border-0" /><span className="min-w-0 truncate">{gitMark(c.author.name, query)}</span>
-            </div>
-          )}
-          <div role="gridcell" className="min-w-0 pe-2 text-xs text-[var(--fg3)] group-aria-selected:text-[var(--fg2)] group-data-[range]:text-[var(--fg2)]">{time}</div>
-          <div role="gridcell" className="flex min-w-0 justify-end pe-1.5">
-            {/* a light copy button rather than CopyButton: rows mount on every scroll step, and the list's one live region
-                announces the copy (see onCopy in GitGraph) */}
-            <button type="button" tabIndex={-1} title={copyLabel} onClick={e => { e.stopPropagation(); onCopy(row.index) }}
-              className="inline-flex h-6 cursor-pointer items-center gap-1 rounded-[var(--r-md)] border-0 bg-transparent px-1.5 font-[family-name:var(--mono)] text-[11px] text-[var(--fg2)] hover:bg-[var(--muted)] hover:text-[var(--fg)] [@media(pointer:coarse)]:h-8">
-              <Icon name={copied ? 'check' : 'copy'} size={12} className={copied ? 'text-[var(--ok)]' : 'text-[var(--fg3)]'} />{short}
-            </button>
-          </div>
-        </>
-      )}
     </>
   )
   return (
-    <div role="row" data-index={row.index} aria-rowindex={row.index + 2} aria-selected={selected} aria-label={label} tabIndex={active ? 0 : -1} data-range={inRange || undefined}
-      className={cn('group absolute inset-x-0 top-0 grid cursor-default items-center outline-none [contain:strict] focus-visible:shadow-[inset_0_0_0_2px_var(--accent)]',
-        selected ? 'bg-[var(--accent-soft)]' : inRange ? 'bg-[color-mix(in_srgb,var(--accent-soft)_55%,transparent)] hover:bg-[var(--muted)]' : 'hover:bg-[var(--muted)]')}
-      style={{ height: geo.h, transform: `translateY(${start}px)`, gridTemplateColumns: cols }}
-      onClick={e => onRowClick(row.index, e)} onPointerEnter={e => { if (e.pointerType === 'mouse') onHover(row.index) }}>
-      {fresh
-        ? <motion.div className="contents" initial={{ opacity: 0 }} animate={{ opacity: 1 }} transition={{ duration: 0.4 }}>{inner}</motion.div>
-        : inner}
-    </div>
+    <>
+      {marker}
+      <div role="gridcell" className="flex min-w-0 items-center gap-1.5 pe-3">{refs}{subject}</div>
+      {showAuthor && (
+        <div role="gridcell" className="flex min-w-0 items-center gap-1.5 pe-2 text-xs text-[var(--fg2)]">
+          <Avatar name={c.author.name} src={c.author.avatar} size={20} className="!border-0" /><span className="min-w-0 truncate">{gitMark(c.author.name, query)}</span>
+        </div>
+      )}
+      <div role="gridcell" className="min-w-0 pe-2 text-xs text-[var(--fg3)] group-aria-selected:text-[var(--fg2)] group-data-[range]:text-[var(--fg2)]">{time}</div>
+      <div role="gridcell" className="flex min-w-0 justify-end pe-1.5">
+        {/* a light copy button rather than CopyButton: rows mount on every scroll step, and the list's one live region
+            announces the copy (see onCopy in GitGraph) */}
+        <button type="button" tabIndex={-1} title={copyLabel} onClick={e => { e.stopPropagation(); onCopy(row.index) }}
+          className="inline-flex h-6 cursor-pointer items-center gap-1 rounded-[var(--r-md)] border-0 bg-transparent px-1.5 font-[family-name:var(--mono)] text-[11px] text-[var(--fg2)] hover:bg-[var(--muted)] hover:text-[var(--fg)] [@media(pointer:coarse)]:h-8">
+          <Icon name={copied ? 'check' : 'copy'} size={12} className={copied ? 'text-[var(--ok)]' : 'text-[var(--fg3)]'} />{short}
+        </button>
+      </div>
+    </>
   )
-})
+}
 
 /* ── details ───────────────────────────────────────────────────────────────── */
 
@@ -829,12 +569,12 @@ const GIT_HEADER_H = 32
 const gitEditable = (t: EventTarget | null) => t instanceof Element && !!t.closest('input,textarea,select,[contenteditable="true"]')
 
 /**
- * Commit history graph (like VS Code's Git Graph or GitKraken): lanes and merge edges drawn per row, virtualised for 100k
- * commits, with refs, author, relative date and hash columns. Click or Enter opens details (a side panel, a sheet on
- * phones: message, parents, refs, files and diffs from `loadCommit`); Shift+click a second commit compares the range
- * (`loadDiff`). Hover or focus lights the first-parent ancestry. Keys: ↑/↓ rows, ← parent, → child, Home/End, PageUp/Down,
- * `/` search, n/N next/previous match, Enter open, Escape close; Shift+F10, right-click or long-press opens the actions
- * menu. Search, branch filter, first-parent and hide-merged views in the toolbar. New commits on top keep the reader's place.
+ * Commit history graph (like VS Code's Git Graph or GitKraken): a LaneGraph preset with refs, author, relative date and
+ * hash columns, virtualised for 100k commits. Click or Enter opens details (a side panel, a sheet on phones: message,
+ * parents, refs, files and diffs from `loadCommit`); Shift+click a second commit compares the range (`loadDiff`). Hover
+ * or focus lights the first-parent ancestry. Keys: ↑/↓ rows, ← parent, → child, Home/End, PageUp/Down, `/` search, n/N
+ * next/previous match, Enter open, Escape close; Shift+F10, right-click or long-press opens the actions menu. Search,
+ * branch filter, first-parent and hide-merged views in the toolbar. New commits on top keep the reader's place.
  */
 export function GitGraph({ commits, order = 'date', pin, selected, defaultSelected = null, onSelectedChange, loadCommit, loadDiff,
   onCheckout, onCreateBranch, onCherryPick, onRevert, onCopyHash, onCompare, branches, defaultBranches = [], onBranchesChange,
@@ -856,7 +596,7 @@ export function GitGraph({ commits, order = 'date', pin, selected, defaultSelect
   }, [commits])
   const pins = useMemo(() => { if (pin) return pin; const m = ['main', 'master', 'trunk'].find(n => allBranches.includes(n)); return m ? [m] : [] }, [pin, allBranches])
   const shown = useMemo(() => filterGitHistory(commits, { branches: branchSel, firstParent, hideMerged }), [commits, branchSel, firstParent, hideMerged])
-  const layout = useMemo(() => layoutGitGraph(shown, { order, pin: pins }), [shown, order, pins])
+  const { lanes, git: layout } = useMemo(() => gitLanes(shown, { order, pin: pins }), [shown, order, pins])
   const { rows } = layout, count = rows.length
   const [open, setOpen] = useState(false)
 
@@ -867,22 +607,19 @@ export function GitGraph({ commits, order = 'date', pin, selected, defaultSelect
   // folding one lane into a one-lane gutter saves nothing: fold only when at least two would go
   const foldable = layout.laneCount > capBase + 1
   const cap = allLanes || !foldable ? layout.laneCount : capBase
-  const folded = layout.laneCount > cap
-  const gw = Math.max(28, 8 + (cap + (folded ? 1 : 0)) * lw)
-  const geo = useMemo<GitRowGeo>(() => ({ h, lw, cap, width: gw }), [h, lw, cap, gw])
+  const gw = laneGutterWidth(layout.laneCount, lw, cap)
   // the list's own width: the details panel takes up to 400px of it on wide screens
   const listW = wide && open && width ? width - Math.min(400, width * 0.42) : width
   const showAuthor = width === 0 || listW >= 760
-  const cols = narrow ? `${gw}px minmax(0,1fr)` : showAuthor ? `${gw}px minmax(0,1fr) 150px 108px 88px` : `${gw}px minmax(0,1fr) 108px 88px`
+  const cols = narrow ? 'minmax(0,1fr)' : showAuthor ? 'minmax(0,1fr) 150px 108px 88px' : 'minmax(0,1fr) 108px 88px'
   // every lane shown and wider than the fold: the list scrolls sideways rather than squeezing the text columns
   const minW = allLanes && foldable ? gw + (narrow ? 220 : 520) : undefined
 
-  /* virtual list */
-  const scrollRef = useRef<HTMLDivElement>(null)
+  /* the rows (LaneGraph) and the Tab stop */
+  const graph = useRef<LaneGraphHandle>(null)
   const [active, setActive] = useState(0)
   const act = Math.min(active, Math.max(0, count - 1))
-  const keep = useMemo(() => (count ? [act] : []), [act, count])
-  const v = useVirtual({ count, estimateSize: h, scrollRef, paddingStart: GIT_HEADER_H, scrollPaddingStart: GIT_HEADER_H, overscan: 8, keep })
+  const goTo = useCallback((i: number, o?: { focus?: boolean; align?: 'auto' | 'center' | 'start' }) => graph.current?.goTo(i, o), [])
 
   /* selection, compare, details */
   const [sel, setSel] = useControllable<string | null>(selected, defaultSelected, onSelectedChange)
@@ -891,12 +628,8 @@ export function GitGraph({ commits, order = 'date', pin, selected, defaultSelect
   const cmpRows = cmp ? [layout.rowOf.get(cmp[0]) ?? -1, layout.rowOf.get(cmp[1]) ?? -1] : null
   const range = useMemo(() => cmpRows && cmpRows[0] >= 0 && cmpRows[1] >= 0 ? gitRange(layout, cmpRows[0], cmpRows[1]) : null, [layout, cmpRows?.[0], cmpRows?.[1]]) // eslint-disable-line react-hooks/exhaustive-deps
   const compare = useMemo(() => (range && cmpRows ? { older: Math.max(cmpRows[0], cmpRows[1]), newer: Math.min(cmpRows[0], cmpRows[1]), count: range.count } : null), [range]) // eslint-disable-line react-hooks/exhaustive-deps
-
-  /* highlight: hover, else the focused row */
-  const [hover, setHover] = useState<number | null>(null)
-  const [focusIn, setFocusIn] = useState(false)
-  const hl = hover ?? (focusIn ? act : null)
-  const path = useMemo(() => (hl != null && hl < count ? gitFirstParentPath(layout, hl) : null), [layout, hl, count])
+  // what LaneGraph marks selected: the two ends while comparing, else the selected commit
+  const marked = useMemo(() => (compare ? [rows[compare.older].commit.hash, rows[compare.newer].commit.hash] : sel ? [sel] : []), [compare, rows, sel])
 
   /* search */
   const [query, setQuery] = useState('')
@@ -919,22 +652,6 @@ export function GitGraph({ commits, order = 'date', pin, selected, defaultSelect
   const headRow = useMemo(() => rows.find(r => r.commit.refs?.some(x => x.type === 'head'))?.index ?? -1, [rows])
   const headName = headRow >= 0 ? rows[headRow].commit.refs!.find(x => x.type === 'head')!.name : null
 
-  /* focus handling */
-  const pendingFocus = useRef<number | null>(null)
-  const goTo = useCallback((i: number, { focus = true, align = 'auto' as 'auto' | 'center' | 'start' } = {}) => {
-    if (!count) return
-    const k = Math.max(0, Math.min(count - 1, i))
-    setActive(k)
-    v.scrollToIndex(k, { align })
-    if (focus) pendingFocus.current = k
-  }, [count, v.scrollToIndex]) // eslint-disable-line react-hooks/exhaustive-deps
-  useLayoutEffect(() => {
-    const k = pendingFocus.current
-    if (k == null) return
-    const el = scrollRef.current?.querySelector<HTMLElement>(`[role=row][data-index="${k}"]`)
-    if (el) { el.focus({ preventScroll: true }); pendingFocus.current = null }
-  })
-
   const select = useCallback((i: number, openIt = true) => {
     const r = rows[i]; if (!r) return
     setSel(r.commit.hash); setCmp(null); setActive(i)
@@ -944,15 +661,14 @@ export function GitGraph({ commits, order = 'date', pin, selected, defaultSelect
     const older = rows[Math.max(a, b)].commit.hash, newer = rows[Math.min(a, b)].commit.hash
     setCmp([older, newer]); setOpen(true); onCompare?.(older, newer)
   }, [rows, onCompare])
-
-  const onRowClick = useCallback((i: number, e: RMouseEvent) => {
-    if (e.shiftKey && selRow >= 0 && selRow !== i) { setActive(i); startCompare(selRow, i); return }
-    select(i)
+  // click and Enter: Shift with a selection compares, otherwise select and open the details
+  const onActivate = useCallback((r: LaneRow<GitLaneNode>, e: { shiftKey: boolean }) => {
+    if (e.shiftKey && selRow >= 0 && selRow !== r.index) { setActive(r.index); startCompare(selRow, r.index); return }
+    select(r.index)
   }, [selRow, select, startCompare])
-  const onHover = useCallback((i: number | null) => setHover(i), [])
   // each row's dates and accessible name, formatted once per layout (scrolling re-renders the list often)
   const textCache = useMemo(() => new Map<number, { when: string; absolute: string; label: string }>(), [rows, now, t, fmt])
-  const rowText = (i: number) => {
+  const rowText = useCallback((i: number) => {
     let x = textCache.get(i)
     if (!x) {
       const c = rows[i].commit, when = fmt.relative(gitTime(c.date), now)
@@ -960,7 +676,7 @@ export function GitGraph({ commits, order = 'date', pin, selected, defaultSelect
       textCache.set(i, x)
     }
     return x
-  }
+  }, [textCache, rows, fmt, now, t])
 
   /* copying a row's hash: one clipboard helper and one announcement for the whole list */
   const { t: tc } = useLocale(), copier = useCopy()
@@ -969,8 +685,8 @@ export function GitGraph({ commits, order = 'date', pin, selected, defaultSelect
   const copyTimer = useRef<ReturnType<typeof setTimeout>>(undefined)
   useEffect(() => () => clearTimeout(copyTimer.current), [])
   const copyHash = useRef<(hash: string) => void>(() => {})
-  const copyRow = useCallback((i: number) => { const h = rowsRef.current[i]?.commit.hash; if (h) copyHash.current(h) }, [])
   const rowsRef = useRef(rows); rowsRef.current = rows
+  const copyRow = useCallback((i: number) => { const h = rowsRef.current[i]?.commit.hash; if (h) copyHash.current(h) }, [])
   copyHash.current = hash => {
     copier.copy(hash).then(ok => {
       setAnnounce(`${ok ? tc('common.copied') : tc('common.copyFailed')}: ${gitShortHash(hash)}`)
@@ -995,90 +711,29 @@ export function GitGraph({ commits, order = 'date', pin, selected, defaultSelect
     if (d && dq === query.trim().toLowerCase()) { pendingJump.current = 0; jumpMatch(d, false) }
   }, [dq]) // eslint-disable-line react-hooks/exhaustive-deps
 
-  /* menu */
+  /* menu: the row it was opened on (right-click, the Menu key) or the active one (long-press) */
   const [menuRow, setMenuRow] = useState(-1)
   const pendingMenu = useRef(-1)
-  const rowFromEvent = (target: EventTarget | null) => {
-    const el = target instanceof Element ? target.closest('[role=row][data-index]') : null
-    return el ? Number(el.getAttribute('data-index')) : -1
-  }
   const menuCommit = rows[menuRow]?.commit
   const menuBranch = menuCommit?.refs?.find(r => r.type === 'branch' || (r.type === 'head' && r.name !== 'HEAD'))?.name
 
-  /* keyboard */
+  /* keys LaneGraph doesn't know: Escape closes compare, then details; / searches; n/N jump between matches */
   const onKeyDown = (e: RKeyboardEvent<HTMLDivElement>) => {
     if (gitEditable(e.target) || e.altKey || e.ctrlKey || e.metaKey) return
-    const page = Math.max(1, Math.floor((v.viewportSize - GIT_HEADER_H) / h) - 1)
-    const key = e.key, r = rows[act]
     const stop = () => { e.preventDefault(); e.stopPropagation() }
-    if (key === 'ContextMenu' || (e.shiftKey && key === 'F10')) {
-      stop()
-      const el = scrollRef.current?.querySelector<HTMLElement>(`[role=row][data-index="${act}"]`)
-      if (el) { pendingMenu.current = act; const b = el.getBoundingClientRect(); el.dispatchEvent(new MouseEvent('contextmenu', { bubbles: true, cancelable: true, clientX: b.left + Math.min(b.width / 2, 240), clientY: b.top + b.height / 2 })) }
-      return
-    }
-    switch (key) {
-      case 'ArrowDown': stop(); goTo(act + 1); return
-      case 'ArrowUp': stop(); goTo(act - 1); return
-      case 'Home': stop(); goTo(0); return
-      case 'End': stop(); goTo(count - 1); return
-      case 'PageDown': stop(); goTo(act + page); return
-      case 'PageUp': stop(); goTo(act - page); return
-      // the graph is a plot whose time runs downward: ← goes back in history (to a parent), → forward (to a child)
-      case 'ArrowLeft': { // rtl-lint-ignore: a plot key, not mapped through logicalArrow
-        stop(); if (!r) return
-        const ps = r.parents.filter(p => p >= 0)
-        const p = e.shiftKey ? ps[1] ?? ps[0] : ps[0]
-        if (p !== undefined) goTo(p)
-        return
-      }
-      case 'ArrowRight': { // rtl-lint-ignore: a plot key, not mapped through logicalArrow
-        stop(); if (!r) return
-        const kids = r.children
-        // prefer the child that continues this commit's lane (its first parent is us), then the newest
-        const k = kids.find(c => rows[c].parents[0] === r.index && rows[c].lane === r.lane) ?? kids.find(c => rows[c].parents[0] === r.index) ?? kids[kids.length - 1]
-        if (k !== undefined) goTo(e.shiftKey ? kids[0] : k)
-        return
-      }
-      case 'Enter':
-        stop()
-        if (e.shiftKey && selRow >= 0 && selRow !== act) startCompare(selRow, act)
-        else select(act)
-        return
+    switch (e.key) {
       case 'Escape':
-        if (cmp) { stop(); setCmp(null); return }
-        if (open) { stop(); setOpen(false); return }
-        if (sel) { stop(); setSel(null) }
-        return
+        if (cmp) { stop(); setCmp(null) } else if (open) { stop(); setOpen(false) }
+        return // otherwise LaneGraph clears the selection
       case '/': if (toolbar) { stop(); searchRef.current?.focus(); searchRef.current?.select() } return
-      case 'n': case 'N': if (matches.length) { stop(); jumpMatch(key === 'n' && !e.shiftKey ? 1 : -1, true) } return
+      case 'n': case 'N': if (matches.length) { stop(); jumpMatch(e.key === 'n' && !e.shiftKey ? 1 : -1, true) } return
     }
   }
 
-  /* live updates: keep the reader's place when commits arrive above, and fade the new ones in */
-  const anchor = useRef<{ hash: string; delta: number } | null>(null)
+  /* new commits on top fade in (LaneGraph keeps the reader's place) and a polite live region counts them */
   const prevHashes = useRef<Set<string> | null>(null)
   const [fresh, setFresh] = useState<Set<string> | null>(null)
   const [announce, setAnnounce] = useState('')
-  const lastLayout = useRef(layout)
-  useLayoutEffect(() => {
-    const prev = anchor.current
-    if (lastLayout.current !== layout && prev) {
-      const ni = layout.rowOf.get(prev.hash), off = v.getScrollOffset()
-      if (ni !== undefined && off > 0) { const to = GIT_HEADER_H + ni * h + prev.delta; if (Math.abs(to - off) > 0.5) v.scrollToOffset(to) }
-    }
-    lastLayout.current = layout
-  }, [layout]) // eslint-disable-line react-hooks/exhaustive-deps
-  useEffect(() => {
-    const el = scrollRef.current; if (!el) return
-    const note = () => {
-      const off = el.scrollTop, i = Math.max(0, Math.min(count - 1, Math.floor(Math.max(0, off - GIT_HEADER_H) / h)))
-      const r = lastLayout.current.rows[i]
-      anchor.current = r && off > 0 ? { hash: r.commit.hash, delta: off - (GIT_HEADER_H + i * h) } : null
-    }
-    note(); el.addEventListener('scroll', note, { passive: true })
-    return () => el.removeEventListener('scroll', note)
-  }, [count, h])
   useEffect(() => {
     const prev = prevHashes.current
     prevHashes.current = new Set(commits.map(c => c.hash))
@@ -1180,50 +835,39 @@ export function GitGraph({ commits, order = 'date', pin, selected, defaultSelect
   const details = showPanel && <GitDetails layout={layout} row={selR} compare={compare} loadCommit={loadCommit} loadDiff={loadDiff} onJump={jump} t={t} now={now} />
 
   const hdr = 'flex h-full min-w-0 items-center truncate pe-2 text-[11px] font-medium text-[var(--fg3)]'
+  const header = (
+    <div role="row" aria-rowindex={1} className="grid h-full items-center" style={{ gridTemplateColumns: `${gw}px ${cols}` }}>
+      <div role="columnheader" dir="ltr" className="flex h-full items-center justify-center">
+        {foldable
+          ? <button type="button" onClick={() => setAllLanes(x => !x)} aria-pressed={allLanes} title={allLanes ? t('fewerLanes') : undefined} className="ui-target relative h-5 cursor-pointer rounded-full border border-dashed border-[var(--line2)] bg-transparent px-1.5 text-[11px] text-[var(--fg2)] hover:bg-[var(--muted)]">
+              <span className="sr-only">{t('graph')} </span>{allLanes ? '−' : t('moreLanes', { n: layout.laneCount - cap })}
+            </button>
+          : <span className="sr-only">{t('graph')}</span>}
+      </div>
+      <div role="columnheader" className={hdr}>{narrow ? t('commit') : t('description')}</div>
+      {!narrow && showAuthor && <div role="columnheader" className={hdr}>{t('author')}</div>}
+      {!narrow && <div role="columnheader" className={hdr}>{t('date')}</div>}
+      {!narrow && <div role="columnheader" className={cn(hdr, 'justify-end pe-3')}>{t('commit')}</div>}
+    </div>
+  )
+  const renderRow = useCallback((r: LaneRow<GitLaneNode>) => {
+    const { when, absolute } = rowText(r.index)
+    return <GitRowCells row={rows[r.index]} narrow={narrow} showAuthor={showAuthor} match={matchSet.has(r.index)} query={dq} when={when} absolute={absolute}
+      onCopy={copyRow} copied={copiedRow === r.index} copyLabel={copyLabel} />
+  }, [rowText, rows, narrow, showAuthor, matchSet, dq, copyRow, copiedRow, copyLabel])
+  const rowLabel = useCallback((r: LaneRow<GitLaneNode>) => { const { label } = rowText(r.index); return range?.marks[r.index] ? `${label}, ${t('inRange')}` : label }, [rowText, range, t])
+  const inRange = useCallback((r: LaneRow<GitLaneNode>) => (range?.marks[r.index] ? { 'data-range': true } : undefined), [range])
+  const rangeClass = useCallback((r: LaneRow<GitLaneNode>, s: LaneRowState) => (!s.selected && range?.marks[r.index] ? 'bg-[color-mix(in_srgb,var(--accent-soft)_55%,transparent)]' : undefined), [range])
+  const isHead = useCallback((r: LaneRow<GitLaneNode>) => r.index === headRow, [headRow])
+  const onRowMenu = useCallback((r: LaneRow<GitLaneNode>) => { pendingMenu.current = r.index }, [])
   const list = (
     <ContextMenuRoot onOpenChange={o => { if (o) setMenuRow(pendingMenu.current >= 0 ? pendingMenu.current : act); else pendingMenu.current = -1 }}>
-      <ContextMenuTrigger asChild label={t('menu')}>
-        <div ref={scrollRef} role="grid" tabIndex={-1} aria-label={ariaLabel ?? t('label')} aria-rowcount={count + 1} aria-colcount={narrow ? 2 : showAuthor ? 5 : 4} aria-multiselectable={false}
-          className="relative min-w-0 flex-1 overflow-auto overscroll-contain outline-none [contain:strict] [scrollbar-width:thin]" style={{ height }}
-          onKeyDown={onKeyDown}
-          onFocus={e => { setFocusIn(true); if (e.target === e.currentTarget) goTo(act); else { const i = rowFromEvent(e.target); if (i >= 0 && i !== act) setActive(i) } }}
-          onBlur={e => { if (!e.currentTarget.contains(e.relatedTarget as Node)) setFocusIn(false) }}
-          onPointerLeave={() => setHover(null)}
-          onPointerDown={e => { const i = rowFromEvent(e.target); pendingMenu.current = i; if (i >= 0 && e.pointerType !== 'mouse') setActive(i) }}
-          onContextMenu={e => { const i = rowFromEvent(e.target); if (i < 0) { e.preventDefault(); return } pendingMenu.current = i; setActive(i) }}>
-          <div style={{ height: v.totalSize, position: 'relative', minWidth: minW }}>
-            <div role="rowgroup" className="sticky top-0 z-[2] border-b border-[var(--line)] bg-[var(--card)]" style={{ height: GIT_HEADER_H }}>
-              <div role="row" aria-rowindex={1} className="grid h-full items-center" style={{ gridTemplateColumns: cols }}>
-                <div role="columnheader" dir="ltr" className="flex h-full items-center justify-center">
-                  {foldable
-                    ? <button type="button" onClick={() => setAllLanes(x => !x)} aria-pressed={allLanes} title={allLanes ? t('fewerLanes') : undefined} className="ui-target relative h-5 cursor-pointer rounded-full border border-dashed border-[var(--line2)] bg-transparent px-1.5 text-[11px] text-[var(--fg2)] hover:bg-[var(--muted)]">
-                        <span className="sr-only">{t('graph')} </span>{allLanes ? '−' : t('moreLanes', { n: layout.laneCount - cap })}
-                      </button>
-                    : <span className="sr-only">{t('graph')}</span>}
-                </div>
-                <div role="columnheader" className={hdr}>{narrow ? t('commit') : t('description')}</div>
-                {!narrow && showAuthor && <div role="columnheader" className={hdr}>{t('author')}</div>}
-                {!narrow && <div role="columnheader" className={hdr}>{t('date')}</div>}
-                {!narrow && <div role="columnheader" className={cn(hdr, 'justify-end pe-3')}>{t('commit')}</div>}
-              </div>
-            </div>
-            <div role="rowgroup">
-              {v.items.map(it => {
-                const r = rows[it.index], c = r.commit, { when, absolute, label } = rowText(it.index)
-                return (
-                  <GitRowView key={c.hash} row={r} start={it.start} geo={geo} cols={cols} narrow={narrow} showAuthor={showAuthor}
-                    active={it.index === act} selected={compare ? it.index === compare.older || it.index === compare.newer : it.index === selRow}
-                    inRange={!!range?.marks[it.index]} match={matchSet.has(it.index)} fresh={!!fresh?.has(c.hash)} head={it.index === headRow}
-                    path={path} query={dq} when={when} absolute={absolute}
-                    label={range?.marks[it.index] ? `${label}, ${t('inRange')}` : label}
-                    onRowClick={onRowClick} onHover={onHover} onCopy={copyRow} copied={copiedRow === it.index} copyLabel={copyLabel} />
-                )
-              })}
-            </div>
-            {!count && <p className="m-0 p-6 text-center text-[13px] text-[var(--fg3)]">{t('empty')}</p>}
-          </div>
-        </div>
-      </ContextMenuTrigger>
+      <LaneGraph ref={graph} nodes={lanes} renderRow={renderRow} cells columns={cols} rowHeight={h} laneWidth={lw} maxLanes={cap} height={height} fit={false}
+        header={header} headerHeight={GIT_HEADER_H} contentMinWidth={minW} empty={<p className="m-0 p-6 text-center text-[13px] text-[var(--fg3)]">{t('empty')}</p>}
+        aria-label={ariaLabel ?? t('label')} aria-colcount={narrow ? 2 : showAuthor ? 5 : 4}
+        active={act} onActiveChange={setActive} selected={marked} onSelect={id => { if (id == null) setSel(null) }} onActivate={onActivate}
+        onKeyDown={onKeyDown} onContextMenu={onRowMenu} rowLabel={rowLabel} rowAttrs={inRange} rowClassName={rangeClass} emphasis={isHead} fresh={fresh}
+        className="flex-1" wrapScroller={el => <ContextMenuTrigger asChild label={t('menu')}>{el}</ContextMenuTrigger>} />
       <ContextMenuContent aria-label={t('menu')}>
         <MenuItem icon="branch" disabled={!onCheckout} onSelect={() => menuCommit && onCheckout?.(menuCommit.hash, menuBranch)}>{menuBranch ? t('checkoutBranch', { branch: menuBranch }) : t('checkout')}</MenuItem>
         <MenuItem icon="branch" disabled={!onCreateBranch} onSelect={() => menuCommit && onCreateBranch?.(menuCommit.hash)}>{t('createBranch')}</MenuItem>

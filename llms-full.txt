@@ -4,7 +4,7 @@
 > CSS variables (seven palette families, light and dark). Forms, overlays, navigation, data grid, charts, diagrams, maps,
 > media, AI chat and agent UIs. Every component is also a self-contained .tsx drop-in file.
 
-Version 0.7.0. Source: https://github.com/lantos1618/oneshot-ui. Docs: https://lantos1618.github.io/oneshot-ui/. Licence: MIT with a revenue threshold (free up to USD 200k ARR).
+Version 0.8.0. Source: https://github.com/lantos1618/oneshot-ui. Docs: https://lantos1618.github.io/oneshot-ui/. Licence: MIT with a revenue threshold (free up to USD 200k ARR).
 
 ## Use it
 
@@ -22,8 +22,8 @@ and motion. Attach the ones you need plus ui-provider.tsx; they share one UIProv
 - CLI (offline, from the installed package): `npx @lyndon/ui add data-grid dialog --dir src/components/ui`, `npx @lyndon/ui list`, `npx @lyndon/ui info data-grid`
 - shadcn CLI: `npx shadcn add https://lantos1618.github.io/oneshot-ui/r/data-grid.json` (pulls in ui-provider)
 - Index with sizes, exports and embedded components: https://lantos1618.github.io/oneshot-ui/index.json
-- The same files from npm: https://unpkg.com/@lyndon/ui@0.7.0/dist-registry/files/<name>.tsx
-- Whole library in one file (dist-single/ui-all.tsx, ~623.0k tokens): only for tools with a very large context; prefer the drop-ins
+- The same files from npm: https://unpkg.com/@lyndon/ui@0.8.0/dist-registry/files/<name>.tsx
+- Whole library in one file (dist-single/ui-all.tsx, ~633.0k tokens): only for tools with a very large context; prefer the drop-ins
 
 ## Foundation
 
@@ -1906,13 +1906,21 @@ A chart and its journal side by side (pattern H), linked both ways: hovering, fo
 - Embeds: Button, Icon, IconButton, Slot, Spinner, TagGlyph, TagJournal, VirtualList
 - npm: motion, react, react-dom
 
-### Git graph (`git-graph`, ~80.7k tokens)
+### Git graph (`git-graph`, ~90.2k tokens)
 
-Commit history graph (like VS Code's Git Graph or GitKraken): lanes and merge edges drawn per row, virtualised for 100k commits, with refs, author, relative date and hash columns. Click or Enter opens details (a side panel, a sheet on phones: message, parents, refs, files and diffs from `loadCommit`); Shift+click a second commit compares the range (`loadDiff`). Hover or focus lights the first-parent ancestry. Keys: ↑/↓ rows, ← parent, → child, Home/End, PageUp/Down, `/` search, n/N next/previous match, Enter open, Escape close; Shift+F10, right-click or long-press opens the actions menu. Search, branch filter, first-parent and hide-merged views in the toolbar. New commits on top keep the reader's place.
+Commit history graph (like VS Code's Git Graph or GitKraken): a LaneGraph preset with refs, author, relative date and hash columns, virtualised for 100k commits. Click or Enter opens details (a side panel, a sheet on phones: message, parents, refs, files and diffs from `loadCommit`); Shift+click a second commit compares the range (`loadDiff`). Hover or focus lights the first-parent ancestry. Keys: ↑/↓ rows, ← parent, → child, Home/End, PageUp/Down, `/` search, n/N next/previous match, Enter open, Escape close; Shift+F10, right-click or long-press opens the actions menu. Search, branch filter, first-parent and hide-merged views in the toolbar. New commits on top keep the reader's place.
 
 - File: https://lantos1618.github.io/oneshot-ui/files/git-graph.tsx
 - Exports: GitGraph
-- Embeds: ActiveIndicator, Avatar, Badge, Button, Chip, ContextMenuContent, ContextMenuRoot, ContextMenuTrigger, CopyButton, DialogClose, DialogRoot, DialogTitle, Diff, DropdownMenuContent, DropdownMenuRoot, DropdownMenuTrigger, FloatingPanel, FormFieldContext, Icon, IconButton, InlineCode, Kbd, Markdown, MenuCheckboxItem, MenuItem, MenuLabel, MenuSeparator, ModalLayer, OverlayPortal, PopoverContent, PopoverRoot, PopoverTrigger, ScrollEdges, SegmentedControl, SheetContent, SheetHeader, Slot, Spinner
+- Embeds: ActiveIndicator, Avatar, Badge, Button, Chip, ContextMenuContent, ContextMenuRoot, ContextMenuTrigger, CopyButton, DialogClose, DialogRoot, DialogTitle, Diff, DropdownMenuContent, DropdownMenuRoot, DropdownMenuTrigger, FloatingPanel, FormFieldContext, Icon, IconButton, InlineCode, Kbd, LaneGraph, LaneGutter, Markdown, MenuCheckboxItem, MenuItem, MenuLabel, MenuSeparator, ModalLayer, OverlayPortal, PopoverContent, PopoverRoot, PopoverTrigger, ScrollEdges, SegmentedControl, SheetContent, SheetHeader, Slot, Spinner
+- npm: motion, react, react-dom
+
+### Lane graph (`lanes`, ~25.4k tokens)
+
+Any DAG as rows: layoutLanes (headless: order, lanes, colours and each row's edges, O(n · lanes)), LaneGutter (one row's SVG slice, stretches to tall rows) and LaneGraph (a virtualised list of gutter + your renderRow, with selection, hover ancestry, keyboard moves along edges and live inserts). GitGraph is a preset of it.
+
+- File: https://lantos1618.github.io/oneshot-ui/files/lanes.tsx
+- Exports: LaneGraph, LaneGutter, useLaneGraph, layoutLanes, laneAncestry, laneColor, laneHash, laneGutterWidth, LANE_COLORS, LANE_MESSAGES
 - npm: motion, react, react-dom
 
 ### Magnet bubble (`magnet-bubble`, ~653 tokens)
