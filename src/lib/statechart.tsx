@@ -3,7 +3,7 @@ import { AnimatePresence, motion, useInView, useReducedMotion } from 'motion/rea
 import { Badge, Button, Icon, ScrollEdges, TOUCH, clamp, cn, maxOf, spring, surface, useScrollEdges, fmt } from './core'
 import { SegmentedControl } from './fields'
 import { play, useFrameLoop } from './motion'
-import { DG_DOTS, DgDot, dgBez, dgSafeId } from './diagramkit'
+import { DG_DOTS, DgArrowMarkers, DgDot, dgBez, dgCubicPath, dgSafeId, useDgDots } from './diagramkit'
 
 /* DIAGRAMS · Statecharts: one SVG renderer (Statechart), the UML StateDiagram, and the WorkflowEngine with its live StateMachine. */
 
@@ -21,6 +21,7 @@ export type StatechartNode = {
 }
 export type StatechartEdge = { id: string; d: string; label?: string; lx?: number; ly?: number; anchor?: 'start' | 'middle' | 'end'; dashed?: boolean; live?: boolean }
 export type StatechartDot = { key: string; edge: string; ms: number; ease?: 'linear' | 'inOut'; onDone?: () => void }
+const SC_MARKERS = { n: 'var(--fg3)', l: 'var(--accent)' }
 
 function DgStateNode({ n, reduce, index }: { n: StatechartNode; reduce: boolean; index: number }) {
   const ref = useRef<SVGGElement>(null)
@@ -79,19 +80,12 @@ export function Statechart({ width, height, nodes, edges, dots = [], label, minW
   const uid = dgSafeId(useId())
   const reduce = !!useReducedMotion()
   const [scrollRef, scroll] = useScrollEdges<HTMLDivElement>()
-  // the diagram keeps its authored geometry in every locale (dir="ltr"), like charts; labels are the caller's text
   return (
     <div className="relative min-w-0 overflow-hidden rounded-[var(--r-lg)]">
     <div ref={scrollRef} tabIndex={scroll.left || scroll.right ? 0 : undefined} role={scroll.left || scroll.right ? 'region' : undefined} aria-label={scroll.left || scroll.right ? `${label}, scrolls sideways` : undefined}
       className={cn('overflow-x-auto overscroll-x-contain rounded-[var(--r-lg)] border border-[var(--line)] outline-none focus-visible:shadow-[0_0_0_2px_var(--accent)]', DG_DOTS, className)}>
       <svg viewBox={`0 0 ${width} ${height}`} role="img" aria-label={label} className="block h-auto w-full max-sm:!min-w-[var(--sc-phone)] [@media(pointer:coarse)]:!min-w-[var(--sc-phone)]" style={{ minWidth, '--sc-phone': `${width}px` } as CSSProperties}>
-        <defs>
-          {[['n', 'var(--fg3)'], ['l', 'var(--accent)']].map(([k, c]) => (
-            <marker key={k} id={`${uid}${k}`} viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto">
-              <path d="M1 1L9 5L1 9" fill="none" stroke={c} strokeWidth="1.7" strokeLinecap="round" strokeLinejoin="round" />
-            </marker>
-          ))}
-        </defs>
+        <defs><DgArrowMarkers uid={uid} colors={SC_MARKERS} size={7} refX={9} /></defs>
         {nodes.filter(n => n.kind === 'composite').map(n => (
           <g key={n.id}>
             <rect x={n.x} y={n.y} width={n.w} height={n.h} rx={16}
@@ -123,21 +117,18 @@ export function Statechart({ width, height, nodes, edges, dots = [], label, minW
  * visible), reduced motion, the dots travelling its transitions, and `repaint` for engines that live outside React
  * state. `travel(edge, ms)` sends a dot along transition `edge` and resolves when it arrives (at once with reduced
  * motion); `spark(edge, ms)` sends one without waiting, keeping at most `max` in flight; `clear()` drops them all.
+ * A dot that is dropped (cleared, pushed out by `max`, or unmounted) resolves its `travel` promise too.
  * StateDiagram and StateMachine are built on it; pass `dots` to Statechart.
  */
 export function useStatechart<T extends HTMLElement = HTMLDivElement>({ amount = 0.2, max = 24 }: { amount?: number; max?: number } = {}) {
   const ref = useRef<T>(null)
   const visible = useInView(ref, { amount })
   const reduce = !!useReducedMotion()
-  const [dots, setDots] = useState<StatechartDot[]>([])
+  const { dots, send, clear } = useDgDots(max)
   const [, repaint] = useReducer((x: number) => x + 1, 0)
-  const send = (edge: string, ms: number, ease: StatechartDot['ease'], done?: () => void) => {
-    const key = `${edge}-${performance.now()}-${Math.random()}`
-    setDots(ds => [...ds.slice(-max), { key, edge, ms, ease, onDone: () => { setDots(x => x.filter(d => d.key !== key)); done?.() } }])
-  }
-  const travel = (edge: string, ms: number, ease: StatechartDot['ease'] = 'inOut') => reduce ? Promise.resolve() : new Promise<void>(res => send(edge, ms, ease, res))
-  const spark = (edge: string, ms: number, ease?: StatechartDot['ease']) => { if (!reduce) send(edge, ms, ease) }
-  return { ref, visible, reduce, dots, travel, spark, clear: () => setDots([]), repaint }
+  const travel = (edge: string, ms: number, ease: StatechartDot['ease'] = 'inOut') => reduce ? Promise.resolve() : send(edge, ms, ease)
+  const spark = (edge: string, ms: number, ease?: StatechartDot['ease']) => { if (!reduce) void send(edge, ms, ease) }
+  return { ref, visible, reduce, dots, travel, spark, clear, repaint }
 }
 
 function DgPlayButton({ playing, onClick, label }: { playing: boolean; onClick: () => void; label?: string }) {
@@ -184,7 +175,8 @@ export type DiagramTransition = {
 export function StateDiagram({ states, transitions, initial, history, width = 940, height = 340, interval = 1600, className }:
   { states: Record<string, DiagramState>; transitions: DiagramTransition[]; initial: string
     history?: { of: string; at: [number, number]; default: string; d: string }; width?: number; height?: number; interval?: number; className?: string }) {
-  const M = useRef({ cur: initial, hist: history?.default ?? '', log: [] as { k: number; ev: string; from: string; to: string; guard?: string; act?: string }[] })
+  const fresh = () => ({ cur: initial, hist: history?.default ?? '', log: [] as { k: number; ev: string; from: string; to: string; guard?: string; act?: string }[] })
+  const M = useRef(fresh())
   const { ref: box, visible, dots, travel, repaint: force } = useStatechart({ amount: 0.2 })
   const [live, setLive] = useState<number | null>(null)
   const [hLive, setHLive] = useState(false)
@@ -194,7 +186,8 @@ export function StateDiagram({ states, transitions, initial, history, width = 94
   const { cur, hist, log } = M.current
   const within = (s: string, anc: string) => s === anc || states[s]?.parent === anc
   const nice = (s: string) => states[s]?.label ?? (states[s]?.kind === 'final' ? 'Final' : states[s]?.kind === 'initial' ? 'Start' : s)
-  const available = transitions.map((t, i) => [t, i] as const).filter(([t]) => within(cur, t.from))
+  const availableFrom = (s: string) => transitions.map((t, i) => [t, i] as const).filter(([t]) => within(s, t.from))
+  const available = availableFrom(cur)
   const resumable = transitions.some(t => t.to === 'H' && within(cur, t.from))
   const fire = async (i: number) => {
     const t = transitions[i], m = M.current
@@ -209,15 +202,15 @@ export function StateDiagram({ states, transitions, initial, history, width = 94
     m.cur = to; m.log = [{ k: performance.now(), ev: t.event, from, to, guard: t.guard, act: t.action }, ...m.log].slice(0, 12)
     busy.current = false; setPulse(p => p + 1); force()
   }
-  const reset = () => { M.current = { cur: initial, hist: history?.default ?? '', log: [] }; setPulse(0); force() }
+  const reset = () => { M.current = fresh(); setPulse(0); force() }
   // auto-play: one interval per (auto, visible, interval); each tick reads the latest props and fire() through a ref
   const step = useRef(() => {})
   useLayoutEffect(() => {
     step.current = () => {
       const m = M.current
       if (busy.current) return
-      if (states[m.cur]?.kind === 'final') { M.current = { ...m, cur: initial, hist: history?.default ?? '' }; force(); return }
-      const av = transitions.map((t, i) => [t, i] as const).filter(([t]) => within(m.cur, t.from))
+      if (states[m.cur]?.kind === 'final') { M.current = { ...fresh(), log: m.log }; force(); return }
+      const av = availableFrom(m.cur)
       if (!av.length) return
       const w = av.map(([t]) => t.weight ?? 1)
       let r = Math.random() * w.reduce((a, b) => a + b, 0)
@@ -333,6 +326,10 @@ export type WorkflowState = {
   next?: string | ((job: WorkflowJob) => string)
   /** fork into these branch states, then continue at `join` once all are back */
   fork?: string[]; join?: string
+  /** what a forked job waits for while its branches run (default 'Waiting for branches to join') */
+  joinLabel?: string
+  /** the state stands for the machine's trigger event: StateMachine labels it with the event name */
+  trigger?: boolean
   /** decision name and its labelled outcomes (for the chart) */
   guard?: string; to?: [string, string][]
 }
@@ -347,8 +344,12 @@ export type WorkflowMachine = {
 export type WorkflowQueued = { id: number; ev: string; from: string; t: number; parent?: number }
 export type WorkflowEvent =
   | { kind: 'spawn' | 'enter' | 'move' | 'guard' | 'join' | 'done' | 'trigger' | 'hitl' | 'hitl-done'; job: WorkflowJob; token: WorkflowToken; state: string; to?: string; guard?: string; result?: string; ev?: string }
+  /** a guard threw or named a state the machine doesn't have: the job ends here */
+  | { kind: 'error'; job: WorkflowJob; token: WorkflowToken; state: string; message: string }
   /** an event joined the queue: fired by hand, by the lap timer, by the intake timer, or emitted by a finished job */
   | { kind: 'queued'; job?: undefined; ev: string; from: string; cause: 'fire' | 'lap' | 'intake' | 'emit' }
+  /** an event (or a fired machine type) that no machine handles: counted in `unmatched`, nothing runs */
+  | { kind: 'unmatched'; job?: undefined; ev: string }
 export type WorkflowEngineOptions = {
   /** jobs that may run at once (default 3) */
   maxJobs?: number
@@ -356,7 +357,7 @@ export type WorkflowEngineOptions = {
   speed?: number
   /** fire the next machine in `order` after lap[0] seconds, then every lap[1] (default [1.2, 7]; lap[1] = 0 turns it off) */
   lap?: [number, number]
-  /** a trigger event that also arrives on its own every 9–15 s, first after 6 s (default 'request.received'; null turns it off) */
+  /** a trigger event that also arrives on its own every 9–15 s, first after 6 s (default none) */
   intake?: string | null
   /** seconds a human-in-the-loop state waits before it is approved by policy (default 4) */
   hitlWait?: number
@@ -370,6 +371,33 @@ export type WorkflowEngineOptions = {
   queueMax?: number
 }
 
+const WF_ROUTE_S = 0.3, WF_ORCH_S = 0.45, WF_APPROVED_S = 0.4
+/** Intake timer: the first event after WF_INTAKE_FIRST s, then one every WF_INTAKE_EVERY s plus up to WF_INTAKE_JITTER. */
+const WF_INTAKE_FIRST = 6, WF_INTAKE_EVERY = 9, WF_INTAKE_JITTER = 6
+/** Finished jobs kept in `jobs` (for the views) once more than this many are listed. */
+const WF_KEEP_JOBS = 6
+
+/** Throws when a machine names a state it doesn't have, so a typo fails at creation rather than mid-run. */
+function wfCheck(machines: Record<string, WorkflowMachine>, order: string[]) {
+  const fail = (m: string, where: string, what: string) => { throw new Error(`WorkflowEngine: machine "${m}"${where}: ${what}`) }
+  for (const [k, m] of Object.entries(machines)) {
+    const has = (s: string) => Object.hasOwn(m.states, s)
+    if (!has(m.start)) fail(k, '', `start state "${m.start}" is not in its states`)
+    for (const [id, st] of Object.entries(m.states)) {
+      const at = `, state "${id}"`
+      if (!Array.isArray(st.at) || st.at.length !== 2) fail(k, at, '`at` must be [line, station]')
+      if (typeof st.next === 'string' && st.next !== 'done' && st.next !== 'back' && !has(st.next)) fail(k, at, `next state "${st.next}" is not in its states`)
+      for (const [to] of st.to ?? []) if (to !== 'done' && !has(to)) fail(k, at, `outcome "${to}" is not in its states`)
+      if (st.fork) {
+        if (!st.join) fail(k, at, 'a fork needs a `join` state')
+        else if (!has(st.join)) fail(k, at, `join state "${st.join}" is not in its states`)
+        for (const b of st.fork) if (!has(b)) fail(k, at, `fork branch "${b}" is not in its states`)
+      }
+    }
+  }
+  for (const t of order) if (!machines[t]) throw new Error(`WorkflowEngine: order names "${t}", which is not a machine`)
+}
+
 /**
  * Token-based workflow engine. Events queue until a job slot frees up; each job walks its machine's states,
  * agents (stations with `work`) hold one token at a time and tokens that arrive while one is busy wait in that
@@ -377,6 +405,9 @@ export type WorkflowEngineOptions = {
  * branch tokens that join back, and human-in-the-loop states wait in `waiting` until resolve() or a timeout.
  * Every job keeps a segment timeline and usage meters. Drive it with tick(seconds) (from useFrameLoop);
  * subscribe() to every transition. StateMachine and AgentTransitMap both run on it.
+ * The constructor throws when a machine names a state it doesn't have (or a fork lacks its join). At run time a guard
+ * that throws or returns an unknown state ends that job with an `error` event; events no machine handles are counted
+ * in `unmatched` and emitted as `unmatched`. A throwing subscriber is reported (reportError) and never stops tick().
  */
 export class WorkflowEngine {
   machines: Record<string, WorkflowMachine>; order: string[]
@@ -390,20 +421,26 @@ export class WorkflowEngine {
   clock = 0
   /** events dropped because the queue was full */
   dropped = 0
+  /** events (or fired machine types) that no machine handles */
+  unmatched = 0
   lap: [number, number]; intake: string | null
-  private seq = 0; private uid = 0; private evIdx = 0; private lapT: number; private intakeT = 6
+  private seq = 0; private uid = 0; private evIdx = 0; private lapT: number; private intakeT = WF_INTAKE_FIRST
   private travelTime: (line: string, from: string, to: string) => number
   private meter: { tokens: number; usd: number }; private source: (type: string) => string
   private subs = new Set<(e: WorkflowEvent) => void>()
   constructor(machines: Record<string, WorkflowMachine>, order: string[], o: WorkflowEngineOptions = {}) {
+    wfCheck(machines, order)
     this.machines = machines; this.order = order
     this.maxJobs = o.maxJobs ?? 3; this.speed = o.speed ?? 1; this.hitlWait = o.hitlWait ?? 4; this.queueMax = o.queueMax ?? 8
-    this.lap = o.lap ?? [1.2, 7]; this.lapT = this.lap[0]; this.intake = o.intake === undefined ? 'request.received' : o.intake
+    this.lap = o.lap ?? [1.2, 7]; this.lapT = this.lap[0]; this.intake = o.intake ?? null
     this.travelTime = o.travelTime ?? (() => 1); this.meter = o.meter ?? { tokens: 0, usd: 0 }
     this.source = o.source ?? (t => { const m = this.machines[t]; return m.states[m.start].at[0] })
   }
   subscribe(f: (e: WorkflowEvent) => void) { this.subs.add(f); return () => { this.subs.delete(f) } }
-  private emit(e: WorkflowEvent) { this.subs.forEach(f => f(e)) }
+  private emit(e: WorkflowEvent) {
+    this.subs.forEach(f => { try { f(e) } catch (err) { wfReport(err) } })
+  }
+  private unmatch(ev: string) { this.unmatched++; this.emit({ kind: 'unmatched', ev }) }
   /** The machine whose trigger is `ev`. */
   typeOf(ev: string) { return Object.keys(this.machines).find(k => this.machines[k].event === ev) }
   /** How far a moving token is along its move, 0…1 (1 when it isn't moving). */
@@ -423,8 +460,9 @@ export class WorkflowEngine {
   }
   /** Queue the trigger event of a machine (defaults to the next one in `order`). */
   fire(type?: string, cause: 'fire' | 'lap' = 'fire') {
+    if (!type && !this.order.length) return
     const t = type ?? this.order[this.evIdx++ % this.order.length]
-    if (this.machines[t]) this.enqueue(this.machines[t].event, this.source(t), cause)
+    if (this.machines[t]) this.enqueue(this.machines[t].event, this.source(t), cause); else this.unmatch(t)
   }
   private slots() { return this.maxJobs - this.jobs.filter(j => !j.done).length }
   private st(tk: WorkflowToken, s = tk.state) { return this.machines[tk.job.type].states[s] }
@@ -451,9 +489,9 @@ export class WorkflowEngine {
     if (!tk.parent) tk.job.state = state
     this.emit({ kind: 'enter', job: tk.job, token: tk, state })
     if (st.hitl && this.hitl) { tk.phase = 'hitl'; tk.t = this.hitlWait; this.seg(tk, 'wait', 'Waiting for human approval'); this.waiting.push(tk); this.emit({ kind: 'hitl', job: tk.job, token: tk, state }); return }
-    if (st.orch) { tk.phase = 'route'; tk.t = 0.45; this.seg(tk, 'wait', st.label); return }
+    if (st.orch) { tk.phase = 'route'; tk.t = WF_ORCH_S; this.seg(tk, 'wait', st.label); return }
     if (st.work) { tk.phase = 'work'; tk.t = st.work; this.seg(tk, 'work', st.label); return }
-    tk.phase = 'route'; tk.t = 0.3; this.seg(tk, 'wait', st.label)
+    tk.phase = 'route'; tk.t = WF_ROUTE_S; this.seg(tk, 'wait', st.label)
   }
   private free(tk: WorkflowToken) { const st = this.st(tk); if (st.work && this.busy[st.at[1]] === tk) delete this.busy[st.at[1]] }
   private travel(tk: WorkflowToken, line: string, from: string, to: string, toState: string, cb: () => void) {
@@ -465,11 +503,13 @@ export class WorkflowEngine {
   private decide(tk: WorkflowToken) {
     const j = tk.job, st = this.st(tk)
     if (st.fork && !tk.parent) {
-      tk.phase = 'join'; tk.kids = st.fork.length; this.seg(tk, 'wait', 'Waiting for reviews to join')
+      tk.phase = 'join'; tk.kids = st.fork.length; this.seg(tk, 'wait', st.joinLabel ?? 'Waiting for branches to join')
       st.fork.forEach(b => { const kid = this.token(j, tk.state, tk); kid.line = this.machines[j.type].states[b].at[0]; j.tokens.push(kid); this.go(kid, b) })
       return
     }
     const nx = typeof st.next === 'function' ? st.next(j) : st.next ?? 'done'
+    if (nx === 'back' && !tk.parent) { this.fault(tk, `"back" from a state that is not a fork branch`); return }
+    if (nx !== 'back' && nx !== 'done' && !Object.hasOwn(this.machines[j.type].states, nx)) { this.fault(tk, `next state "${nx}" is not in machine "${j.type}"`); return }
     if (nx === 'back' && tk.parent) {
       const p = tk.parent, pst = this.st(p); this.free(tk)
       this.travel(tk, tk.line, st.at[1], pst.at[1], pst.join!, () => {
@@ -498,6 +538,18 @@ export class WorkflowEngine {
     }
     this.enter(tk, state)
   }
+  /** The job can't go on (bad guard result): say so, then end it like a rejection (it emits nothing). */
+  private fault(tk: WorkflowToken, message: string) {
+    tk.job.rejected = true
+    this.emit({ kind: 'error', job: tk.job, token: tk, state: tk.state, message })
+    for (const other of tk.job.tokens) if (other !== tk) {
+      this.free(other); this.closeSeg(other); other.phase = 'join'; other.move = null
+      this.waiting = this.waiting.filter(x => x !== other)
+      for (const q of Object.values(this.queues)) { const i = q.indexOf(other); if (i >= 0) q.splice(i, 1) }
+    }
+    tk.job.tokens = [tk]
+    this.finish(tk)
+  }
   private finish(tk: WorkflowToken) {
     const j = tk.job; this.free(tk); this.closeSeg(tk)
     this.emit({ kind: 'move', job: j, token: tk, state: tk.state, to: 'done' })
@@ -513,7 +565,7 @@ export class WorkflowEngine {
     if (how === 'reject') { tk.job.rejected = true; this.seg(tk, 'wait', 'Rejected by a human'); this.emit({ kind: 'hitl-done', job: tk.job, token: tk, state: tk.state, result: 'rejected' }); this.finish(tk); return }
     this.seg(tk, 'work', how === 'timeout' ? 'Auto-approved by policy (timeout)' : 'Approved by a human')
     this.emit({ kind: 'hitl-done', job: tk.job, token: tk, state: tk.state, result: how === 'timeout' ? 'auto-approved' : 'approved' })
-    tk.phase = 'work'; tk.t = 0.4
+    tk.phase = 'work'; tk.t = WF_APPROVED_S
   }
   /** Human in the loop on or off; turning it off approves everything waiting. */
   setHitl(on: boolean) { this.hitl = on; if (!on) this.waiting.slice().forEach(tk => this.resolve(tk, 'timeout')) }
@@ -524,30 +576,41 @@ export class WorkflowEngine {
     if (this.lap[1] > 0) { this.lapT -= dt; if (this.lapT <= 0) { this.lapT += this.lap[1]; this.fire(undefined, 'lap') } }
     if (this.intake) {
       this.intakeT -= dt
-      const t = this.intakeT <= 0 ? this.typeOf(this.intake) : undefined
-      if (this.intakeT <= 0) this.intakeT = 9 + Math.random() * 6
-      if (t) this.enqueue(this.intake, this.source(t), 'intake')
+      if (this.intakeT <= 0) {
+        this.intakeT = WF_INTAKE_EVERY + Math.random() * WF_INTAKE_JITTER
+        const t = this.typeOf(this.intake)
+        if (t) this.enqueue(this.intake, this.source(t), 'intake'); else this.unmatch(this.intake)
+      }
     }
-    while (this.queue.length && this.slots() > 0) { const q = this.queue.shift()!, t = this.typeOf(q.ev); if (t) this.spawn(t, q) }
+    while (this.queue.length && this.slots() > 0) { const q = this.queue.shift()!, t = this.typeOf(q.ev); if (!t) this.unmatch(q.ev); else try { this.spawn(t, q) } catch (err) { wfReport(err) } }
     this.jobs.forEach(j => {
       if (j.done) return
-      j.tokens.slice().forEach(tk => {
-        if (tk.phase === 'move') { tk.t -= dt; if (tk.t <= 0) { const cb = tk.cb; tk.cb = null; tk.move = null; cb?.() } }
-        else if (tk.phase === 'work' || tk.phase === 'route') {
-          tk.t -= dt
-          if (tk.phase === 'work') { j.usage.tokens += this.meter.tokens * dt; j.usage.usd += this.meter.usd * dt }
-          if (tk.t <= 0) this.decide(tk)
-        }
-        else if (tk.phase === 'queue') {
-          const stn = this.st(tk, tk.next).at[1], q = this.queues[stn]
-          if (!this.busy[stn] && q?.[0] === tk) { q.shift(); this.busy[stn] = tk; this.enter(tk, tk.next!) }
-        }
-        else if (tk.phase === 'hitl') { tk.t -= dt; if (tk.t <= 0) this.resolve(tk, 'timeout') }
-      })
+      j.tokens.slice().forEach(tk => { if (!j.done) this.step(tk, dt) })
     })
-    while (this.jobs.length > 6 && this.jobs[this.jobs.length - 1].done) this.jobs.pop()
+    while (this.jobs.length > WF_KEEP_JOBS && this.jobs[this.jobs.length - 1].done) this.jobs.pop()
+  }
+  /** One token's share of a tick; a machine callback (guard, emits, travelTime) that throws ends its job, never the engine. */
+  private step(tk: WorkflowToken, dt: number) {
+    const j = tk.job
+    try {
+      if (tk.phase === 'move') { tk.t -= dt; if (tk.t <= 0) { const cb = tk.cb; tk.cb = null; tk.move = null; cb?.() } }
+      else if (tk.phase === 'work' || tk.phase === 'route') {
+        tk.t -= dt
+        if (tk.phase === 'work') { j.usage.tokens += this.meter.tokens * dt; j.usage.usd += this.meter.usd * dt }
+        if (tk.t <= 0) this.decide(tk)
+      }
+      else if (tk.phase === 'queue') {
+        const stn = this.st(tk, tk.next).at[1], q = this.queues[stn]
+        if (!this.busy[stn] && q?.[0] === tk) { q.shift(); this.busy[stn] = tk; this.enter(tk, tk.next!) }
+      }
+      else if (tk.phase === 'hitl') { tk.t -= dt; if (tk.t <= 0) this.resolve(tk, 'timeout') }
+    } catch (err) {
+      wfReport(err)
+      if (!j.done) try { this.fault(tk, err instanceof Error ? err.message : String(err)) } catch (e2) { wfReport(e2); j.done = true; j.t1 = this.clock; j.state = 'done' }
+    }
   }
 }
+const wfReport = (err: unknown) => { if (typeof reportError === 'function') reportError(err); else console.error(err) }
 
 const WF_H = 250
 /** Columns by breadth-first depth from the start state; fork, join, guard and back edges included. */
@@ -571,7 +634,7 @@ function wfLayout(m: WorkflowMachine, minW = 900) {
     if (back) P = [x1, y1 + 22, x1, y1 + 92, x2, y2 + 92, x2, y2 + 22]
     else { const sx = x1 + nw / 2, ex = e.b === 'done' ? x2 - 12 : x2 - nw / 2 - 2, mx = (sx + ex) / 2; P = [sx, y1, mx, y1, mx, y2, ex, y2] }
     const [lx, ly] = dgBez(P, back ? 0.5 : P[6] - P[0] < 80 ? 0.35 : 0.62)
-    return { id: `${e.a}>${e.b}`, d: `M${P[0]},${P[1]} C${P[2]},${P[3]} ${P[4]},${P[5]} ${P[6]},${P[7]}`, dashed: e.fork, label: e.label || undefined, lx, ly: ly + (back ? 14 : -6) }
+    return { id: `${e.a}>${e.b}`, d: dgCubicPath(P), dashed: e.fork, label: e.label || undefined, lx, ly: ly + (back ? 14 : -6) }
   })
   return { pos, edges, W, H, nw }
 }
@@ -582,11 +645,19 @@ const WF_NONE: Record<string, WorkflowMachine> = {}
  * while the chart is on screen: lit states hold jobs (with a count), dots travel each transition as it
  * happens, guards and fork / join are labelled. Fire event queues the selected workflow's trigger; the log
  * shows the latest decisions. Pass your `machines` (the agent-team sample is `AGENT_WORKFLOWS` in
- * `@lyndon/ui/examples`); without any it shows an empty chart of the same size.
+ * `@lyndon/ui/examples`); without any it shows an empty chart of the same size. The engine is rebuilt only when
+ * `machines` changes identity or `order` changes value; `options` are read when it is built.
  */
-export function StateMachine({ machines = WF_NONE, order, defaultValue, className }:
-  { machines?: Record<string, WorkflowMachine>; order?: string[]; defaultValue?: string; className?: string }) {
-  const engine = useMemo(() => new WorkflowEngine(machines, order ?? Object.keys(machines).slice(0, 3), { speed: 1.5 }), [machines, order])
+export function StateMachine({ machines = WF_NONE, order, options, defaultValue, className }:
+  { machines?: Record<string, WorkflowMachine>; order?: string[]
+    /** engine options (speed defaults to 1.5 here), e.g. an `intake` event that arrives on its own */
+    options?: WorkflowEngineOptions; defaultValue?: string; className?: string }) {
+  const orderKey = (order ?? Object.keys(machines).slice(0, 3)).join('\u0000')
+  const built = useRef<{ machines: Record<string, WorkflowMachine>; orderKey: string; engine: WorkflowEngine } | null>(null)
+  if (!built.current || built.current.machines !== machines || built.current.orderKey !== orderKey) { // eslint-disable-line react-hooks/refs
+    built.current = { machines, orderKey, engine: new WorkflowEngine(machines, orderKey ? orderKey.split('\u0000') : [], { speed: 1.5, ...options }) }
+  }
+  const engine = built.current.engine // eslint-disable-line react-hooks/refs
   const [picked, setType] = useState(defaultValue ?? Object.keys(machines)[0] ?? '')
   const type = machines[picked] ? picked : Object.keys(machines)[0] ?? ''
   const { ref: box, visible, reduce, dots, spark, clear, repaint: force } = useStatechart({ amount: 0.15 })
@@ -598,14 +669,22 @@ export function StateMachine({ machines = WF_NONE, order, defaultValue, classNam
   const repaint = useRef(0)
   useFrameLoop(visible, dt => { engine.tick(dt); if ((repaint.current += dt) > 0.4) { repaint.current = 0; force() } }, { coarseFps: 30 }) // the engine runs on time, not frames
   useEffect(() => engine.subscribe(ev => {
-    if (ev.kind === 'queued') { force(); return }
+    if (!ev.job) { force(); return }
     if (ev.job.type !== type) { if (ev.kind === 'enter' || ev.kind === 'done') force(); return }
     if (ev.kind === 'move' && ev.to) spark(`${ev.state}>${ev.to}`, 700)
-    const [wait0, wait1] = 'waiting for <b>human approval</b>'.split(/<b>|<\/b>/)
-    const text = ev.kind === 'hitl' ? <>{wait0}<b>{wait1}</b></> : ev.kind === 'hitl-done' ? <>{'human:'} <b>{ev.result}</b></>
-      : ev.kind === 'trigger' ? <>{'emits'} <b>{ev.ev}</b> {'→ queued'}</> : ev.kind === 'guard' ? <bdi><b>{ev.guard}?</b> → {ev.result}</bdi>
-      : ev.kind === 'join' ? <>{'reviews'} <b>{'joined'}</b></> : ev.kind === 'spawn' ? <><b>{machines[ev.job.type].event}</b> {'→ started'}</> : ev.kind === 'done' ? <b>{'done'}</b> : null
-    if (text) setLog(l => [{ k: `${ev.job.id}-${ev.kind}-${performance.now()}`, id: ev.job.id, name: ev.job.name, text }, ...l].slice(0, 5))
+    let text: ReactNode = null
+    switch (ev.kind) {
+      case 'hitl': text = <>{'waiting for '}<b>{'human approval'}</b></>; break
+      case 'hitl-done': text = <>{'human:'} <b>{ev.result}</b></>; break
+      case 'trigger': text = <>{'emits'} <b>{ev.ev}</b> {'→ queued'}</>; break
+      case 'guard': text = <><b>{ev.guard}?</b> → {ev.result}</>; break
+      case 'join': text = <>{'branches'} <b>{'joined'}</b></>; break
+      case 'spawn': text = <><b>{machines[ev.job.type].event}</b> {'→ started'}</>; break
+      case 'done': text = <b>{'done'}</b>; break
+      case 'error': text = <span className="text-[var(--bad)]">{'error: '}{ev.message}</span>; break
+    }
+    const job = ev.job
+    if (text) setLog(l => [{ k: `${job.id}-${ev.kind}-${performance.now()}`, id: job.id, name: job.name, text }, ...l].slice(0, 5))
     force()
   }), [engine, type, reduce, machines]) // eslint-disable-line react-hooks/exhaustive-deps -- spark and repaint only read reduce and setState
   const counts: Record<string, number> = {}
@@ -614,8 +693,8 @@ export function StateMachine({ machines = WF_NONE, order, defaultValue, classNam
     if (k === 'done') return { id: k, kind: 'end', x, y }
     const st = m!.states[k]
     const secs = fmt.number(st.work ?? 0, { style: 'unit', unit: 'second', unitDisplay: 'narrow' })
-    const sub = st.hitl ? 'human approval' : st.work ? (st.at[1] === 'Index' ? secs : `agent · ${secs}`) : st.orch ? (st.guard ? 'decision' : st.fork ? 'fork → join' : 'orchestrator') : 'trigger'
-    return { id: k, kind: 'state', x: x - L.nw / 2, y: y - 22, w: L.nw, h: 44, label: st.at[1] === 'Index' ? m!.event : st.at[1], sub, dashed: !!st.orch, on: !!counts[k], count: counts[k] }
+    const sub = st.hitl ? 'human approval' : st.work ? (st.trigger ? secs : `agent · ${secs}`) : st.orch ? (st.guard ? 'decision' : st.fork ? 'fork → join' : 'orchestrator') : 'trigger'
+    return { id: k, kind: 'state', x: x - L.nw / 2, y: y - 22, w: L.nw, h: 44, label: st.trigger ? m!.event : st.at[1], sub, dashed: !!st.orch, on: !!counts[k], count: counts[k] }
   })
   const pick = (v: string) => { setType(v); clear(); setLog([]) }
   return (

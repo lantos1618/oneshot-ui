@@ -1,11 +1,11 @@
 import { useEffect, useId, useLayoutEffect, useMemo, useReducer, useRef, useState, type CSSProperties, type PointerEvent as ReactPointerEvent } from 'react'
 import { AnimatePresence, animate, cubicBezier, motion, useInView, useReducedMotion } from 'motion/react'
-import { AnimatedNumber, Button, ICONS, Icon, StatusIcon, TOUCH, clamp, cn, isTouch, onMouseLeave, safeColor, sleep, spring, surface, useOutside, useWidth, type IconName, plural, useActiveIndex, fmt, svgN, svgTranslate } from './core'
+import { AnimatedNumber, Button, EASE_OUT, ICONS, Icon, StatusIcon, TOUCH, capturePointer, clamp, cn, colorResolver, isTouch, onMouseLeave, safeColor, sleep, spring, surface, useOutside, usePointerDrag, useTouchScrollLock, useLatest, useThemeVersion, useWidth, type IconName, type RGBA, type StatusIconStatus, plural, useActiveIndex, fmt, svgN, svgTranslate } from './core'
 import { Slider } from './inputs'
 import { PointerTooltip, usePointerTooltip } from './overlay'
 import { useFrameLoop, useViewport, useWheelZoom } from './motion'
-import { DG_DOTS, DgDot, dgBez, dgSafeId } from './diagramkit'
-import type { StatechartDot } from './statechart'
+import { DG_DOTS, DG_HALO_LABEL, DgDot, dgBez, dgCubicPath, dgSafeId, useDgDots } from './diagramkit'
+import { seriesColor } from './vizkit'
 
 /* DIAGRAMS · Flows and graphs: Sankey, force-directed network graph, process flow canvas and streaming data flow. */
 
@@ -46,7 +46,7 @@ export function Sankey({ sources, targets, links, width = 300, height = 176, nod
         tabIndex={0} role="button" aria-labelledby={`${clip}${side}${i}l ${clip}${side}${i}v`} className="cursor-default outline-none [&:focus-visible>rect:nth-child(2)]:stroke-[var(--fg)] [&:focus-visible>rect:nth-child(2)]:[stroke-width:2]"
         onPointerEnter={() => setHover({ k: side, i })} onPointerDown={() => { hide(); setHover({ k: side, i }) }} onPointerLeave={onMouseLeave(() => setHover(null))} onFocus={() => setHover({ k: side, i })} onBlur={() => setHover(null)}>
         <rect x={left ? 0 : x} y={p.y - 2} width={left ? x + nw : W - x} height={p.h + 4} fill="transparent" />
-        <rect x={x} y={p.y} width={nw} height={p.h} rx={2} fill={n.color ?? PALETTE_DG[i % PALETTE_DG.length]} />
+        <rect x={x} y={p.y} width={nw} height={p.h} rx={2} fill={seriesColor(i, n.color)} />
         {/* named by its two visible texts (aria-labelledby); the space between them (not rendered in SVG) keeps the
             visible text "Organic 60%" rather than "Organic60%", so name and visible label match */}
         <text id={`${clip}${side}${i}l`} x={tx} y={p.y + p.h / 2 - 2} textAnchor={left ? 'end' : 'start'} className="fill-[var(--fg)] [font:500_12px_var(--font)]">{n.label}</text>
@@ -55,13 +55,12 @@ export function Sankey({ sources, targets, links, width = 300, height = 176, nod
     )
   }
   return (
-    // a flow diagram keeps its left-to-right geometry in every locale (like charts); the tooltip follows the locale
     <div className={className}>
       <svg ref={ref} viewBox={`0 0 ${W} ${H}`} role="group" aria-label={'Sankey diagram'} className="block h-auto w-full overflow-visible">
-        <defs><clipPath id={clip}><motion.rect x={0} y={0} height={H} initial={{ width: 0 }} animate={inView ? { width: W } : undefined} transition={{ duration: 1, ease: [0.22, 1, 0.36, 1], delay: 0.1 }} /></clipPath></defs>
+        <defs><clipPath id={clip}><motion.rect x={0} y={0} height={H} initial={{ width: 0 }} animate={inView ? { width: W } : undefined} transition={{ duration: 1, ease: EASE_OUT, delay: 0.1 }} /></clipPath></defs>
         <g clipPath={`url(#${clip})`}>
           {ribbons.map(({ i, l, d }) => (
-            <motion.path key={i} d={d} fill={sources[l[0]].color ?? PALETTE_DG[l[0] % PALETTE_DG.length]} initial={false} animate={{ opacity: op(i, l) }} transition={{ duration: 0.15 }}
+            <motion.path key={i} d={d} fill={seriesColor(l[0], sources[l[0]].color)} initial={false} animate={{ opacity: op(i, l) }} transition={{ duration: 0.15 }}
               onPointerEnter={() => setHover({ k: 'link', i })} onPointerDown={e => { setHover({ k: 'link', i }); show(e, `${sources[l[0]].label} → ${targets[l[1]].label} · ${share(l[2])}`) }}
               onPointerMove={e => show(e, `${sources[l[0]].label} → ${targets[l[1]].label} · ${share(l[2])}`)} onPointerLeave={onMouseLeave(() => { setHover(null); hide() })} />
           ))}
@@ -73,7 +72,6 @@ export function Sankey({ sources, targets, links, width = 300, height = 176, nod
     </div>
   )
 }
-const PALETTE_DG = ['var(--c2)', 'var(--c3)', 'var(--c4)', 'var(--c1)', 'var(--bad)', 'var(--warn)']
 
 export type NetworkNode = { label: string; group: number; size?: number }
 type NetSim = { x: number; y: number; vx: number; vy: number; fx: number | null; fy: number | null }
@@ -85,7 +83,7 @@ type NetSim = { x: number; y: number; vx: number; vy: number; fx: number | null;
  * The simulation pauses while the graph is off screen or hidden (width 0) and resumes where it was when it comes back;
  * it stops once it has cooled down, and while it runs it moves the nodes by writing their attributes directly (no re-render per frame).
  */
-export function NetworkGraph({ nodes, links, groups, width = 900, height = 340, className }:
+export function NetworkGraph({ nodes, links: linksProp, groups, width = 900, height = 340, className }:
   { nodes: NetworkNode[]; links: [number, number][]; groups: [string, string][]; /** used until the container is measured */ width?: number; height?: number; className?: string }) {
   // the layout is sized to the container (1 SVG unit = 1px) so labels stay 11px and the graph fills the card
   const [wrapRef, measured] = useWidth<HTMLDivElement>()
@@ -93,14 +91,18 @@ export function NetworkGraph({ nodes, links, groups, width = 900, height = 340, 
   const lastW = useRef(0); if (measured > 0) lastW.current = Math.round(measured)
   const W = lastW.current || width, H = W < 560 ? Math.max(height, 420) : height
   // deterministic start (a golden-angle spiral by index), so the server and the first client render agree
-  const sim = useRef<NetSim[]>(nodes.map((_, i) => ({ x: W / 2 + Math.cos(i * 2.39996) * 7 * Math.sqrt(i + 0.5), y: H / 2 + Math.sin(i * 2.39996) * 7 * Math.sqrt(i + 0.5), vx: 0, vy: 0, fx: null, fy: null })))
+  const seed = (i: number): NetSim => ({ x: W / 2 + Math.cos(i * 2.39996) * 7 * Math.sqrt(i + 0.5), y: H / 2 + Math.sin(i * 2.39996) * 7 * Math.sqrt(i + 0.5), vx: 0, vy: 0, fx: null, fy: null })
+  const sim = useRef<NetSim[]>([])
+  // nodes are matched by index: added ones start on the spiral, removed ones drop out, the rest keep their places
+  if (sim.current.length !== nodes.length) sim.current = nodes.map((_, i) => sim.current[i] ?? seed(i)) // eslint-disable-line react-hooks/refs
+  const links = useMemo(() => linksProp.filter(([a, b]) => a !== b && a >= 0 && b >= 0 && a < nodes.length && b < nodes.length), [linksProp, nodes.length])
   const alpha = useRef(1)
   const [running, setRunning] = useState(false)
   const [, force] = useReducer((x: number) => x + 1, 0)
   const [hl, setHl] = useState<number | null>(null)
   const [dragging, setDragging] = useState<number | null>(null)
   const svgRef = useRef<SVGSVGElement>(null)
-  const tap = useRef<{ i: number; x: number; y: number; was: boolean; moved: boolean } | null>(null)
+  const tap = useRef<{ i: number; was: boolean; moved: boolean } | null>(null)
   const inView = useInView(svgRef, { once: true, amount: 0.3 })
   const { visible } = useViewport(svgRef, { amount: 0 })
   const awake = visible && measured > 0
@@ -140,6 +142,8 @@ export function NetworkGraph({ nodes, links, groups, width = 900, height = 340, 
   const settle = () => { for (let i = 0; i < 400; i++) tick(); force() }
   const kick = (a: number) => { alpha.current = Math.max(alpha.current, a); if (reduce && dragging === null) settle(); else setRunning(true) }
   useEffect(() => { if (inView) kick(1) }, [inView]) // eslint-disable-line react-hooks/exhaustive-deps
+  const count = useRef(nodes.length)
+  useEffect(() => { if (count.current === nodes.length) return; count.current = nodes.length; if (inView) kick(0.5); else force() }, [nodes.length]) // eslint-disable-line react-hooks/exhaustive-deps
   const size = useRef([W, H])
   useEffect(() => { // container resized: stretch the current layout to the new box, then let it re-settle
     const [w0, h0] = size.current; if (w0 === W && h0 === H) return
@@ -156,24 +160,30 @@ export function NetworkGraph({ nodes, links, groups, width = 900, height = 340, 
   }, { coarseFps: 30 })
   useEffect(() => { if (!running) force() }, [running]) // one React render with the settled positions
   const toSvg = (e: { clientX: number; clientY: number }) => { const svg = svgRef.current!, m = svg.getScreenCTM()!.inverse(), p = new DOMPoint(e.clientX, e.clientY).matrixTransform(m); return p }
-  const end = (i: number, e?: ReactPointerEvent) => {
-    if (dragging !== i) return
-    const n = sim.current[i], t = tap.current; n.fx = n.fy = null; setDragging(null); kick(0.3); tap.current = null
-    // a touch tap (no drag) toggles the highlight and keeps it; a drag or a mouse release clears it as before
-    if (e?.pointerType === 'touch' && e.type === 'pointerup' && t && !t.moved) setHl(t.was ? null : i)
-    else if (e?.pointerType === 'touch' || !e) setHl(null)
-  }
+  // a node drag: usePointerDrag ends it on release, cancel or a lost capture, so a node is never left pinned
+  const dragI = useRef<number | null>(null)
+  const nodeDrag = usePointerDrag({
+    onMove: p => {
+      const i = dragI.current; if (i === null || !sim.current[i]) return
+      const t = tap.current; if (t && !t.moved && Math.hypot(p.dx, p.dy) > 6) t.moved = true
+      const q = toSvg({ clientX: p.x, clientY: p.y }), n = sim.current[i]
+      n.fx = clamp(q.x, r(i), W - r(i)); n.fy = clamp(q.y, r(i), H - r(i)); alpha.current = Math.max(alpha.current, 0.3)
+      if (reduce) { n.x = n.fx; n.y = n.fy; force() }
+    },
+    onEnd: (p, cancelled) => {
+      const i = dragI.current; if (i === null) return
+      dragI.current = null
+      const n = sim.current[i], t = tap.current; if (n) n.fx = n.fy = null; setDragging(null); kick(0.3); tap.current = null
+      // a touch tap (no drag) toggles the highlight and keeps it; a touch drag clears it; a mouse release leaves the hover
+      if (p.event.pointerType === 'touch' && !cancelled && t && !t.moved) setHl(t.was ? null : i)
+      else if (p.event.pointerType === 'touch') setHl(null)
+    },
+  })
   // touch-action on SVG children isn't honoured everywhere: once a node drag is live, keep the page from scrolling under it
-  const draggingRef = useRef(dragging); draggingRef.current = dragging
-  useEffect(() => {
-    const el = svgRef.current; if (!el) return
-    const block = (ev: TouchEvent) => { if (draggingRef.current !== null) ev.preventDefault() }
-    el.addEventListener('touchmove', block, { passive: false })
-    return () => el.removeEventListener('touchmove', block)
-  }, [])
+  useTouchScrollLock(svgRef, () => dragI.current !== null)
   useOutside([], () => setHl(null), hl !== null && dragging === null, { escape: true, keep: t => !!t.closest('[data-net-node]') && !!svgRef.current?.contains(t) })
   const ns = sim.current
-  const isOn = (i: number) => hl === null || i === hl || nb[hl].has(i)
+  const isOn = (i: number) => hl === null || i === hl || !!nb[hl]?.has(i)
   return (
     <div ref={wrapRef} className={cn('flex min-w-0 flex-col gap-2', className)}>
       <div className="flex justify-end"><Button size="sm" className={TOUCH.tap36} onClick={() => { sim.current.forEach(n => { n.x = W / 2 + (Math.random() - 0.5) * W * 0.55; n.y = H / 2 + (Math.random() - 0.5) * H * 0.65 }); kick(1) }}>{'Shuffle'}</Button></div>
@@ -187,15 +197,13 @@ export function NetworkGraph({ nodes, links, groups, width = 900, height = 340, 
         </g>
         <g>
           {nodes.map((n, i) => (
-            <g key={i} ref={el => { nodeEls.current[i] = el }} transform={svgTranslate(ns[i].x, ns[i].y)} tabIndex={0} role="button" aria-label={`${n.label}, ${groups[n.group][0]}, ${plural(nb[i].size, 'connection')}`} data-net-node=""
+            <g key={i} ref={el => { nodeEls.current[i] = el }} transform={svgTranslate(ns[i].x, ns[i].y)} tabIndex={0} role="button" aria-label={`${n.label}, ${groups[n.group]?.[0] ?? ''}, ${plural(nb[i].size, 'connection')}`} data-net-node=""
               className={cn('touch-none outline-none transition-opacity duration-150', dragging === i ? 'cursor-grabbing' : 'cursor-grab', !isOn(i) && 'opacity-25')}
               onPointerEnter={e => { if (dragging === null && !isTouch(e)) setHl(i) }} onPointerLeave={onMouseLeave(() => { if (dragging === null) setHl(null) })}
               onFocus={() => setHl(i)} onBlur={() => setHl(null)}
-              onPointerDown={e => { e.preventDefault(); e.currentTarget.setPointerCapture(e.pointerId); tap.current = { i, x: e.clientX, y: e.clientY, was: hl === i, moved: false }; const q = toSvg(e); ns[i].fx = q.x; ns[i].fy = q.y; setDragging(i); setHl(i); alpha.current = Math.max(alpha.current, 0.4); setRunning(true) }}
-              onPointerMove={e => { if (dragging !== i) return; const t = tap.current; if (t && !t.moved && Math.hypot(e.clientX - t.x, e.clientY - t.y) > 6) t.moved = true; const q = toSvg(e); ns[i].fx = clamp(q.x, r(i), W - r(i)); ns[i].fy = clamp(q.y, r(i), H - r(i)); alpha.current = Math.max(alpha.current, 0.3); if (reduce) { ns[i].x = ns[i].fx!; ns[i].y = ns[i].fy!; force() } }}
-              onPointerUp={e => end(i, e)} onPointerCancel={e => end(i, e)}>
+              onPointerDown={e => { e.preventDefault(); tap.current = { i, was: hl === i, moved: false }; const q = toSvg(e); ns[i].fx = q.x; ns[i].fy = q.y; dragI.current = i; setDragging(i); setHl(i); alpha.current = Math.max(alpha.current, 0.4); setRunning(true); nodeDrag.start(e) }}>
               <circle r={Math.max(r(i) + 6, 18)} fill="transparent" />
-              <motion.circle r={r(i)} fill={groups[n.group][1]} className="stroke-[var(--card)] [stroke-width:2]" initial={false} animate={{ scale: dragging === i ? 1.2 : 1 }} transition={spring(0.4, 0.3)} />
+              <motion.circle r={r(i)} fill={groups[n.group]?.[1] ?? seriesColor(n.group)} className="stroke-[var(--card)] [stroke-width:2]" initial={false} animate={{ scale: dragging === i ? 1.2 : 1 }} transition={spring(0.4, 0.3)} />
               <text x={r(i) + 5} y={4} className="pointer-events-none fill-[var(--fg)] stroke-[var(--card)] [font:500_11px_var(--font)] [paint-order:stroke] [stroke-linejoin:round] [stroke-width:3px]">{n.label}</text>
             </g>
           ))}
@@ -216,8 +224,18 @@ export type FlowNode = { id: string; x: number; y: number; icon: IconName; color
 export type FlowEdge = { from: string; to: string; alt?: boolean; label?: string }
 /** One stage of a run: its nodes execute in parallel; edges into them pulse first. */
 export type FlowStep = { log: string; nodes: { id: string; ms: number; count?: number; tone?: 'ok' | 'warn' }[] }
-type FlowStatus = 'run' | 'ok' | 'warn' | undefined
+type FlowStatus = 'run' | 'ok' | 'warn'
+/** How a node looks in each run state: its border, StatusIcon state and label. */
+const FLOW_STATUS: Record<FlowStatus | 'idle', { border: string; icon: StatusIconStatus; label: string }> = {
+  idle: { border: 'border-[var(--line)]', icon: 'pending', label: 'Waiting' },
+  run: { border: 'border-[var(--accent)] !shadow-[0_0_0_3px_var(--accent-soft)]', icon: 'active', label: 'Running' },
+  ok: { border: 'border-[color-mix(in_srgb,var(--ok)_55%,var(--line))]', icon: 'done', label: 'Done' },
+  warn: { border: 'border-[color-mix(in_srgb,var(--warn)_60%,var(--line))]', icon: 'warn', label: 'Needs review' },
+}
+/** An edge's stroke while it carries the run (live), after it (done) and before: [main, alt] (alt edges are the warn branch). */
+const FLOW_EDGE = { live: ['stroke-[var(--accent)]', 'stroke-[var(--warn)]'], done: ['stroke-[var(--fg3)]', 'stroke-[var(--warn)]'], idle: ['stroke-[var(--line2)]', 'stroke-[var(--line2)]'] } as const
 const FLOW_W = 232
+const FLOW_ZOOM: [number, number] = [0.2, 2]
 
 /**
  * Workflow canvas. Run executes `steps` in order: edges pulse, nodes spin then tick, counters roll and a
@@ -225,20 +243,23 @@ const FLOW_W = 232
  * pointer; +, − and Fit buttons. On touch a vertical swipe scrolls the page, so pan with a sideways drag or two
  * fingers (which also pinch-zoom). Reset cancels a run.
  */
-export function ProcessFlow({ nodes: initial, edges, steps, height = 420, idle, done, onComplete, className }:
+export function ProcessFlow({ nodes: initial, edges: edgesProp, steps, height = 420, idle, done, onComplete, className }:
   { nodes: FlowNode[]; edges: FlowEdge[]; steps: FlowStep[]; height?: number; idle?: string; done?: (seconds: number) => string; onComplete?: () => void; className?: string }) {
-  const [pos, setPos] = useState(() => Object.fromEntries(initial.map(n => [n.id, { x: n.x, y: n.y }])))
+  // only dragged positions are state: nodes added later start where their props put them, removed ones drop out
+  const [moved, setPos] = useState<Record<string, { x: number; y: number }>>({})
+  const pos = useMemo(() => Object.fromEntries(initial.map(n => [n.id, moved[n.id] ?? { x: n.x, y: n.y }])), [initial, moved])
+  const edges = useMemo(() => edgesProp.filter(e => pos[e.from] && pos[e.to]), [edgesProp, pos])
   const [hs, setHs] = useState<Record<string, number>>({})
   const [view, setView] = useState({ x: 0, y: 0, z: 1 })
   const viewRef = useRef(view); viewRef.current = view
   const [sel, setSel] = useState<string | null>(null)
-  const [status, setStatus] = useState<Record<string, FlowStatus>>({})
+  const [status, setStatus] = useState<Record<string, FlowStatus | undefined>>({})
   const [counts, setCounts] = useState<Record<string, number>>({})
   const [times, setTimes] = useState<Record<string, string>>({})
   const [edgeSt, setEdgeSt] = useState<Record<number, 'live' | 'done'>>({})
-  const [dots, setDots] = useState<StatechartDot[]>([])
-  const idleText = idle ?? `Idle · ${plural(initial.length, 'step')}`
-  const [log, setLog] = useState(idleText)
+  const { dots, send: sendDot, clear: clearDots } = useDgDots(64)
+  const [logText, setLog] = useState<string | null>(null)
+  const log = logText ?? idle ?? `Idle · ${plural(initial.length, 'step')}`
   const [running, setRunning] = useState(false)
   const gen = useRef(0)
   const pf = useRef<HTMLDivElement>(null)
@@ -254,10 +275,15 @@ export function ProcessFlow({ nodes: initial, edges, steps, height = 420, idle, 
     const ro = new ResizeObserver(measure); Object.values(nodeEls.current).forEach(el => el && ro.observe(el))
     return () => ro.disconnect()
   }, [initial])
+  // one view tween at a time: a new one, a pointer, the wheel or unmounting stops the last
+  const tweenCtl = useRef<{ stop: () => void } | null>(null)
+  const stopTween = () => { tweenCtl.current?.stop(); tweenCtl.current = null }
+  useEffect(() => stopTween, [])
   const tween = (to: { x: number; y: number; z: number }, dur = 0.5) => {
+    stopTween()
     const from = viewRef.current
     if (reduce) { setView(to); return }
-    animate(0, 1, { duration: dur, ease: [0.22, 1, 0.36, 1], onUpdate: k => setView({ x: from.x + (to.x - from.x) * k, y: from.y + (to.y - from.y) * k, z: from.z + (to.z - from.z) * k }) })
+    tweenCtl.current = animate(0, 1, { duration: dur, ease: EASE_OUT, onUpdate: k => setView({ x: from.x + (to.x - from.x) * k, y: from.y + (to.y - from.y) * k, z: from.z + (to.z - from.z) * k }) })
   }
   /** Fit everything; `start` (phones) instead opens at a readable zoom on the first steps, to pan from. */
   const fit = (anim = true, start = false) => {
@@ -280,10 +306,10 @@ export function ProcessFlow({ nodes: initial, edges, steps, height = 420, idle, 
     return () => { ro.disconnect(); clearTimeout(t) }
   }, [])
   const zoomAt = (f: number, cx: number, cy: number, anim = true) => {
-    const v = viewRef.current, z = Math.max(0.2, Math.min(2, v.z * f)), wx = (cx - v.x) / v.z, wy = (cy - v.y) / v.z, to = { z, x: cx - wx * z, y: cy - wy * z }
+    const v = viewRef.current, z = clamp(v.z * f, ...FLOW_ZOOM), wx = (cx - v.x) / v.z, wy = (cy - v.y) / v.z, to = { z, x: cx - wx * z, y: cy - wy * z }
     if (anim) tween(to, 0.25); else setView(to)
   }
-  useWheelZoom(pf, (zoomIn, e) => { const r = pf.current!.getBoundingClientRect(); zoomAt(zoomIn ? 1.08 : 0.93, e.clientX - r.left, e.clientY - r.top, false) }, { modifier: true })
+  useWheelZoom(pf, (zoomIn, e) => { stopTween(); const r = pf.current!.getBoundingClientRect(); zoomAt(zoomIn ? 1.08 : 0.93, e.clientX - r.left, e.clientY - r.top, false) }, { modifier: true })
 
   // pointers: drag a node, pan the canvas, pinch with two fingers
   const ptrs = useRef(new Map<number, { x: number; y: number }>())
@@ -291,7 +317,8 @@ export function ProcessFlow({ nodes: initial, edges, steps, height = 420, idle, 
   const [panning, setPanning] = useState(false)
   const onDown = (e: ReactPointerEvent<HTMLDivElement>) => {
     if ((e.target as HTMLElement).closest('[data-pfctl]')) return
-    pf.current!.setPointerCapture(e.pointerId); ptrs.current.set(e.pointerId, { x: e.clientX, y: e.clientY })
+    stopTween()
+    capturePointer(pf.current, e.pointerId); ptrs.current.set(e.pointerId, { x: e.clientX, y: e.clientY })
     if (ptrs.current.size === 2) {
       const [a, b] = [...ptrs.current.values()], r = pf.current!.getBoundingClientRect(), v = viewRef.current, mx = (a.x + b.x) / 2 - r.left, my = (a.y + b.y) / 2 - r.top
       // remember the world point under the fingers' midpoint: two fingers pan and pinch around it
@@ -306,7 +333,7 @@ export function ProcessFlow({ nodes: initial, edges, steps, height = 420, idle, 
     ptrs.current.set(e.pointerId, { x: e.clientX, y: e.clientY })
     if (g.pinch && ptrs.current.size >= 2) {
       const [a, b] = [...ptrs.current.values()], r = pf.current!.getBoundingClientRect(), d = Math.hypot(a.x - b.x, a.y - b.y)
-      const z = Math.max(0.2, Math.min(2, g.pinch.z * (d / g.pinch.d))), mx = (a.x + b.x) / 2 - r.left, my = (a.y + b.y) / 2 - r.top
+      const z = clamp(g.pinch.z * (d / g.pinch.d), ...FLOW_ZOOM), mx = (a.x + b.x) / 2 - r.left, my = (a.y + b.y) / 2 - r.top
       setView({ z, x: mx - g.pinch.wx * z, y: my - g.pinch.wy * z }); return
     }
     const dx = e.clientX - g.sx, dy = e.clientY - g.sy
@@ -328,25 +355,25 @@ export function ProcessFlow({ nodes: initial, edges, steps, height = 420, idle, 
 
   // geometry
   const anchor = (id: string, side: 'l' | 'r') => ({ x: pos[id].x + (side === 'r' ? FLOW_W : 0), y: pos[id].y + (hs[id] ?? 120) / 2 })
-  const eg = edges.map(e => { const a = anchor(e.from, 'r'), b = anchor(e.to, 'l'), c = Math.max(60, Math.abs(b.x - a.x) / 2); return { d: `M${a.x},${a.y} C${a.x + c},${a.y} ${b.x - c},${b.y} ${b.x},${b.y}`, mx: (a.x + b.x) / 2, my: (a.y + b.y) / 2 - 6 } })
+  const eg = edges.map(e => { const a = anchor(e.from, 'r'), b = anchor(e.to, 'l'), c = Math.max(60, Math.abs(b.x - a.x) / 2); return { d: dgCubicPath([a.x, a.y, a.x + c, a.y, b.x - c, b.y, b.x, b.y]), mx: (a.x + b.x) / 2, my: (a.y + b.y) / 2 - 6 } })
 
   // run
-  const reset = () => { gen.current++; counters.current.forEach(c => c.stop()); counters.current.clear(); setRunning(false); setStatus({}); setCounts({}); setTimes({}); setEdgeSt({}); setDots([]); setLog(idleText) }
-  const pulse = (k: number) => reduce ? Promise.resolve() : new Promise<void>(res => {
-    const key = `e${k}-${performance.now()}`
-    setDots(ds => [...ds, { key, edge: `e${k}`, ms: 700, ease: 'inOut', onDone: () => { setDots(x => x.filter(d => d.key !== key)); res() } }])
-  })
+  // a new generation stops the old run: its pending dots and counters settle, and it sees it is stale and returns
+  const reset = () => { gen.current++; counters.current.forEach(c => c.stop()); counters.current.clear(); setRunning(false); setStatus({}); setCounts({}); setTimes({}); setEdgeSt({}); clearDots(); setLog(null) }
+  const pulse = (k: number) => reduce ? Promise.resolve() : sendDot(`e${k}`, 700, 'inOut')
   // counters roll with motion's tween (ease-out cubic); Reset (a new generation) stops them
   const counters = useRef(new Set<{ stop: () => void }>())
   useEffect(() => () => counters.current.forEach(c => c.stop()), [])
   const countTo = (id: string, to: number, ms: number) => new Promise<void>(res => {
     const g0 = gen.current
+    // stopping a counter (Reset, unmount) settles the run waiting on it too
+    const ctl = { stop: () => { c.stop(); counters.current.delete(ctl); res() } }
     const c = animate(0, to, {
       duration: reduce ? 0 : ms / 1000, ease: [0.33, 1, 0.68, 1],
       onUpdate: v => { if (gen.current === g0) setCounts(cs => ({ ...cs, [id]: Math.round(v) })) },
-      onComplete: () => { counters.current.delete(c); res() },
+      onComplete: () => { counters.current.delete(ctl); res() },
     })
-    counters.current.add(c)
+    counters.current.add(ctl)
   })
   const run = async () => {
     if (running) return
@@ -389,32 +416,27 @@ export function ProcessFlow({ nodes: initial, edges, steps, height = 420, idle, 
                     animate={{ opacity: inView ? (st === 'done' && e.alt ? 0.6 : 1) : 0, strokeDashoffset: st === 'live' && !reduce ? [0, -12] : 0 }}
                     transition={{ opacity: { duration: 0.4, delay: st ? 0 : 0.2 + k * 0.08 }, strokeDashoffset: st === 'live' ? { duration: 0.6, ease: 'linear', repeat: Infinity } : { duration: 0 } }}
                     strokeDasharray={st === 'live' ? '6 6' : e.alt ? '5 5' : undefined}
-                    className={cn('transition-[stroke] duration-300', st === 'live' ? (e.alt ? 'stroke-[var(--warn)]' : 'stroke-[var(--accent)]') : st === 'done' ? (e.alt ? 'stroke-[var(--warn)]' : 'stroke-[var(--fg3)]') : 'stroke-[var(--line2)]')} />
-                  {e.label && <text x={g.mx} y={g.my} textAnchor="middle" className="fill-[var(--fg2)] stroke-[var(--bg)] [font:500_11px_var(--font)] [paint-order:stroke] [stroke-width:4px]">{e.label}</text>}
+                    className={cn('transition-[stroke] duration-300', FLOW_EDGE[st ?? 'idle'][e.alt ? 1 : 0])} />
+                  {e.label && <text x={g.mx} y={g.my} textAnchor="middle" className={cn('fill-[var(--fg2)]', DG_HALO_LABEL)}>{e.label}</text>}
                 </g>
               )
             })}
             {dots.map(d => <DgDot key={d.key} path={() => paths.current[d.edge]} ms={d.ms} ease={d.ease} onDone={d.onDone} />)}
           </svg>
           {initial.map((n, i) => {
-            const st = status[n.id], hasL = edges.some(e => e.to === n.id), hasR = edges.some(e => e.from === n.id)
+            const st = status[n.id], look = FLOW_STATUS[st ?? 'idle'], hasL = edges.some(e => e.to === n.id), hasR = edges.some(e => e.from === n.id)
             return (
               <motion.div key={n.id} ref={el => { nodeEls.current[n.id] = el }} data-node={n.id} initial={{ opacity: 0, y: 10 }} animate={inView ? { opacity: 1, y: 0, scale: drag.current?.id === n.id ? 1.02 : 1 } : undefined}
                 transition={{ opacity: { duration: 0.4, delay: i * 0.08 }, y: { duration: 0.4, delay: i * 0.08 }, scale: spring(0.4, 0.25) }}
                 className={cn('absolute cursor-default rounded-[var(--r-lg)] border bg-[var(--card)] shadow-[0_1px_2px_rgba(0,0,0,.05)] transition-[border-color,box-shadow] duration-250',
-                  st === 'run' ? 'border-[var(--accent)] !shadow-[0_0_0_3px_var(--accent-soft)]' : st === 'ok' ? 'border-[color-mix(in_srgb,var(--ok)_55%,var(--line))]' : st === 'warn' ? 'border-[color-mix(in_srgb,var(--warn)_60%,var(--line))]' : sel === n.id ? 'border-[var(--fg3)]' : 'border-[var(--line)]')}
+                  !st && sel === n.id ? 'border-[var(--fg3)]' : look.border)}
                 style={{ left: pos[n.id].x, top: pos[n.id].y, width: FLOW_W, zIndex: sel === n.id ? 2 : undefined }}>
-                {/* ports are where the edges attach: physical sides, whatever the card's text direction */}
                 {hasL && <span className={cn('absolute top-1/2 -left-1.5 -mt-1 h-2.5 w-2.5 rounded-full border-2 bg-[var(--card)]', st ? 'border-[var(--fg3)]' : 'border-[var(--line2)]')} />}
                 {hasR && <span className={cn('absolute top-1/2 -right-1.5 -mt-1 h-2.5 w-2.5 rounded-full border-2 bg-[var(--card)]', st ? 'border-[var(--fg3)]' : 'border-[var(--line2)]')} />}
                 <div className="flex cursor-grab touch-none items-center gap-2 border-b border-[var(--line)] px-3 py-2.5">
                   <span className="grid h-[26px] w-[26px] flex-none place-items-center rounded-[var(--r-md)]" style={{ color: safeColor(n.color), background: `color-mix(in srgb, ${safeColor(n.color)} 14%, var(--card))` }}><Icon name={n.icon} size={14} /></span>
                   <div className="min-w-0"><div className="text-[13px] leading-tight font-semibold">{n.title}</div><div className="text-[11px] text-[var(--fg3)]">{n.desc}</div></div>
-                  {st === 'warn' ? (
-                    // StatusIcon has no warning state: same shape, warn colour, "!" instead of the tick
-                    <motion.span role="img" aria-label={'Needs review'} initial={{ scale: 0.4 }} animate={{ scale: 1 }} transition={spring(0.5, 0.35)}
-                      className="ms-auto grid h-[18px] w-[18px] flex-none place-items-center rounded-full bg-[var(--warn)] text-[var(--card)]"><Icon name="alert" size={10} strokeWidth={3} /></motion.span>
-                  ) : <StatusIcon status={st === 'run' ? 'active' : st === 'ok' ? 'done' : 'pending'} tone="ok" label={st === 'run' ? 'Running' : st === 'ok' ? 'Done' : 'Waiting'} className="ms-auto motion-reduce:animate-none" />}
+                  <StatusIcon status={look.icon} tone="ok" label={look.label} className="ms-auto motion-reduce:animate-none" />
                 </div>
                 <div className="px-3 py-2 text-xs leading-[1.45] text-[var(--fg2)]">{bodyText(n)}</div>
                 <div className="flex justify-between rounded-b-[var(--r-lg)] border-t border-[var(--line)] bg-[color-mix(in_srgb,var(--muted)_50%,var(--card))] px-3 py-2 text-[11px] text-[var(--fg3)]"><span>{n.foot[0]}</span><span>{times[n.id] ?? n.foot[1]}</span></div>
@@ -442,6 +464,8 @@ type DfParticle = { stage: 0 | 1; p: number; t: number; v: number; src: number }
 const DF_W = 960, DF_H = 380, DF_NW = 150, DF_NH = 44, DF_ER = 62, DF_NW_T = 148
 /** Most particles in flight at once (new ones wait for a free slot). */
 const DF_MAX = 120
+/** Events one particle stands for: rates are divided by it, Processed and Delivered multiplied back. */
+const DF_EVENTS_PER_PARTICLE = 40
 /** Points per path in the arc-length lookup table. */
 const DF_LUT = 64
 /** A cubic Bézier [x0,y0, c1x,c1y, c2x,c2y, x1,y1] sampled at DF_LUT points evenly spaced by arc length (x, y pairs). */
@@ -457,18 +481,12 @@ function dfLut(P: number[]) {
   }
   return out
 }
-const dfD = (P: number[]) => `M${P[0]},${P[1]} C${P[2]},${P[3]} ${P[4]},${P[5]} ${P[6]},${P[7]}`
-/** CSS colours (var(), color-mix(), fallbacks) resolved to rgb() through an element's computed `color`. */
-function dfResolve(el: HTMLElement, colors: string[]) {
-  const prev = el.style.color
-  const out = colors.map(c => { el.style.color = ''; el.style.color = safeColor(c, 'var(--fg3)'); return getComputedStyle(el).color })
-  el.style.color = prev
-  return out
-}
+const dfRgba = ([r, g, b, a]: RGBA) => `rgba(${r},${g},${b},${a})`
 /** A soft glow dot (the old blur filter) pre-rendered once per colour, so a frame is a few drawImage calls. */
 function dfSprite(color: string, dpr: number) {
   const s = Math.ceil(16 * dpr), cv = document.createElement('canvas'); cv.width = cv.height = s
-  const g = cv.getContext('2d')!, r = s / 2, grd = g.createRadialGradient(r, r, 0, r, r, r)
+  const g = cv.getContext('2d'); if (!g) return cv
+  const r = s / 2, grd = g.createRadialGradient(r, r, 0, r, r, r)
   grd.addColorStop(0, color); grd.addColorStop(0.35, color); grd.addColorStop(1, 'transparent')
   g.globalAlpha = 0.55; g.fillStyle = grd; g.fillRect(0, 0, s, s)
   g.globalAlpha = 1; g.fillStyle = color; g.beginPath(); g.arc(r, r, 1.6 * dpr, 0, Math.PI * 2); g.fill()
@@ -479,13 +497,19 @@ const dfEaseOut = cubicBezier(0, 0, 0.58, 1)
 /**
  * Streaming pipeline: particles leave each source at its event rate, pass through the processing engine
  * (its stage label cycles) and fan out to destinations by share. Hover, tap or focus a node to trace its path.
- * Speed slider, Pause, and a live stat strip (throughput, processed, in flight, p95 latency). Below 560px the
+ * Speed slider, Pause, and a stat strip: throughput (the sources' rates × speed, or `stats.throughput`), processed and in
+ * flight (this diagram's own particles), and p95 latency only when `stats.p95` is given. `simulate` adds demo jitter to
+ * the throughput and a made-up p95 when none is given (for showcases, never real dashboards). Below 560px the
  * pipeline turns vertical (sources above the engine, destinations below) so labels stay full size on phones.
  * Particles are drawn on one canvas from per-path lookup tables (no DOM reads or writes per frame), capped at 120 in
  * flight, and everything pauses while the diagram is off screen.
  */
-export function DataFlow({ sources, targets, engine: engineProp, stages: stagesProp, className }:
-  { sources: DataFlowSource[]; targets: DataFlowTarget[]; engine?: string; stages?: string[]; className?: string }) {
+export function DataFlow({ sources, targets, engine: engineProp, stages: stagesProp, stats: statsProp, simulate = false, className }:
+  { sources: DataFlowSource[]; targets: DataFlowTarget[]; engine?: string; stages?: string[]
+    /** measured numbers from your pipeline: events per second, and p95 latency in ms (its tile shows only when given) */
+    stats?: { throughput?: number; p95?: number }
+    /** demo mode: jitter the throughput and invent a p95 when `stats.p95` is missing */
+    simulate?: boolean; className?: string }) {
   const [wrapRef, wrapW] = useWidth<HTMLDivElement>()
   const engine = engineProp ?? 'Engine'
   const stagesDefault = ['Ingest', 'Transform', 'Enrich', 'Route'], stages = stagesProp ?? stagesDefault
@@ -500,15 +524,17 @@ export function DataFlow({ sources, targets, engine: engineProp, stages: stagesP
   const [paused, setPaused] = useState(false)
   const [hl, setHl] = useState<{ k: 's' | 'd'; i: number } | null>(null)
   const [stage, setStage] = useState(0)
-  const [stats, setStats] = useState({ tp: 0, processed: 0, inflight: 0, p95: 42, delivered: targets.map(() => 0) })
+  const [stats, setStats] = useState({ tp: 0, processed: 0, inflight: 0, p95: null as number | null, delivered: [] as number[] })
   const box = useRef<HTMLDivElement>(null)
   const inView = useInView(box, { once: true, amount: 0.3 })
   const { visible } = useViewport(box, { amount: 0.05 })
   const reduce = useReducedMotion()
   const pulseC = useRef<SVGCircleElement>(null), pulseT = useRef(-1)
   const cvRef = useRef<HTMLCanvasElement>(null)
-  const sim = useRef({ parts: [] as DfParticle[], acc: sources.map(() => 0), processed: 0, delivered: targets.map(() => 0) })
+  // per-source and per-target counters are filled on first use, so sources and targets added later just join in
+  const sim = useRef({ parts: [] as DfParticle[], acc: [] as number[], processed: 0, delivered: [] as number[] })
   const hlRef = useRef(hl); hlRef.current = hl
+  const latest = useLatest({ sources, targets, statsProp, simulate })
   const uid = dgSafeId(useId())
   const speedId = `${uid}-speed`
   const sy = (i: number) => 34 + i * ((H - 68 - nh) / Math.max(1, sources.length - 1)), dy = (i: number) => 70 + i * ((H - 140 - nh) / Math.max(1, targets.length - 1))
@@ -535,6 +561,7 @@ export function DataFlow({ sources, targets, engine: engineProp, stages: stagesP
   const cv = useRef({ w: 0, h: 0, dpr: 1, sprites: [] as HTMLCanvasElement[], srcSprite: [] as number[], dstSprite: [] as number[], accent: '', now: 0 })
   const drawRef = useRef<(dt: number, now: number) => void>(() => {})
   const colorKey = [...sources, ...targets].map(n => n.color).join('|')
+  const themeV = useThemeVersion(box)
   useEffect(() => {
     const el = cvRef.current; if (!el) return
     const ro = new ResizeObserver(([e]) => {
@@ -548,20 +575,15 @@ export function DataFlow({ sources, targets, engine: engineProp, stages: stagesP
   }, [])
   useEffect(() => {
     const el = cvRef.current; if (!el) return
-    const build = () => {
-      const c = cv.current, dpr = Math.min(2, devicePixelRatio || 1), all = dfResolve(el, [...sources.map(s => s.color), ...targets.map(t => t.color), 'var(--accent)'])
-      c.accent = all.pop()!
-      const uniq = [...new Set(all)]
-      c.sprites = uniq.map(col => dfSprite(col, dpr))
-      c.srcSprite = sources.map((_, i) => uniq.indexOf(all[i])); c.dstSprite = targets.map((_, i) => uniq.indexOf(all[sources.length + i]))
-      drawRef.current(0, c.now)
-    }
-    build()
-    // theme switches change the tokens on <html> (data-theme, class, style) or the colour scheme
-    const mo = new MutationObserver(build); mo.observe(document.documentElement, { attributes: true, attributeFilter: ['data-theme', 'class', 'style'] })
-    const mq = matchMedia('(prefers-color-scheme: dark)'); mq.addEventListener?.('change', build)
-    return () => { mo.disconnect(); mq.removeEventListener?.('change', build) }
-  }, [colorKey]) // eslint-disable-line react-hooks/exhaustive-deps
+    // colours resolve in this element's theme scope, again whenever the theme changes (UIProvider target="self" too)
+    const c = cv.current, dpr = Math.min(2, devicePixelRatio || 1), C = colorResolver(el)
+    const all = [...sources.map(s => s.color), ...targets.map(t => t.color), 'var(--accent)'].map(col => dfRgba(C(col)))
+    c.accent = all.pop()!
+    const uniq = [...new Set(all)]
+    c.sprites = uniq.map(col => dfSprite(col, dpr))
+    c.srcSprite = sources.map((_, i) => uniq.indexOf(all[i])); c.dstSprite = targets.map((_, i) => uniq.indexOf(all[sources.length + i]))
+    drawRef.current(0, c.now)
+  }, [colorKey, themeV]) // eslint-disable-line react-hooks/exhaustive-deps
 
   const running = visible && !paused && !reduce
   // one frame: the engine's orbiting rings (dash offsets, so a rotation costs no layout) and every particle
@@ -569,7 +591,7 @@ export function DataFlow({ sources, targets, engine: engineProp, stages: stagesP
     const S = sim.current, el = cvRef.current, c = cv.current; if (!el || !c.w) return
     c.now = now
     sources.forEach((s, i) => {
-      S.acc[i] += (dt * s.rate / 40) * speed
+      S.acc[i] = (S.acc[i] ?? 0) + (dt * s.rate / DF_EVENTS_PER_PARTICLE) * speed
       while (S.acc[i] >= 1) { S.acc[i]--; if (S.parts.length < DF_MAX) S.parts.push({ stage: 0, p: i, t: 0, v: 0.35 + Math.random() * 0.25, src: i }) }
     })
     const g = el.getContext('2d'); if (!g) return
@@ -581,7 +603,7 @@ export function DataFlow({ sources, targets, engine: engineProp, stages: stagesP
       q.t += dt * q.v * speed
       if (q.t >= 1) {
         if (q.stage === 0) { q.stage = 1; q.t = 0; q.p = pickTarget(); S.processed++; if (S.processed % 6 === 0) pulse = true }
-        else { S.delivered[q.p]++; S.parts.splice(j, 1); continue }
+        else { S.delivered[q.p] = (S.delivered[q.p] ?? 0) + 1; S.parts.splice(j, 1); continue }
       }
       const lut = (q.stage ? luts.out : luts.in)[q.p]; if (!lut) continue
       const f = q.t * (DF_LUT - 1), a = Math.min(DF_LUT - 2, Math.floor(f)), u = f - a
@@ -618,11 +640,16 @@ export function DataFlow({ sources, targets, engine: engineProp, stages: stagesP
   useEffect(() => {
     if (!visible || paused) return
     const id = setInterval(() => {
-      const S = sim.current
-      setStats({ tp: Math.round(sources.reduce((a, s) => a + s.rate, 0) * speed + (Math.random() - 0.5) * 12), processed: S.processed * 40, inflight: S.parts.length, p95: Math.round(42 / Math.max(0.4, speed) + Math.random() * 6), delivered: S.delivered.map(d => d * 40) })
+      const S = sim.current, { sources, targets, statsProp, simulate } = latest.current, rate = sources.reduce((a, s) => a + s.rate, 0) * speed
+      setStats({
+        tp: Math.round(statsProp?.throughput ?? rate + (simulate ? (Math.random() - 0.5) * 12 : 0)),
+        processed: S.processed * DF_EVENTS_PER_PARTICLE, inflight: S.parts.length,
+        p95: statsProp?.p95 ?? (simulate ? Math.round(42 / Math.max(0.4, speed) + Math.random() * 6) : null),
+        delivered: targets.map((_, i) => (S.delivered[i] ?? 0) * DF_EVENTS_PER_PARTICLE),
+      })
     }, 1000)
     return () => clearInterval(id)
-  }, [visible, paused, speed, sources])
+  }, [visible, paused, speed])
   useEffect(() => { if (!visible) return; const id = setInterval(() => setStage(s => (s + 1) % stages.length), 1800); return () => clearInterval(id) }, [visible, stages.length])
 
   useOutside([], () => setHl(null), hl !== null, { escape: true, keep: t => !!t.closest('[data-df-node]') && !!box.current?.contains(t) })
@@ -642,9 +669,10 @@ export function DataFlow({ sources, targets, engine: engineProp, stages: stagesP
     </motion.g>
   )
   const lk = (d: string, k: 's' | 'd', i: number, order: number) => (
-    <motion.path key={`${k}${i}`} d={d} fill="none" initial={{ pathLength: reduce ? 1 : 0 }} animate={inView ? { pathLength: 1 } : undefined} transition={{ duration: 0.8, delay: 0.1 + order * 0.05, ease: [0.22, 1, 0.36, 1] }}
+    <motion.path key={`${k}${i}`} d={d} fill="none" initial={{ pathLength: reduce ? 1 : 0 }} animate={inView ? { pathLength: 1 } : undefined} transition={{ duration: 0.8, delay: 0.1 + order * 0.05, ease: EASE_OUT }}
       className={cn('transition-[opacity,stroke] duration-200 [stroke-width:1.5]', linkOn(k, i) ? 'stroke-[var(--fg3)]' : 'stroke-[var(--line2)]', hl && !linkOn(k, i) && 'opacity-15')} />
   )
+  const p95 = statsProp?.p95 ?? stats.p95
   const stat = (label: string, v: number, unit?: string) => (
     <div className="rounded-[var(--r-md)] bg-[var(--muted)] px-3 py-2.5"><span className="block text-[11px] text-[var(--fg3)]">{label}</span>
       <b className="flex items-baseline text-lg font-semibold tracking-tight"><AnimatedNumber value={v} format={{ maximumFractionDigits: 0 }} />{unit && <span className="ms-0.5 text-xs font-normal text-[var(--fg3)]">{unit}</span>}</b></div>
@@ -656,19 +684,18 @@ export function DataFlow({ sources, targets, engine: engineProp, stages: stagesP
         <div className="w-[90px] [@media(pointer:coarse)]:w-[120px]"><Slider id={speedId} min={0.3} max={3} step={0.1} value={speed} onChange={setSpeed} /></div>
         <Button size="sm" className={TOUCH.tap36} onClick={() => setPaused(p => !p)}>{paused ? 'Resume' : 'Pause'}</Button>
       </div>
-      {/* geometry: left-to-right flow in every locale (like charts and Sankey) */}
       <div ref={wrapRef} className="overflow-x-auto overscroll-x-contain rounded-[var(--r-lg)] border border-[var(--line)] bg-[var(--bg)]">
         <div className={cn('relative', tall ? 'mx-auto max-w-[420px]' : 'min-w-[640px] [@media(pointer:coarse)]:min-w-[960px]')}>
         {/* three layers with one geometry: links (SVG), particles (canvas), nodes and engine (SVG), so particles pass under the nodes */}
         <svg viewBox={`0 0 ${W} ${H}`} aria-hidden className="block h-auto w-full">
-          {inP.map((P, i) => lk(dfD(P), 's', i, i))}
-          {outP.map((P, i) => lk(dfD(P), 'd', i, sources.length + i))}
+          {inP.map((P, i) => lk(dgCubicPath(P), 's', i, i))}
+          {outP.map((P, i) => lk(dgCubicPath(P), 'd', i, sources.length + i))}
         </svg>
         <canvas ref={cvRef} aria-hidden className="pointer-events-none absolute inset-0 h-full w-full" />
         <svg viewBox={`0 0 ${W} ${H}`} role="group" aria-label={'Data flow from sources through a processing engine to destinations'} className="pointer-events-none absolute inset-0 block h-full w-full [&_[data-df-node]]:pointer-events-auto">
           <g>
             {sources.map((s, i) => node('s', s, i, srcAt(i)[0], srcAt(i)[1], `${Math.round(s.rate * speed)} ev/s`))}
-            {targets.map((t, i) => node('d', t, i, dstAt(i)[0], dstAt(i)[1], `${fmt.number(stats.delivered[i])} delivered`))}
+            {targets.map((t, i) => node('d', t, i, dstAt(i)[0], dstAt(i)[1], `${fmt.number(stats.delivered[i] ?? 0)} delivered`))}
           </g>
           <g transform={`translate(${ex},${ey})`} role="img" aria-label={`${engine}: ${stages[stage]}`}>
             <motion.g initial={{ opacity: 0, scale: 0.85 }} animate={inView ? { opacity: 1, scale: 1 } : undefined} transition={spring(0.3, 0.6)}>
@@ -685,8 +712,8 @@ export function DataFlow({ sources, targets, engine: engineProp, stages: stagesP
         </svg>
         </div>
       </div>
-      <div className="grid grid-cols-2 gap-3 sm:grid-cols-4">
-        {stat('Throughput', paused ? 0 : stats.tp, 'ev/s')}{stat('Processed', stats.processed)}{stat('In flight', stats.inflight)}{stat('Latency p95', stats.p95, 'ms')}
+      <div className={cn('grid grid-cols-2 gap-3', p95 == null ? 'sm:grid-cols-3' : 'sm:grid-cols-4')}>
+        {stat('Throughput', paused ? 0 : statsProp?.throughput ?? stats.tp, 'ev/s')}{stat('Processed', stats.processed)}{stat('In flight', stats.inflight)}{p95 != null && stat('Latency p95', p95, 'ms')}
       </div>
     </div>
   )

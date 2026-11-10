@@ -455,7 +455,7 @@ const atPad = (s: string, n: number) => s.padStart(n, ' ')
  */
 function atEngine(machines: Record<string, WorkflowMachine>, order: string[]) {
   return new WorkflowEngine(machines, order, {
-    speed: 1.5, maxJobs: 3, hitlWait: AT_HITL_TIMEOUT, queueMax: AT_QMAX,
+    speed: 1.5, maxJobs: 3, hitlWait: AT_HITL_TIMEOUT, queueMax: AT_QMAX, intake: 'request.received',
     lap: [(AT_LOOP_L * 0.45) / AT_LOOP_SPEED, AT_LOOP_L / AT_LOOP_SPEED],
     travelTime: (line, from, to) => { const a = atPos(line, from), b = atPos(line, to); return a === undefined || b === undefined ? 0 : Math.abs(b - a) / AT_SPEED },
     meter: { tokens: 900, usd: 0.0011 },
