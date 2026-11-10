@@ -40,10 +40,11 @@ export const FAMILIES = {
   'date-picker': { roots: ['DatePicker', 'formatDate'] },
   'file-upload': { roots: ['FileUpload', 'fileAccepts'] },
   // feedback
-  toast: { roots: ['ToastProvider', 'useToast'], title: 'Toast' },
+  toast: { roots: ['ToastProvider', 'useToast', 'toast'], title: 'Toast' },
   progress: { roots: ['Progress', 'ProgressRing'] },
   collapse: { roots: ['Collapse', 'AutoHeight'] },
   'copy-button': { roots: ['CopyButton', 'useCopy'] },
+  confetti: { roots: ['confetti'], title: 'Confetti', type: 'registry:lib', description: 'confetti({ x, y, count }): a one-off burst of confetti from a point, drawn on a temporary canvas in the theme\'s chart colours. Does nothing under reduced motion. For real milestones, not every click.' },
   // data
   stat: { roots: ['StatCard', 'StatGrid'], title: 'Stat card' },
   'shortcut-sheet': { roots: ['ShortcutSheet', 'ShortcutOverlay'] },
@@ -57,13 +58,14 @@ export const FAMILIES = {
   markdown: { roots: ['Markdown', 'parseMarkdown'] },
   'audio-player': { roots: ['AudioPlayer', 'useAudioTrack', 'createAudioTrack', 'useSeekSlider'] },
   // charts
-  chart: { roots: ['Chart', 'Legend', 'useChartFocus', 'niceTicks', 'compact', 'chartDownsample', 'PALETTE', 'CHART_NEUTRAL'] },
+  chart: { roots: ['Chart', 'Legend', 'useChartFocus', 'exportChart', 'niceTicks', 'compact', 'chartDownsample', 'PALETTE', 'CHART_NEUTRAL'] },
   // AI
   'ai-stream': { roots: ['useAiChat', 'applyAiChunk', 'toAiChunk', 'fromAiSdkUIMessageStream', 'aiMessageText', 'aiId', 'AI_LIMITS', 'AI_STREAM_VERSION'], title: 'AI streams (useAiChat)', type: 'registry:hook', description: 'The AI message model with parts (text, reasoning, tools, sources, files, data) and useAiChat, which streams from a ReadableStream, an AsyncIterable or an AI SDK UI message stream, with stop via AbortSignal.' },
   'prompt-input': { roots: ['PromptInput', 'useAutoGrow', 'useAttachments', 'AttachmentChip', 'SendButton'] },
   conversation: { roots: ['Conversation', 'useStickToBottom', 'aiNearBottom'] },
   'suggested-edit': { roots: ['SuggestedEdit', 'wordDiff'] },
   'state-machine': { roots: ['StateMachine', 'WorkflowEngine'] },
+  'agent-run': { roots: ['useAgentRun', 'applyRunEvent', 'runFromEvents', 'runToEvents', 'runTotals', 'runLatestMs', 'runLaneNodes', 'agentSpanCost', 'otelTraceIds', 'otelToRunEvents', 'fromOtel', 'aiSdkResultToRunEvents', 'fromAiSdkResult', 'aiSdkRunMapper', 'fromAiSdkUIStream', 'langGraphRunMapper', 'fromLangGraphEvents', 'AGENT_RUN_LIMITS'], title: 'Agent runs (useAgentRun)', type: 'registry:hook', description: 'One model of an agent run (spans, events, tokens, cost) with a streaming reducer and useAgentRun, plus adapters from OpenTelemetry GenAI traces (OTLP/JSON), Vercel AI SDK results and UI streams, and LangGraph astream_events. TraceWaterfall, AgentTransitMap and LaneGraph draw a run.' },
   // graphs as rows
   lanes: { roots: ['LaneGraph', 'LaneGutter', 'useLaneGraph', 'layoutLanes', 'laneAncestry', 'laneColor', 'laneHash', 'laneGutterWidth', 'LANE_COLORS', 'LANE_MESSAGES'], title: 'Lane graph', description: 'Any DAG as rows: layoutLanes (headless: order, lanes, colours and each row\'s edges, O(n · lanes)), LaneGutter (one row\'s SVG slice, stretches to tall rows) and LaneGraph (a virtualised list of gutter + your renderRow, with selection, hover ancestry, keyboard moves along edges and live inserts). GitGraph is a preset of it.' },
 }

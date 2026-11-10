@@ -1,4 +1,4 @@
-import { Fragment, memo, useEffect, useLayoutEffect, useRef, useState, type PointerEvent as ReactPointerEvent, type ReactNode } from 'react'
+import { Fragment, memo, useEffect, useLayoutEffect, useMemo, useRef, useState, type PointerEvent as ReactPointerEvent, type ReactNode } from 'react'
 import { motion, useInView, useReducedMotion } from 'motion/react'
 import { AnimatedNumber, Badge, Button, Icon, ScrollEdges, Spinner, TOUCH, cn, defineMessages, isTouch, onMouseLeave, surface, useLocale, useMessages, useScrollEdges, useWidth, type IconName } from './core'
 import { Collapse } from './feedback'
@@ -13,7 +13,49 @@ import { TAG_SR_ONLY, TagGlyph, layoutTimeTags, timeTagLook, timeTagMs, timeTagT
  * Trace waterfall
  * ══════════════════════════════════════════════════════════════════════════ */
 
-export type TraceSpan = { id: string; parent?: string | null; name: string; meta?: string; kind: 'llm' | 'tool' | 'agent'; /** default by kind: asterisk, code, bot */ icon?: IconName; start: number; duration: number; cost?: number; tokens?: number }
+export type TraceSpan = { id: string; parent?: string | null; name: string; meta?: string; kind: 'llm' | 'tool' | 'agent'; /** default by kind: asterisk, code, bot */ icon?: IconName; start: number; duration: number; cost?: number; tokens?: number
+  /** the span failed with this message: drawn red, with the message, once it ends */ error?: string }
+/**
+ * A recorded or live run for TraceWaterfall's `run` prop: an AgentRun from `@lyndon/ui/agentrun` (useAgentRun,
+ * fromOtel, fromAiSdkResult, fromLangGraphEvents), or anything shaped like it. Times are epoch ms; a span without
+ * `endMs` is still running.
+ */
+export type TraceRun = {
+  id?: string; name?: string; startedAt: number; endedAt?: number; status: string
+  spans: readonly { id: string; parentId?: string; kind: string; name: string; model?: string; startMs: number; endMs?: number; status: string; tokens?: { input: number; output: number }; costUsd?: number; error?: string }[]
+  events?: readonly { id: string; kind: string; atMs: number; label: string; detail?: string }[]
+}
+/** A waterfall row: a span, plus whether it is still running (its bar reaches the end of the plot and is revealed up to now). */
+type TraceRow = TraceSpan & { open?: boolean }
+const TRACE_RUN_KIND: Record<string, TraceSpan['kind']> = { llm: 'llm', tool: 'tool', retrieval: 'tool', human: 'tool', agent: 'agent', chain: 'agent' }
+const TRACE_RUN_ICON: Record<string, IconName> = { retrieval: 'search', human: 'user', chain: 'layers' }
+const TRACE_RUN_ROOT = '\u0000run'
+/** The latest moment a run reports (its end, or the last start, end or event so far). */
+const traceRunLatest = (run: TraceRun) => {
+  let t = run.endedAt ?? run.startedAt
+  for (const s of run.spans) t = Math.max(t, s.endMs ?? s.startMs)
+  for (const e of run.events ?? []) t = Math.max(t, e.atMs)
+  return t
+}
+/** A run's spans as waterfall rows in seconds from its start (one root: a run with several gets one of its own, named `name`). */
+function traceRunRows(run: TraceRun, total: number, end: number, name: string): TraceRow[] {
+  const t0 = run.startedAt, ids = new Set(run.spans.map(s => s.id)), live = run.status === 'running'
+  const roots = run.spans.filter(s => !s.parentId || !ids.has(s.parentId))
+  const own = roots.length === 1 ? null : TRACE_RUN_ROOT
+  const rows: TraceRow[] = run.spans.map(s => {
+    const start = Math.max(0, (s.startMs - t0) / 1000), open = s.endMs == null && live
+    const end = open ? total : Math.max(start, ((s.endMs ?? traceRunLatest(run)) - t0) / 1000)
+    const meta = s.model && !s.name.includes(s.model.replace(/-\d{4}-?\d{2}-?\d{2}$/, '')) ? s.model : undefined
+    const tokens = s.tokens ? s.tokens.input + s.tokens.output : undefined
+    return { id: s.id, parent: s.parentId && ids.has(s.parentId) ? s.parentId : own, name: s.name, ...(meta ? { meta } : {}), kind: TRACE_RUN_KIND[s.kind] ?? 'agent',
+      ...(TRACE_RUN_ICON[s.kind] ? { icon: TRACE_RUN_ICON[s.kind] } : {}), start, duration: Math.max(0.001, end - start),
+      ...(s.costUsd != null ? { cost: s.costUsd } : {}), ...(tokens ? { tokens } : {}), ...(s.status === 'error' ? { error: s.error ?? '' } : {}), ...(open ? { open } : {}) }
+  })
+  if (own) rows.unshift({ id: own, parent: null, name, kind: 'agent', start: 0, duration: Math.max(0.001, live ? total : end), ...(live ? { open: true } : {}) })
+  return rows
+}
+/** A tick step that gives at most 6 ticks over `total` seconds. */
+const traceStep = (total: number) => [0.5, 1, 2, 5, 10, 15, 30, 60, 120, 300, 600, 1800, 3600].find(s => total / s <= 6) ?? 7200
 const TRACE_BAR = {
   llm: 'bg-[color-mix(in_srgb,var(--accent)_72%,var(--card))]',
   tool: 'bg-[color-mix(in_srgb,var(--c4)_58%,var(--card))]',
@@ -55,7 +97,8 @@ export const TRACE_MESSAGES = defineMessages('trace', {
     duration: 'Duration', cost: 'Cost', tokens: 'Tokens', llmCalls: 'LLM calls', toolCalls: 'Tool calls', errors: 'Errors',
     tipStart: 'Start {start} · {elapsed}', soFar: '{elapsed} so far', tokenCount: '{n} tokens',
     failed: 'Failed after {time} · {message}', slowest: 'Slowest', running: '{name} running',
-    events: 'Events', eventAt: '{label} at {time}',
+    events: 'Events', eventAt: '{label} at {time}', failedShort: 'Failed after {time}',
+    evApproval: 'Approval', evHandoff: 'Handoff', evError: 'Error', evRetry: 'Retry', evNote: 'Note',
   },
   de: {
     title: 'Trace', span: 'Span', simulate: 'Fehler simulieren', replay: 'Wiederholen',
@@ -64,7 +107,8 @@ export const TRACE_MESSAGES = defineMessages('trace', {
     duration: 'Dauer', cost: 'Kosten', tokens: 'Tokens', llmCalls: 'LLM-Aufrufe', toolCalls: 'Tool-Aufrufe', errors: 'Fehler',
     tipStart: 'Start {start} · {elapsed}', soFar: 'bisher {elapsed}', tokenCount: '{n} Tokens',
     failed: 'Fehlgeschlagen nach {time} · {message}', slowest: 'Langsamster', running: '{name} läuft',
-    events: 'Ereignisse', eventAt: '{label} bei {time}',
+    events: 'Ereignisse', eventAt: '{label} bei {time}', failedShort: 'Fehlgeschlagen nach {time}',
+    evApproval: 'Freigabe', evHandoff: 'Übergabe', evError: 'Fehler', evRetry: 'Wiederholung', evNote: 'Notiz',
   },
   ar: {
     title: 'التتبّع', span: 'المقطع', simulate: 'محاكاة إخفاق', replay: 'إعادة التشغيل',
@@ -73,7 +117,8 @@ export const TRACE_MESSAGES = defineMessages('trace', {
     duration: 'المدة', cost: 'التكلفة', tokens: 'الرموز', llmCalls: 'استدعاءات النموذج', toolCalls: 'استدعاءات الأدوات', errors: 'الأخطاء',
     tipStart: 'البدء {start}، {elapsed}', soFar: '{elapsed} حتى الآن', tokenCount: '{n} رمز',
     failed: 'أخفق بعد {time}، {message}', slowest: 'الأبطأ', running: '{name} قيد التشغيل',
-    events: 'الأحداث', eventAt: '{label} عند {time}',
+    events: 'الأحداث', eventAt: '{label} عند {time}', failedShort: 'أخفق بعد {time}',
+    evApproval: 'موافقة', evHandoff: 'تسليم', evError: 'خطأ', evRetry: 'إعادة محاولة', evNote: 'ملاحظة',
   },
 })
 
@@ -88,9 +133,17 @@ export const TRACE_MESSAGES = defineMessages('trace', {
  * with flags in a row of their own (reserved up front, so rows never move); flags that would overlap drop out to a dot
  * on their rule, and `annotationStyle="rug"` shows icons instead, folding crowded ones into "+N". Hover, tap or focus a
  * flag for its tooltip; the flag row is one Tab stop (←/→, Home/End, Escape).
+ * `run` draws an agent run instead of `spans` + `total` (a TraceRun: an AgentRun from useAgentRun or an adapter): spans
+ * become rows (agents and chains as groups, retrievals and human waits as tools), failed spans show their error, and
+ * the run's events (approvals, handoffs, errors, retries) become flags. A finished run plays like a trace; a running one
+ * grows live, its clock following the latest moment the run reported, with room ahead on the axis that extends as it
+ * fills.
  */
-export function TraceWaterfall({ spans, total, title, subtitle, failure, speed = 1.2, annotations, annotationKinds, annotationStyle = 'flags', className }:
-  { spans: TraceSpan[]; total: number; title?: ReactNode; subtitle?: ReactNode
+export function TraceWaterfall({ spans: spansProp, total: totalProp, run, title, subtitle, failure, speed = 1.2, annotations: annProp, annotationKinds: kindsProp, annotationStyle = 'flags', className }:
+  { spans?: TraceSpan[]; total?: number
+    /** an agent run to draw instead of `spans` and `total`, finished or live */
+    run?: TraceRun | null
+    title?: ReactNode; subtitle?: ReactNode
     failure?: { span: string; at: number; message: string; retry?: string }; speed?: number
     /** events over the run, `at` in ms from the trace start: deploys, approvals, retries */
     annotations?: TimeTag[]
@@ -116,6 +169,41 @@ export function TraceWaterfall({ spans, total, title, subtitle, failure, speed =
   const geoRef = (key: string) => (el: HTMLElement | null) => { if (el) geo.current.set(key, el); else geo.current.delete(key) }
   const [playing, setPlaying] = useState(false)
   const [fail, setFail] = useState(false)
+  // run mode: the rows come from the run. While it runs, the clock follows the latest moment it reported (plus the time
+  // since it arrived), never going back, and the axis keeps ~25% of room ahead, growing in nice steps.
+  const seen = useRef<{ run: TraceRun | null; at: number; latest: number }>({ run: null, at: 0, latest: 0 })
+  if (run && seen.current.run !== run) seen.current = { run, at: Date.now(), latest: traceRunLatest(run) } // eslint-disable-line react-hooks/refs
+  const liveRun = !!run && run.status === 'running'
+  const liveNow = () => seen.current.latest + (Date.now() - seen.current.at)
+  const liveAxis = useRef({ on: false, v: 0 })
+  /* eslint-disable react-hooks/refs */
+  if (liveRun && !liveAxis.current.on) { liveAxis.current = { on: true, v: 0 }; clockRef.current = 0 }
+  if (!liveRun) liveAxis.current.on = false
+  let total = totalProp ?? 0, endAt = Infinity
+  if (run) {
+    const t0 = run.startedAt
+    if (liveRun) {
+      const el = Math.max(clockRef.current, (liveNow() - t0) / 1000), want = Math.max(4, el * 1.25, ((seen.current.latest - t0) / 1000) * 1.05), step = traceStep(want)
+      liveAxis.current.v = Math.max(liveAxis.current.v, Math.ceil(want / step) * step)
+      total = liveAxis.current.v
+    } else {
+      // a finished run: the clock stops at its end, and the plot runs ~15% past it so the last spans' labels fit
+      endAt = Math.max(0.5, ((run.endedAt ?? seen.current.latest) - t0) / 1000)
+      total = endAt * 1.15
+    }
+  }
+  /* eslint-enable react-hooks/refs */
+  if (!(total > 0)) total = 1
+  if (!run) endAt = total
+  const spans: TraceRow[] = run ? traceRunRows(run, total, endAt, typeof title === 'string' ? title : run.name || m('title')) : spansProp ?? []
+  const runKinds = useMemo<TimeTagKind[]>(() => [
+    { kind: 'approval', label: m('evApproval'), icon: '✓', color: 'var(--ok)' }, { kind: 'handoff', label: m('evHandoff'), icon: '⇢', color: 'var(--accent)' },
+    { kind: 'error', label: m('evError'), icon: '!', color: 'var(--bad)' }, { kind: 'retry', label: m('evRetry'), icon: '↻', color: 'var(--warn)' },
+    { kind: 'note', label: m('evNote'), icon: '•', color: 'var(--c-neutral)' },
+  ], [m])
+  const runTags = useMemo<TimeTag[] | null>(() => run && !annProp ? (run.events ?? []).map(e => ({ id: e.id, at: Math.max(0, e.atMs - run.startedAt), kind: e.kind, label: e.label, ...(e.detail ? { detail: e.detail } : {}) })) : null, [run, annProp])
+  const annotations = annProp ?? runTags ?? undefined
+  const annotationKinds = kindsProp ?? (run ? runKinds : undefined)
   const [closed, setClosed] = useState<Set<string>>(new Set())
   const box = useRef<HTMLDivElement>(null)
   const inView = useInView(box, { once: true, amount: 0.3 })
@@ -124,8 +212,9 @@ export function TraceWaterfall({ spans, total, title, subtitle, failure, speed =
   const [scrollRef, scroll] = useScrollEdges<HTMLDivElement>()
   const { tip, show, hide } = usePointerTooltip()
   const [hot, setHot] = useState<string | null>(null)
-  // annotations: one flag row (reserved whenever the prop is set) and rules through every row
+  // annotations: one flag row (reserved whenever the prop is set, or a run is live or has events) and rules through every row
   const ann = annotations ?? []
+  const annReserved = annProp != null || (!!run && (liveRun || ann.length > 0))
   const [annOn, setAnnOn] = useState<string | null>(null)
   const annRow = useRef<HTMLDivElement>(null)
   const annSec = (t: TimeTag) => timeTagMs(t.at) / 1000
@@ -160,16 +249,30 @@ export function TraceWaterfall({ spans, total, title, subtitle, failure, speed =
   }, [annOn]) // eslint-disable-line react-hooks/exhaustive-deps
   const kids = (id: string | null) => spans.filter(s => (s.parent ?? null) === id && (fail || s.id !== failure?.retry))
   const root0 = () => spans.find(s => !s.parent)
-  const depth = (s: TraceSpan): number => s.parent ? 1 + depth(spans.find(x => x.id === s.parent)!) : 0
-  const slowest = spans.filter(s => s.kind === 'tool' && s.id !== failure?.retry).sort((a, b) => b.duration - a.duration)[0]
+  const depth = (s: TraceSpan, n = 0): number => s.parent && n < 64 ? 1 + depth(spans.find(x => x.id === s.parent) ?? { ...s, parent: null }, n + 1) : 0
+  const slowest = spans.filter(s => s.kind === 'tool' && s.id !== failure?.retry && !s.open).sort((a, b) => b.duration - a.duration)[0]
   const D = (s: TraceSpan) => fail && s.id === failure?.span ? failure.at : s.duration
-  const play = (withFail: boolean) => { setFail(withFail); if (reduce) { setClock(total); setPlaying(false) } else { setClock(0); setPlaying(true) } }
-  useEffect(() => { if (inView && clock === 0 && !playing) play(false) }, [inView]) // eslint-disable-line react-hooks/exhaustive-deps
-  useFrameLoop(playing && onScreen, dt => {
-    const n = Math.min(total, clockRef.current + dt * speed)
+  const play = (withFail: boolean) => { setFail(withFail); if (reduce) { setClock(endAt); setPlaying(false) } else { setClock(0); setPlaying(true) } }
+  useEffect(() => { if (inView && clock === 0 && !playing && !liveRun) play(false) }, [inView]) // eslint-disable-line react-hooks/exhaustive-deps
+  // a live run that finishes stays at its end; a different finished run plays from the start
+  const wasLive = useRef(liveRun), runKey = run ? run.id ?? '' : null
+  useEffect(() => {
+    if (liveRun) { wasLive.current = true; setPlaying(false); setFail(false); return }
+    if (wasLive.current) { wasLive.current = false; setClock(endAt) }
+  }, [liveRun]) // eslint-disable-line react-hooks/exhaustive-deps
+  const firstKey = useRef(runKey)
+  useEffect(() => { if (runKey === firstKey.current) return; firstKey.current = runKey; if (run && !liveRun && inView) play(false) }, [runKey]) // eslint-disable-line react-hooks/exhaustive-deps
+  useFrameLoop(liveRun && onScreen, dt => {
+    const n = Math.max(clockRef.current, (liveNow() - (run?.startedAt ?? 0)) / 1000)
+    clockRef.current = n
+    drawFrame.current(Math.min(n, total))
+    if ((sinceRender.current += dt) >= 0.1) { sinceRender.current = 0; setClock(n) }
+  }, { maxDt: 0.25, coarseFps: 30 })
+  useFrameLoop(playing && onScreen && !liveRun, dt => {
+    const n = Math.min(endAt, clockRef.current + dt * speed)
     clockRef.current = n
     drawFrame.current(n)
-    if (n >= total) { setClock(total); setPlaying(false) } else if ((sinceRender.current += dt) >= 0.1) { sinceRender.current = 0; setClock(n) }
+    if (n >= endAt) { setClock(endAt); setPlaying(false) } else if ((sinceRender.current += dt) >= 0.1) { sinceRender.current = 0; setClock(n) }
   }, { maxDt: 0.25, coarseFps: 30 })
   // the per-frame geometry, for the spans as rendered last (closes over the current failure mode and lane width)
   useLayoutEffect(() => {
@@ -197,19 +300,21 @@ export function TraceWaterfall({ spans, total, title, subtitle, failure, speed =
   spans.forEach(s => {
     if (s.id === failure?.retry && !fail) return
     const started = clock >= s.start, end = s.start + D(s), w = started ? Math.min(clock, end) - s.start : 0
-    if (fail && s.id === failure?.span && clock >= end) errs++
+    if (((fail && s.id === failure?.span) || (s.error != null && !s.open)) && clock >= end) errs++
     if (s.kind === 'agent') return
     const frac = started ? Math.min(1, w / s.duration) : 0
     cost += (s.cost ?? 0) * frac; tok += (s.tokens ?? 0) * frac; if (started) { if (s.kind === 'llm') llm++; else tool++ }
   })
-  const done = clock >= total, root = spans.find(s => !s.parent)
+  const done = !liveRun && clock >= endAt, root = spans.find(s => !s.parent)
   if (done && !fail && root?.cost) cost = root.cost
   // the stat strip rolls once per second (and settles at the end)
-  const sec = Math.floor(Math.min(clock, total)), statSec = useRef(-1), stats = useRef({ dur: 0, cost: 0, tok: 0, llm: 0, tool: 0, errs: 0 })
-  if (sec !== statSec.current || done) { statSec.current = sec; stats.current = { dur: Math.min(total, Math.round(clock)), cost, tok, llm, tool, errs } }
+  const sec = Math.floor(Math.min(clock, endAt)), statSec = useRef(-1), stats = useRef({ dur: 0, cost: 0, tok: 0, llm: 0, tool: 0, errs: 0 })
+  if (sec !== statSec.current || done) { statSec.current = sec; stats.current = { dur: Math.round(Math.min(endAt, clock)), cost, tok, llm, tool, errs } }
   const S = stats.current
   const pct = (t: number) => `${(t / total) * 100}%`
-  const ticks = Array.from({ length: Math.floor(total / 10) + 1 }, (_, i) => i * 10)
+  // a run's axis picks its own step (at most 6 ticks); a trace keeps 10 s ticks
+  const tickStep = run ? traceStep(total) : 10
+  const ticks = Array.from({ length: Math.floor(total / tickStep + 1e-9) + 1 }, (_, i) => Math.round(i * tickStep * 10) / 10)
 
   // spawn connectors, drawn row by row so they follow Collapse, scrolling and streaming for free: the parent row
   // holds a stub down from its bar, rows in between a pass-through, the child row an elbow into its bar. Rows are
@@ -228,16 +333,17 @@ export function TraceWaterfall({ spans, total, title, subtitle, failure, speed =
   const lit = tip ? hot : null, chain = new Set<string>()
   for (let id = lit; id; id = spans.find(x => x.id === id)?.parent ?? null) chain.add(id)
 
-  const row = (s: TraceSpan): ReactNode => {
+  const row = (s: TraceRow): ReactNode => {
     const d = depth(s), ch = kids(s.id), isOpen = !closed.has(s.id)
     const du = D(s), started = clock >= s.start, end = s.start + du, fin = clock >= end, w = started ? Math.min(clock, end) - s.start : 0
-    const failed = fail && s.id === failure?.span && fin, frac = started ? Math.min(1, w / s.duration) : 0
+    const failed = ((fail && s.id === failure?.span) || s.error != null) && fin, frac = started ? Math.min(1, w / s.duration) : 0
+    const failMsg = s.error ?? failure?.message ?? ''
     const live = started && !fin, capped = live && s.kind === 'agent'
     // the line re-renders only when what it shows changes (the 10 Hz refresh mostly touches the running spans' labels),
     // so its tooltip reads the clock when it opens
     const labelText = failed ? '' : started ? `${secs(fin ? s.duration : w, s.duration >= 10 && fin ? 0 : 1)}${s.cost ? fmt.usd(s.cost * (fin ? 1 : frac)) : ''}` : ''
     const myWires = wires.get(s.id) ?? []
-    const sig = [started, fin, failed, isOpen, labelText, laneW, d, ch.length, myWires.map(x => `${x.c.id}${x.part}${chain.has(x.c.id)}`).join(), s === slowest, dir, reduce, fail].join('|')
+    const sig = [started, fin, failed, isOpen, labelText, laneW, d, ch.length, total, du, s.name, s.meta, failMsg, myWires.map(x => `${x.c.id}${x.part}${chain.has(x.c.id)}`).join(), s === slowest, dir, reduce, fail].join('|')
     const traceTip = (ev: ReactPointerEvent) => { const clock = clockRef.current, started = clock >= s.start, fin = clock >= end; setHot(s.id); if (!started) return hide(); const elapsed = secs(Math.min(clock, end) - s.start); show(ev, <><b className="font-semibold">{s.name}</b> <span className="text-[var(--fg3)]">{s.meta}</span><br /><span className="text-[var(--fg2)]">{m('tipStart', { start: secs(s.start), elapsed: fin ? elapsed : m('soFar', { elapsed }) })}{s.cost ? ` · ${fmt.usd(s.cost)}` : ''}{s.tokens ? ` · ${m('tokenCount', { n: fmt.compact(s.tokens) })}` : ''}</span></>) }
     return (
       <Fragment key={s.id}>
@@ -270,7 +376,7 @@ export function TraceWaterfall({ spans, total, title, subtitle, failure, speed =
             <div ref={geoRef(s.id + ':label')} className="absolute top-[11px] flex items-center gap-2 text-xs whitespace-nowrap text-[var(--fg2)]"
               style={laneW > 0 ? { /* rtl-lint-ignore: LTR plot */ left: `calc(${pct(s.start)} + 10px)`, transform: `translateX(${(laneW * w / total).toFixed(2)}px)`, opacity: started ? 1 : 0 } : { /* rtl-lint-ignore: LTR plot */ left: `calc(${pct(s.start + w)} + 10px)`, opacity: started ? 1 : 0 }}>
               {failed ? (
-                <span className="inline-flex items-center gap-1 font-medium text-[var(--bad)]"><Icon name="alertCircle" size={12} /><span dir={dir}>{m('failed', { time: secs(du), message: failure!.message })}</span></span>
+                <span className="inline-flex items-center gap-1 font-medium text-[var(--bad)]"><Icon name="alertCircle" size={12} /><span dir={dir}>{failMsg ? m('failed', { time: secs(du), message: failMsg }) : m('failedShort', { time: secs(du) })}</span></span>
               ) : started && (
                 <>
                   <span>{secs(fin ? s.duration : w, s.duration >= 10 && fin ? 0 : 1)}{s.cost ? <> · <span className={fin ? 'text-[var(--fg2)]' : 'text-[var(--fg3)]'}>{fmt.usd(s.cost * (fin ? 1 : frac))}</span></> : null}</span>
@@ -289,12 +395,12 @@ export function TraceWaterfall({ spans, total, title, subtitle, failure, speed =
   return (
     <div ref={box} className={cn('flex flex-col gap-3', className)}>
       <div className="flex justify-end gap-2">
-        <Button size="sm" className={TOUCH.tap36} onClick={() => play(true)} disabled={!failure}>{m('simulate')}</Button>
-        <Button size="sm" className={TOUCH.tap36} onClick={() => play(false)}>{m('replay')}</Button>
+        {(!run || failure) && <Button size="sm" className={TOUCH.tap36} onClick={() => play(true)} disabled={!failure}>{m('simulate')}</Button>}
+        <Button size="sm" className={TOUCH.tap36} onClick={() => play(false)} disabled={liveRun}>{m('replay')}</Button>
       </div>
       <div className={cn('overflow-hidden', surface.card)}>
         <div className="flex flex-wrap items-center gap-x-2.5 gap-y-1.5 border-b border-[var(--line)] px-4 py-3 text-sm">
-          <span className="text-[var(--accent)]">✦</span><b className="font-semibold">{title ?? m('title')}</b>{subtitle && <span className="text-[var(--fg3)]">{subtitle}</span>}
+          <span className="text-[var(--accent)]">✦</span><b className="font-semibold">{title ?? (run?.name || m('title'))}</b>{subtitle && <span className="text-[var(--fg3)]">{subtitle}</span>}
           <span className="flex-1" />
           <span className="me-1.5 flex flex-wrap items-center gap-3 text-xs text-[var(--fg2)]">
             {(['llm', 'tool', 'agent'] as const).map(k => <span key={k} className="inline-flex items-center gap-1"><i className={cn('inline-block h-2.5 w-2.5 rounded-[var(--r-sm)]', TRACE_BAR[k])} />{m(k)}</span>)}
@@ -317,10 +423,10 @@ export function TraceWaterfall({ spans, total, title, subtitle, failure, speed =
           <div className="min-w-[560px]">
             <div className="grid h-9 grid-cols-[var(--split)_1fr] items-center border-b border-[var(--line)] text-xs text-[var(--fg3)]">
               <div dir={dir} className="sticky left-0 z-[2] flex h-full items-center bg-[var(--card)] ps-4 shadow-[1px_0_0_var(--line)]">{m('span')}</div>{/* rtl-lint-ignore: pinned column of the LTR plot */}
-              <div ref={laneRef} className="relative h-full border-s border-[var(--line)]">{ticks.map(t => <span key={t} className="absolute top-2.5 translate-x-1.5" style={{ left: pct(t) }}>{secs(t, 0)}</span>)}</div>{/* rtl-lint-ignore: LTR plot geometry */}
+              <div ref={laneRef} className="relative h-full border-s border-[var(--line)]">{ticks.map(t => <span key={t} className="absolute top-2.5 translate-x-1.5" style={{ left: pct(t) }}>{secs(t, tickStep < 1 ? 1 : 0)}</span>)}</div>{/* rtl-lint-ignore: LTR plot geometry */}
             </div>
             <div className="relative">
-              {annotations && (
+              {annReserved && (
                 <div className="grid h-9 grid-cols-[var(--split)_1fr] items-center border-b border-[var(--line)]">
                   <div dir={dir} className="sticky left-0 z-[3] flex h-full items-center bg-[var(--card)] ps-4 text-xs text-[var(--fg3)] shadow-[1px_0_0_var(--line)]">{m('events')}</div>{/* rtl-lint-ignore: pinned column of the LTR plot */}
                   <div ref={annRow} {...annFocus.props} className="relative z-[2] h-full rounded-[var(--r-sm)] border-s border-[var(--line)] outline-none focus-visible:shadow-[inset_0_0_0_2px_var(--accent)]"

@@ -5,8 +5,9 @@
 //                                           closure of top-level declarations, in source order); imports only
 //                                           react, react-dom and motion
 //   dist-registry/files/<name>.package.tsx  blocks only: the block as written, importing from '@lyndon/ui'
-//   dist-registry/index.json                name, title, description, exports, embedded components, npm
-//                                           dependencies, bytes, approximate tokens (bytes / 3.6), sha256
+//   dist-registry/index.json                name, title, description, kind, area, tags, exports, embedded
+//                                           components, npm dependencies, bytes, approximate tokens (bytes / 3.6),
+//                                           sha256; plus the tag vocabulary (src/showcase/tags.ts)
 //   dist-registry/r/<name>.json             shadcn registry items (`npx shadcn add <base>/r/<name>.json`)
 //   dist-registry/r/registry.json           shadcn registry index; r/tokens.json carries the token CSS
 //   llms.txt, llms-full.txt                 (repo root) index for AI tools, built from index.json
@@ -26,6 +27,8 @@ import { createHash } from 'node:crypto'
 import { execFileSync } from 'node:child_process'
 import { analyze, closure } from './registry/analyze.mjs'
 import { FAMILIES, BLOCKS, EXCLUDE, kebab, humanize, isComponentName } from './registry/items.mjs'
+// the tag vocabulary shared with the showcase and the docs (a .ts file: Node strips its types)
+import { TAGS, TAG_FACETS, TAG_BY_ID, tagRegistryMeta } from '../src/showcase/tags.ts'
 
 const root = new URL('..', import.meta.url).pathname
 const out = join(root, 'dist-registry')
@@ -163,6 +166,7 @@ function build() {
     const bytes = Buffer.byteLength(text)
     const entry = {
       name: it.name, type: it.type, title: it.title, description, module: first.module,
+      ...tagRegistryMeta({ name: it.name, type: it.type, module: first.module }),
       file: `files/${it.name}.tsx`, exports: it.roots, embeds,
       embedsItems: [...new Set(embeds.map(e => itemOfRoot.get(e)).filter(Boolean))].sort(),
       dependencies: deps, modules: [...new Set([...c.names].map(n => decls.get(n).module))].sort(),
@@ -197,7 +201,7 @@ function build() {
       : undefined,
     categories: [e.modules.find(m => m !== 'core') ?? 'core'],
     meta: {
-      package: `${pkg.name}@${pkg.version}`, source: repo, exports: e.exports, embeds: e.embeds,
+      package: `${pkg.name}@${pkg.version}`, source: repo, kind: e.kind, area: e.area, tags: e.tags, exports: e.exports, embeds: e.embeds,
       requires: e.requires.includes('ui-provider') ? 'UIProvider (ui-provider item) or @lyndon/ui/tokens.css with <UIProvider injectStyles={false}>' : undefined,
       tokensCss: '@lyndon/ui/tokens.css', tokensItem: `${BASE}/r/tokens.json`,
       bytes: Buffer.byteLength(content), approxTokens: tokensOf(Buffer.byteLength(content)),
@@ -229,7 +233,8 @@ function build() {
   }
   writeFileSync(join(out, 'r', 'registry.json'), JSON.stringify(registry, null, 2) + '\n')
 
-  const indexJson = { name: pkg.name, version: pkg.version, commit: commit ? commit + dirty : null, generated: 'scripts/build-registry.mjs', tokensPerByte: 1 / 3.6, items: index }
+  const vocabulary = { source: 'src/showcase/tags.ts', facets: TAG_FACETS, tags: TAGS }
+  const indexJson = { name: pkg.name, version: pkg.version, commit: commit ? commit + dirty : null, generated: 'scripts/build-registry.mjs', tokensPerByte: 1 / 3.6, vocabulary, items: index }
   writeFileSync(join(out, 'index.json'), JSON.stringify(indexJson, null, 2) + '\n')
   writeLlms(index)
 
@@ -410,16 +415,14 @@ function cssToObject(css) {
 
 function writeLlms(index) {
   const fmtTok = t => (t >= 1000 ? `${(t / 1000).toFixed(1)}k` : `${t}`)
-  const groups = new Map()
-  const area = e => (e.type === 'registry:block' ? 'Blocks (copy-in page sections)' : AREA[e.module] ?? 'Other')
-  for (const e of index) {
-    const g = e.name === 'ui-provider' || e.name === 'utils' || e.name === 'hooks' || e.name === 'motion' ? 'Foundation' : area(e)
-    if (!groups.has(g)) groups.set(g, [])
-    groups.get(g).push(e)
-  }
-  const order = ['Foundation', 'Primitives', ...Object.values(AREA), 'Blocks (copy-in page sections)', 'Other'].filter((g, i, a) => a.indexOf(g) === i && groups.has(g))
+  // one group per area of the tag vocabulary, in its order
+  const order = TAGS.filter(t => t.facet === 'area').map(t => t.id).filter(a => index.some(e => e.area === a))
+  const groups = new Map(order.map(a => [a, index.filter(e => e.area === a)]))
   const first = s => s.split(/(?<=\.)\s/)[0].replace(/\s+/g, ' ')
-  const allLines = order.flatMap(g => [`\n## ${g}\n`, ...groups.get(g).map(e => `- [${e.name}](${RAW}/${e.file}): ${first(e.description)} (~${fmtTok(e.tokens)} tokens)`)])
+  const tagList = e => e.tags.filter(t => t !== e.area).join(', ')
+  const allLines = order.flatMap(a => [`\n## ${TAG_BY_ID[a].label}\n`, ...groups.get(a).map(e =>
+    `- [${e.name}](${RAW}/${e.file}): ${first(e.description)} (${e.kind}, ~${fmtTok(e.tokens)} tokens${tagList(e) ? `; tags: ${tagList(e)}` : ''})`)])
+  const vocab = TAG_FACETS.filter(f => f.id !== 'area').map(f => `- ${f.label}: ${TAGS.filter(t => t.facet === f.id).map(t => t.id).join(', ')}`).join('\n')
   const intro = `# @lyndon/ui
 
 > Animated React 19 components in the shadcn style: Tailwind CSS (v4 or v3) for styling, motion for animation, themes as
@@ -446,25 +449,23 @@ and motion. Attach the ones you need plus ui-provider.tsx; they share one UIProv
 - Index with sizes, exports and embedded components: ${RAW}/index.json
 - The same files from npm: https://unpkg.com/${pkg.name}@${pkg.version}/dist-registry/files/<name>.tsx
 - Whole library in one file (dist-single/ui-all.tsx, ~${fmtTok(tokensOf(sizeOf('dist-single/ui-all.tsx')))} tokens): only for tools with a very large context; prefer the drop-ins
+
+## Tags
+
+Items are grouped by area below; each line gives the item's kind and tags (ids from one vocabulary: labels,
+descriptions and synonyms are in index.json under \`vocabulary\`; the showcase filters by them with \`?tags=id,id\`).
+
+${vocab}
 `
   writeFileSync(join(root, 'llms.txt'), intro + allLines.join('\n') + '\n')
   // llms-full.txt: the same, plus each item's exports and embedded components
-  const full = intro + order.flatMap(g => [`\n## ${g}\n`, ...groups.get(g).map(e =>
-    `### ${e.title} (\`${e.name}\`, ~${fmtTok(e.tokens)} tokens)\n\n${e.description}\n\n- File: ${RAW}/${e.file}\n- Exports: ${e.exports.join(', ')}` +
+  const full = intro + order.flatMap(a => [`\n## ${TAG_BY_ID[a].label}\n`, ...groups.get(a).map(e =>
+    `### ${e.title} (\`${e.name}\`, ~${fmtTok(e.tokens)} tokens)\n\n${e.description}\n\n- File: ${RAW}/${e.file}\n- Kind: ${e.kind}; area: ${a}${tagList(e) ? `; tags: ${tagList(e)}` : ''}\n- Exports: ${e.exports.join(', ')}` +
     (e.embeds.length ? `\n- Embeds: ${e.embeds.join(', ')}` : '') + (e.dependencies.length ? `\n- npm: ${e.dependencies.join(', ')}` : '') + '\n')]).join('\n')
   writeFileSync(join(root, 'llms-full.txt'), full + '\n')
 }
 
 function sizeOf(rel) { try { return readFileSync(join(root, rel)).length } catch { return 0 } }
-
-const AREA = {
-  forms: 'Forms and inputs', formkit: 'Forms and inputs', fields: 'Forms and inputs', inputs: 'Forms and inputs', select: 'Forms and inputs', pickers: 'Forms and inputs', upload: 'Forms and inputs', overlay: 'Overlays', navigation: 'Navigation', feedback: 'Feedback', data: 'Data display', datagrid: 'Data display',
-  layout: 'Layout', editor: 'Editors and content', scheduler: 'Scheduling', code: 'Code', markdown: 'Editors and content', media: 'Media', collab: 'Collaboration',
-  pages: 'Pages', charts: 'Charts', diagrams: 'Diagrams', geo: 'Maps', aistream: 'AI', ai: 'AI', aichat: 'AI', aiagent: 'AI',
-  appearance: 'Theming', provider: 'Foundation', core: 'Primitives', primitives: 'Primitives', icons: 'Primitives', slot: 'Primitives',
-  helpers: 'Foundation', shared: 'Foundation', locale: 'Foundation', theme: 'Theming', hooks: 'Foundation', safe: 'Foundation', formcontrol: 'Forms and inputs', motion: 'Foundation', virtual: 'Data display',
-  gantt: 'Diagrams', statechart: 'Diagrams', trace: 'Diagrams', network: 'Diagrams', diagramkit: 'Diagrams', geoworld: 'Maps', geoland: 'Maps',
-}
 
 const graph = analyze(root, { extraDirs: ['src/blocks'] })
 try {

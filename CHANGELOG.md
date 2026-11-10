@@ -3,6 +3,22 @@
 All notable changes to `@lyndon/ui`, newest first. While on 0.x, a minor release may break APIs; each breaking
 change is listed with how to migrate.
 
+## 0.9.0
+
+Live agent runs, binary inspection, theme export and sharing, better toasts and chart export, and one tag vocabulary.
+
+### Added
+- `@lyndon/ui/agentrun`: one run model (agents, model calls, tools, retrieval, human steps; tokens, cost, errors) with `useAgentRun` for streams, SSE/NDJSON or polling, and adapters from OpenTelemetry GenAI spans (`fromOtel`), the Vercel AI SDK (`fromAiSdkResult`, `aiSdkRunMapper`) and LangGraph events (`langGraphRunMapper`). `TraceWaterfall run`, `AgentTransitMap run` and `runLaneNodes(run)` draw real runs live.
+- `@lyndon/ui/binary`: `HexEditor` (virtualised to 100 MB, linked hex/ASCII, data inspector, overwrite editing with undo, search, copy as hex/C/Base64), `EntropyMap`, `ByteMap` (Hilbert curve), `BinarySectionList` and the linked `BinaryView`; helpers for entropy, strings, search and number decoding.
+- Theme export to CSS, Tailwind v4 `@theme`, shadcn variables (`oklch`), W3C design tokens and Tokens Studio; `themeImport` for shadcn/DTCG themes; validated share links (`themeShareUrl`, `UIProvider themeFromUrl`); an "Export and share" area in the appearance panel (`ThemeExportPanel`).
+- `toast()` returns an id; `toast.update`, `toast.dismiss`, `toast.promise`, `toast.undoable`, positions, dedupe by id, a visible limit with "+n more", pause on hover, focus and hidden tab; standalone `toast` export.
+- Every chart renders an accessible data table (`table: 'hidden' | 'toggle' | 'shown'`) and can export PNG, SVG or CSV (`exportable`, `exportChart`).
+- Showcase: one tag vocabulary (areas, use cases, capabilities, kinds, status) with synonyms, faceted filtering and shareable filter URLs; the registry, docs site and `llms.txt` carry the same tags.
+
+### Fixed
+- Custom themes never set their soft error tint (`bad-soft`).
+- The appearance menu popover had no accessible name.
+
 ## 0.8.1
 
 ### Added

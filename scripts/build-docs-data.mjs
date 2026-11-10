@@ -1,11 +1,12 @@
 // Generates the data the docs site (docs/) renders, into docs/generated/:
 //
 //   items.json   one entry per registry item (dist-registry/index.json: run scripts/build-registry.mjs first), with
-//                its area, and for every exported component a props table extracted from the TypeScript types:
+//                its kind, area and tags (src/showcase/tags.ts), and for every exported component a props table extracted from the TypeScript types:
 //                name, type, required, default (from the parameter's destructuring) and JSDoc. Props inherited from
 //                React's DOM attribute types are counted, not listed. Hooks and helpers get their signature.
-//   demos.json   which showcase cards (src/showcase/*Section.tsx <Spec title>) use each item's components, so a docs
-//                page can mount that section and show only those cards
+//   demos.json   which showcase cards (src/showcase/*Section.tsx <Spec title>) demonstrate each item (TAG_CARDS in
+//                src/showcase/tags.ts names them; items no card names fall back to the cards that use their components),
+//                so a docs page can mount that section and show only those cards
 //
 // Uses the TypeScript 7 API (typescript/unstable/sync) over tsconfig.app.json.
 import { readFileSync, writeFileSync, mkdirSync, readdirSync } from 'node:fs'
@@ -14,32 +15,23 @@ import { SymbolFlags } from 'typescript/unstable/sync'
 import { SyntaxKind } from 'typescript/unstable/ast'
 import { analyze } from './registry/analyze.mjs'
 import { isComponentName } from './registry/items.mjs'
+import { TAGS, TAG_CARDS } from '../src/showcase/tags.ts'
 
 const root = new URL('..', import.meta.url).pathname
 const outDir = join(root, 'docs/generated')
 const t0 = Date.now()
 const index = JSON.parse(readFileSync(join(root, 'dist-registry/index.json'), 'utf8'))
 
-const AREAS = [
-  ['foundation', 'Foundation'], ['primitives', 'Primitives'], ['forms', 'Forms and inputs'], ['overlays', 'Overlays'], ['navigation', 'Navigation'],
-  ['feedback', 'Feedback'], ['data', 'Data display'], ['layout', 'Layout'], ['content', 'Editors and content'], ['media', 'Media'],
-  ['charts', 'Charts'], ['diagrams', 'Diagrams and maps'], ['ai', 'AI'], ['collab', 'Collaboration'], ['theming', 'Theming'], ['blocks', 'Blocks and pages'],
-]
-const AREA_OF_MODULE = {
-  core: 'primitives', motion: 'foundation', virtual: 'foundation', provider: 'foundation', overlay: 'overlays', forms: 'forms', formkit: 'forms', fields: 'forms', inputs: 'forms', select: 'forms', pickers: 'forms', upload: 'forms', navigation: 'navigation',
-  feedback: 'feedback', data: 'data', datagrid: 'data', layout: 'layout', editor: 'content', scheduler: 'layout', code: 'content', markdown: 'content',
-  media: 'media', collab: 'collab', pages: 'blocks', charts: 'charts', diagrams: 'diagrams', gantt: 'diagrams', statechart: 'diagrams', trace: 'diagrams',
-  network: 'diagrams', diagramkit: 'diagrams', geo: 'diagrams', aistream: 'ai', ai: 'ai', aichat: 'ai', aiagent: 'ai', appearance: 'theming',
-}
+// the areas of the tag vocabulary, in its order: the docs sidebar groups by them
+const AREAS = TAGS.filter(t => t.facet === 'area').map(t => [t.id, t.label])
 
 const graph = analyze(root, { extraDirs: ['src/blocks'] })
 let items
 try {
   items = index.items.map(e => {
     const home = graph.decls.get(e.exports[0])?.module
-    const area = e.type === 'registry:block' ? 'blocks' : ['ui-provider', 'utils', 'hooks', 'motion', 'virtual-list', 'ai-stream'].includes(e.name) ? (e.name === 'ai-stream' ? 'ai' : 'foundation') : AREA_OF_MODULE[home] ?? 'primitives'
     return {
-      name: e.name, title: e.title, type: e.type, description: e.description, area, module: home,
+      name: e.name, title: e.title, type: e.type, description: e.description, kind: e.kind, area: e.area, tags: e.tags, module: home,
       exports: e.exports, embeds: e.embeds, dependencies: e.dependencies, requires: e.requires,
       bytes: e.bytes, tokens: e.tokens, file: e.file, packageFile: e.packageFile ?? null,
       api: e.exports.map(apiOf).filter(Boolean),
@@ -124,7 +116,16 @@ for (const f of readdirSync(showcase).filter(f => /Section\.tsx$/.test(f)).sort(
   sections.push({ id, file: f.replace(/\.tsx$/, ''), exportName, specs })
 }
 const demos = {}
+const sectionOf = new Map(sections.flatMap(s => s.specs.map(sp => [sp.title, s])))
 for (const it of items) {
+  // the cards the vocabulary says demonstrate this item: the ones about it (listed first) win, then any that show it
+  const tagged = Object.entries(TAG_CARDS).filter(([t, c]) => c.items.includes(it.name) && sectionOf.has(t))
+  const about = tagged.filter(([, c]) => c.items[0] === it.name), pick = about.length ? about : tagged
+  if (pick.length) {
+    const s = sectionOf.get(pick[0][0]) // one section per page (it is mounted once)
+    demos[it.name] = { section: s.id, file: s.file, exportName: s.exportName, titles: pick.filter(([t]) => sectionOf.get(t) === s).slice(0, 3).map(([t]) => t) }
+    continue
+  }
   const roots = it.exports
   const words = it.title.toLowerCase().split(/\s+/)
   const scored = []

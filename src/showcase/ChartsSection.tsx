@@ -120,14 +120,14 @@ export function ChartsSection() {
     <Section id="charts" title="Charts" desc="One SVG kit with shared scales, tooltip, legend and palette. Every chart draws in when it scrolls into view and morphs when its data changes.">
       <Spec title="Line with forecast band" desc="Actual, forecast and 80% range. Switch the range and the lines redraw." span={2}>
         <SegmentedControl aria-label="Range" options={['7D', '30D', '90D']} value={range} onChange={setRange} size="sm" className={CHART_SEG} />
-        <Chart data={FORECAST[range]} x="d" curve="monotone" zero={false} band={{ lower: 'lo', upper: 'hi', label: '80% range' }}
+        <Chart data={FORECAST[range]} x="d" curve="monotone" zero={false} band={{ lower: 'lo', upper: 'hi', label: '80% range' }} table="toggle" exportable
           series={[{ key: 'actual', label: 'Actual', color: 'var(--c-neutral)' }, { key: 'forecast', label: 'Forecast', dashed: true, color: 'var(--c2)' }]} />
       </Spec>
       <Spec title="Bar" desc="Grouped comparison">
-        <Chart data={QUARTERS} x="q" series={[{ key: 'y2025', label: '2025', type: 'bar', color: 'var(--line2)' }, { key: 'y2026', label: '2026', type: 'bar', color: 'var(--c2)' }]} />
+        <Chart data={QUARTERS} x="q" table="toggle" exportable series={[{ key: 'y2025', label: '2025', type: 'bar', color: 'var(--line2)' }, { key: 'y2026', label: '2026', type: 'bar', color: 'var(--c2)' }]} />
       </Spec>
       <Spec title="Doughnut" desc="Share of total">
-        <DonutChart centerLabel="Traffic"
+        <DonutChart centerLabel="Traffic" table="toggle" exportable
           data={[{ label: 'Direct', value: 42, color: 'var(--c-neutral)' }, { label: 'Search', value: 28, color: 'var(--c2)' }, { label: 'Social', value: 18, color: 'var(--c3)' }, { label: 'Referral', value: 12, color: 'var(--c4)' }]} />
       </Spec>
       <Spec title="Stacked area" desc="Composition over time">
@@ -139,7 +139,7 @@ export function ChartsSection() {
           series={[{ label: 'Ours', values: [80, 65, 70, 50, 85, 60], color: 'var(--c2)' }, { label: 'Competitor', values: [55, 80, 45, 75, 60, 70], color: 'var(--c3)', dashed: true, fill: false }]} />
       </Spec>
       <Spec title="Scatter" desc="Relationship between two values">
-        <ScatterChart points={SCATTER} xDomain={[0, 100]} />
+        <ScatterChart points={SCATTER} xDomain={[0, 100]} table="toggle" exportable />
       </Spec>
       <Spec title="Sparkline tile" desc="One number that matters">
         <SparkTile label="Revenue" value={41280} format={{ style: 'currency', currency: 'EUR', maximumFractionDigits: 0 }} data={[20, 22, 21, 25, 24, 28, 27, 30, 29, 33, 35, 34, 38, 41]} />

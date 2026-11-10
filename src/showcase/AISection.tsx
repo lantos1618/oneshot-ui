@@ -1,8 +1,9 @@
-import { useEffect, useState } from 'react'
+import { useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
 import {
   AI_RICH_RENDERERS, AICanvas, CHAT_PARTS_MESSAGES, type AiChunk, type AiMessage, type AiToolPart, AgentComposer, Conversation, Message, MessageActions, PromptInput, Suggestions, aiMessageText, useAiChat, AgentPlan, AgentTransitMap, AssistantChat, Badge, Chart, ChatApproval, ChatCard, ChatChecklist, type ChatScript, SourceList, Citation, CodeBlock, sourceDomain, type ComposerModel, type ComposerAction, type ComposerReply, type ComposerSample, type ComposerSendMeta, ConfidenceField, type Connector, GhostTextInput, ModelComparison, PermissionRequest, type SlashCommand, type Source, SourcesPanel, SuggestedEdit, ThinkingSteps, VoiceInput, type StepStatus, type WorkspaceItem, sleep, useLocale, useMessages, useToast, useViewport,
 } from '../lib'
-import { AGENT_WORKFLOWS, AGENT_WORKFLOW_ORDER, AI_CANVAS_SAMPLE } from '../examples'
+import { AGENT_WORKFLOWS, AGENT_WORKFLOW_ORDER, AI_CANVAS_SAMPLE, AGENT_RUN_FIXTURES, AgentRunLanes, type AgentRunFixture } from '../examples'
+import { Button, Icon, SegmentedControl, TabsContent, TabsList, TabsRoot, TabsTrigger, TraceWaterfall, replayRun, useAgentRun, type AgentRunSource } from '../lib'
 import { Section, Spec, SpecAction } from './kit'
 
 export type Invoice = { id: string; customer: string; status: string; amount: number }
@@ -275,6 +276,59 @@ function LiveChatDemo({ older }: { older: number }) {
   )
 }
 
+/** The tallest a panel has been for this source and view, so a replay that starts from one row doesn't pull the page up. */
+function useLiveRunHeight(key: string) {
+  const ref = useRef<HTMLDivElement>(null), seen = useRef(new Map<string, number>())
+  const [h, setH] = useState(0)
+  useLayoutEffect(() => {
+    const el = ref.current
+    setH(seen.current.get(key) ?? 0)
+    if (!el || typeof ResizeObserver === 'undefined') return
+    const ro = new ResizeObserver(() => { const v = Math.max(seen.current.get(key) ?? 0, el.offsetHeight); if (v !== seen.current.get(key)) { seen.current.set(key, v); setH(v) } })
+    ro.observe(el)
+    return () => ro.disconnect()
+  }, [key])
+  return { ref, minHeight: h || undefined }
+}
+
+const LIVE_RUN_SPEED = 2
+/** One run model, three recorded sources, three views; Replay as stream feeds the run back through useAgentRun. */
+function LiveAgentRunDemo() {
+  const [srcKey, setSrcKey] = useState<AgentRunFixture['key']>('otel')
+  const [view, setView] = useState('waterfall')
+  const [replay, setReplay] = useState(0)
+  const fixture = AGENT_RUN_FIXTURES.find(f => f.key === srcKey) ?? AGENT_RUN_FIXTURES[0]
+  const recorded = useMemo(() => fixture.run(), [fixture])
+  const source = useMemo<AgentRunSource>(() => replay ? (signal: AbortSignal) => replayRun(recorded, { speed: LIVE_RUN_SPEED, signal }) : recorded, [recorded, replay])
+  const { run, status } = useAgentRun(source)
+  const shown = run ?? recorded
+  const streaming = status === 'live' || status === 'connecting'
+  const panel = useLiveRunHeight(`${srcKey}:${view}`)
+  return (
+    <div className="flex flex-col gap-3">
+      <div className="flex flex-wrap items-center gap-2">
+        <SegmentedControl aria-label="Source" size="sm" value={srcKey} onChange={v => { setSrcKey(v as AgentRunFixture['key']); setReplay(0) }}
+          options={AGENT_RUN_FIXTURES.map(f => ({ value: f.key, label: f.label }))} />
+        <span className="flex-1" />
+        <span className="text-xs text-[var(--fg3)]" aria-live="polite">{streaming ? `Streaming at ${LIVE_RUN_SPEED}×…` : replay ? 'Replayed' : 'Recorded'}</span>
+        <Button size="sm" onClick={() => setReplay(n => n + 1)}><Icon name="play" size={12} filled />Replay as stream</Button>
+      </div>
+      <TabsRoot value={view} onValueChange={setView}>
+        <TabsList aria-label="View">
+          <TabsTrigger value="waterfall">Waterfall</TabsTrigger>
+          <TabsTrigger value="transit">Transit map</TabsTrigger>
+          <TabsTrigger value="lanes">Lanes</TabsTrigger>
+        </TabsList>
+        <div ref={panel.ref} style={{ minHeight: panel.minHeight }}>
+          <TabsContent value="waterfall"><TraceWaterfall run={shown} subtitle={fixture.label} /></TabsContent>
+          <TabsContent value="transit"><AgentTransitMap run={shown} /></TabsContent>
+          <TabsContent value="lanes"><AgentRunLanes run={shown} height={440} /></TabsContent>
+        </div>
+      </TabsRoot>
+    </div>
+  )
+}
+
 export function AISection() {
   const [replay, setReplay] = useState(0)
   const [planRun, setPlanRun] = useState(0)
@@ -345,6 +399,10 @@ export function AISection() {
       </Spec>
       <Spec title="Agent transit map" desc="A live state machine. The Indexing loop and the Intake endpoint fire events into a queue, and jobs start as slots free up. Endpoints emit follow-up triggers: Deploy starts a smoke test, Ledger starts an audit, and a failed smoke test starts a regression fix. Human and Risk stations wait for your approval (human in the loop). Hover or tap a trace row to follow a job." span={3}>
         <AgentTransitMap machines={AGENT_WORKFLOWS} order={AGENT_WORKFLOW_ORDER} />
+      </Spec>
+      <Spec title="Live agent run" desc="One run model (AgentRun) from three real sources: an OpenTelemetry GenAI trace export (OTLP/JSON), a Vercel AI SDK generateText result and LangGraph astream_events. Pick a source and a view: the waterfall, the transit map or lanes. “Replay as stream” feeds the recorded run back through useAgentRun at 2×, so every view grows live as spans start and end." span={3}
+        notes={{ good: 'Showing a real run from the tracing or SDK you already have, without glue code; watching a run live; comparing the same run as a timeline, a map and a step graph.', breaks: 'AI SDK results carry no per-tool timings (they are inferred; pass stepEnds or use its telemetry spans); LangGraph events have no times unless your server stamps them; the transit map has fixed lines, so a run with many tools piles onto a few stations.' }}>
+        <LiveAgentRunDemo />
       </Spec>
     </Section>
   )

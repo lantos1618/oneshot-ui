@@ -65,6 +65,9 @@ const BASE = ['bg', 'card', 'muted', 'line', 'line2', 'fg', 'fg2', 'fg3', 'prima
 
 export type Palette = Record<(typeof BASE)[number], string>
 
+/** The 15 keys of a Palette, in order (the order the share code and exporters use). */
+export const THEME_PALETTE_KEYS: readonly (keyof Palette)[] = BASE
+
 const P = (...c: string[]) => Object.fromEntries(BASE.map((k, i) => [k, c[i]])) as Palette
 
 /** A theme family: one or more light palettes and one or more dark palettes, each with a name (e.g. Ayu Light · Mirage · Dark). */
@@ -109,7 +112,8 @@ export const hex = (a: number[]) => '#' + a.map(v => Math.round(Math.max(0, Math
 /** Blend two hex colours: mix('#000000', '#FFFFFF', 0.5) → '#808080' */
 export const mix = (a: string, b: string, t: number) => { const A = rgb(a), B = rgb(b); return hex(A.map((v, i) => v + (B[i] - v) * t)) }
 
-const luminance = (h: string) => { const [r, g, b] = rgb(h).map(v => { v /= 255; return v <= 0.03928 ? v / 12.92 : ((v + 0.055) / 1.055) ** 2.4 }); return 0.2126 * r + 0.7152 * g + 0.0722 * b }
+/** WCAG relative luminance of a '#RRGGBB' colour (0 black … 1 white). */
+export const luminance = (h: string) => { const [r, g, b] = rgb(h).map(v => { v /= 255; return v <= 0.03928 ? v / 12.92 : ((v + 0.055) / 1.055) ** 2.4 }); return 0.2126 * r + 0.7152 * g + 0.0722 * b }
 
 /** WCAG contrast ratio between two hex colours (1–21). */
 export const contrast = (a: string, b: string) => { const x = luminance(a), y = luminance(b); return (Math.max(x, y) + 0.05) / (Math.min(x, y) + 0.05) }
@@ -162,7 +166,8 @@ export function derive(p: Palette, dark: boolean): Record<string, string> {
   return {
     ...p, primary: onP.fill, 'on-primary': onP.ink, accent, ok, bad, warn,
     fg2: readable(p.fg2, p.card, p.fg), fg3: readable(p.fg3, p.card, p.fg),
-    'accent-soft': soft(accent), 'ok-soft': soft(ok), 'warn-soft': soft(p.warn), // the tint comes from the palette's own amber, so it stays light even when --warn is darkened to read as text 'bad-soft': soft(bad),
+    // warn-soft tints the palette's own amber, so it stays light even when --warn is darkened to read as text
+    'accent-soft': soft(accent), 'ok-soft': soft(ok), 'warn-soft': soft(p.warn), 'bad-soft': soft(bad),
     c1: p.fg, c2: accent, c3: p.c3, c4: ok, 'c-neutral': readable(mix(p.fg, p.card, 0.4), p.card, p.fg), band: `rgba(${r},${g},${b},${dark ? 0.18 : 0.13})`,
     shadow: dark ? THEME_SHADOW_DARK : THEME_SHADOW_LIGHT,
   }
@@ -319,6 +324,106 @@ export function editPalette(base: Palette, baseDark: boolean, key: keyof Palette
   return { dark, v }
 }
 
+/* Share codes ────────────────────────────────────────────────────────────────
+ * A theme in a URL: `#theme=<code>`, where the code is base64url of a few bytes. Byte 0 is the format version (1);
+ * then flags (mode in bits 0–1: system/light/dark, bit 2 a Custom palette follows, bit 3 it leans dark), radius × 4,
+ * font index (FONTS), family index (THEMES), that family's variant, and with a Custom palette its 15 colours as RGB
+ * (45 bytes). A link is input from anyone: the code must decode to exactly this shape, every index must be in range,
+ * and the result then goes through themeLoad, the same check as saved settings. */
+
+/** The query or hash parameter that carries a share code. */
+export const THEME_SHARE_PARAM = 'theme'
+
+const THEME_SHARE_VERSION = 1
+
+const THEME_SHARE_MODES = ['system', 'light', 'dark'] as const
+
+/** Bytes → base64url (no padding). */
+const themeB64 = (bytes: number[]) => btoa(String.fromCharCode(...bytes)).replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '')
+
+/**
+ * The compact, URL-safe code for a set of settings (8 characters, or 68 with a Custom palette): the family and
+ * its variant, mode, radius and font, plus the Custom palette when `useCustom` is on. Settings are normalised first.
+ */
+export function themeShareEncode(s: ThemeSettings): string {
+  const c = themeLoad(s), custom = c.useCustom ? c.custom : null
+  const ti = Math.max(0, THEMES.findIndex(t => t.id === c.theme)), fi = Math.max(0, FONTS.findIndex(f => f[0] === c.font))
+  const flags = THEME_SHARE_MODES.indexOf(c.mode) | (custom ? 4 : 0) | (custom?.dark ? 8 : 0)
+  const bytes = [THEME_SHARE_VERSION, flags, Math.round(c.radius * 4), fi, ti, c.variant[THEMES[ti].id] ?? 0]
+  if (custom) for (const k of BASE) bytes.push(...rgb(custom.v[k]))
+  return themeB64(bytes)
+}
+
+/**
+ * Settings from a share code, or null when it isn't one (wrong characters, length, version, flags or an index out of
+ * range). Fields the code doesn't carry (other families' variants, a saved Custom palette when the link has none)
+ * come from `base`. Never throws.
+ */
+export function themeShareDecode(code: unknown, base: ThemeSettings = DEFAULT_THEME): ThemeSettings | null {
+  try {
+    if (typeof code !== 'string' || !/^[A-Za-z0-9_-]{8,80}$/.test(code)) return null
+    const bin = atob(code.replace(/-/g, '+').replace(/_/g, '/') + '='.repeat((4 - (code.length % 4)) % 4))
+    const b = Array.from(bin, ch => ch.charCodeAt(0))
+    if (b[0] !== THEME_SHARE_VERSION || b[1] > 15 || (b[1] & 3) > 2) return null
+    const custom = (b[1] & 4) !== 0
+    if (b.length !== (custom ? 51 : 6) || b[2] > THEME_RADIUS_MAX * 4) return null
+    const font = FONTS[b[3]], theme = THEMES[b[4]]
+    if (!font || !theme || b[5] >= Math.max(theme.light.length, theme.dark.length)) return null
+    const v = custom ? Object.fromEntries(BASE.map((k, i) => [k, hex(b.slice(6 + i * 3, 9 + i * 3))])) : null
+    return themeLoad({
+      theme: theme.id, mode: THEME_SHARE_MODES[b[1] & 3], radius: b[2] / 4, font: font[0], variant: b[5] || Object.hasOwn(base.variant, theme.id) ? { ...base.variant, [theme.id]: b[5] } : { ...base.variant },
+      custom: v ? { dark: (b[1] & 8) !== 0, v } : base.custom, useCustom: custom,
+    }, base)
+  } catch { return null }
+}
+
+/** A URL (string, URL or Location), or the current page's, or null on the server. */
+const themeUrlOf = (url?: string | URL | { href: string }) => {
+  try {
+    const href = typeof url === 'string' ? url : url?.href ?? (typeof location === 'undefined' ? null : location.href)
+    return href == null ? null : new URL(href, 'http://localhost')
+  } catch { return null }
+}
+
+/** The share code in a URL: `#theme=…` (also among other hash parameters) first, then `?theme=…`. */
+function themeUrlCode(u: URL): string | null {
+  return new URLSearchParams(u.hash.replace(/^#/, '')).get(THEME_SHARE_PARAM) ?? u.searchParams.get(THEME_SHARE_PARAM)
+}
+
+/**
+ * Settings from a share link (`#theme=…` or `?theme=…`), validated like saved settings; null when the URL has no
+ * valid code. Defaults to the current page's URL. UIProvider applies it on load with `themeFromUrl`.
+ */
+export function themeFromUrl(url?: string | URL | { href: string }, base: ThemeSettings = DEFAULT_THEME): ThemeSettings | null {
+  const u = themeUrlOf(url), code = u && themeUrlCode(u)
+  return code ? themeShareDecode(code, base) : null
+}
+
+/**
+ * A link that opens `href` (default: the current page) with these settings: `#theme=<code>` by default (the hash never
+ * reaches your server), or `?theme=<code>` with `{ param: 'query' }`. Other parameters are kept.
+ */
+export function themeShareUrl(s: ThemeSettings, href?: string, { param = 'hash' }: { param?: 'hash' | 'query' } = {}): string {
+  const code = themeShareEncode(s), u = themeUrlOf(href)
+  if (!u) return `#${THEME_SHARE_PARAM}=${code}`
+  const h = new URLSearchParams(u.hash.replace(/^#/, ''))
+  h.delete(THEME_SHARE_PARAM); u.searchParams.delete(THEME_SHARE_PARAM)
+  if (param === 'query') u.searchParams.set(THEME_SHARE_PARAM, code); else h.set(THEME_SHARE_PARAM, code)
+  u.hash = h.toString()
+  const out = u.toString()
+  return href !== undefined && !/^[a-z][a-z\d+.-]*:/i.test(href) ? out.replace(/^http:\/\/localhost/, '') : out // keep a relative href relative
+}
+
+/** Remove the share parameter from the address bar (after applying it), without a navigation or a history entry. */
+function themeUrlStrip() {
+  const u = themeUrlOf()
+  if (!u || !themeUrlCode(u)) return
+  const h = new URLSearchParams(u.hash.replace(/^#/, ''))
+  h.delete(THEME_SHARE_PARAM); u.searchParams.delete(THEME_SHARE_PARAM)
+  u.hash = h.toString()
+  history.replaceState(history.state, '', u.toString())
+}
+
 /** Where a theme reveal starts: an element (its centre), a point, or by default the last place the user pressed. */
 export type RevealOrigin = Element | { x: number; y: number } | null | undefined
 
@@ -428,6 +533,11 @@ export type ThemeProviderProps = {
   target?: 'html' | 'self'
   /** Load the theme's font from Google Fonts when it changes (default false: nothing is fetched, the system stack is used). */
   fonts?: boolean
+  /**
+   * Apply a share link's theme (`#theme=…` or `?theme=…`, see themeShareUrl) on load, over the saved one, then remove
+   * the parameter from the address bar (default false). The code is validated like saved settings; junk is ignored.
+   */
+  fromUrl?: boolean
 }
 
 /**
@@ -436,13 +546,19 @@ export type ThemeProviderProps = {
  * render), then reads the saved settings and the OS scheme in a layout effect, before the first paint.
  * Saved settings (and other tabs' changes) are validated field by field; see themeLoad.
  */
-export function ThemeProvider({ children, defaultSettings, storageKey = THEME_STORAGE_KEY, persist = true, target = 'html', fonts = false }: ThemeProviderProps) {
+export function ThemeProvider({ children, defaultSettings, storageKey = THEME_STORAGE_KEY, persist = true, target = 'html', fonts = false, fromUrl = false }: ThemeProviderProps) {
   const initial = { ...DEFAULT_THEME, ...defaultSettings }
   const [settings, setSettings] = useState<ThemeSettings>(initial)
   const [ready, setReady] = useState(false)
   const sysDark = useMediaQuery('(prefers-color-scheme: dark)') // false on the server and while hydrating
   useLayoutEffect(() => { // restore the saved choice after hydration, before paint
-    if (persist) try { const saved = themeRead(storageKey, initial); if (saved) setSettings(saved) } catch { /* storage blocked */ }
+    let saved: ThemeSettings | null = null
+    if (persist) try { saved = themeRead(storageKey, initial); if (saved) setSettings(saved) } catch { /* storage blocked */ }
+    if (fromUrl) try { // a share link wins over the saved choice (and is then saved as the choice)
+      const shared = themeFromUrl(undefined, saved ?? initial)
+      if (shared) setSettings(shared)
+      themeUrlStrip()
+    } catch { /* no history API */ }
     setReady(true)
     if (!persist) return
     const on = (e: StorageEvent) => { // another tab changed it: same validation as on load
@@ -451,7 +567,7 @@ export function ThemeProvider({ children, defaultSettings, storageKey = THEME_ST
       if (o) setSettings(themeLoad(o, initial))
     }
     addEventListener('storage', on); return () => removeEventListener('storage', on)
-  }, [storageKey, persist]) // eslint-disable-line react-hooks/exhaustive-deps
+  }, [storageKey, persist, fromUrl]) // eslint-disable-line react-hooks/exhaustive-deps
   const modeDark = settings.mode === 'system' ? sysDark : settings.mode === 'dark'
   const dark = settings.useCustom && settings.custom ? settings.custom.dark : modeDark
   const tokens = useMemo(() => themeTokens(settings, modeDark), [settings, modeDark])

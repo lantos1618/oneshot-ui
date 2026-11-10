@@ -3,86 +3,25 @@ import { createContext, startTransition, useContext, useEffect, useId, useLayout
 import { motion, useReducedMotion } from 'motion/react'
 import { Badge, Button, type ButtonProps, Card, EASE_OUT, Icon, Kbd, cn, defineMessages, logicalArrow, useDir, useMessages } from '../lib'
 import { openCodeDrawer } from './CodeDrawer'
+import { TAG_BY_ID, TAG_CARDS, type TagCard, type TagId, tagCardTags, tagChipOrder, tagMatches } from './tags'
 
-/* Showcase kit: Section, Spec (card), Row, the section list, use-case tags, and the card registry the
- * page shell reads for the sidebar filter, the component subnav and the ⌘K "Components" group. */
+/* Showcase kit: Section, Spec (card), Row, the section list, and the card registry the page shell reads for the sidebar
+ * filter, the component subnav and the ⌘K "Components" group. Card tags come from the vocabulary in tags.ts. */
 
-/** Use-case tags per card title, copied from the original page. The filter and ⌘K match on them. */
-export const SPEC_TAGS: Record<string, string> = {
-  'Tags over time': 'charts, annotations, events, timeline, swimlanes, journal, health, monitoring',
-  'Slider with magnets': 'user input, range, snapping, haptics, settings',
-  'Accordion · composable': 'data, disclosure, composable, FAQ', 'Composable overlays': 'overlay, dialog, popover, tooltip, composable, asChild',
-  'Context menu · composable': 'navigation, menu, right click, composable, keyboard', 'Links as buttons (asChild)': 'navigation, links, routing, asChild, buttons',
-  'Tabs · vertical and overflow': 'navigation, tabs, composable, keyboard', 'Toolbar and toggle group': 'navigation, toolbar, toggle, formatting, keyboard',
-  'Async multi-select': 'user input, selection, async, search, labels', 'Calendar constraints': 'user input, date, booking, availability',
-  'Date and time with a time zone': 'user input, date, time, time zone, scheduling', 'Month and year': 'user input, date, billing, reports',
-  'Typed dates in any locale': 'user input, date, i18n, locale, keyboard',
-  'Alert dialog': 'overlay, confirmation, destructive, async, dialog', 'Async combobox': 'user input, search, autocomplete, async, loading',
-  'Command palette · pages and async': 'navigation, search, keyboard, async, command menu', 'Data grid · 50k rows': 'data, table, virtualisation, performance, spreadsheet',
-  'Data grid · server mode': 'data, table, server, pagination, async, selection', 'Form submission': 'forms, validation, user input, server actions, FormData',
-  'Live chat (real stream)': 'AI, chat, streaming, tools, approvals, assistant', 'Markdown': 'developer, AI, rich text, streaming, content',
-  'Tree view · 10k nodes': 'layout, files, hierarchy, virtualisation, performance',
-  'Variants': 'buttons, actions, call to action', 'Loading to success': 'buttons, loading, feedback, async', 'Like with burst': 'buttons, reactions, social, delight', 'Motion playground': 'animation, spring, developer, design tokens',
-  'Switch': 'user input, settings, toggle', 'Checkbox and radio': 'user input, forms, selection', 'Text field with validation': 'user input, forms, validation, errors', 'One-time code': 'user input, auth, login, security, OTP',
-  'Segmented control': 'user input, selection, view switcher, filters', 'Number stepper': 'user input, quantity, commerce', 'Slider': 'user input, range, settings, volume', 'Rating': 'user input, feedback, reviews',
-  'Tag input': 'user input, labels, keywords', 'Date picker dropdown': 'user input, date, forms, scheduling', 'Date range picker': 'user input, date range, filters, reports', 'Time picker': 'user input, time, booking, scheduling',
-  'Combobox': 'user input, search, autocomplete, selection', 'Multi-select': 'user input, selection, labels, filters', 'Select': 'user input, dropdown, selection, forms', 'Textarea': 'user input, long text, forms, bio',
-  'Password': 'user input, auth, security, signup', 'Colour picker': 'user input, design, theming', 'File upload': 'user input, upload, files, drag and drop', 'Range slider': 'user input, range, price filter, filters',
-  'Phone number': 'user input, forms, contact, international', 'Currency input': 'user input, money, payments, finance', 'Rich text editor': 'user input, writing, documents, editor, formatting',
-  'Mentions and commands': 'user input, chat, mentions, slash commands, collaboration', 'Form with unsaved changes': 'forms, settings, save, validation', 'Signature pad': 'user input, contracts, sign, legal',
-  'Address autocomplete': 'user input, forms, address, checkout, autocomplete', 'Emoji picker': 'user input, reactions, chat, social',
-  'Tabs': 'navigation, sections, view switcher', 'Wizard stepper': 'navigation, multi-step, onboarding, process, forms', 'Breadcrumbs and pagination': 'navigation, paging, hierarchy',
-  'Collapsible sidebar': 'navigation, app shell, layout', 'Mobile tab bar': 'navigation, mobile, app shell', 'Mega menu': 'navigation, marketing site, header', 'Context menu': 'actions, right click, menu, files',
-  'Toasts': 'feedback, notification, undo, status', 'Alerts': 'feedback, status, errors, warnings', 'Progress': 'feedback, loading, status, upload', 'Skeleton loading': 'loading, placeholder, feedback',
-  'Empty state': 'onboarding, empty, first run, feedback', 'Badges and status': 'status, labels, feedback', 'Celebration': 'delight, success, confetti, milestone', 'Cookie consent': 'privacy, legal, banner, consent',
-  'Offline indicator': 'status, connectivity, errors, feedback', 'Upgrade prompt': 'monetisation, paywall, limits, plans',
-  'Dropdown menu': 'overlay, actions, menu', 'Modal': 'overlay, dialog, confirm, destructive', 'Sheet / drawer': 'overlay, filters, side panel, mobile', 'Tooltip': 'overlay, help, hints',
-  'Command palette': 'search, keyboard, navigation, power users', 'Popover': 'overlay, share, details', 'Hover card': 'overlay, preview, profile', 'Hold to confirm': 'destructive, confirm, safety, actions',
-  'Onboarding tour': 'onboarding, walkthrough, help, first run', 'Notification centre': 'notification, inbox, activity, feedback', 'Announcement banner': 'marketing, announcement, news', 'Inline edit': 'user input, editing, tables, profile',
-  'Stat cards': 'data, KPI, dashboard, metrics', 'Sortable table': 'data, table, sorting', 'Accordion': 'content, FAQ, disclosure', 'Animated list': 'data, list, feed', 'Date picker': 'user input, date, range, calendar, scheduling',
-  'Avatars and presence': 'people, team, presence, collaboration', 'Data grid': 'data, table, spreadsheet, filters, search, query, grouping, admin', 'JSON viewer': 'developer, data, API, debugging', 'Keyboard shortcuts': 'keyboard, help, power users',
-  'Kanban board': 'project management, tasks, drag and drop, workflow, planning', 'Sortable list': 'drag and drop, ordering, priorities', 'Tree view': 'files, hierarchy, navigation, explorer', 'Activity timeline': 'activity, history, feed, audit log',
-  'Split panes': 'layout, IDE, resizable, editor', 'Calendar scheduler': 'scheduling, calendar, meetings, booking, planning, drag and drop', 'Org chart': 'people, hierarchy, team, HR',
-  'Comments and threads': 'collaboration, comments, review, feedback', 'Live presence': 'collaboration, realtime, multiplayer, cursors', 'Chat inbox': 'chat, messaging, support, inbox',
-  'Pricing table': 'pricing, plans, marketing, monetisation', 'Checkout': 'commerce, payments, checkout, forms', 'Settings page': 'settings, account, preferences', 'Profile': 'people, profile, social, account', 'Onboarding checklist': 'onboarding, progress, setup, activation',
-  'Line with forecast band': 'charts, time series, forecast, uncertainty, trends', 'Bar': 'charts, comparison, categories', 'Doughnut': 'charts, part to whole, share', 'Stacked area': 'charts, time series, composition',
-  'Radar': 'charts, comparison, profile, skills', 'Scatter': 'charts, correlation, statistics', 'Sparkline tile': 'charts, KPI, dashboard, trends', 'Waterfall': 'charts, finance, bridge, P&L',
-  'Combo bar + line': 'charts, comparison, time series', 'Histogram': 'charts, distribution, statistics', 'Bubble': 'charts, three variables, portfolio', 'Funnel': 'charts, conversion, marketing, process',
-  'Gauge': 'charts, KPI, target, score', 'Candlestick': 'charts, finance, trading, markets', 'Sparklines': 'charts, finance, tickers, realtime, trends', 'Polar area': 'charts, categories, comparison',
-  'Gantt': 'project management, planning, timeline, dependencies, critical path', 'State diagram': 'state, workflow, lifecycle, process, UML, subscription', 'State machine': 'state, workflow, process, automation, agents',
-  'Trace waterfall': 'observability, tracing, performance, agents, process, debugging', 'Heatmap': 'charts, activity, patterns', 'Calendar heatmap': 'charts, activity, contributions, streaks', 'Treemap': 'charts, part to whole, hierarchy, budget',
-  'Sankey': 'charts, flows, process, conversion, budget', 'Bullet': 'charts, target, KPI, performance', 'Error bars': 'charts, statistics, uncertainty, experiments, A/B test',
-  'Regression with confidence band': 'charts, statistics, uncertainty, forecast, correlation, data science', 'Box and violin': 'charts, statistics, distribution, outliers, data science',
-  'Histogram and density': 'charts, statistics, distribution, data science', 'Forest plot': 'charts, statistics, uncertainty, experiments, meta-analysis, A/B test',
-  'Map': 'charts, geo, countries, regions', 'Globe': 'charts, geo, network, global, routes', 'Network graph': 'charts, relationships, graph, dependencies', 'Process flow': 'process, workflow, automation, node editor, pipeline',
-  'Data flow': 'process, pipeline, data, ETL, realtime', 'Code block': 'code, developer, docs, syntax', 'Install command': 'code, developer, docs, CLI', 'Tabbed example': 'code, developer, docs, API',
-  'Terminal': 'code, developer, CLI, logs', 'Diff': 'code, developer, review, changes, version control', 'Graphs as rows': 'code, developer, graph, DAG, lanes, version control, history, branches, chat, AST, agents, dependencies, virtualised', 'Video player': 'media, video, player', 'Audio player': 'media, audio, podcast, music', 'Compact audio': 'media, audio, voice note, chat',
-  'Masonry gallery': 'media, images, gallery, portfolio', 'Media cards': 'media, content, cards, feed', 'Carousel': 'media, images, slider, marketing', 'Before / after': 'media, images, comparison, design',
-  'Image with states': 'media, images, loading, errors', 'Avatar upload': 'upload, profile, images, crop',
-  'Chat': 'AI, chat, assistant, streaming, AI output', 'Thinking steps': 'AI, reasoning, progress, transparency, AI output', 'Agent plan': 'AI, agents, plan, progress, tasks', 'Permission request': 'AI, approval, human in the loop, safety, agents',
-  'Citations': 'AI, sources, trust, AI output', 'Ghost text': 'AI, autocomplete, suggestions, writing', 'Suggested edit': 'AI, review, accept or reject, writing, human in the loop', 'Confidence flags': 'AI, uncertainty, review, human in the loop, extraction',
-  'Voice input': 'AI, voice, user input, dictation', 'Chat composer': 'AI, chat, user input, composer, upload, drag and drop, permissions, connectors, MCP', 'Sources panel': 'AI, sources, research, trust, citations', 'Model comparison': 'AI, evaluation, benchmarks, models, comparison', 'AI canvas': 'AI, canvas, editor, artifacts, code, documents',
-  'Agent transit map': 'AI, agents, orchestration, process, state, human in the loop, workflow'
+/** The area tag of each section (the ⌘K "Go to" commands match its label and synonyms). */
+export const SECTION_AREA: Record<string, TagId> = {
+  buttons: 'actions', motion: 'motion', inputs: 'inputs', forms: 'forms', navigation: 'navigation', feedback: 'feedback', overlays: 'overlays', data: 'data',
+  layout: 'layout', collab: 'collaboration', pages: 'pages', charts: 'charts', diagrams: 'diagrams', code: 'code', media: 'media', ai: 'ai',
 }
-/** Tags every card in a section also gets. */
-export const SECTION_TAGS: Record<string, string> = { buttons: 'actions', motion: 'animation', inputs: 'user input', forms: 'forms, user input', navigation: 'navigation', feedback: 'feedback', overlays: 'overlay', data: 'data', layout: 'layout', collab: 'collaboration', pages: 'pages, templates', charts: 'charts, data visualisation', code: 'developer', media: 'media', ai: 'AI', diagrams: 'charts, diagrams, data visualisation' }
-
-const kitSplitTags = (s?: string) => (s ?? '').split(',').map(t => t.trim()).filter(Boolean)
-const kitTagKeys = Object.keys(SPEC_TAGS)
-/** Tags for a card: its own (by exact title, else by the parts of a merged title such as "Rating and tags"), then its section's. */
-export function specTags(title: string, section?: string): string[] {
-  let own = SPEC_TAGS[title]
-  if (own === undefined) {
-    const parts = title.toLowerCase().split(/\s*(?:,| and | \+ | & |\/)\s*/).filter(Boolean)
-    own = parts.flatMap(p => kitTagKeys.filter(k => { const kl = k.toLowerCase(); return kl === p || kl.startsWith(p) || p.startsWith(kl) }).map(k => SPEC_TAGS[k])).join(',')
-  }
-  return [...new Set([...kitSplitTags(own), ...kitSplitTags(section ? SECTION_TAGS[section] : '')])]
-}
+const KIT_NO_CARD: TagCard = { kind: 'component', tags: [], items: [] }
+/** A card's tags and registry items by its title (tests/unit/tags.test.ts makes sure every card has an entry). */
+export const specCard = (title: string): TagCard => TAG_CARDS[title] ?? KIT_NO_CARD
 export const specSlug = (t: string) => 'c-' + t.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '')
 
 /* Card registry ─────────────────────────────────────────────────────────────── */
 
-export type SpecEntry = { key: string; id: string; title: string; desc: string; section: string; tags: string[] }
+/** A card on the page. `tags` are tag ids (kind first); `text` is what search reads besides the tags. */
+export type SpecEntry = { key: string; id: string; title: string; desc: string; section: string; tags: TagId[]; aka: readonly string[]; items: readonly string[]; text: string }
 const kitSpecs = new Map<string, SpecEntry>()
 const kitListeners = new Set<() => void>()
 let kitSnapshot: SpecEntry[] = []
@@ -103,48 +42,64 @@ const kitSubscribe = (l: () => void) => { kitListeners.add(l); return () => { ki
 const kitServerSnapshot: SpecEntry[] = []
 export const useSpecs = () => useSyncExternalStore(kitSubscribe, () => kitSnapshot, () => kitServerSnapshot)
 
-/** Does a card match the filter? Every word must appear in its title, description or tags. */
-export function specMatches(e: Pick<SpecEntry, 'title' | 'desc' | 'tags'>, query: string) {
-  const q = query.trim().toLowerCase()
-  if (!q) return true
-  const text = `${e.title} ${e.desc} ${e.tags.join(', ')}`.toLowerCase()
-  return q.split(/\s+/).every(w => text.includes(w))
-}
+/** What search reads for a card besides its tags: title, description, section and registry item names. */
+export const specText = (title: string, desc: string, section: string, items: readonly string[]) => `${title} ${desc} ${section} ${items.join(' ')}`
+/** Does a card match the filter? Every typed word must start a word of its title, description, registry items, tags or
+ * their synonyms, and it must carry the selected tags (OR within a facet, AND across facets). */
+export const specMatches = (e: Pick<SpecEntry, 'text' | 'tags' | 'aka'>, query: string, tags: readonly TagId[] = []) => tagMatches(e, query, tags)
 
-/* Page shell context: the sidebar filter query, shared with every card. */
-type KitShell = { query: string; setQuery: (q: string) => void; focusFilter: () => void }
+/* Page shell context: the sidebar filter (query and tags), shared with every card. */
+type KitShell = {
+  query: string; tags: readonly TagId[]; setQuery: (q: string) => void; focusFilter: () => void
+  /** a card's tag chip was picked: filter by that tag alone. Without it the chip is a plain link. */
+  pickTag?: (id: TagId) => void
+  /** where a tag chip links (default `?tags=<id>`, this page filtered) */
+  tagHref?: (id: TagId) => string
+}
 /** The showcase chrome's own strings (cards, sidebar, header). Demo content stays English. de/ar machine-drafted. */
 export const SHOWCASE_MSG = defineMessages('showcase', {
   en: {
-    goodAt: 'Good at', breaksWhen: 'Breaks when', openState: 'Open state', viewCode: 'View code', viewCodeFor: 'View code for {title}', keyboard: 'Keyboard', tagsFor: 'Use-case tags for {title}',
+    goodAt: 'Good at', breaksWhen: 'Breaks when', openState: 'Open state', viewCode: 'View code', viewCodeFor: 'View code for {title}', keyboard: 'Keyboard', tagsFor: 'Tags for {title}',
     showTagged: 'Show components tagged {tag}', skipNext: 'Skip to next card', sections: 'Sections', filterPlaceholder: 'Search by name or use case',
     filterShort: 'Name or use case', filterLabel: 'Filter components by name or use case', filterComponents: 'Filter components', filter: 'Filter',
     matches: 'Matches', noMatches: 'No matches', found: '{count} found', searchComponents: 'Search components',
     paletteSearch: 'Search components, use cases, actions, themes…', shortcuts: 'Keyboard shortcuts',
     shortcutsHint: 'With a hardware keyboard. Single keys work anywhere except while typing.', noneMatch: 'No components match “{query}”.',
     clearFilter: 'Clear filter', auto: 'Auto ({dir})', tagline: 'React · Motion · Tailwind', libraryName: 'UI library',
+    tags: 'Tags', filterByTag: 'Filter by tag', clearFilters: 'Clear filters', removeTag: 'Remove filter: {tag}', activeFilters: 'Active filters',
+    facetKind: 'Kind', facetArea: 'Area', facetUse: 'Use case', facetCapability: 'Capability', facetStatus: 'Status',
+    noneMatchTags: 'No components match these filters.', showResults: '{count, plural, one {Show # component} other {Show # components}}',
+    tagFilterHint: 'Within a group any tag matches; across groups all must.',
   },
   de: {
-    goodAt: 'Gut für', breaksWhen: 'Stößt an Grenzen, wenn', openState: 'Geöffneter Zustand', viewCode: 'Code anzeigen', viewCodeFor: 'Code für {title} anzeigen', keyboard: 'Tastatur', tagsFor: 'Anwendungsfälle für {title}',
+    goodAt: 'Gut für', breaksWhen: 'Stößt an Grenzen, wenn', openState: 'Geöffneter Zustand', viewCode: 'Code anzeigen', viewCodeFor: 'Code für {title} anzeigen', keyboard: 'Tastatur', tagsFor: 'Tags für {title}',
     showTagged: 'Komponenten mit {tag} anzeigen', skipNext: 'Zur nächsten Karte springen', sections: 'Abschnitte', filterPlaceholder: 'Nach Name oder Anwendungsfall suchen',
     filterShort: 'Name oder Anwendungsfall', filterLabel: 'Komponenten nach Name oder Anwendungsfall filtern', filterComponents: 'Komponenten filtern', filter: 'Filtern',
     matches: 'Treffer', noMatches: 'Keine Treffer', found: '{count} gefunden', searchComponents: 'Komponenten suchen',
     paletteSearch: 'Komponenten, Anwendungsfälle, Aktionen, Designs suchen…', shortcuts: 'Tastenkürzel',
     shortcutsHint: 'Mit einer Hardware-Tastatur. Einzelne Tasten funktionieren überall außer beim Tippen.', noneMatch: 'Keine Komponente passt zu „{query}“.',
     clearFilter: 'Filter entfernen', auto: 'Automatisch ({dir})', tagline: 'React · Motion · Tailwind', libraryName: 'UI-Bibliothek',
+    tags: 'Tags', filterByTag: 'Nach Tag filtern', clearFilters: 'Filter zurücksetzen', removeTag: 'Filter entfernen: {tag}', activeFilters: 'Aktive Filter',
+    facetKind: 'Art', facetArea: 'Bereich', facetUse: 'Anwendungsfall', facetCapability: 'Fähigkeit', facetStatus: 'Status',
+    noneMatchTags: 'Keine Komponente passt zu diesen Filtern.', showResults: '{count, plural, one {# Komponente anzeigen} other {# Komponenten anzeigen}}',
+    tagFilterHint: 'Innerhalb einer Gruppe genügt ein Tag; gruppenübergreifend müssen alle passen.',
   },
   ar: {
-    goodAt: 'مناسب لـ', breaksWhen: 'يتعثر عندما', openState: 'الحالة المفتوحة', viewCode: 'عرض الشيفرة', viewCodeFor: 'عرض شيفرة {title}', keyboard: 'لوحة المفاتيح', tagsFor: 'وسوم حالات الاستخدام لـ {title}',
+    goodAt: 'مناسب لـ', breaksWhen: 'يتعثر عندما', openState: 'الحالة المفتوحة', viewCode: 'عرض الشيفرة', viewCodeFor: 'عرض شيفرة {title}', keyboard: 'لوحة المفاتيح', tagsFor: 'وسوم {title}',
     showTagged: 'عرض المكونات الموسومة بـ {tag}', skipNext: 'انتقل إلى البطاقة التالية', sections: 'الأقسام', filterPlaceholder: 'ابحث بالاسم أو حالة الاستخدام',
     filterShort: 'الاسم أو حالة الاستخدام', filterLabel: 'تصفية المكونات بالاسم أو حالة الاستخدام', filterComponents: 'تصفية المكونات', filter: 'تصفية',
     matches: 'النتائج المطابقة', noMatches: 'لا توجد نتائج مطابقة', found: 'عُثر على {count}', searchComponents: 'البحث في المكونات',
     paletteSearch: 'ابحث في المكونات وحالات الاستخدام والإجراءات والسمات…', shortcuts: 'اختصارات لوحة المفاتيح',
     shortcutsHint: 'مع لوحة مفاتيح فعلية. تعمل المفاتيح المفردة في أي مكان إلا أثناء الكتابة.', noneMatch: 'لا توجد مكونات تطابق «{query}».',
     clearFilter: 'مسح التصفية', auto: 'تلقائي ({dir})', tagline: 'React · Motion · Tailwind', libraryName: 'مكتبة واجهات',
+    tags: 'الوسوم', filterByTag: 'التصفية حسب الوسم', clearFilters: 'مسح عوامل التصفية', removeTag: 'إزالة عامل التصفية: {tag}', activeFilters: 'عوامل التصفية النشطة',
+    facetKind: 'النوع', facetArea: 'المجال', facetUse: 'حالة الاستخدام', facetCapability: 'القدرة', facetStatus: 'الحالة',
+    noneMatchTags: 'لا توجد مكونات تطابق عوامل التصفية هذه.', showResults: '{count, plural, one {عرض مكوّن واحد} other {عرض # مكونات}}',
+    tagFilterHint: 'داخل المجموعة يكفي أي وسم؛ وبين المجموعات يجب أن تتحقق كلها.',
   },
 })
 
-export const ShellContext = createContext<KitShell>({ query: '', setQuery: () => {}, focusFilter: () => {} })
+export const ShellContext = createContext<KitShell>({ query: '', tags: [], setQuery: () => {}, focusFilter: () => {} })
 const SectionContext = createContext('')
 
 /** Scroll to a card and flash its outline so the eye finds it. */
@@ -304,17 +259,18 @@ export function Spec({ title, desc, children, span = 1, actions, keys, notes }:
   { title: string; desc?: string; children: ReactNode; span?: 1 | 2 | 3; actions?: ReactNode; keys?: SpecKey[]; notes?: SpecNotes }) {
   const key = useId()
   const section = useContext(SectionContext)
-  const { query, setQuery, focusFilter } = useContext(ShellContext)
+  const { query, tags: picked, pickTag, tagHref } = useContext(ShellContext)
   const base = specSlug(title)
   const [id, setId] = useState(base)
   const [tagAt, setTagAt] = useState(0)
   const [skip, setSkip] = useState(false)
-  const cardRef = useRef<HTMLDivElement>(null), bodyRef = useRef<HTMLDivElement>(null), tagRefs = useRef<(HTMLButtonElement | null)[]>([])
-  const tags = specTags(title, section)
-  const tagKey = tags.join(',')
+  const cardRef = useRef<HTMLDivElement>(null), bodyRef = useRef<HTMLDivElement>(null), tagRefs = useRef<(HTMLAnchorElement | null)[]>([])
+  const card = specCard(title)
+  const tags = tagCardTags(card)
+  const text = specText(title, desc ?? '', section, card.items)
   useLayoutEffect(() => {
-    setId(kitRegister({ key, id: base, title, desc: desc ?? '', section, tags }))
-  }, [key, base, title, desc, section, tagKey]) // eslint-disable-line react-hooks/exhaustive-deps
+    setId(kitRegister({ key, id: base, title, desc: desc ?? '', section, tags: tagCardTags(card), aka: card.aka ?? [], items: card.items, text }))
+  }, [key, base, title, desc, section, card, text])
   useLayoutEffect(() => () => { kitSpecs.delete(key); kitNotify() }, [key])
   // lazy demo: placeholders on the server and in the first client render; on screen (or the deep-link target) it
   // mounts before the first paint, otherwise when it nears the viewport
@@ -358,11 +314,11 @@ export function Spec({ title, desc, children, span = 1, actions, keys, notes }:
     kitDeepLinked = true
     requestAnimationFrame(() => { if (!kitOnScreen(el)) el.scrollIntoView({ block: 'start' }) })
   }, [live, id])
-  const shown = specMatches({ title, desc: desc ?? '', tags }, query)
-  const chips = tags.slice(0, 4)
-  const pickTag = (t: string) => {
-    setQuery(t); focusFilter()
-    scrollTo({ top: 0, behavior: kitReduce() ? 'auto' : 'smooth' })
+  const shown = specMatches({ text, tags, aka: card.aka ?? [] }, query, picked)
+  const chips = tagChipOrder(card.tags).slice(0, 4)
+  const onChip = (e: React.MouseEvent, id: TagId) => {
+    if (!pickTag || e.metaKey || e.ctrlKey || e.shiftKey || e.button !== 0) return // a new tab gets the link
+    e.preventDefault(); pickTag(id)
   }
   const dir = useDir(), t = useMessages(SHOWCASE_MSG)
   const tagKeys = (e: React.KeyboardEvent, i: number) => {
@@ -406,13 +362,16 @@ export function Spec({ title, desc, children, span = 1, actions, keys, notes }:
         {chips.length > 0 && (
           <div role="toolbar" aria-label={t('tagsFor', { title })} className="mt-2 mb-4 flex flex-wrap gap-1">
             {/* one Tab stop for the row (arrows move inside it); on touch each chip is 32px tall (transparent padding, pulled back with negative margins) around the same 21px pill */}
-            {chips.map((tag, i) => (
-              <button key={tag} ref={el => { tagRefs.current[i] = el }} type="button" tabIndex={i === Math.min(tagAt, chips.length - 1) ? 0 : -1} onClick={() => pickTag(tag)} onKeyDown={e => tagKeys(e, i)} onFocus={() => setTagAt(i)}
-                aria-label={t('showTagged', { tag })}
-                className="group/tag cursor-pointer rounded-full border-0 bg-transparent p-0 focus-visible:outline-2 focus-visible:outline-offset-1 focus-visible:outline-[var(--accent)] [@media(pointer:coarse)]:-my-[5.5px] [@media(pointer:coarse)]:py-[5.5px]">
-                <Badge size="sm" className="group-hover/tag:!bg-[var(--accent-soft)] group-hover/tag:!text-[var(--accent)]">{tag}</Badge>
-              </button>
-            ))}
+            {chips.map((tag, i) => {
+              const label = TAG_BY_ID[tag].label
+              return (
+                <a key={tag} ref={el => { tagRefs.current[i] = el }} href={tagHref ? tagHref(tag) : `?tags=${tag}`} tabIndex={i === Math.min(tagAt, chips.length - 1) ? 0 : -1}
+                  onClick={e => onChip(e, tag)} onKeyDown={e => tagKeys(e, i)} onFocus={() => setTagAt(i)} aria-label={t('showTagged', { tag: label })} title={TAG_BY_ID[tag].desc}
+                  className="group/tag inline-flex cursor-pointer rounded-full p-0 no-underline focus-visible:outline-2 focus-visible:outline-offset-1 focus-visible:outline-[var(--accent)] [@media(pointer:coarse)]:-my-[5.5px] [@media(pointer:coarse)]:py-[5.5px]">
+                  <Badge size="sm" className="group-hover/tag:!bg-[var(--accent-soft)] group-hover/tag:!text-[var(--accent)]">{label}</Badge>
+                </a>
+              )
+            })}
           </div>
         )}
         {!chips.length && <div className="mb-4" />}
@@ -438,10 +397,10 @@ export function Spec({ title, desc, children, span = 1, actions, keys, notes }:
 
 /** A page section: heading, intro line and a responsive card grid. Hides itself when the filter matches none of its cards. */
 export function Section({ id, title, desc, children }: { id: string; title: string; desc: string; children: ReactNode }) {
-  const { query } = useContext(ShellContext)
+  const { query, tags } = useContext(ShellContext)
   const specs = useSpecs()
   const mine = specs.filter(s => s.section === id)
-  const empty = !!query.trim() && mine.length > 0 && !mine.some(s => specMatches(s, query))
+  const empty = (!!query.trim() || tags.length > 0) && mine.length > 0 && !mine.some(s => specMatches(s, query, tags))
   return (
     <SectionContext.Provider value={id}>
       <section id={id} className={cn('mb-12 scroll-mt-28 md:mb-16 min-[900px]:scroll-mt-20', empty && 'hidden')}>

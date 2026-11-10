@@ -1,6 +1,6 @@
 import { createContext, memo, useCallback, useContext, useEffect, useId, useLayoutEffect, useMemo, useRef, useState, type RefObject } from 'react'
 import { AnimatePresence, motion } from 'motion/react'
-import { ActiveIndicator, AppearanceMenu, Button, type Command, CommandPalette, Dialog, DropdownMenu, Icon, type IconName, Kbd, MenuItem, THEMES, ThemeToggle, UIProvider, type UIDir, UI_MESSAGES_AR, UI_MESSAGES_DE, type UIMessages, cn, fmtFor, useHotkey, useLocale, useMessages, useTheme, useToast } from '../lib'
+import { ActiveIndicator, AppearanceMenu, Badge, Button, Collapse, type Command, CommandPalette, Dialog, DropdownMenu, Icon, type IconName, Kbd, MenuItem, Sheet, THEMES, ThemeToggle, UIProvider, type UIDir, UI_MESSAGES_AR, UI_MESSAGES_DE, type UIMessages, cn, fmtFor, useHotkey, useLocale, useMessages, useRoving, useTheme, useToast } from '../lib'
 import { AISection } from './AISection'
 import { ButtonsSection } from './ButtonsSection'
 import { ChartsSection } from './ChartsSection'
@@ -17,7 +17,8 @@ import { MotionSection } from './MotionSection'
 import { NavigationSection } from './NavigationSection'
 import { OverlaysSection } from './OverlaysSection'
 import { PagesSection } from './PagesSection'
-import { SECTIONS, SECTION_TAGS, SHOWCASE_MSG, ShellContext, type SpecEntry, flashSpec, mountAllSpecs, specMatches, useSpecs } from './kit'
+import { SECTIONS, SECTION_AREA, SHOWCASE_MSG, ShellContext, type SpecEntry, flashSpec, mountAllSpecs, specMatches, useSpecs } from './kit'
+import { TAG_BY_ID, type TagFacet, type TagId, tagFacetCounts, tagParseUrl, tagSearchString, tagSuggest, tagToggle, tagsOfFacet } from './tags'
 import { CodeDrawer } from './CodeDrawer'
 import { DesignQA, DesignQAButton, designQA, useDesignQA } from './DesignQA'
 import { OVERLAY_DEMO_EVENT, type OverlayDemo } from './OverlaysSection'
@@ -65,6 +66,14 @@ function shellOrder(specs: SpecEntry[]) {
 }
 
 const shellReduce = () => matchMedia('(prefers-reduced-motion: reduce)').matches
+/** A tag's label, id and synonyms, for ⌘K keywords. */
+const shellTagWords = (id: TagId) => [TAG_BY_ID[id].label, id, ...TAG_BY_ID[id].synonyms]
+/** The tags the cards on the page use, with how many cards each (vocabulary order). */
+const shellTagsInUse = (specs: SpecEntry[]): [TagId, number][] => {
+  const n = new Map<TagId, number>()
+  for (const s of specs) for (const t of s.tags) n.set(t, (n.get(t) ?? 0) + 1)
+  return (Object.keys(TAG_BY_ID) as TagId[]).filter(id => n.has(id)).map(id => [id, n.get(id)!])
+}
 const shellJump = (id: string) => document.getElementById(id)?.scrollIntoView({ behavior: shellReduce() ? 'auto' : 'smooth' })
 
 /** The section on screen, from one IntersectionObserver over the 16 sections (no scroll listeners). */
@@ -91,26 +100,107 @@ const ShellSectionLink = memo(function ShellSectionLink({ id, label, on, group, 
   )
 })
 
-type ShellNavProps = { ordered: SpecEntry[]; query: string; setQuery: (q: string) => void; total: number; filterRef: RefObject<HTMLInputElement | null>; goSpec: (s: SpecEntry, flash?: boolean) => void }
+/* Tag filter (0.9) ───────────────────────────────────────────────────────────────────────────────────────────── */
+
+/** The facets the filter offers, in order (kind is left out: area says more on this page; ?tags= still takes kinds). */
+const SHELL_FACETS: [TagFacet, 'facetArea' | 'facetUse' | 'facetCapability' | 'facetStatus'][] = [['area', 'facetArea'], ['use', 'facetUse'], ['capability', 'facetCapability'], ['status', 'facetStatus']]
+type ShellFilter = { query: string; tags: readonly TagId[]; setQuery: (q: string) => void; toggleTag: (id: TagId) => void; clear: () => void; counts: Record<TagId, number>; total: number }
+
+/** One facet's tags as toggle chips with counts (OR within the facet). One Tab stop: arrows move, Enter or Space toggles.
+ * A chip that would match nothing (and isn't on) is disabled and skipped. */
+function ShellTagGroup({ facet, label, f, touch }: { facet: TagFacet; label: string; f: ShellFilter; touch?: boolean }) {
+  const defs = tagsOfFacet(facet)
+  const refs = useRef<(HTMLButtonElement | null)[]>([])
+  const { fmt } = useLocale()
+  const off = (i: number) => !f.tags.includes(defs[i].id as TagId) && !f.counts[defs[i].id as TagId]
+  const { active, setActive, onKeyDown } = useRoving(defs.length, i => f.toggleTag(defs[i].id as TagId), { orientation: 'both', isDisabled: off, onMove: i => refs.current[i]?.focus() })
+  const stop = off(active) ? Math.max(0, defs.findIndex((_, i) => !off(i))) : active
+  const head = useId()
+  return (
+    <div className="flex flex-col gap-1.5">
+      <span id={head} className="text-[11px] font-medium tracking-wide text-[var(--fg3)] uppercase">{label}</span>
+      <div role="group" aria-labelledby={head} onKeyDown={onKeyDown} className="flex flex-wrap gap-1">
+        {defs.map((d, i) => {
+          const id = d.id as TagId, on = f.tags.includes(id)
+          return (
+            <button key={id} ref={el => { refs.current[i] = el }} type="button" aria-pressed={on} disabled={off(i)} tabIndex={i === stop ? 0 : -1} title={d.desc}
+              onClick={() => { setActive(i); f.toggleTag(id) }} onFocus={() => setActive(i)}
+              className={cn('inline-flex flex-none cursor-pointer items-center gap-1 rounded-full border px-2 text-[11px] leading-none font-medium whitespace-nowrap transition-colors duration-150 focus-visible:outline-2 focus-visible:outline-offset-1 focus-visible:outline-[var(--accent)] disabled:cursor-default disabled:opacity-50',
+                touch ? 'h-8' : 'h-6 [@media(pointer:coarse)]:h-8',
+                on ? 'border-[var(--primary)] bg-[var(--primary)] text-[var(--on-primary)]' : 'border-[var(--line)] bg-[var(--card)] text-[var(--fg2)] enabled:hover:bg-[var(--muted)] enabled:hover:text-[var(--fg)]')}>
+              {d.label}<span className={cn('ui-num font-normal', on ? '' : 'text-[var(--fg3)]')}>{fmt.number(f.counts[id])}</span>
+            </button>
+          )
+        })}
+      </div>
+    </div>
+  )
+}
+
+/** Every facet's chips (the desktop sidebar's "Filter by tag" panel, and the phone's sheet). */
+function ShellTagPanel({ f, touch }: { f: ShellFilter; touch?: boolean }) {
+  const t = useMessages(SHOWCASE_MSG)
+  return (
+    <div className="flex flex-col gap-3">
+      <p className="m-0 text-[11px] leading-snug text-[var(--fg3)]">{t('tagFilterHint')}</p>
+      {SHELL_FACETS.map(([facet, key]) => <ShellTagGroup key={facet} facet={facet} label={t(key)} f={f} touch={touch} />)}
+    </div>
+  )
+}
+
+/** The selected tags as removable chips (a list, so it reads "Active filters, 2 items"). */
+function ShellActiveTags({ f, className }: { f: ShellFilter; className?: string }) {
+  const t = useMessages(SHOWCASE_MSG)
+  if (!f.tags.length) return null
+  return (
+    <ul aria-label={t('activeFilters')} className={cn('m-0 flex list-none gap-1 p-0', className)}>
+      {f.tags.map(id => (
+        <li key={id} className="flex-none">
+          <button type="button" onClick={() => f.toggleTag(id)} aria-label={t('removeTag', { tag: TAG_BY_ID[id].label })}
+            className="inline-flex h-6 cursor-pointer items-center gap-1 rounded-full border border-[var(--primary)] bg-[var(--primary)] ps-2 pe-1.5 text-[11px] leading-none font-medium whitespace-nowrap text-[var(--on-primary)] focus-visible:outline-2 focus-visible:outline-offset-1 focus-visible:outline-[var(--accent)] [@media(pointer:coarse)]:h-8">
+            {TAG_BY_ID[id].label}<Icon name="x" size={11} strokeWidth={2.4} />
+          </button>
+        </li>
+      ))}
+    </ul>
+  )
+}
+
+/** A tag whose name is exactly what was typed ("dropdown" → none, "streaming" → Streaming): offer it as a filter. */
+function ShellSuggestTag({ f }: { f: ShellFilter }) {
+  const t = useMessages(SHOWCASE_MSG)
+  const hit = tagSuggest(f.query).filter(id => !f.tags.includes(id) && f.counts[id])[0]
+  if (!hit) return null
+  return (
+    <button type="button" onClick={() => { f.toggleTag(hit); f.setQuery('') }}
+      className="flex h-6 w-full cursor-pointer items-center gap-1.5 rounded-[var(--r-md)] border-0 bg-transparent px-2.5 text-start text-xs text-[var(--fg2)] hover:bg-[var(--muted)] hover:text-[var(--fg)] focus-visible:outline-2 focus-visible:outline-[var(--accent)] [@media(pointer:coarse)]:h-8">
+      <Icon name="sliders" size={12} />{t('filterByTag')}: <span className="font-medium text-[var(--fg)]">{TAG_BY_ID[hit].label}</span>
+    </button>
+  )
+}
+
+type ShellNavProps = { ordered: SpecEntry[]; f: ShellFilter; filterRef: RefObject<HTMLInputElement | null>; goSpec: (s: SpecEntry, flash?: boolean) => void; tagsOpen: boolean; setTagsOpen: (v: boolean) => void }
 
 /**
- * Desktop sidebar: filter box, the section list, and below it a panel with the cards of the section on screen (it
- * tracks the card in view). The section links never move: the panel under them swaps its content and scrolls on
- * its own, so changing section doesn't reflow the list. While filtering, the panel lists every match instead.
+ * Desktop sidebar: filter box, "Filter by tag" (facet chips with counts, the picked ones as removable chips), the
+ * section list, and below it a panel with the cards of the section on screen (it tracks the card in view). The section
+ * links never move: the panel under them swaps its content and scrolls on its own, so changing section doesn't reflow
+ * the list. While filtering, the panel lists every match instead.
  */
-const ShellSideNav = memo(function ShellSideNav({ ordered, query, setQuery, total, filterRef, goSpec }: ShellNavProps) {
+const ShellSideNav = memo(function ShellSideNav({ ordered, f, filterRef, goSpec, tagsOpen, setTagsOpen }: ShellNavProps) {
+  const { query, setQuery, total } = f
   const active = useShellActiveSection()
   const [activeSpec, setActiveSpec] = useState('')
   const sideRef = useRef<HTMLElement>(null), subRef = useRef<HTMLDivElement>(null)
-  const group = useId(), subId = useId()
+  const group = useId(), subId = useId(), panelId = useId()
   useEffect(() => { // which card is on screen: one observer for all cards
     if (!sideRef.current?.offsetParent) return // hidden on mobile: don't track
     const io = new IntersectionObserver(es => es.forEach(e => e.isIntersecting && setActiveSpec(e.target.id)), { rootMargin: '-35% 0px -60% 0px' })
     ordered.forEach(s => { const el = document.getElementById(s.id); if (el) io.observe(el) })
     return () => io.disconnect()
   }, [ordered])
-  const q = query.trim()
-  const subs = q ? ordered.filter(s => specMatches(s, query)) : ordered.filter(s => s.section === active)
+  const q = query.trim(), filtering = !!q || f.tags.length > 0
+  const subs = filtering ? ordered.filter(s => specMatches(s, query, f.tags)) : ordered.filter(s => s.section === active)
   useEffect(() => { // keep the current card's link in view, scrolling only the panel
     const box = subRef.current, a = box?.querySelector<HTMLElement>(`[data-sub="${activeSpec}"]`)
     if (!box || !a) return
@@ -118,38 +208,55 @@ const ShellSideNav = memo(function ShellSideNav({ ordered, query, setQuery, tota
     if (r.top < br.top + 8 || r.bottom > br.bottom - 8) box.scrollTo({ top: a.offsetTop - box.clientHeight / 2, behavior: shellReduce() ? 'auto' : 'smooth' })
   }, [activeSpec, active])
   const sectionLabel = Object.fromEntries(SECTIONS) as Record<string, string>
-  const t = useMessages(SHOWCASE_MSG)
+  const t = useMessages(SHOWCASE_MSG), { fmt } = useLocale()
   return (
     <nav ref={sideRef} aria-label={t('sections')}
       className="sticky top-[calc(env(safe-area-inset-top,0px)+76px)] hidden max-h-[calc(100vh-env(safe-area-inset-top,0px)-96px)] flex-col self-start overflow-auto pb-5 [scrollbar-width:thin] min-[900px]:flex">
-      <div className="relative mb-2.5 flex-none">
+      <div className="relative mb-1.5 flex-none">
         <Icon name="search" size={13} strokeWidth={2.2} className="pointer-events-none absolute top-[9.5px] start-[9px] text-[var(--fg3)]" />
         <input ref={filterRef} value={query} onChange={e => setQuery(e.target.value)} placeholder={t('filterPlaceholder')} aria-label={t('filterLabel')}
           onKeyDown={e => { if (e.key === 'Escape') { setQuery(''); e.currentTarget.blur() } }}
           className="h-8 w-full rounded-[var(--r-md)] border border-[var(--line)] bg-[var(--card)] pe-8 ps-7 text-[13px] text-[var(--fg)] outline-none placeholder:text-xs placeholder:text-[var(--fg3)] focus:border-[var(--fg3)] focus:shadow-[0_0_0_3px_var(--muted)]" />
-        <Kbd className="ui-num pointer-events-none absolute top-[7px] end-1.5" aria-live="polite">{q ? total : '/'}</Kbd>
+        <Kbd className="ui-num pointer-events-none absolute top-[7px] end-1.5" aria-live="polite">{filtering ? total : '/'}</Kbd>
+      </div>
+      <div className="mb-2.5 flex flex-none flex-col gap-1.5">
+        <div className="flex items-center gap-1">
+          <Button size="xs" variant="ghost" aria-expanded={tagsOpen} aria-controls={panelId} onClick={() => setTagsOpen(!tagsOpen)} className="!px-1.5 !text-[var(--fg2)]">
+            <Icon name="sliders" size={13} />{t('filterByTag')}
+            {f.tags.length > 0 && <Badge size="sm" tone="accent">{fmt.number(f.tags.length)}</Badge>}
+            <Icon name="chevronDown" size={13} className={cn('transition-transform duration-200', tagsOpen && 'rotate-180')} />
+          </Button>
+          <span className="flex-1" />
+          {filtering && <Button size="xs" variant="ghost" onClick={f.clear} className="!px-1.5 !text-[var(--fg2)]">{t('clearFilters')}</Button>}
+        </div>
+        <ShellActiveTags f={f} className="flex-wrap" />
+        <div id={panelId}>
+          <Collapse open={tagsOpen}><div className="pt-1 pb-2"><ShellTagPanel f={f} /></div></Collapse>
+        </div>
       </div>
       <div className="flex flex-none flex-col gap-0.5">
         {SECTIONS.map(([id, label]) => {
-          const none = !!q && !ordered.some(s => s.section === id && specMatches(s, query))
-          return <div key={id} className={cn('flex flex-col', none && 'opacity-40')}><ShellSectionLink id={id} label={label} on={active === id} group={group} /></div>
+          const none = filtering && !ordered.some(s => s.section === id && specMatches(s, query, f.tags))
+          // a section with no matches greys out (in --fg3, which still reads at 4.5:1, rather than at 40% opacity)
+          return <div key={id} className={cn('flex flex-col', none && '[&>a]:!text-[var(--fg3)]')}><ShellSectionLink id={id} label={label} on={active === id} group={group} /></div>
         })}
       </div>
       <div className="mt-3 flex min-h-[120px] flex-1 flex-col border-t border-[var(--line)] pt-2.5">
         <h2 id={subId} className="m-0 mb-1 flex flex-none items-baseline justify-between px-2.5 text-[11px] font-medium tracking-wide text-[var(--fg3)] uppercase">
-          <span className="truncate">{q ? t('matches') : sectionLabel[active]}</span><span className="ui-num w-8 flex-none text-end normal-case">{subs.length}</span>
+          <span className="truncate">{filtering ? t('matches') : sectionLabel[active]}</span><span className="ui-num w-8 flex-none text-end normal-case">{subs.length}</span>
         </h2>
+        {q && <ShellSuggestTag f={f} />}
         <div ref={subRef} role="list" aria-labelledby={subId} className="relative min-h-0 flex-1 overflow-auto overscroll-contain [scrollbar-width:thin]">
           {subs.map((s, i) => (
             <div key={s.id} role="listitem">
-              {q && s.section !== subs[i - 1]?.section && <span aria-hidden className="mt-1.5 block px-2.5 text-[11px] text-[var(--fg3)]">{sectionLabel[s.section]}</span>}
+              {filtering && s.section !== subs[i - 1]?.section && <span aria-hidden className="mt-1.5 block px-2.5 text-[11px] text-[var(--fg3)]">{sectionLabel[s.section]}</span>}
               <a href={`#${s.id}`} data-sub={s.id} aria-current={activeSpec === s.id ? 'location' : undefined}
-                onClick={e => { e.preventDefault(); goSpec(s, false); history.replaceState(null, '', `#${s.id}`) }}
+                onClick={e => { e.preventDefault(); goSpec(s, false); history.replaceState(history.state, '', `${location.pathname}${location.search}#${s.id}`) }}
                 className={cn('block truncate rounded-[var(--r-md)] px-2.5 py-1 text-xs no-underline hover:bg-[var(--muted)] hover:text-[var(--fg)]',
                   activeSpec === s.id ? 'bg-[var(--muted)] text-[var(--fg)]' : 'text-[var(--fg2)]')}>{s.title}</a>
             </div>
           ))}
-          {q && !subs.length && <span className="block px-2.5 py-1 text-xs text-[var(--fg3)]">{t('noMatches')}</span>}
+          {filtering && !subs.length && <span className="block px-2.5 py-1 text-xs text-[var(--fg3)]">{t('noMatches')}</span>}
         </div>
       </div>
     </nav>
@@ -158,14 +265,17 @@ const ShellSideNav = memo(function ShellSideNav({ ordered, query, setQuery, tota
 
 /**
  * Below 900px: a sticky horizontal chip row instead of the sidebar. Its first chip opens the component filter in
- * place of the chips (a tag tapped on a card opens it too); Cancel clears the filter and brings the chips back.
+ * place of the chips (a tag tapped on a card opens it too): the search box, a Tags button that opens the facet chips
+ * in a sheet, and the picked tags as a row of removable chips. Cancel clears the filter and brings the chips back.
  */
-const ShellChipNav = memo(function ShellChipNav({ query, setQuery, total, searching, setSearching, filterRef }:
-  Pick<ShellNavProps, 'query' | 'setQuery' | 'total' | 'filterRef'> & { searching: boolean; setSearching: (v: boolean) => void }) {
+const ShellChipNav = memo(function ShellChipNav({ f, searching, setSearching, filterRef }:
+  Pick<ShellNavProps, 'f' | 'filterRef'> & { searching: boolean; setSearching: (v: boolean) => void }) {
+  const { query, setQuery, total } = f
   const active = useShellActiveSection()
   const chipsRef = useRef<HTMLDivElement>(null)
   const group = useId()
-  const q = query.trim(), filtering = searching || !!q
+  const [sheet, setSheet] = useState(false)
+  const q = query.trim(), filtering = searching || !!q || f.tags.length > 0
   useEffect(() => {
     const row = chipsRef.current, chip = row?.querySelector<HTMLElement>(`[data-chip="${active}"]`)
     if (!row || !chip || !row.offsetParent) return
@@ -173,20 +283,32 @@ const ShellChipNav = memo(function ShellChipNav({ query, setQuery, total, search
     const left = chip.offsetLeft - row.clientWidth / 2 + chip.offsetWidth / 2
     row.scrollTo({ left: getComputedStyle(row).direction === 'rtl' ? left - (row.scrollWidth - row.clientWidth) : left, behavior: shellReduce() ? 'auto' : 'smooth' })
   }, [active, filtering])
-  const done = () => { setQuery(''); setSearching(false) }
+  const done = () => { f.clear(); setSearching(false) }
   const t = useMessages(SHOWCASE_MSG), { t: tc, fmt } = useLocale()
   return (
     <nav aria-label={t('sections')} className="sticky top-[calc(env(safe-area-inset-top,0px)+57px)] z-30 -mx-4 -mt-4 min-w-0 bg-[var(--bg)] px-[max(16px,env(safe-area-inset-left))] py-2 sm:-mx-5 sm:px-5 min-[900px]:hidden">
       {filtering ? (
-        <div role="search" className="flex items-center gap-2">
-          <div className="relative min-w-0 flex-1">
-            <Icon name="search" size={14} className="pointer-events-none absolute top-1/2 start-2.5 -translate-y-1/2 text-[var(--fg3)]" />
-            <input ref={filterRef} value={query} onChange={e => setQuery(e.target.value)} placeholder={t('filterShort')} aria-label={t('filterLabel')} enterKeyHint="search"
-              onKeyDown={e => { if (e.key === 'Escape') { done() } else if (e.key === 'Enter') e.currentTarget.blur() }}
-              className="h-9 w-full rounded-[var(--r-md)] border border-[var(--line)] bg-[var(--card)] pe-12 ps-8 text-[13px] text-[var(--fg)] outline-none placeholder:text-[var(--fg3)] focus:border-[var(--fg3)] focus:shadow-[0_0_0_3px_var(--muted)]" />
-            <span className="ui-num pointer-events-none absolute top-1/2 end-2.5 -translate-y-1/2 text-xs text-[var(--fg3)]" aria-live="polite">{q ? t('found', { count: fmt.number(total) }) : ''}</span>
+        <div role="search" className="flex flex-col gap-2">
+          <div className="flex items-center gap-2">
+            <div className="relative min-w-0 flex-1">
+              <Icon name="search" size={14} className="pointer-events-none absolute top-1/2 start-2.5 -translate-y-1/2 text-[var(--fg3)]" />
+              <input ref={filterRef} value={query} onChange={e => setQuery(e.target.value)} placeholder={t('filterShort')} aria-label={t('filterLabel')} enterKeyHint="search"
+                onKeyDown={e => { if (e.key === 'Escape') { done() } else if (e.key === 'Enter') e.currentTarget.blur() }}
+                className="h-9 w-full rounded-[var(--r-md)] border border-[var(--line)] bg-[var(--card)] pe-12 ps-8 text-[13px] text-[var(--fg)] outline-none placeholder:text-[var(--fg3)] focus:border-[var(--fg3)] focus:shadow-[0_0_0_3px_var(--muted)]" />
+              <span className="ui-num pointer-events-none absolute top-1/2 end-2.5 -translate-y-1/2 text-xs text-[var(--fg3)]" aria-live="polite">{q ? t('found', { count: fmt.number(total) }) : ''}</span>
+            </div>
+            <Button onClick={() => setSheet(true)} aria-label={t('filterByTag')} aria-haspopup="dialog" className="flex-none !px-2.5">
+              <Icon name="sliders" size={15} /><span className="max-[420px]:sr-only">{t('tags')}</span>
+              {f.tags.length > 0 && <Badge size="sm" tone="accent">{fmt.number(f.tags.length)}</Badge>}
+            </Button>
+            <Button variant="ghost" onClick={done} className="flex-none !px-2.5">{tc('common.cancel')}</Button>
           </div>
-          <Button variant="ghost" onClick={done} className="flex-none !px-2.5">{tc('common.cancel')}</Button>
+          {f.tags.length > 0 && (
+            <div className="flex min-w-0 items-center gap-2">
+              <ShellActiveTags f={f} className="-ms-[max(16px,env(safe-area-inset-left))] min-w-0 flex-1 overflow-x-auto ps-[max(16px,env(safe-area-inset-left))] [scrollbar-width:none] sm:-ms-5 sm:ps-5" />
+              {!q && <span className="ui-num flex-none text-xs text-[var(--fg3)]" aria-live="polite">{t('found', { count: fmt.number(total) })}</span>}
+            </div>
+          )}
         </div>
       ) : (
         <div ref={chipsRef} className="-mx-[max(16px,env(safe-area-inset-left))] flex gap-1.5 overflow-x-auto px-[max(16px,env(safe-area-inset-left))] [scrollbar-width:none] sm:-mx-5 sm:px-5">
@@ -197,6 +319,14 @@ const ShellChipNav = memo(function ShellChipNav({ query, setQuery, total, search
           {SECTIONS.map(([id, label]) => <ShellSectionLink key={id} id={id} label={label} on={active === id} group={group} chip />)}
         </div>
       )}
+      <Sheet open={sheet} onOpenChange={setSheet} title={t('filterByTag')} footer={
+        <div className="flex w-full items-center gap-2">
+          {(q || f.tags.length > 0) && <Button variant="ghost" onClick={f.clear}>{t('clearFilters')}</Button>}
+          <span className="flex-1" />
+          <Button variant="primary" onClick={() => setSheet(false)}>{t('showResults', { count: total })}</Button>
+        </div>}>
+        <ShellTagPanel f={f} touch />
+      </Sheet>
     </nav>
   )
 })
@@ -269,6 +399,8 @@ function ShowcaseBody() {
   const [appearance, setAppearance] = useState(false)
   const [keys, setKeys] = useState(false)
   const [query, setQuery] = useState('')
+  const [tags, setTags] = useState<TagId[]>([])
+  const [tagsOpen, setTagsOpen] = useState(false)
   const [mobileFilter, setMobileFilter] = useState(false)
   const filterRef = useRef<HTMLInputElement>(null), mobileFilterRef = useRef<HTMLInputElement>(null)
   /** Focus whichever filter box is on screen: the sidebar one, or the chip-row one below 900px (opened first). */
@@ -280,8 +412,44 @@ function ShowcaseBody() {
   }, [])
   const specs = useSpecs()
   const ordered = useMemo(() => shellOrder(specs), [specs])
-  const total = useMemo(() => ordered.filter(s => specMatches(s, query)).length, [ordered, query])
-  const queryRef = useRef(query); queryRef.current = query // eslint-disable-line react-hooks/refs
+  const total = useMemo(() => ordered.filter(s => specMatches(s, query, tags)).length, [ordered, query, tags])
+  const counts = useMemo(() => tagFacetCounts(ordered, query, tags), [ordered, query, tags])
+  const filterNow = useRef({ query, tags }); filterNow.current = { query, tags } // eslint-disable-line react-hooks/refs
+
+  // The filter lives in the URL (?tags=search,keyboard&q=date), so a filtered view can be shared. Read before the first
+  // paint (the server render has no filter), written back with replaceState as it changes, re-read on back/forward.
+  const urlPending = useRef<string | null>('') // the filter just read from the URL, until state has caught up with it
+  const urlSynced = useRef('') // the search string the state matches
+  useLayoutEffect(() => {
+    const read = () => {
+      if (urlPending.current === null && location.search === urlSynced.current) return // only the hash changed (a #card link)
+      const u = tagParseUrl(location.search)
+      urlPending.current = `${u.tags.join(',')}|${u.q}`; urlSynced.current = location.search
+      setTags(u.tags); setQuery(u.q)
+      if (u.tags.length || u.q) setMobileFilter(true)
+    }
+    read()
+    addEventListener('popstate', read); return () => removeEventListener('popstate', read)
+  }, [])
+  useEffect(() => {
+    if (urlPending.current !== null) {
+      if (urlPending.current !== `${tags.join(',')}|${query}`) return // an older render: don't write over the URL we just read
+      urlPending.current = null
+      return
+    }
+    const search = tagSearchString(location.search, tags, query)
+    urlSynced.current = search
+    if (search !== location.search) history.replaceState(history.state, '', `${location.pathname}${search}${location.hash}`)
+  }, [tags, query])
+  const toggleTag = useCallback((id: TagId) => setTags(cur => tagToggle(cur, id)), [])
+  const clearFilters = useCallback(() => { setQuery(''); setTags([]) }, [])
+  const filter = useMemo<ShellFilter>(() => ({ query, tags, setQuery, toggleTag, clear: clearFilters, counts, total }), [query, tags, toggleTag, clearFilters, counts, total])
+  /** A card's tag chip (or ⌘K "Tag: …"): show only that tag's cards, from the top of the page. */
+  const pickTag = useCallback((id: TagId) => {
+    setTags([id]); setQuery('')
+    if (filterRef.current?.offsetParent) setTagsOpen(true); else setMobileFilter(true)
+    scrollTo({ top: 0, behavior: shellReduce() ? 'auto' : 'smooth' })
+  }, [])
 
   useHotkey('mod+k', () => setPalette(p => !p))
   useHotkey('mod+shift+l', () => toggle())
@@ -296,18 +464,20 @@ function ShowcaseBody() {
 
   const goSpec = useCallback((s: SpecEntry, flash = true) => {
     const run = () => flash ? flashSpec(s.id) : document.getElementById(s.id)?.scrollIntoView({ behavior: shellReduce() ? 'auto' : 'smooth', block: 'start' })
-    if (!specMatches(s, queryRef.current)) { setQuery(''); requestAnimationFrame(() => requestAnimationFrame(run)) } else run()
-  }, [])
+    if (!specMatches(s, filterNow.current.query, filterNow.current.tags)) { clearFilters(); requestAnimationFrame(() => requestAnimationFrame(run)) } else run()
+  }, [clearFilters])
   const focusFilter = useCallback(() => openFilter(!matchMedia('(pointer: coarse)').matches || !!filterRef.current?.offsetParent), [openFilter])
-  const shell = useMemo(() => ({ query, setQuery, focusFilter }), [query, focusFilter])
+  const shell = useMemo(() => ({ query, tags, setQuery, focusFilter, pickTag }), [query, tags, focusFilter, pickTag])
 
   // Commands are rebuilt only when the cards or theme change; runners reach the latest theme API through a ref.
   const api = useRef({ set, toggle, toast }); api.current = { set, toggle, toast } // eslint-disable-line react-hooks/refs
   const commands = useMemo(() => {
     const sectionLabel = Object.fromEntries(SECTIONS) as Record<string, string>
     const list: Command[] = [
-      ...SECTIONS.map(([id, label]) => ({ id: `go-${id}`, label: `Go to ${label}`, group: 'Navigate', icon: 'layers' as IconName, keywords: [id, SECTION_TAGS[id] ?? ''], hint: 'Section', run: shellAfterPalette(() => shellJump(id)) })),
-      ...ordered.map(s => ({ id: `spec-${s.id}`, label: s.title, group: 'Components', icon: 'layers' as IconName, keywords: [...s.tags, sectionLabel[s.section]], hint: s.desc, run: shellAfterPalette(() => goSpec(s)) })),
+      ...SECTIONS.map(([id, label]) => ({ id: `go-${id}`, label: `Go to ${label}`, group: 'Navigate', icon: 'layers' as IconName, keywords: [id, ...shellTagWords(SECTION_AREA[id])], hint: 'Section', run: shellAfterPalette(() => shellJump(id)) })),
+      ...ordered.map(s => ({ id: `spec-${s.id}`, label: s.title, group: 'Components', icon: 'layers' as IconName, keywords: [...s.tags.flatMap(shellTagWords), ...s.aka, ...s.items, sectionLabel[s.section]], hint: s.desc, run: shellAfterPalette(() => goSpec(s)) })),
+      // one command per tag that has cards: "Tag: Streaming" filters the page by it
+      ...shellTagsInUse(ordered).map(([id, n]) => ({ id: `tag-${id}`, label: `Tag: ${TAG_BY_ID[id].label}`, group: 'Tags', icon: 'sliders' as IconName, keywords: shellTagWords(id), hint: `${n} ${n === 1 ? 'card' : 'cards'} · ${TAG_BY_ID[id].desc}`, run: shellAfterPalette(() => pickTag(id)) })),
       { id: 'act-toggle', label: 'Toggle light / dark', group: 'Actions', icon: 'moon', shortcut: '⌘⇧L', keywords: ['theme', 'mode', 'dark mode', 'light mode', 'switch'], hint: 'Theme', run: () => api.current.toggle() },
       { id: 'act-settings', label: 'Open theme settings', group: 'Actions', icon: 'settings', keywords: ['appearance', 'colours', 'colors', 'customise', 'radius', 'font', 'palette'], hint: 'Appearance panel', run: () => setAppearance(true) },
       { id: 'act-toast', label: 'Show a toast', group: 'Actions', icon: 'bell', keywords: ['notification', 'feedback', 'demo'], hint: 'Demo', run: () => api.current.toast({ title: 'Changes saved', description: 'Synced across devices' }) },
@@ -331,7 +501,7 @@ function ShowcaseBody() {
       })))),
     ]
     return list
-  }, [ordered, goSpec, settings.variant, openFilter])
+  }, [ordered, goSpec, settings.variant, openFilter, pickTag])
   const paletteEl = useMemo(() => <CommandPalette open={palette} onOpenChange={setPalette} commands={commands} placeholder={tm('paletteSearch')} suggestion="chart" />, [palette, commands, tm])
 
   // The sections never depend on shell state. Keeping them in one memoised element means scrolling, typing in
@@ -363,15 +533,17 @@ function ShowcaseBody() {
         </div>
       </header>
       <div className="mx-auto grid max-w-[1320px] gap-4 pt-4 pr-[max(16px,env(safe-area-inset-right))] pb-[max(80px,calc(env(safe-area-inset-bottom)+64px))] pl-[max(16px,env(safe-area-inset-left))] sm:px-5 min-[900px]:grid-cols-[212px_minmax(0,1fr)] min-[900px]:gap-8 min-[900px]:pt-6">
-        <ShellSideNav ordered={ordered} query={query} setQuery={setQuery} total={total} filterRef={filterRef} goSpec={goSpec} />
-        <ShellChipNav query={query} setQuery={setQuery} total={total} searching={mobileFilter} setSearching={setMobileFilter} filterRef={mobileFilterRef} />
+        <ShellSideNav ordered={ordered} f={filter} filterRef={filterRef} goSpec={goSpec} tagsOpen={tagsOpen} setTagsOpen={setTagsOpen} />
+        <ShellChipNav f={filter} searching={mobileFilter} setSearching={setMobileFilter} filterRef={mobileFilterRef} />
         <main className="min-w-0">
           {sections}
           <AnimatePresence>
-            {q && total === 0 && (
-              <motion.div initial={{ opacity: 0, y: 8 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0 }} transition={{ duration: 0.2 }}
-                className="rounded-[var(--r-lg)] border border-dashed border-[var(--line2)] p-10 text-center text-[var(--fg3)]">
-                {tm('noneMatch', { query: q })}<Button size="sm" className="ms-2" onClick={() => { setQuery(''); openFilter(!matchMedia('(pointer: coarse)').matches) }}>{tm('clearFilter')}</Button>
+            {(q || tags.length > 0) && total === 0 && (
+              <motion.div initial={{ opacity: 0, y: 8 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0 }} transition={{ duration: 0.2 }} role="status"
+                className="flex flex-col items-center gap-3 rounded-[var(--r-lg)] border border-dashed border-[var(--line2)] p-10 text-center text-[var(--fg2)]">
+                <span>{q ? tm('noneMatch', { query: q }) : tm('noneMatchTags')}</span>
+                {tags.length > 0 && <span className="text-xs text-[var(--fg3)]">{tags.map(id => TAG_BY_ID[id].label).join(' · ')}</span>}
+                <Button size="sm" onClick={() => { clearFilters(); openFilter(!matchMedia('(pointer: coarse)').matches) }}>{tm('clearFilters')}</Button>
               </motion.div>
             )}
           </AnimatePresence>
@@ -406,7 +578,7 @@ export default function Showcase({ locale, dir = 'auto' }: { /** the server and 
   const messages = SHELL_LOCALES.find(([l]) => l === loc.locale)?.[1]
   return (
     <ShellLocaleContext.Provider value={shellLocale}>
-      <UIProvider fonts nonce={showcaseNonce()} locale={loc.locale} dir={loc.dir} messages={messages}><ShowcaseBody /></UIProvider>
+      <UIProvider fonts themeFromUrl nonce={showcaseNonce()} locale={loc.locale} dir={loc.dir} messages={messages}><ShowcaseBody /></UIProvider>
     </ShellLocaleContext.Provider>
   )
 }

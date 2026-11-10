@@ -109,6 +109,7 @@ What it does:
 | `target` | `'html'` | `'self'` puts the theme variables on the `.ui-root` wrapper instead of `<html>` and leaves the host page alone (useful for embedding in an existing app). |
 | `nonce` | | CSP nonce for the `<style>` elements UIProvider renders (and motion's layout styles). See [Content Security Policy](#content-security-policy). |
 | `injectStyles` | `true` | `false` renders no `<style>`: link `@lyndon/ui/tokens.css` instead (for a CSP without nonces). |
+| `themeFromUrl` | `false` | Apply a theme share link (`#theme=…` or `?theme=…`) on load, validated like saved settings, then remove it from the address bar. See [Exporting and sharing themes](#exporting-and-sharing-themes). |
 | `className` | | Classes for the `.ui-root` wrapper. |
 | `locale` | `'en-GB'` | BCP 47 locale for built-in strings, numbers, dates and the week start. See [Internationalisation and RTL](#internationalisation-and-rtl). |
 | `dir` | `'auto'` | `'ltr'`, `'rtl'`, or `'auto'` (from the locale: Arabic, Hebrew, Persian, Urdu… are right to left). |
@@ -152,7 +153,9 @@ function ThemePicker() {
   chart colours and shadows and nudges secondary text to 4.5:1 contrast. `themeTokens(settings, dark)` gives
   every variable for a set of settings, `themeCSS(tokens, label)` turns them into a `:root { … }` block you can
   paste into a stylesheet, and `themeStyle(tokens, dark)` into an inline `style` for one subtree. Users can make
-  their own palette in the Customise grid of the appearance panel.
+  their own palette in the Customise grid of the appearance panel. To take a theme elsewhere (Tailwind v4, shadcn/ui,
+  DTCG, Figma), bring a shadcn theme in, or share one as a link, see
+  [Exporting and sharing themes](#exporting-and-sharing-themes).
 - **Saved settings are validated.** `localStorage` is shared by everything on your origin, so the saved appearance
   is treated as untrusted input: `themeLoad` keeps a field only if it is something the library writes (a known theme
   id and font, `light|dark|system`, an in-range integer variant, a finite radius clamped to 0–32, a custom palette of
@@ -173,6 +176,153 @@ same `storageKey`, `defaultTheme` and `persist` as `UIProvider`, and add `suppre
 default). For a strict CSP, pass `nonce`, or hash the string from `themeScriptSource()`. The script applies the
 saved CSS variables only when every name is a theme token and every value matches what `themeTokens` produces (hex,
 `rgba()`, numbers and px, the two shadows, the font stack); otherwise it applies the defaults.
+
+### Exporting and sharing themes
+
+The appearance panel has an **Export and share** section (also on its own as `<ThemeExportPanel />`, e.g. for a
+theme-builder page next to `<AppearancePanel />`): format tabs with the code, Copy code, Download, Copy share link and
+Import. The same exporters are pure functions in `@lyndon/ui/themeexport` (and `@lyndon/ui/utils`, so they run on the
+server and in build scripts). Each takes settings (resolved with `themeTokens`, exactly what UIProvider applies) or a
+`{ label, modes: { light, dark } }` token source, and writes both modes. A Custom theme is one palette, so it exports
+one mode.
+
+```ts
+import { themeToCSS, themeToTailwind, themeToShadcn, themeToDTCG, themeToTokensStudio, themeImport, themeImportSettings } from '@lyndon/ui/themeexport'
+
+const settings = { ...DEFAULT_THEME, theme: 'nord', radius: 10 } // or useTheme().settings
+writeFileSync('theme.css', themeToTailwind(settings))
+```
+
+| Function | Output |
+| --- | --- |
+| `themeToCSS(s)` | The library's own variables (`--bg`, `--card`, `--accent`, `--r-md`, `--font` …): light in `:root`, dark under `@media (prefers-color-scheme: dark)` (unless `data-theme="light"`) and `:root[data-theme="dark"]`, like UIProvider's style sheet. For `<UIProvider injectStyles={false}>` or pages without React. |
+| `themeToTailwind(s, { dark?, inline? })` | A Tailwind CSS v4 `@theme` block: `--color-*` for every colour token, `--radius-sm/md/lg`, `--font-sans`, `--font-mono`, `--shadow-card`. |
+| `themeToShadcn(s, { themeInline? })` | shadcn/ui variables as `oklch()`: `:root` (with `--radius`) and `.dark`. |
+| `themeToDTCG(s, { modes? })` | W3C Design Tokens (DTCG 2025.10) JSON; `themeToDTCGTokens` returns the object. |
+| `themeToTokensStudio(s)` | Tokens Studio for Figma JSON (the panel's **Figma** tab). |
+| `themeExport(format, s)` | One of the above by id (`THEME_EXPORT_FORMATS` lists them with file names). |
+
+**Tailwind v4.** Paste the block after `@import "tailwindcss";`. Utilities then follow the theme: `bg-card`,
+`text-fg2`, `border-line`, `bg-accent-soft`, `text-bad`, `rounded-md`, `font-sans`, `shadow-card`.
+
+```css
+@import "tailwindcss";
+@custom-variant dark (&:where([data-theme=dark], [data-theme=dark] *));
+
+@theme {
+  --color-bg: #E5E9F0;
+  --color-card: #ECEFF4;
+  --color-accent: #496485; /* Nord's #5E81AC, nudged by derive() to 4.5:1 on its cards */
+  /* … every colour token … */
+  --radius-md: 10px;
+  --font-sans: "Geist",ui-sans-serif,system-ui,-apple-system,"Segoe UI",sans-serif;
+  --shadow-card: 0 1px 2px rgba(0,0,0,.04),0 10px 30px rgba(0,0,0,.08);
+}
+
+@layer theme {
+  :root, :host {
+    @variant dark {
+      --color-bg: #2E3440;
+      /* … the dark values that differ … */
+    }
+  }
+}
+```
+
+The dark values sit under `@variant dark`, so they follow whatever `dark:` means in your project. `dark` picks it:
+`'data-theme'` (default) adds the `@custom-variant` above (UIProvider sets `data-theme` on `<html>`), `'class'` uses
+a `.dark` class (next-themes, shadcn), `'media'` leaves Tailwind's default (the OS setting). If the app also renders
+UIProvider, prefer `themeToTailwind(s, { inline: true })`: `@theme inline { --color-card: var(--card); … }` maps the
+utilities onto the variables UIProvider already switches per mode and per user choice, with no values copied.
+
+**shadcn/ui.** Replace the `:root` and `.dark` blocks in your `globals.css` (Tailwind v4 shadcn projects already have
+the `@theme inline` mapping; pass `{ themeInline: true }` to include it):
+
+```css
+:root {
+  --radius: 0.625rem;
+  --background: oklch(0.985 0 0);
+  --foreground: oklch(0.141 0.004 285.823);
+  --primary: oklch(0.21 0.006 285.885);
+  --primary-foreground: oklch(0.985 0 0);
+  --destructive: oklch(0.577 0.215 27.325);
+  --ring: oklch(0.546 0.215 262.881);
+  /* … card, popover, secondary, muted, accent, border, input, chart-1…5, sidebar-*, success, warning */
+}
+.dark {
+  --background: oklch(0.141 0.004 285.823);
+  /* … */
+}
+```
+
+Mapping: background ← `bg`; card and popover ← `card`; secondary, muted and accent ← `muted` (shadcn's accent is a
+hover surface, not a brand colour); muted-foreground ← `fg2`; destructive ← `bad`; border ← `line`; input ← `line2`;
+ring ← `accent`; chart-1…5 ← `c1`, `c2`, `c3`, `c4`, `c-neutral`; sidebar-* likewise; plus `--success` (`ok`) and
+`--warning` (`warn`), which shadcn doesn't define. `--radius` is the theme radius + 2px, because shadcn's buttons use
+`radius - 2px` and the library's use the radius itself (8px → `0.625rem`, shadcn's default).
+
+**DTCG.** Groups `color` (`$type: "color"`, values `{ "colorSpace": "srgb", "components": [r, g, b], "alpha"?, "hex" }`),
+`radius` (`dimension`, `{ "value": 8, "unit": "px" }`), `font` (`fontFamily` lists) and `shadow` (`card`). The format
+has no modes of its own, so: `$value` is the light value and `$extensions["@lyndon/ui"].modes.dark` the dark one
+(default), or `{ modes: 'sets' }` for two top-level groups, `light` and `dark`, each a full tree (one source per mode
+in Style Dictionary).
+
+```json
+{
+  "color": {
+    "$type": "color",
+    "bg": {
+      "$value": { "colorSpace": "srgb", "components": [0.9804, 0.9804, 0.9804], "hex": "#fafafa" },
+      "$extensions": { "@lyndon/ui": { "modes": { "dark": { "colorSpace": "srgb", "components": [0.0353, 0.0353, 0.0431], "hex": "#09090b" } } } }
+    }
+  },
+  "radius": { "$type": "dimension", "md": { "$value": { "value": 8, "unit": "px" } } }
+}
+```
+
+**Tokens Studio (Figma).** Sets `global` (radius, fonts), `light` and `dark` (colours, shadow) in the plugin's
+`value`/`type` format, with `$themes` Light and Dark and `$metadata.tokenSetOrder`; paste it into the plugin's JSON
+view or sync it from a repository.
+
+**Import.** `themeImport(text)` reads a shadcn block (current `oklch()`, the older bare `222.2 84% 4.9%` HSL triplets,
+`hsl()`, `rgb()` or hex), this library's CSS or Tailwind export, or DTCG / Tokens Studio JSON, and returns
+`{ ok, format, light, dark, radius, font, notes }`: up to two Custom palettes, validated like saved settings.
+`themeImportSettings(result, settings, 'dark')` gives the settings to apply. The panel's Import box previews the
+palette, lets you pick light or dark when both are there, and applies it as the Custom theme. Best effort, and every
+guess is reported in `notes` (shown in the panel):
+
+- `missing`: no value for a colour the library needs (shadcn has no success or warning, and a grey `--ring` is not an
+  accent), so the default theme's colour is used. Surfaces and lines it can derive (muted, line2, fg3) are derived silently.
+- `blended`: a translucent value (shadcn's dark `--border: oklch(1 0 0 / 10%)`) is flattened onto the background.
+- `clipped`: a colour outside sRGB (wide-gamut `oklch()`, e.g. shadcn's red destructive) is clipped to the nearest
+  sRGB colour; the library's tokens are `#RRGGBB`.
+- `contrast`: derive() still nudges imported palettes to 4.5:1 (secondary text, primary text, accent, ok, warn, bad),
+  and each colour it moved is listed with its old and new value.
+- `font`: a font the panel doesn't offer; your current font is kept.
+
+Only colours (as `#RRGGBB`), one radius and a font from `FONTS` come out of an import; nothing in the text is
+evaluated or written into a style sheet as is. Input over 200 kB is refused.
+
+**Share links.** `themeShareUrl(settings)` returns the current URL with `#theme=<code>`: base64url of a few bytes
+(the format version, mode, radius, font, family and variant; a Custom palette adds its 15 colours), 8 characters for
+a built-in theme and 68 for a Custom one. `{ param: 'query' }` writes `?theme=` instead. `themeShareEncode` and
+`themeShareDecode` work on the bare code, and `themeFromUrl(url?)` reads one from a URL. A link is input from anyone:
+the code must have exactly the expected shape, version and in-range indexes, and then goes through `themeLoad`, the
+same check as saved settings; anything else is ignored. Apps opt in to applying links with
+`<UIProvider themeFromUrl>`: on load a valid code replaces (and is saved over) the saved appearance, and the
+parameter is removed from the address bar with `history.replaceState`. With ThemeScript the saved theme shows for the
+first paint and the linked one right after hydration.
+
+**Caveats.**
+
+- oklch conversion uses Björn Ottosson's OKLab matrices on sRGB. Exports pick the fewest decimals (3 to 6) that
+  convert back to the same `#RRGGBB`, so a shadcn export imports back exactly; values typed by hand round to the
+  nearest sRGB colour.
+- `--band` (a translucent accent) and `--shadow` have no shadcn equivalent and are left out of that export; Tokens
+  Studio and DTCG carry them.
+- Tailwind writes shadow values into the `shadow-*` utilities at build time, so the dark `--shadow-card` applies to
+  `shadow-(--shadow-card)` but not to `shadow-card`.
+- `--mono` is not a theme setting; the exports write the default mono stack.
 
 ## Internationalisation and RTL
 
@@ -274,7 +424,8 @@ object-src 'none'; base-uri 'none'; frame-ancestors 'none'
   attributes (server-rendered ones included). Values the library takes from data (colours, URLs) are checked with
   `safeColor` / `cssUrl` before they reach a `style`.
 - `data:` and `blob:` in `img-src`/`media-src` are only needed for the media, avatar-cropper and signature
-  components (previews of local files and recordings); drop them if you don't use those. The media demo's synthetic
+  components (previews of local files and recordings) and for PNG chart export (`exportChart` draws the chart's SVG
+  through a `blob:` image, or a `data:` one if blobs are blocked); drop them if you don't use those. The media demo's synthetic
   audio also fetches a `blob:` URL (`connect-src blob:`).
 - With `fonts`: add `https://fonts.googleapis.com` to `style-src` and `https://fonts.gstatic.com` to `font-src`.
 - `frame-ancestors 'none'` (or `'self'`) matters for pages with `HoldToConfirm` or approval prompts, so another
@@ -444,6 +595,101 @@ approved) => approved ? runTool(tool.name, tool.args) : undefined })` runs it in
 becomes the result; without that handler the decision is recorded on the part (`approval.approved`) for your
 server. Either way `send` is then called again (`continueAfterApproval`) so the model can carry on.
 
+## Live agent runs
+
+The agent visuals (`TraceWaterfall`, `AgentTransitMap`, `LaneGraph`) can draw a real run, recorded or live, from the
+tracing or SDK you already use. Everything goes through one model, from `@lyndon/ui/agentrun` (headless: React only):
+
+```ts
+type AgentRun   = { id, name, startedAt, endedAt?, status, spans: AgentSpan[], events: AgentEvent[] }   // epoch ms
+type AgentSpan  = { id, parentId?, kind: 'agent' | 'llm' | 'tool' | 'retrieval' | 'chain' | 'human', name, model?,
+                    startMs, endMs?, status: 'running' | 'ok' | 'error' | 'cancelled',
+                    tokens?: { input, output, cached? }, costUsd?, error?, attributes }
+type AgentEvent = { id, kind: 'approval' | 'handoff' | 'error' | 'retry' | 'note', atMs, label, spanId?, detail? }
+```
+
+A run streams as updates (`run-start`, `span-start`, `span-update`, `span-end`, `event`, `run-end`, `snapshot`) that
+the pure reducer `applyRunEvent(run, update)` folds; a span that fails adds an error event, an agent that starts after
+another adds a handoff. `useAgentRun(source)` keeps a run as React state, rendering at most once per animation frame:
+the source is an `AgentRun`, an async iterable or `ReadableStream` of updates (bytes are parsed as SSE or NDJSON), a
+`Response`, a function `(signal) => one of those`, or `{ fetchRun, intervalMs }` to poll. `mapper` turns your source's
+own items into updates. Memoise the source: a new one starts over.
+
+```tsx
+const source = useMemo(() => (signal: AbortSignal) => fetch(`/api/runs/${id}/events`, { signal }), [id])
+const { run, status } = useAgentRun(source)          // 'connecting' → 'live' → 'done'
+if (!run) return null
+<TraceWaterfall run={run} />                          // spans → rows, events → flags; grows while running
+<AgentTransitMap run={run} stations={{ issue_refund: ['payments', 'Pay agent'], chain: null }} />
+<LaneGraph nodes={runLaneNodes(run)} order="input" direction="up" renderRow={row => row.node.span.name} />
+```
+
+Without `run`, `AgentTransitMap` keeps its built-in simulation and `TraceWaterfall` its `spans` + `total`. Helpers:
+`runTotals(run)` (duration, tokens, cost, calls, errors), `agentSpanCost(model, tokens, prices)`, `runToEvents(run)`
+and `replayRun(run, { speed })` (plays a recorded run back as a live stream, rebased to now).
+
+**OpenTelemetry GenAI.** `fromOtel(otlpJson, { pricing })` reads an OTLP/JSON trace export (a collector's file exporter,
+or what your `/v1/traces` receiver gets) by the GenAI semantic conventions: `gen_ai.operation.name` (chat,
+text_completion, generate_content, embeddings → llm; execute_tool → tool; invoke_agent → agent), `gen_ai.request.model`
+/ `response.model`, `gen_ai.usage.input_tokens` / `output_tokens` (and cache reads), `gen_ai.tool.name`,
+`gen_ai.agent.name`, span status and `exception` events. The AI SDK's telemetry spans, OpenInference and OpenLLMetry
+attributes map too; HTTP and database spans under a tool are dropped (`include: 'all'` keeps them).
+
+```ts
+// a collector writes traces as OTLP/JSON; poll the latest export of one trace until it ends
+const poll = useMemo(() => ({
+  intervalMs: 1000,
+  fetchRun: async (signal: AbortSignal) => {
+    const res = await fetch(`/api/traces/${traceId}`, { signal })          // { resourceSpans: [...] }
+    return fromOtel(await res.json(), { traceId, pricing: PRICES })
+  },
+}), [traceId])
+const { run } = useAgentRun(poll)
+```
+
+**Vercel AI SDK.** `fromAiSdkResult(result, { pricing, stepEnds? })` reads a `generateText` / `streamText` result: a
+model span per step (model, usage incl. cached input) and a span per tool call (input, output, `tool-error`). The SDK
+records no tool timings, so they are inferred unless you pass `stepEnds`; with `experimental_telemetry` on, read its spans
+with `fromOtel` instead. Live, `aiSdkRunMapper()` maps the UI message stream (the same parts `useAiChat` reads):
+
+```ts
+// server: forward each step's usage with the stream
+return result.toUIMessageStreamResponse({
+  messageMetadata: ({ part }) => part.type === 'finish-step' ? { usage: part.usage, model: part.response.modelId } : undefined,
+})
+// client: one request, one live run
+const source = useMemo(() => (signal: AbortSignal) =>
+  fetch('/api/agent', { method: 'POST', body: JSON.stringify({ prompt }), signal }), [prompt])
+const { run } = useAgentRun(source, { mapper: () => aiSdkRunMapper({ name: 'Research', pricing: PRICES }) })
+// or after the fact: fromAiSdkResult(await generateText({ … }), { stepEnds })
+```
+
+**LangGraph.** `langGraphRunMapper()` maps `astream_events(version="v2")` events: the root graph is the run, graph
+nodes are chains (or agents: `agentNodes`, and subgraphs on their own), `on_chat_model_*` are model calls (usage from
+`usage_metadata`), `on_tool_*` tools, `on_retriever_*` retrievals; internal runnables are skipped. A tool whose
+exception ToolNode turned into an error ToolMessage is closed with that error; custom events named `*approval*` become
+a human span. LangChain's events carry no times, so stamp them on the server:
+
+```python
+# FastAPI: relay the events as SSE, each with a timestamp
+@app.get("/runs/{thread_id}/events")
+async def events(thread_id: str):
+    async def gen():
+        async for ev in graph.astream_events(inputs, {"configurable": {"thread_id": thread_id}}, version="v2"):
+            yield f"data: {json.dumps({**ev, 'timestamp': time.time()}, default=str)}\n\n"
+    return StreamingResponse(gen(), media_type="text/event-stream")
+```
+
+```ts
+const source = useMemo(() => (signal: AbortSignal) => fetch(`/runs/${threadId}/events`, { signal }), [threadId])
+const { run } = useAgentRun(source, { mapper: () => langGraphRunMapper({ agentNodes: ['planner', 'writer'], pricing: PRICES }) })
+// recorded: fromLangGraphEvents(events, { agentNodes })
+```
+
+`PRICES` is yours (`{ 'gpt-4.1': { input: 2, output: 8, cachedInput: 0.5 } }`, USD per million tokens; a key also
+matches dated model ids). The showcase's "Live agent run" card plays recorded runs from all three sources
+(`AGENT_RUN_FIXTURES` in `@lyndon/ui/examples`).
+
 ## Subpath imports
 
 `@lyndon/ui` is the all-in-one entry. Each area is also its own entry point (one ES module per area, with
@@ -458,9 +704,9 @@ import { cn, mix } from '@lyndon/ui/utils'
 
 Entries: `core` (re-exports `helpers`, `theme`, `locale`, `hooks`, `icons`, `primitives`, `slot`, `safe`,
 `formcontrol` and `shared`, each also an entry), `motion`, `virtual`, `overlay`, `forms` (re-exports `fields`, `inputs`, `select`, `pickers` and `upload`, each also an entry), `navigation`, `feedback`, `data`, `datagrid`, `layout`,
-`editor`, `scheduler`, `code`, `markdown`, `media`, `collab`, `pages`, `charts`, `diagrams` (re-exports `gantt`,
+`editor`, `scheduler`, `code`, `markdown`, `media`, `collab`, `pages`, `binary`, `charts`, `diagrams` (re-exports `gantt`,
 `statechart`, `trace` and `network`, each also an entry), `geo` (its map data, `geoworld` and `geoland`, loads lazily),
-`aistream`, `ai`, `aichat`, `aiagent`, `appearance`, `provider`, `utils`, plus `styles.css`, `preflight.css` and
+`aistream`, `agentrun`, `ai`, `aichat`, `aiagent`, `appearance`, `themeexport` (theme exporters, import and share codes), `provider`, `utils`, plus `styles.css`, `preflight.css` and
 `tokens.css` (the token CSS UIProvider injects, for `injectStyles={false}`). Sample data and demo helpers (the
 showcase's documents, workflows, generated media, MotionPlayground) are in `@lyndon/ui/examples`, outside the stable API.
 Tree-shaking works with either style: a bundler only keeps the components you import.
@@ -579,6 +825,82 @@ default from the destructuring, JSDoc), the drop-in's size and install commands 
 search (⌘K), the theme toggle and a phone layout. `pnpm docs:dev` runs it; `pnpm docs:build` (after `pnpm build`)
 writes `docs-dist/` with the docs, the showcase under `showcase/`, the registry and `llms.txt`, and
 `.github/workflows/pages.yml` deploys that to GitHub Pages.
+
+## Toasts
+
+`toast()` shows a toast and returns its id; the same function hangs off `useToast()` (the nearest `ToastProvider`'s
+queue) and is exported as a standalone `toast` that needs no hook (the page-wide queue; its region mounts itself in
+`UIProvider` on the first toast). Existing `const toast = useToast(); toast({ title })` calls keep working.
+
+```tsx
+import { toast } from '@lyndon/ui'
+
+const id = toast({ title: 'Saving…', tone: 'loading' })   // tones: ok (default), info, warn, bad, loading
+toast.update(id, { title: 'Saved', tone: 'ok' })          // in place: same slot, fresh timer, announced again
+toast.dismiss(id)                                          // or toast.dismiss() for all
+
+// one toast through a promise: loading → success or error, morphing in place
+toast.promise(save(draft), {
+  loading: 'Saving draft…',
+  success: doc => ({ title: 'Draft saved', description: doc.name }),
+  error: e => ({ title: 'Couldn’t save', description: String(e), action: { label: 'Retry', onClick: retry } }),
+})
+
+// Undo: the toast gets an Undo button; onCommit runs when it leaves without Undo (deferred delete)
+toast.undoable({ title: 'Message archived', onUndo: restore, onCommit: archiveForGood })
+
+toast({ id: 'new-version', title: 'A new version is available', duration: Infinity, action: { label: 'Reload', onClick: reload } })
+```
+
+- **Options:** `id` (dedupe: the same id replaces the toast instead of stacking), `title`, `description`, `tone`,
+  `action` (`{ label?, onClick }`; the label defaults to "Undo"; the toast closes unless `onClick` calls
+  `e.preventDefault()`), `duration` (ms, default 4200, 6000 with an action; `Infinity` stays until dismissed; loading
+  toasts never time out), `position`, `onDismiss(reason)` (`timeout`, `close`, `swipe`, `action` or `api`).
+- **Position:** `top-start`, `top-center`, `top-end`, `bottom-start`, `bottom-center`, `bottom-end` (default).
+  Start and end are logical, so they swap in RTL. Set it per toast, on `<ToastProvider position>`, or for the page-wide
+  queue with `toast.configure({ position, max })`. Phones get full-width toasts.
+- **Stacking:** at most `max` (default 5) per position are on screen, the newest ones. Older toasts wait behind a
+  "+n more" badge and come back as newer ones leave. Moving toasts animate with transforms, so nothing reflows.
+- **Timers** pause while a toast is hovered, while focus is in the region and while the tab is hidden. Swipe a toast
+  toward its edge to dismiss it.
+- **Screen readers** hear each toast and each update once: a polite status region, or an assertive alert for `bad`.
+  The text starts with the tone ("Error: Couldn’t save"), because the icon is decorative.
+
+## Chart data tables and export
+
+Every chart (`Chart`, `DonutChart`, `RadarChart`, `ScatterChart`, `FunnelChart`, `BarList`, `Treemap`, `BulletChart`,
+`Heatmap`, `CalendarHeatmap`, `RegressionChart`, `BoxViolinChart`, `DensityHistogram`, `ForestPlot`) renders its
+data as a real `<table>`, with numbers formatted in the provider's locale (the chart's `format` when you pass one).
+
+- `table="hidden"` (default): the table is visually hidden. Screen-reader users can browse it with table navigation,
+  and its caption holds the summary that the chart's `aria-describedby` points to.
+- `table="toggle"` adds a **Show data** button under the chart that opens the table in a scrollable box.
+- `table="shown"` shows it from the start.
+
+`exportable` adds a ⋯ menu under the chart: Download PNG, Download SVG, Download CSV and, where the clipboard accepts
+images, Copy image. It opens over the chart, so nothing moves. You can also export from code. Every chart takes a `ref`:
+
+```tsx
+import { Chart, exportChart } from '@lyndon/ui/charts'
+
+const ref = useRef<HTMLDivElement>(null)
+<Chart ref={ref} data={rows} x="month" series={[{ key: 'revenue' }]} table="toggle" exportable />
+
+await exportChart(ref, { format: 'png', scale: 3 })                     // downloads "revenue-chart.png"
+const blob = await exportChart(ref, { format: 'svg', download: false }) // just the Blob
+```
+
+- **Files** are named after the chart's label (`fileName` overrides it). `background` is `'auto'` (the card colour
+  behind the chart), a CSS colour, or `'none'`.
+- **Images** are drawn from the chart as it is on screen. Theme colours (CSS variables, `color-mix()`), opacity and
+  fonts are inlined as plain values, so the SVG looks the same outside the page. HTML parts (legends, bar lists,
+  heatmap cells, treemap tiles) are redrawn as SVG rects and text. Nothing external is loaded. PNG renders that SVG
+  on a canvas at `scale` (default: the screen's pixel ratio, at least 2), capped at 16 megapixels.
+- **CSV** comes from the data table: raw values (ISO times for time axes), UTF-8 with a BOM so spreadsheets read
+  accents. Text cells that start like a formula (`=`, `+`, `-`, `@`) get a leading `'`.
+- **Limits:** web fonts are not embedded. A PNG uses the fonts installed on the machine, and an SVG names the page's
+  font stack. Gradients and shadows on HTML parts are dropped, and text cut off with an ellipsis is exported in full.
+  Copy image needs a secure context and a browser with `ClipboardItem`.
 
 ## Tags over time (annotations and timelines)
 
@@ -717,6 +1039,50 @@ Also exported: `filterGitHistory` (branch filter, `firstParent`, `hideMerged`), 
   Markdown and Diff); `lanes` alone is about 89 KB (~25k tokens).
 - Limits: the layout runs on the main thread (~0.05 s per 50k commits on a laptop); for bigger logs, filter by branch or
   page the history (missing parents render as stubs).
+
+## Binary inspection (hex editor, entropy, byte map)
+
+`@lyndon/ui/binary` looks inside files: a hex editor, an entropy strip and a Hilbert-curve byte map that share a cursor,
+plus the pure helpers behind them. Data is a `Uint8Array` or `ArrayBuffer`; nothing copies or stringifies it whole.
+
+- `<HexEditor data />`: offset · hex · text rows, virtualised with fixed-height rows (a 100 MB buffer renders ~25 rows;
+  past ~8 M px of rows the scroll range is scaled, with the wheel and keys still moving by exact pixels and rows).
+  `bytesPerRow` 8 / 16 / 32, `colorBy` `'class' | 'section' | 'none'`, `offsets` `'offset' | 'vaddr'` (section address),
+  `cursor` / `selection` (controlled or not), `highlights` (tinted, labelled ranges), `readOnly`, `onChange(edits)`.
+  Keys: arrows, Page Up/Down, Home/End (Ctrl: file ends), Shift extends, Tab switches hex ↔ text, Ctrl+G go to (hex,
+  decimal, `+16`, or a section address), Ctrl+F search (hex with `??` wildcards or text; matches on screen are tinted),
+  Ctrl+A, Ctrl+C. Typing overwrites (hex digits a nibble at a time, or text); edits are a patch over the data with
+  Ctrl+Z / Ctrl+Shift+Z, and the handle's `getBytes()` returns a patched copy. Right-click or long-press: copy as hex,
+  C array, Base64 or text, select the section, jump to the u32 at the cursor. The data inspector decodes the cursor as
+  u8…i64, f32/f64, unix time, varint and zigzag in either byte order. Touch: tap selects, the grid scrolls sideways, the
+  text column hides below 480 px (switch).
+- `<EntropyMap data />` (or `entropy` + `length`): Shannon entropy per window (default 512 B) as bars on a theme-aware
+  scale, an offset ruler, section bands, a threshold (default 7.2 bits) and the merged high-entropy regions, listed with
+  range, size, section and value. Click, drag, Enter or a list item → `onSelect(range)`. `orientation="horizontal"`.
+- `<ByteMap data />`: the file on a Hilbert curve (canvas, crisp on HiDPI, square box with no layout shift), coloured by
+  `entropy | sections | class | strings`; hover/tap readout (offset → address, section, entropy), click → `onSelect`,
+  Ctrl/⌘ + wheel or the buttons zoom into part of the file.
+- `<BinaryView data sections />`: all of the above plus `BinarySectionList`, linked (a hot spot, section or region moves
+  the hex editor there; high-entropy regions are tinted in the hex). Columns from 900 px, tabs (Map / Entropy / Hex) below.
+- Helpers: `entropyWindows(bytes, window = 512, step?, { align })` (one O(n) pass with a 256-bin histogram and a running
+  Σ c·log₂c: ~0.2 s for 100 MB), `shannonEntropy`, `highEntropyRegions`, `hilbertD2XY` / `hilbertXY2D`,
+  `findStrings(bytes, { min: 4, encodings: ['ascii', 'utf16le'] })`, `classifyByte`, `sectionAt`, `searchBytes(bytes,
+  pattern, { as: 'text' | 'hex' })` (native `indexOf`, ~50 ms for 100 MB), `parseHexPattern`, `decodeBytes`,
+  `readVarint`, `formatBytesAs(bytes, 'hex' | 'c' | 'base64' | 'text')`, `parseByteOffset`, `entropyColor`.
+
+```tsx
+import { BinaryView, HexEditor } from '@lyndon/ui/binary'
+
+const sections = [{ name: '.text', offset: 0x1000, size: 0x3000, vaddr: 0x401000 }, /* … */]
+<BinaryView data={bytes} sections={sections} onChange={edits => setDirty(edits.length > 0)} />
+
+// or on its own, linked to your own views
+<HexEditor data={bytes} cursor={cursor} onCursorChange={setCursor} highlights={[{ start: 0x7000, end: 0x9000, label: 'packed' }]} readOnly />
+```
+
+The grid, strip and map are LTR islands in every locale; toolbars, legends, lists and readouts mirror. Strings:
+`BINARY_MESSAGES` (en, drafted de/ar). Sample data: `binarySample()` / `BINARY_SAMPLE_SECTIONS` (a synthetic 44 KiB
+ELF-like file) and `binarySampleLarge(mb)` in `@lyndon/ui/examples`.
 
 ## Magnets (snapping for sliders and drags)
 
@@ -1059,8 +1425,10 @@ they exist.
 - Components use native elements or the matching ARIA roles (dialog, menu, listbox, tablist, slider, …), with
   keyboard support (arrow keys, Home/End, Escape, type-ahead where it fits) and visible focus rings.
 - Dialogs and sheets trap focus and restore it on close; while one is open the rest of the page is `inert` and
-  Escape and Tab work wherever focus is (nested dialogs stack). Toasts are announced through an `aria-live` region
-  and at most five show at once (`ToastProvider max`).
+  Escape and Tab work wherever focus is (nested dialogs stack). Toasts are announced once each, through a polite
+  status region (an assertive alert for errors), and at most five per position show at once (`ToastProvider max`).
+- Every chart is one Tab stop with an arrow-key readout, and its data is also a real table: visually hidden by default,
+  or behind a "Show data" button (`table="toggle"`).
 - Every animation respects `prefers-reduced-motion` (`MotionConfig reducedMotion="user"` plus CSS fallbacks);
   the theme reveal becomes an instant change.
 - Touch: controls grow their hit areas on coarse pointers, hover-only affordances also work by tap or focus,

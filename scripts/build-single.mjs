@@ -21,10 +21,10 @@ import { execFileSync } from 'node:child_process'
 
 const root = new URL('..', import.meta.url).pathname
 const BUNDLES = {
-  ui: ['core', 'helpers', 'shared', 'locale', 'safe', 'theme', 'hooks', 'icons', 'slot', 'primitives', 'formcontrol', 'motion', 'virtual', 'magnet', 'overlay', 'formkit', 'fields', 'select', 'inputs', 'pickers', 'upload', 'forms', 'navigation', 'feedback', 'data', 'layout', 'appearance', 'provider'],
+  ui: ['core', 'helpers', 'shared', 'locale', 'safe', 'theme', 'hooks', 'icons', 'slot', 'primitives', 'formcontrol', 'motion', 'virtual', 'magnet', 'overlay', 'formkit', 'fields', 'select', 'inputs', 'pickers', 'upload', 'forms', 'navigation', 'feedback', 'data', 'layout', 'themeexport', 'appearance', 'provider'],
   'ui-charts': ['annotate', 'charts', 'timeline', 'diagramkit', 'gantt', 'statechart', 'trace', 'network', 'diagrams', 'geoworld', 'geoland', 'geo'],
-  'ui-content': ['editor', 'datagrid', 'scheduler', 'code', 'markdown', 'media', 'collab', 'pages', 'lanes', 'gitgraph'],
-  'ui-ai': ['aistream', 'ai', 'aichat', 'aiagent'],
+  'ui-content': ['editor', 'datagrid', 'scheduler', 'code', 'markdown', 'media', 'collab', 'pages', 'lanes', 'gitgraph', 'binary'],
+  'ui-ai': ['aistream', 'agentrun', 'ai', 'aichat', 'aiagent'],
 }
 const LIB = Object.values(BUNDLES).flat()
 const bundleOf = Object.fromEntries(Object.entries(BUNDLES).flatMap(([b, ms]) => ms.map(m => [m, b])))
@@ -85,7 +85,7 @@ const libFile = m => join(root, 'src/lib', `${m}.tsx`)
 const showcaseDir = join(root, 'src/showcase')
 // ui-with-examples: the sample data (src/examples) and copy-in blocks (src/blocks) the showcase imports, then the showcase
 const samples = ['examples', 'blocks'].flatMap(d => readdirSync(join(root, 'src', d)).filter(f => f.endsWith('.tsx')).sort().map(f => join(root, 'src', d, f)))
-const examples = [...samples, 'kit.tsx', ...readdirSync(showcaseDir).filter(f => f.endsWith('.tsx') && f !== 'index.tsx' && f !== 'kit.tsx').sort(), 'index.tsx'].map(f => f.startsWith('/') ? f : join(showcaseDir, f))
+const examples = [...samples, 'tags.ts', 'kit.tsx', ...readdirSync(showcaseDir).filter(f => f.endsWith('.tsx') && f !== 'index.tsx' && f !== 'kit.tsx').sort(), 'index.tsx'].map(f => f.startsWith('/') ? f : join(showcaseDir, f))
 
 mkdirSync(join(root, 'dist-single'), { recursive: true })
 const sizes = [], sums = []

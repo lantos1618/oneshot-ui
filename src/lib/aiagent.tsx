@@ -8,6 +8,7 @@ import { SendButton } from './ai'
 import { lcsDiff } from './code'
 import { WorkflowEngine, type WorkflowJob, type WorkflowMachine, type WorkflowToken } from './statechart'
 import { useFrameLoop, useViewport } from './motion'
+import { runLatestMs, runTotals, type AgentRun, type AgentSpan } from './agentrun'
 
 /* ════════════════════════════════════════════════════════════════════════════
  * 11c. AI WORKSPACES: the canvas (chat + living document) and the agent transit map
@@ -362,6 +363,9 @@ export const TRANSIT_MESSAGES = defineMessages('transit', {
     traceScrolls: 'Trace table, scrolls sideways', trace: 'Trace', ago: '−{n, number}s', now: 'now', time: 'time', tokens: 'tokens', usd: 'USD',
     jobsAppear: 'Jobs appear here as they start.', rejected: 'rejected', done: 'done', inReview: '{n, number} in review', waitingFor: 'waiting for {station}',
     follow: 'Follow job {id}, {name}, on the map', swipeTrace: 'Swipe the trace',
+    runLive: 'Live', runDone: 'Complete', runFailed: 'Failed', runCancelled: 'Cancelled', runAgent: 'Agent (numbered, matches the trace)', runStop: 'Stop (visits)',
+    runErrorStop: 'Failed here', offMap: 'off the map', runEmpty: 'Steps appear here as the run reports them.', step: 'Step',
+    runSteps: '{n, plural, one {# step} other {# steps}}', runSummary: '{steps} · {time} · {tokens} tokens · {usd}',
   },
   de: {
     research: 'Recherche', payments: 'Zahlungen', approvals: 'Freigaben', evals: 'Evaluierung', memory: 'Gedächtnis', index: 'Indexierungsschleife',
@@ -377,6 +381,9 @@ export const TRANSIT_MESSAGES = defineMessages('transit', {
     traceScrolls: 'Trace-Tabelle, seitlich scrollbar', trace: 'Trace', ago: '−{n, number} s', now: 'jetzt', time: 'Zeit', tokens: 'Tokens', usd: 'USD',
     jobsAppear: 'Jobs erscheinen hier, sobald sie starten.', rejected: 'abgelehnt', done: 'fertig', inReview: '{n, number} in Prüfung', waitingFor: 'wartet auf {station}',
     follow: 'Job {id}, {name}, auf der Karte folgen', swipeTrace: 'Trace wischen',
+    runLive: 'Live', runDone: 'Abgeschlossen', runFailed: 'Fehlgeschlagen', runCancelled: 'Abgebrochen', runAgent: 'Agent (nummeriert, wie im Trace)', runStop: 'Halt (Besuche)',
+    runErrorStop: 'Hier fehlgeschlagen', offMap: 'nicht auf der Karte', runEmpty: 'Schritte erscheinen hier, sobald der Lauf sie meldet.', step: 'Schritt',
+    runSteps: '{n, plural, one {# Schritt} other {# Schritte}}', runSummary: '{steps} · {time} · {tokens} Tokens · {usd}',
   },
   ar: {
     research: 'البحث', payments: 'المدفوعات', approvals: 'الموافقات', evals: 'التقييمات', memory: 'الذاكرة', index: 'حلقة الفهرسة',
@@ -392,6 +399,9 @@ export const TRANSIT_MESSAGES = defineMessages('transit', {
     traceScrolls: 'جدول السجل، يُمرَّر أفقيًا', trace: 'السجل', ago: '−{n, number} ث', now: 'الآن', time: 'الوقت', tokens: 'الرموز', usd: 'دولار',
     jobsAppear: 'تظهر المهام هنا عند بدئها.', rejected: 'مرفوضة', done: 'منجزة', inReview: '{n, number} قيد المراجعة', waitingFor: 'بانتظار {station}',
     follow: 'تتبّع المهمة {id}، {name}، على الخريطة', swipeTrace: 'اسحب السجل',
+    runLive: 'مباشر', runDone: 'اكتمل', runFailed: 'أخفق', runCancelled: 'أُلغي', runAgent: 'وكيل (مرقّم، يطابق السجل)', runStop: 'محطة (الزيارات)',
+    runErrorStop: 'أخفق هنا', offMap: 'خارج الخريطة', runEmpty: 'تظهر الخطوات هنا عندما يبلّغ عنها التشغيل.', step: 'خطوة',
+    runSteps: '{n, plural, zero {لا خطوات} one {خطوة واحدة} two {خطوتان} few {# خطوات} many {# خطوة} other {# خطوة}}', runSummary: '{steps} · {time} · {tokens} رمز · {usd}',
   },
 })
 type AtKey = keyof typeof TRANSIT_MESSAGES.en
@@ -985,8 +995,24 @@ const AtControls = memo(function AtControls({ eng, machines, chips, rerender }:
  * travel. On phones the map keeps a readable size and scrolls sideways inside the card, as does the trace table.
  * Pass `machines` whose stations are the map's (the sample is `AGENT_WORKFLOWS` / `AGENT_WORKFLOW_ORDER` in
  * `@lyndon/ui/examples`); without any, the map is drawn with no traffic.
+ * `run` draws a real agent run instead (an AgentRun from useAgentRun, fromOtel, fromAiSdkResult or
+ * fromLangGraphEvents, finished or live): each span stops at a station (`stations`, default transitRunStation: model
+ * calls at Analyst, retrievals at Recall, people at Human, tools by name), each running agent is a numbered token that
+ * glides to where its latest step is, stations count their visits and turn red where a step failed, and the trace
+ * table lists the steps on the run's own timeline. Hover or tap a row to light its line.
  */
-export function AgentTransitMap({ machines = AT_NO_MACHINES, order = AT_NO_ORDER, className }:
+export function AgentTransitMap({ run, stations, ...rest }: {
+  machines?: Record<string, WorkflowMachine>; order?: string[]
+  /** draw this agent run instead of the simulation (finished or live, e.g. from useAgentRun) */
+  run?: AgentRun | null
+  /** where a run's spans stop: [line, station] by span name or kind, or a function (default transitRunStation) */
+  stations?: TransitRunStations
+  className?: string }) {
+  return run ? <AtRunMap run={run} stations={stations} className={rest.className} /> : <AtSimMap {...rest} />
+}
+
+/** The simulation: the WorkflowEngine on the map's geometry (AgentTransitMap without a run). */
+function AtSimMap({ machines = AT_NO_MACHINES, order = AT_NO_ORDER, className }:
   { machines?: Record<string, WorkflowMachine>; order?: string[]; className?: string }) {
   const eng = useMemo(() => atEngine(machines, order), [machines, order])
   const t = useMessages(TRANSIT_MESSAGES), { dir } = useLocale()
@@ -1278,3 +1304,234 @@ export function AgentTransitMap({ machines = AT_NO_MACHINES, order = AT_NO_ORDER
     </div>
   )
 }
+
+/* Agent transit map: a real run (AgentRun) on the same geometry ────────────────── */
+
+/** Where a run's span stops on the transit map: a line and one of its stations or hubs (e.g. ['payments', 'Search']). */
+export type TransitStation = readonly [line: string, station: string]
+/** AgentTransitMap's `stations`: a stop per span name or kind (null keeps it off the map), or a function returning one (undefined: the default). */
+export type TransitRunStations = Partial<Record<string, TransitStation | null>> | ((span: AgentSpan, run: AgentRun) => TransitStation | null | undefined)
+const AT_RUN_HUBS: TransitStation[] = [['research', 'Research'], ['research', 'Product'], ['payments', 'Finance']]
+const AT_RUN_TOOLS: [RegExp, TransitStation][] = [
+  [/memor|recall|remember|embed|vector|index/i, ['memory', 'Recall']],
+  [/search|web|browse|fetch|lookup|find|get|read|query|list/i, ['payments', 'Search']],
+  [/refund|pay|charge|invoice|bill|book|purchase|order|checkout/i, ['payments', 'Pay agent']],
+  [/deploy|publish|release|send|email|notify|post|ship/i, ['research', 'Deploy']],
+  [/ledger|write|save|create|update|insert|ticket|record|log|store/i, ['payments', 'Ledger']],
+  [/eval|grade|score|test|check|verify|validate|review|lint/i, ['evals', 'Grader']],
+]
+/**
+ * The default stop of a run's span on the transit map: the root agent at Intake, other agents at the hubs (Research,
+ * Product, Finance in turn), model calls at Analyst, retrievals at Recall, people at Human, chains nowhere, and tools by
+ * name (memory → Recall; search, get, read → Search; pay, refund, book → Pay agent; send, deploy → Deploy; create,
+ * write, ticket → Ledger; check, test, review → Grader; anything else → Evals).
+ */
+export function transitRunStation(span: AgentSpan, run: AgentRun): TransitStation | null {
+  switch (span.kind) {
+    case 'human': return ['approvals', 'Human']
+    case 'retrieval': return ['memory', 'Recall']
+    case 'llm': return ['research', 'Analyst']
+    case 'chain': return null
+    case 'agent': {
+      const byId = new Map(run.spans.map(s => [s.id, s]))
+      let sub = false
+      for (let p = span.parentId ? byId.get(span.parentId) : undefined, n = 0; p && n < 64; p = p.parentId ? byId.get(p.parentId) : undefined, n++) if (p.kind === 'agent') { sub = true; break }
+      if (!sub && !run.spans.some(s => s.kind === 'agent' && s !== span && s.startMs < span.startMs)) return ['research', 'Intake']
+      const others = run.spans.filter(s => s.kind === 'agent' && s.startMs <= span.startMs && s !== span).length
+      return AT_RUN_HUBS[(others - 1 + AT_RUN_HUBS.length) % AT_RUN_HUBS.length]
+    }
+    default: return AT_RUN_TOOLS.find(([re]) => re.test(span.name))?.[1] ?? ['evals', 'Evals']
+  }
+}
+/** A span's stop: `stations` (by name, then kind, or the function), else the default; stops the map doesn't have fall back to the default. */
+function atRunStop(span: AgentSpan, run: AgentRun, stations: TransitRunStations | undefined): TransitStation | null {
+  let st: TransitStation | null | undefined
+  if (typeof stations === 'function') st = stations(span, run)
+  else if (stations) st = Object.prototype.hasOwnProperty.call(stations, span.name) ? stations[span.name] : Object.prototype.hasOwnProperty.call(stations, span.kind) ? stations[span.kind] : undefined
+  if (st === null) return null
+  return st && atPos(st[0], st[1]) !== undefined ? st : transitRunStation(span, run)
+}
+type AtRunStopMark = { key: string; line: string; station: string; x: number; y: number; visits: number; running: number; errors: number; human: boolean; ids: string[] }
+type AtRunTok = { id: string; n: number; line: string; s: number; error: boolean }
+type AtRunRowData = { span: AgentSpan; stop: TransitStation | null; agent: number }
+/** A run on the map: each span's stop, the stations' marks, a token per running agent (at its latest step), the lines used. */
+function atRunModel(run: AgentRun, stations: TransitRunStations | undefined) {
+  const byId = new Map(run.spans.map(s => [s.id, s]))
+  const agents = run.spans.filter(s => s.kind === 'agent').sort((a, b) => a.startMs - b.startMs)
+  const num = new Map(agents.map((a, i) => [a.id, i + 1]))
+  const agentOf = (s: AgentSpan) => { if (s.kind === 'agent') return s.id; for (let p = s.parentId ? byId.get(s.parentId) : undefined, n = 0; p && n < 64; p = p.parentId ? byId.get(p.parentId) : undefined, n++) if (p.kind === 'agent') return p.id; return agents[0]?.id ?? '' }
+  const rows: AtRunRowData[] = [...run.spans].sort((a, b) => a.startMs - b.startMs).map(span => ({ span, stop: atRunStop(span, run, stations), agent: num.get(agentOf(span)) ?? 1 }))
+  const marks = new Map<string, AtRunStopMark>(), lines = new Set<string>()
+  for (const r of rows) {
+    if (!r.stop) continue
+    const [line, station] = r.stop, key = `${line}|${station}`, p = atPoint(line, atPos(line, station) ?? 0)
+    lines.add(line)
+    const m = marks.get(key) ?? { key, line, station, x: p.x, y: p.y, visits: 0, running: 0, errors: 0, human: false, ids: [] }
+    m.visits++; m.ids.push(r.span.id)
+    if (r.span.status === 'running') { m.running++; if (r.span.kind === 'human') m.human = true }
+    if (r.span.status === 'error') m.errors++
+    marks.set(key, m)
+  }
+  // a token per running agent (or one for the run, when it has no agent span), at its latest step's stop
+  const tokens: AtRunTok[] = []
+  const owners = agents.length ? agents.filter(a => a.status === 'running') : run.status === 'running' ? [null] : []
+  for (const a of owners) {
+    const mine = rows.filter(r => r.stop && (a ? agentOf(r.span) === a.id : true))
+    const cur = [...mine].reverse().find(r => r.span.status === 'running' && r.span.kind !== 'agent') ?? mine[mine.length - 1]
+    if (!cur?.stop) continue
+    tokens.push({ id: a?.id ?? 'run', n: a ? num.get(a.id)! : 1, line: cur.stop[0], s: atPos(cur.stop[0], cur.stop[1]) ?? 0, error: cur.span.status === 'error' })
+  }
+  return { rows: rows.filter(r => r.span.kind !== 'agent' && r.span.kind !== 'chain'), marks: [...marks.values()], tokens, lines }
+}
+const AT_RUN_COLS = 'grid-cols-[minmax(160px,30%)_1fr_64px_64px_72px] gap-3'
+const AT_RUN_TONE = { running: 'accent', ok: 'ok', error: 'bad', cancelled: 'neutral' } as const
+
+/** The stations' visit marks: a ring in the line's colour with the count, red with "!" where a step failed, thicker while one runs there. */
+const AtRunMarks = memo(function AtRunMarks({ marks, lit }: { sig: string; marks: AtRunStopMark[]; lit: string | null }) {
+  return <g>
+    {marks.map(m => { const on = !lit || m.ids.includes(lit); return (
+      <g key={m.key} transform={`translate(${m.x.toFixed(1)},${m.y.toFixed(1)})`} className={atDim(on)}>
+        <circle r={m.running ? 15 : 13} fill="var(--card)" stroke={m.errors ? 'var(--bad)' : AT_C(m.line)} strokeWidth={m.running ? 4.5 : 3} />
+        <text y={4} textAnchor="middle" fill={m.errors ? 'var(--bad)' : 'var(--fg)'} style={{ font: '700 11px var(--font)' }}>{m.errors ? '!' : m.visits}</text>
+      </g>) })}
+  </g>
+}, atSigEq)
+
+/** The run view of AgentTransitMap: stops, marks and tokens for a real run, with its steps in a table. */
+function AtRunMap({ run, stations, className }: { run: AgentRun; stations?: TransitRunStations; className?: string }) {
+  const t = useMessages(TRANSIT_MESSAGES), { fmt, dir } = useLocale()
+  const nm = (n: string) => atName(t, n)
+  const reduce = !!useReducedMotion()
+  const narrow = useMediaQuery('(max-width: 639px)')
+  const { ref: host, visible } = useViewport<HTMLDivElement>(null, { amount: 0 })
+  const [mapScrollRef, mapEdges] = useScrollEdges<HTMLDivElement>()
+  const [traceScrollRef, traceEdges] = useScrollEdges<HTMLDivElement>()
+  const listRef = useRef<HTMLDivElement>(null)
+  const [hovered, setHovered] = useState<string | null>(null), [pin, setPin] = useState<string | null>(null)
+  const lit = hovered ?? pin
+  const model = useMemo(() => atRunModel(run, stations), [run, stations])
+  const fs = narrow ? 1.2 : 1
+  const totals = runTotals(run), latest = runLatestMs(run), span0 = Math.max(1, latest - run.startedAt)
+  const litRow = lit ? model.rows.find(r => r.span.id === lit) : undefined
+  const litKey = litRow?.stop ? litRow.stop[0] : lit ? '' : [...model.lines].join(',') || null
+  // tokens glide along the lines to their agent's latest stop (the frame loop writes their transforms; React keeps the first)
+  const disp = useRef(new Map<string, { line: string; s: number }>()), els = useRef(new Map<string, HTMLDivElement>()), born = useRef(new Map<string, string>())
+  const [moving, setMoving] = useState(false)
+  const want = useRef(model.tokens); want.current = model.tokens
+  const step = (dt: number) => {
+    let busy = false
+    for (const tk of want.current) {
+      let d = disp.current.get(tk.id)
+      if (!d || reduce) d = { line: tk.line, s: tk.s }
+      else {
+        if (d.line !== tk.line) { const p = atPoint(d.line, d.s); d.line = tk.line; d.s = atNear(tk.line, [p.x, p.y]) }
+        const diff = tk.s - d.s, v = 340 * dt
+        d.s = Math.abs(diff) <= v ? tk.s : d.s + Math.sign(diff) * v
+        if (d.s !== tk.s) busy = true
+      }
+      disp.current.set(tk.id, d)
+      const el = els.current.get(tk.id); if (el) el.style.transform = atAt(atPoint(d.line, d.s), AT_TOK)
+    }
+    for (const id of disp.current.keys()) if (!want.current.some(tk => tk.id === id)) disp.current.delete(id)
+    return busy
+  }
+  const tokSig = model.tokens.map(tk => `${tk.id}:${tk.line}:${tk.s.toFixed(1)}`).join(',')
+  useLayoutEffect(() => { if (!step(0)) setMoving(false); else setMoving(true) }, [tokSig, reduce]) // eslint-disable-line react-hooks/exhaustive-deps
+  useFrameLoop(moving && visible, dt => { if (!step(dt)) setMoving(false) }, { coarseFps: 30 })
+  const placeOf = (tk: AtRunTok) => { let b = born.current.get(tk.id); if (b === undefined) { const d = disp.current.get(tk.id); born.current.set(tk.id, b = atAt(atPoint(d?.line ?? tk.line, d?.s ?? tk.s), AT_TOK)) } return b }
+  const regTok = useCallback((el: HTMLDivElement | null) => {
+    if (!el) return
+    const id = el.dataset.id!
+    els.current.set(id, el)
+    return () => { els.current.delete(id); born.current.delete(id) }
+  }, [])
+  // a live run's table follows its newest step unless the reader scrolled up
+  const rowCount = model.rows.length
+  useLayoutEffect(() => {
+    const el = listRef.current
+    if (el && run.status === 'running' && el.scrollHeight - el.scrollTop - el.clientHeight < AT_ROW_H * 1.5 + 4) el.scrollTop = el.scrollHeight
+  }, [rowCount, run.status])
+  const status = run.status === 'running' ? t('runLive') : run.status === 'error' ? t('runFailed') : run.status === 'cancelled' ? t('runCancelled') : t('runDone')
+  const secs = (ms: number) => t('secs', { n: fmt.number(ms / 1000, { minimumFractionDigits: 1, maximumFractionDigits: 1 }) })
+  const waiting = model.marks.filter(m => m.human)
+  const tx = (ms: number) => `${(Math.max(0, ms - run.startedAt) / span0) * 100}%`
+
+  return (
+    <div ref={host} className={cn('flex flex-col', className)}>
+      <div className="mb-2 flex flex-wrap items-center gap-x-2.5 gap-y-1 text-[13px]">
+        <b className="min-w-0 truncate font-semibold" dir="auto">{run.name}</b>
+        <Badge tone={AT_RUN_TONE[run.status]} size="sm"><span className={cn('me-1 h-1.5 w-1.5 rounded-full bg-current', run.status === 'running' && 'animate-pulse motion-reduce:animate-none')} />{status}</Badge>
+        <span className="ui-num text-xs text-[var(--fg2)]">{t('runSummary', { steps: t('runSteps', { n: rowCount }), time: secs(totals.durationMs), tokens: fmt.compact(totals.tokens.input + totals.tokens.output), usd: fmt.usd(totals.costUsd) })}</span>
+      </div>
+      <div dir="ltr" className="relative">
+        <div ref={mapScrollRef} className={cn(narrow && '-mx-1 overflow-x-auto overscroll-x-contain rounded-[var(--r-md)] px-1 [contain:inline-size] [scrollbar-width:thin]')} tabIndex={narrow ? 0 : undefined} aria-label={narrow ? t('mapScrolls') : undefined}>
+          <div className={cn('relative', narrow && 'min-w-[820px]')}>
+            <AtMapBase lit={litKey} fs={fs} regHeat={atRunNoHeat} />
+            <div aria-hidden className={AT_HTML_LAYER}>{!reduce && waiting.map(m => <AtPulse key={m.key} x={m.x} y={m.y} active={visible} />)}</div>
+            <svg viewBox={AT_VIEWBOX} aria-hidden className={AT_SVG_LAYER}>
+              <AtHubs />
+              <AtRunMarks sig={`${model.marks.map(m => `${m.key}${m.visits}${m.running}${m.errors}`).join(',')}|${lit}`} marks={model.marks} lit={lit} />
+            </svg>
+            <div aria-hidden className={AT_HTML_LAYER}>
+              {model.tokens.map(tk => (
+                <div key={tk.id} data-id={tk.id} ref={regTok} className="absolute top-0 left-0 will-change-transform" style={{ ...atBox(AT_TOK), transform: placeOf(tk) }} /* rtl-lint-ignore: map coordinates (LTR drawing) */>
+                  <svg viewBox={`${-AT_TOK / 2} ${-AT_TOK / 2} ${AT_TOK} ${AT_TOK}`} className="block h-full w-full overflow-visible">
+                    <circle r={10} fill={tk.error ? 'var(--bad)' : AT_C(tk.line)} stroke="var(--card)" strokeWidth={2.5} />
+                    <text y={3.6} textAnchor="middle" fill="#fff" style={{ font: '700 10px var(--font)' }}>{tk.n}</text>
+                  </svg>
+                </div>))}
+            </div>
+            <svg viewBox={AT_VIEWBOX} aria-hidden className={AT_SVG_LAYER}>
+              <g style={{ font: `${13 * fs}px var(--font)` }} fill="var(--fg2)"><AtLabels fs={fs} /></g>
+            </svg>
+          </div>
+        </div>
+        {narrow && <ScrollEdges {...mapEdges} hint={t('swipeMap')} />}
+      </div>
+      <span className="sr-only" aria-live="polite" dir={dir}>{waiting.length ? t('waitingSr', { n: waiting.reduce((n, m) => n + m.running, 0) }) : ''}</span>
+      <div className="mt-1.5 mb-3 flex flex-wrap justify-center gap-x-5 gap-y-2 text-[13px] text-[var(--fg2)] max-sm:justify-start max-sm:gap-x-4">
+        {Object.entries(AT_LINES).filter(([k]) => model.lines.has(k)).map(([k, [, c]]) => <span key={k} className="inline-flex items-center gap-2"><i className="inline-block h-[7px] w-5 rounded-[var(--r-sm)]" style={{ background: c }} />{nm(k)}</span>)}
+        <span className="inline-flex items-center gap-2"><i className="inline-block h-3.5 w-3.5 rounded-full bg-[var(--fg2)]" />{t('runAgent')}</span>
+        <span className="inline-flex items-center gap-2"><i className="inline-block h-3.5 w-3.5 rounded-full bg-[var(--card)] shadow-[inset_0_0_0_2.5px_var(--fg2)]" />{t('runStop')}</span>
+        <span className="inline-flex items-center gap-2"><i className="inline-block h-3.5 w-3.5 rounded-full bg-[var(--card)] shadow-[inset_0_0_0_2.5px_var(--bad)]" />{t('runErrorStop')}</span>
+        <span className="inline-flex items-center gap-2"><i className="inline-block h-3.5 w-3.5 rounded-full shadow-[inset_0_0_0_3px_var(--warn)]" />{t('waiting')}</span>
+      </div>
+      <div className="relative border-t border-[var(--line)]">
+        <div ref={traceScrollRef} className="overflow-x-auto overscroll-x-contain [contain:inline-size]" tabIndex={narrow ? 0 : undefined} aria-label={narrow ? t('traceScrolls') : undefined}>
+          <div className="min-w-[640px]">
+            <div className={cn('grid h-9 items-center border-b border-[var(--line)] text-xs text-[var(--fg3)]', AT_RUN_COLS)}>
+              <span className="sticky start-0 z-[1] bg-[var(--card)] text-sm font-semibold text-[var(--fg)]">{t('trace')}</span>
+              <span dir="ltr" className="relative h-full font-[family-name:var(--mono)] text-[11px]"><span className="absolute top-2.5 start-0">0</span><span className="absolute top-2.5 end-0">{secs(span0)}</span></span>
+              <span className="text-end font-[family-name:var(--mono)]">{t('time')}</span><span className="text-end font-[family-name:var(--mono)]">{t('tokens')}</span><span className="text-end font-[family-name:var(--mono)]">{t('usd')}</span>
+            </div>
+            <div ref={listRef} className="relative overflow-y-auto overscroll-y-contain" style={{ height: AT_ROWS * AT_ROW_H }} onPointerLeave={() => setHovered(null)}>
+              {!rowCount && <span className="absolute top-3 start-0 text-xs text-[var(--fg3)]">{t('runEmpty')}</span>}
+              {model.rows.map(({ span: s, stop, agent }) => {
+                const col = stop ? AT_C(stop[0]) : 'var(--c-neutral)', end = s.endMs ?? latest, tok = s.tokens ? s.tokens.input + s.tokens.output : 0
+                return (
+                  <div key={s.id} onPointerEnter={e => { if (e.pointerType === 'mouse') setHovered(s.id) }} onClick={() => setPin(p => p === s.id ? null : s.id)}
+                    className={cn('grid cursor-pointer items-center border-b border-[var(--line)] text-[13px] hover:bg-[color-mix(in_srgb,var(--muted)_60%,transparent)]', AT_RUN_COLS, lit === s.id && 'bg-[color-mix(in_srgb,var(--muted)_60%,transparent)]')} style={{ height: AT_ROW_H }}>
+                    <div className="sticky start-0 z-[1] flex min-w-0 items-center gap-2 bg-[var(--card)] whitespace-nowrap max-sm:shadow-[6px_0_6px_-6px_rgba(0,0,0,.25)] rtl:max-sm:shadow-[-6px_0_6px_-6px_rgba(0,0,0,.25)]">
+                      <span className={AT_JOB_DOT} style={{ background: `color-mix(in srgb, ${col} 70%, #000)` }}>{agent}</span>
+                      <span dir="auto" className={cn('max-w-[58%] flex-none truncate', s.status === 'error' && 'text-[var(--bad)]')}>{s.name}</span>
+                      <span className={cn('min-w-0 flex-1 truncate text-[11px]', s.status === 'error' ? 'text-[var(--bad)]' : 'text-[var(--fg3)]')} title={s.error}>{s.status === 'error' && s.error ? s.error : stop ? nm(stop[1]) : t('offMap')}</span>
+                    </div>
+                    <div dir="ltr" className="relative h-3.5 overflow-x-clip">
+                      <span className="absolute top-0 h-3.5 rounded-[var(--r-sm)]" style={{ left: tx(s.startMs), width: `max(2px, ${(Math.max(0, end - s.startMs) / span0) * 100}%)`, background: s.status === 'error' ? 'var(--bad)' : atSegFill({ kind: s.status === 'running' ? 'wait' : 'work', sub: false }, col) }} /* rtl-lint-ignore: time axis (LTR) */ />
+                    </div>
+                    <span className="text-end font-[family-name:var(--mono)] text-xs whitespace-pre">{atPad(secs(end - s.startMs), 6)}</span>
+                    <span className="text-end font-[family-name:var(--mono)] text-xs whitespace-pre">{tok ? atPad(fmt.compact(tok), 6) : atPad('—', 6)}</span>
+                    <span className="text-end font-[family-name:var(--mono)] text-xs whitespace-pre">{s.costUsd != null ? atPad(fmt.usd(s.costUsd), 8) : atPad('—', 8)}</span>
+                  </div>
+                )
+              })}
+            </div>
+          </div>
+        </div>
+        {narrow && <ScrollEdges left={false} right={traceEdges.right} touched={traceEdges.touched} hint={t('swipeTrace')} />}
+      </div>
+    </div>
+  )
+}
+/** The run view paints no congestion: its heat paths stay unstyled. */
+const atRunNoHeat = () => {}

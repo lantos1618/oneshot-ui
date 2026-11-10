@@ -30,6 +30,12 @@ export type UIProviderProps = LocaleSettings & {
    * on, the Google Fonts stylesheet is then added as a `<link>` rather than an inline `@import`.
    */
   injectStyles?: boolean
+  /**
+   * Apply a theme share link on load (default false): a valid `#theme=…` or `?theme=…` code (themeShareUrl, the
+   * appearance panel's Copy share link) replaces the saved appearance and is saved, then the parameter is removed
+   * from the address bar. The code is untrusted input and is validated like saved settings; anything else is ignored.
+   */
+  themeFromUrl?: boolean
 }
 
 /** The page background and text colour, on `html` and `body` (so a host page's own body background can't show through): added with target="html" (dist/tokens.css carries the same rule). */
@@ -45,14 +51,14 @@ const PROVIDER_FONT_HREF = 'https://fonts.googleapis.com/css2?family=Geist:wght@
  * `locale`/`dir`/`timeZone`/`weekStartsOn`/`messages` set what `useLocale()` returns (default en-GB, ltr) and put
  * `lang`/`dir` on the wrapper (and on <html> with target="html").
  */
-export function UIProvider({ children, className, defaultTheme, storageKey, persist, fonts = false, target = 'html', nonce, injectStyles = true,
+export function UIProvider({ children, className, defaultTheme, storageKey, persist, fonts = false, target = 'html', nonce, injectStyles = true, themeFromUrl = false,
   locale, dir, timeZone, weekStartsOn, hourCycle, messages }: UIProviderProps) {
   return (
     <MotionConfig reducedMotion="user" nonce={nonce}>
       {fonts && (injectStyles ? <style nonce={nonce}>{FONT_CSS}</style> : <link rel="stylesheet" href={PROVIDER_FONT_HREF} nonce={nonce} />)}
       {injectStyles && <style nonce={nonce}>{(target === 'html' ? TOKENS + '\n' + PROVIDER_PAGE_CSS : TOKENS) + '\n' + UI_DIR_CSS}</style>}
       <LocaleProvider locale={locale} dir={dir} timeZone={timeZone} weekStartsOn={weekStartsOn} hourCycle={hourCycle} messages={messages}>
-        <ThemeProvider defaultSettings={defaultTheme} storageKey={storageKey} persist={persist} fonts={fonts} target={target}>
+        <ThemeProvider defaultSettings={defaultTheme} storageKey={storageKey} persist={persist} fonts={fonts} target={target} fromUrl={themeFromUrl}>
           <UIProviderRoot className={className}>
             {children}
             <UIHosts />

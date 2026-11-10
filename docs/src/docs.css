@@ -8,8 +8,9 @@ html { scroll-padding-top: 72px; }
 body { margin: 0; }
 
 /* A docs page mounts one showcase section and shows only the cards that use the page's components (DocsDemo writes
-   the per-page rule); the section heading, the code button and the tag chips belong to the showcase. */
+   the per-page rule); the section heading and the code button belong to the showcase. The cards' tag chips stay: on
+   this site they filter the component list (DocsDemo hands the cards a ShellContext that does that). */
 .docs-demo section { margin: 0 !important; }
 .docs-demo section > div:first-child { display: none; }
 .docs-demo section > div.grid { grid-template-columns: minmax(0, 1fr); }
-.docs-demo [data-kit-entry], .docs-demo [role='toolbar'][aria-label^='Use-case tags'] { display: none; }
+.docs-demo [data-kit-entry] { display: none; }

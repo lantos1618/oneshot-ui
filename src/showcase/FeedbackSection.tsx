@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState, type ReactNode } from 'react'
 import { AnimatePresence, animate, motion, useInView } from 'motion/react'
-import { Alert, Avatar, Badge, Button, EmptyState, Icon, IconButton, OfflineIndicator, Progress, ProgressRing, Skeleton, Spinner, Switch, cn, confetti, floatingSurface, sleep, spring, useToast } from '../lib'
+import { Alert, Avatar, Badge, Button, EmptyState, Icon, IconButton, OfflineIndicator, Progress, ProgressRing, Skeleton, Spinner, Switch, type ToastPosition, cn, confetti, floatingSurface, sleep, spring, useToast } from '../lib'
 import { CookieConsent } from '../blocks'
 import { Row, Section, Spec, SpecPreview } from './kit'
 
@@ -193,6 +193,50 @@ function FbAlertsDemo() {
   )
 }
 
+const FB_POSITIONS: [ToastPosition, string, string][] = [['top-start', 'Top start', 'Start'], ['top-center', 'Top centre', 'Centre'], ['top-end', 'Top end', 'End'], ['bottom-start', 'Bottom start', 'Start'], ['bottom-center', 'Bottom centre', 'Centre'], ['bottom-end', 'Bottom end', 'End']]
+/** The toast API: promise toasts that morph in place, a toast updated by id, a sticky one with an action, six positions. */
+function FbToastDemo() {
+  const toast = useToast()
+  const upload = (ok: boolean) => toast.promise(sleep(1600).then(() => { if (!ok) throw new Error('The connection dropped at 64%'); return 3 }), {
+    loading: { title: 'Uploading 3 files…', description: 'report-q3.pdf and 2 more' },
+    success: n => ({ title: `Uploaded ${n} files`, description: 'Shared with Design' }),
+    error: e => ({ title: 'Upload failed', description: e instanceof Error ? e.message : 'Try again', action: { label: 'Retry', onClick: () => upload(true) } }),
+  })
+  const sync = async () => {
+    const id = toast({ title: 'Syncing 0 of 4 items…', tone: 'loading' })
+    for (let k = 1; k <= 4; k++) { await sleep(450); toast.update(id, { title: `Syncing ${k} of 4 items…` }) }
+    toast.update(id, { title: 'Synced 4 items', description: 'Everything is up to date', tone: 'ok' })
+  }
+  return (
+    <div className="grid gap-3 sm:grid-cols-[minmax(0,1fr)_212px]">
+      <div className="flex flex-col gap-2.5">
+        <Row>
+          <Button onClick={() => toast({ title: 'Changes saved', description: 'Just now', tone: 'ok' })}>Success</Button>
+          <Button onClick={() => toast.undoable({ title: 'Message archived', onUndo: () => toast({ title: 'Restored', tone: 'info' }) })}>With undo</Button>
+          <Button onClick={() => toast({ title: 'Couldn’t connect', description: 'Check your network and retry', tone: 'bad' })}>Error</Button>
+        </Row>
+        <Row>
+          <Button onClick={() => upload(true)}><Icon name="upload" size={14} />Promise: resolve</Button>
+          <Button onClick={() => upload(false)}><Icon name="upload" size={14} />Promise: reject</Button>
+        </Row>
+        <Row>
+          <Button onClick={() => void sync()}>Update in place</Button>
+          {/* a fixed id: pressing it again replaces the toast instead of stacking a second one */}
+          <Button onClick={() => toast({ id: 'fb-new-version', title: 'A new version is available', description: 'Reload to get the latest', tone: 'info', duration: Infinity, action: { label: 'Reload', onClick: () => toast({ title: 'You’re up to date', tone: 'ok' }) } })}>Sticky with action</Button>
+        </Row>
+      </div>
+      <div role="group" aria-label="Toast position" className="relative grid h-[124px] grid-cols-3 grid-rows-2 content-between gap-1.5 rounded-[var(--r-md)] border border-[var(--line)] bg-[var(--bg)] p-1.5">
+        <span aria-hidden className="pointer-events-none absolute inset-0 grid place-items-center text-[11px] text-[var(--fg3)]">Position</span>
+        {/* a little screen: each button sits where its toasts will appear (its name says top or bottom, the text says where along the edge) */}
+        {FB_POSITIONS.map(([pos, label, short]) => (
+          <Button key={pos} size="xs" aria-label={label} className={cn('relative', pos.endsWith('start') ? 'justify-self-start' : pos.endsWith('end') ? 'justify-self-end' : 'justify-self-center', pos.startsWith('top') ? 'self-start' : 'self-end')}
+            onClick={() => toast({ id: `fb-pos-${pos}`, title: label, description: 'Start and end swap in right-to-left languages', tone: 'info', position: pos })}>{short}</Button>
+        ))}
+      </div>
+    </div>
+  )
+}
+
 function FbCelebrationDemo() {
   return (
     <div className="flex flex-1 flex-col items-center justify-center gap-2 rounded-[var(--r-md)] bg-[linear-gradient(160deg,var(--accent-soft),var(--card)_70%)] p-4 text-center">
@@ -206,16 +250,11 @@ function FbCelebrationDemo() {
 }
 
 export function FeedbackSection() {
-  const toast = useToast()
   return (
     <Section id="feedback" title="Feedback" desc="Tell people what happened, what’s happening, and what to do next.">
       <Spec title="Alerts" desc="Tinted, icon plus text. Four tones, an action, and one you can dismiss." span={2}><FbAlertsDemo /></Spec>
-      <Spec title="Toasts" desc="Stack with springs, undo inline">
-        <Row>
-          <Button onClick={() => toast({ title: 'Changes saved', description: 'Just now', tone: 'ok' })}>Success</Button>
-          <Button onClick={() => toast({ title: 'Message archived', action: { label: 'Undo', onClick: () => toast({ title: 'Restored', tone: 'info' }) } })}>With undo</Button>
-          <Button onClick={() => toast({ title: 'Couldn’t connect', description: 'Check your network and retry', tone: 'bad' })}>Error</Button>
-        </Row>
+      <Spec title="Toasts" desc="Stack with springs, undo inline, promises and updates morph in place, six positions" span={2}>
+        <FbToastDemo />
         <SpecPreview label="A stack of toasts" className="flex flex-col items-end gap-1.5">
           {([['Message archived', 'Undo', 'check'], ['Changes saved', 'Just now', 'check']] as const).map(([t, d], i) => (
             <div key={t} className={cn(floatingSurface, 'flex w-full max-w-[250px] items-center gap-2 px-3 py-2 text-xs', i === 1 && 'scale-[0.96]')}>

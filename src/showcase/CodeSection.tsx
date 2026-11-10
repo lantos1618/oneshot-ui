@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useState } from 'react'
 import { useReducedMotion } from 'motion/react'
-import { Citation, CodeBlock, CodeTabs, Diff, GitGraph, type GitCommit, InlineCode, InstallCommand, Kbd, Markdown, type Source, Switch, Tabs, Terminal, markdownCodeBlock, useToast, useViewport } from '../lib'
-import { AgentRunExample, AstGraphExample, ChatBranchesExample, DependencyGraphExample, chatTreeHistory, GIT_SAMPLE, GIT_SAMPLE_NOW, gitHistory, gitSampleCommit, gitSampleLoadCommit, gitSampleLoadDiff } from '../examples'
+import { BinaryView, Citation, CodeBlock, CodeTabs, Diff, GitGraph, type GitCommit, InlineCode, InstallCommand, Kbd, Markdown, type Source, Switch, Tabs, Terminal, markdownCodeBlock, useToast, useViewport } from '../lib'
+import { AgentRunExample, AstGraphExample, BINARY_SAMPLE_SECTIONS, binarySample, binarySampleLarge, ChatBranchesExample, DependencyGraphExample, chatTreeHistory, GIT_SAMPLE, GIT_SAMPLE_NOW, gitHistory, gitSampleCommit, gitSampleLoadCommit, gitSampleLoadDiff } from '../examples'
 import { Section, Spec, SpecAction } from './kit'
 
 const IMPORT_CODE = `import { createFlow } from './flow';
@@ -193,6 +193,12 @@ function ChatBigDemo({ big }: { big: boolean }) {
   return <ChatBranchesExample key={big ? 'big' : 'sample'} messages={history} />
 }
 
+/** The Binary explorer card: the synthetic 44 KiB ELF-like sample, or 100 MiB of it repeated (built on first use). */
+function BinaryExplorerDemo({ big }: { big: boolean }) {
+  const file = useMemo(() => (big ? binarySampleLarge(100) : { bytes: binarySample(), sections: BINARY_SAMPLE_SECTIONS }), [big])
+  return <BinaryView key={big ? 'big' : 'sample'} data={file.bytes} sections={file.sections} defaultCursor={big ? 0 : 0x4000} />
+}
+
 export function CodeSection() {
   const [mdRun, setMdRun] = useState(0)
   const [mdStill, setMdStill] = useState(false)
@@ -200,6 +206,7 @@ export function CodeSection() {
   const [gitPushes, setGitPushes] = useState(0)
   const [graphTab, setGraphTab] = useState<(typeof GRAPH_TABS)[number]['value']>('git')
   const [chatBig, setChatBig] = useState(false)
+  const [binBig, setBinBig] = useState(false)
   return (
     <Section id="code" title="Code" desc="Highlighted blocks, tabs, diffs, a terminal and streamed Markdown. Tokenised in the page, no highlighter library.">
       <Spec title="Code block" desc="File name, language, line numbers, highlighted lines, wrap, copy, expand" span={2}>
@@ -258,6 +265,16 @@ export function CodeSection() {
           <Tabs.Content value="agent"><AgentRunExample /></Tabs.Content>
           <Tabs.Content value="deps"><DependencyGraphExample /></Tabs.Content>
         </Tabs.Root>
+      </Spec>
+      <Spec title="Binary explorer" span={3}
+        desc="Look inside a file: a Hilbert-curve byte map, an entropy strip with section bands and high-entropy regions, and a hex editor with a data inspector, all sharing one cursor. Click a hot spot to jump the hex editor there."
+        keys={[[['↑', '↓', '←', '→'], 'Move'], [['⇧', '→'], 'Select'], [['Tab'], 'Hex ↔ text'], [['0–F'], 'Overwrite'], [['Ctrl', 'G'], 'Go to'], [['Ctrl', 'F'], 'Search'], [['Ctrl', 'Z'], 'Undo']]}
+        notes={{
+          good: 'Triage of unknown files: packed or encrypted blobs stand out as red on the map and the strip, sections show as blocks, and the hex editor jumps to whatever you click. Only the rows on screen render and edits are a patch over the original bytes, so a 100 MB file scrolls and edits like a small one; entropy is one O(n) pass (about 0.3 s for 100 MB).',
+          breaks: 'Files that don\'t fit in memory (the whole buffer is a Uint8Array) and structure-aware parsing: it shows bytes, entropy and the sections you pass, not decoded headers or disassembly. Inserting or deleting bytes isn\'t supported (overwrite only). Past ~8 M px of rows the scrollbar is scaled, so dragging it or flicking on a phone moves in coarse steps; the wheel and keys stay exact.',
+        }}
+        actions={<Switch label={<span className="text-xs text-[var(--fg2)]">100 MB</span>} checked={binBig} onChange={setBinBig} />}>
+        <BinaryExplorerDemo big={binBig} />
       </Spec>
     </Section>
   )
