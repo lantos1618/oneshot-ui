@@ -222,12 +222,12 @@ describe('useAgentRun', () => {
     render(<Probe source={source} />)
     await waitFor(() => expect(screen.getByTestId('probe').textContent).toBe('done:21:ok'))
   })
-  it('parses an NDJSON byte stream, and closes a run whose stream ended early', async () => {
+  it('parses an NDJSON byte stream, and marks a run whose stream ended early as cancelled', async () => {
     const evs = runToEvents(AGENT_RUN_FIXTURES[0].run()).slice(0, 6)
     const bytes = new TextEncoder().encode(evs.map(e => JSON.stringify(e)).join('\n') + '\n{oops\n')
     const stream = new ReadableStream<Uint8Array>({ start(c) { c.enqueue(bytes.slice(0, 50)); c.enqueue(bytes.slice(50)); c.close() } })
     render(<Probe source={stream} />)
-    await waitFor(() => expect(screen.getByTestId('probe').textContent).toBe('done:4:ok'))
+    await waitFor(() => expect(screen.getByTestId('probe').textContent).toBe('error:4:cancelled'))
   })
   it('maps SSE items with a mapper, and polls fetchRun until the run ends', async () => {
     const sse = LANGGRAPH_EVENTS_SAMPLE.map(e => `event: message\ndata: ${JSON.stringify(e)}\n\n`).join('') + 'data: [DONE]\n\n'

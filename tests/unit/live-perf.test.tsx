@@ -6,6 +6,7 @@ import { useState } from 'react'
 import { UIProvider } from '../../src/lib/provider'
 import { frameLoopFps, useFrameLoop } from '../../src/lib/motion'
 import { AgentTransitMap } from '../../src/lib/aiagent'
+import { TransitSimMap } from '../../src/examples/transit-sim'
 import { TraceWaterfall } from '../../src/lib/trace'
 import { Globe } from '../../src/lib/geo'
 import { AGENT_WORKFLOWS, AGENT_WORKFLOW_ORDER } from '../../src/examples'
@@ -77,7 +78,7 @@ describe('useFrameLoop', () => {
 
 describe('AgentTransitMap layers', () => {
   it('draws the map once and its moving parts in layers over it', () => {
-    const { container } = render(<AgentTransitMap machines={AGENT_WORKFLOWS} order={AGENT_WORKFLOW_ORDER} />)
+    const { container } = render(<TransitSimMap machines={AGENT_WORKFLOWS} order={AGENT_WORKFLOW_ORDER} />)
     // one accessible drawing; the heat, the queue/hubs/rings and the labels are hidden layers of the same size
     expect(screen.getAllByRole('img', { name: 'Transit map of agent teams' })).toHaveLength(1)
     const svgs = container.querySelectorAll('svg[viewBox="0 0 1000 720"]')
@@ -90,7 +91,7 @@ describe('AgentTransitMap layers', () => {
     expect(screen.getByText('Event queue')).toBeInTheDocument()
   })
   it('places the train by rotation (stepped, under reduced motion) and keeps it under the Index station', () => {
-    const { container } = render(<AgentTransitMap machines={AGENT_WORKFLOWS} order={AGENT_WORKFLOW_ORDER} />)
+    const { container } = render(<TransitSimMap machines={AGENT_WORKFLOWS} order={AGENT_WORKFLOW_ORDER} />)
     const train = container.querySelector('rect[width="24"][height="8"]')!.closest('svg')!.parentElement!.parentElement!
     expect(train.style.transform).toMatch(/^rotate\([\d.]+deg\)$/)
     // the train's layer comes before the hubs' drawing in the DOM, so the Index station is drawn over it

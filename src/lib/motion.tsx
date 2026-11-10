@@ -179,6 +179,8 @@ export function usePinchPan({ getZoom, onZoom, min = 1, max = 4, onPinchStart, o
       if (pan.current) { const m = move(e); pan.current = null; fns.current.onPanEnd?.(m) }
     },
     onPointerCancel: (e: RPointerEvent) => { pts.current.delete(e.pointerId); pinch.current = null; pan.current = null; fns.current.onCancel?.() },
+    // capture taken away without a pointerup (the element moved, another capture): drop the pointer, or the next press reads as a pinch
+    onLostPointerCapture: (e: RPointerEvent) => { if (pts.current.has(e.pointerId)) bind.onPointerCancel(e) },
   }
   return { bind, pinching: () => pinch.current !== null }
 }

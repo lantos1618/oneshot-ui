@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
+import { tryJson } from './core'
 
 export type AgentSpanKind = 'agent' | 'llm' | 'tool' | 'retrieval' | 'chain' | 'human'
 export type AgentSpanStatus = 'running' | 'ok' | 'error' | 'cancelled'
@@ -35,8 +36,8 @@ export type AgentRunEvent =
   | { type: 'run-end'; at: number; status?: Exclude<AgentSpanStatus, 'running'> }
   | { type: 'snapshot'; run: AgentRun }
 
-/** Caps: spans and events per run, characters per attribute string, error and label text. Excess is dropped, not thrown. */
-export const AGENT_RUN_LIMITS = { spans: 5_000, events: 2_000, attrChars: 2_000, textChars: 1_000, lineChars: 1_000_000 }
+/** Caps: spans and events per run, characters per attribute string, error and label text, span and model names, stream lines, ancestor depth. Excess is dropped, not thrown. */
+export const AGENT_RUN_LIMITS = { spans: 5_000, events: 2_000, attrChars: 2_000, textChars: 1_000, nameChars: 300, modelChars: 200, lineChars: 1_000_000, depth: 64 }
 
 const AR_KINDS = new Set<AgentSpanKind>(['agent', 'llm', 'tool', 'retrieval', 'chain', 'human'])
 const AR_EVENT_KINDS = new Set<AgentEventKind>(['approval', 'handoff', 'error', 'retry', 'note'])
@@ -97,6 +98,26 @@ function arEventTime(e: AgentRunEvent): number | undefined {
 /** The span ids of a run's roots (no parent, or a parent the run doesn't have). */
 const arRoots = (spans: readonly AgentSpan[]) => { const ids = new Set(spans.map(s => s.id)); return spans.filter(s => !s.parentId || !ids.has(s.parentId)) }
 
+/** A span's ancestors, nearest first (at most AGENT_RUN_LIMITS.depth, so a cyclic parent chain ends). */
+export function* spanAncestors(span: AgentSpan, byId: ReadonlyMap<string, AgentSpan>, max = AGENT_RUN_LIMITS.depth): Generator<AgentSpan> {
+  for (let p = span.parentId ? byId.get(span.parentId) : undefined, n = 0; p && n < max; p = p.parentId ? byId.get(p.parentId) : undefined, n++) yield p
+}
+/** The closest ancestor of a span that is an agent. */
+export function nearestAgent(span: AgentSpan, byId: ReadonlyMap<string, AgentSpan>): AgentSpan | undefined {
+  for (const p of spanAncestors(span, byId)) if (p.kind === 'agent') return p
+  return undefined
+}
+
+type ArFields = { name?: string; model?: string; tokens?: AgentTokens; costUsd?: number; error?: string; attributes?: Record<string, unknown> }
+/** The optional fields an update carries, sanitised and capped, with attributes merged over the span's own. */
+const arPatchFields = (old: AgentSpan | undefined, e: ArFields): Partial<AgentSpan> => ({
+  ...(e.name ? { name: arText(e.name, AGENT_RUN_LIMITS.nameChars) } : {}), ...(e.model ? { model: arText(e.model, AGENT_RUN_LIMITS.modelChars) } : {}),
+  ...(e.tokens ? { tokens: arTokens(e.tokens) } : {}), ...(e.costUsd != null ? { costUsd: arNum(e.costUsd) } : {}),
+  ...(e.error ? { error: arText(e.error) } : {}), ...(e.attributes ? { attributes: { ...old?.attributes, ...arAttrs(e.attributes) } } : {}),
+})
+/** The `error:<span>` event a failed span adds (its id makes replays idempotent). */
+const arErrorEvent = (s: AgentSpan, atMs: number): AgentEvent => ({ id: `error:${s.id}`, kind: 'error', atMs, label: s.name, spanId: s.id, ...(s.error ? { detail: s.error } : {}) })
+
 /** Inserts or replaces an event (same id), keeping events in time order. */
 function arUpsertEvent(events: AgentEvent[], ev: AgentEvent): AgentEvent[] {
   const rest = events.filter(e => e.id !== ev.id)
@@ -130,7 +151,7 @@ export function applyRunEvent(run: AgentRun | null | undefined, e: AgentRunEvent
   switch (e.type) {
     case 'run-start': {
       const at = arNum(e.at) ?? r.startedAt
-      return { ...r, ...(e.id != null ? { id: String(e.id) } : {}), ...(e.name != null ? { name: arText(e.name, 300) } : {}), startedAt: run && r.spans.length ? Math.min(r.startedAt, at) : at,
+      return { ...r, ...(e.id != null ? { id: String(e.id) } : {}), ...(e.name != null ? { name: arText(e.name, AGENT_RUN_LIMITS.nameChars) } : {}), startedAt: run && r.spans.length ? Math.min(r.startedAt, at) : at,
         status: 'running', endedAt: undefined, ...(e.attributes ? { attributes: { ...r.attributes, ...arAttrs(e.attributes) } } : {}) }
     }
     case 'span-start': {
@@ -140,23 +161,21 @@ export function applyRunEvent(run: AgentRun | null | undefined, e: AgentRunEvent
       if (!old && r.spans.length >= AGENT_RUN_LIMITS.spans) return r
       const startMs = arNum(s.startMs) ?? old?.startMs ?? r.startedAt
       const span: AgentSpan = {
-        ...old, id, kind: AR_KINDS.has(s.kind) ? s.kind : old?.kind ?? 'chain', name: arText(s.name ?? old?.name ?? id, 300), startMs,
+        ...old, id, kind: AR_KINDS.has(s.kind) ? s.kind : old?.kind ?? 'chain', name: arText(s.name ?? old?.name ?? id, AGENT_RUN_LIMITS.nameChars), startMs,
         status: s.status ?? old?.status ?? 'running', attributes: { ...old?.attributes, ...arAttrs(s.attributes) },
-        ...(s.parentId != null ? { parentId: String(s.parentId) } : {}), ...(s.model ? { model: arText(s.model, 200) } : {}),
-        ...(s.endMs != null ? { endMs: arNum(s.endMs) } : {}), ...(s.tokens ? { tokens: arTokens(s.tokens) } : {}),
-        ...(s.costUsd != null ? { costUsd: arNum(s.costUsd) } : {}), ...(s.error ? { error: arText(s.error) } : {}),
+        ...(s.parentId != null ? { parentId: String(s.parentId) } : {}), ...(s.endMs != null ? { endMs: arNum(s.endMs) } : {}),
+        ...arPatchFields(old, { model: s.model, tokens: s.tokens, costUsd: s.costUsd, error: s.error }),
       }
       const spans = i >= 0 ? r.spans.map((x, k) => k === i ? span : x) : [...r.spans, span]
       let events = span.kind === 'agent' && old?.kind !== 'agent' ? arHandoff(spans, r.events, span) : r.events
-      if (span.status === 'error') events = arUpsertEvent(events, { id: `error:${id}`, kind: 'error', atMs: span.endMs ?? startMs, label: span.name, spanId: id, ...(span.error ? { detail: span.error } : {}) })
+      if (span.status === 'error') events = arUpsertEvent(events, arErrorEvent(span, span.endMs ?? startMs))
       return { ...r, startedAt: Math.min(r.startedAt, startMs), spans, events }
     }
     case 'span-update': {
       const i = find(String(e.id))
       if (i < 0) return r
       const old = r.spans[i]
-      const span: AgentSpan = { ...old, ...(e.kind && AR_KINDS.has(e.kind) ? { kind: e.kind } : {}), ...(e.name ? { name: arText(e.name, 300) } : {}), ...(e.model ? { model: arText(e.model, 200) } : {}),
-        ...(e.tokens ? { tokens: arTokens(e.tokens) } : {}), ...(e.costUsd != null ? { costUsd: arNum(e.costUsd) } : {}), ...(e.attributes ? { attributes: { ...old.attributes, ...arAttrs(e.attributes) } } : {}) }
+      const span: AgentSpan = { ...old, ...(e.kind && AR_KINDS.has(e.kind) ? { kind: e.kind } : {}), ...arPatchFields(old, e) }
       const spans = r.spans.map((x, k) => k === i ? span : x)
       return { ...r, spans, events: span.kind === 'agent' && old.kind !== 'agent' ? arHandoff(spans, r.events, span) : r.events }
     }
@@ -165,9 +184,8 @@ export function applyRunEvent(run: AgentRun | null | undefined, e: AgentRunEvent
       if (i < 0) return r
       const old = r.spans[i], endMs = Math.max(old.startMs, arNum(e.endMs) ?? old.startMs)
       const status = e.status ?? (e.error ? 'error' : 'ok')
-      const span: AgentSpan = { ...old, endMs, status, ...(e.error ? { error: arText(e.error) } : {}), ...(e.model ? { model: arText(e.model, 200) } : {}),
-        ...(e.tokens ? { tokens: arTokens(e.tokens) } : {}), ...(e.costUsd != null ? { costUsd: arNum(e.costUsd) } : {}), ...(e.attributes ? { attributes: { ...old.attributes, ...arAttrs(e.attributes) } } : {}) }
-      const events = status === 'error' ? arUpsertEvent(r.events, { id: `error:${span.id}`, kind: 'error', atMs: endMs, label: span.name, spanId: span.id, ...(span.error ? { detail: span.error } : {}) }) : r.events
+      const span: AgentSpan = { ...old, endMs, status, ...arPatchFields(old, e) }
+      const events = status === 'error' ? arUpsertEvent(r.events, arErrorEvent(span, endMs)) : r.events
       return { ...r, spans: r.spans.map((x, k) => k === i ? span : x), events }
     }
     case 'event': {
@@ -203,7 +221,7 @@ export function runFromEvents(events: Iterable<AgentRunEvent>, run: AgentRun | n
  */
 export function runToEvents(run: AgentRun): AgentRunEvent[] {
   const byId = new Map(run.spans.map(s => [s.id, s]))
-  const depth = (s: AgentSpan) => { let d = 0; for (let p = s.parentId ? byId.get(s.parentId) : undefined; p && d < 64; p = p.parentId ? byId.get(p.parentId) : undefined) d++; return d }
+  const depth = (s: AgentSpan) => [...spanAncestors(s, byId)].length
   const items: { t: number; rank: number; d: number; e: AgentRunEvent }[] = []
   for (const s of run.spans) {
     const d = depth(s)
@@ -308,7 +326,7 @@ export function runLaneNodes(run: AgentRun, { include }: { include?: (span: Agen
   const byId = new Map(run.spans.map(s => [s.id, s])), parents = new Set(run.spans.map(s => s.parentId).filter(Boolean))
   const steps = run.spans.filter(include ?? (s => !parents.has(s.id))).slice(0, 2_000)
     .map((s, i) => ({ s, i })).sort((a, b) => a.s.startMs - b.s.startMs || a.i - b.i).map(x => x.s)
-  const agentOf = (s: AgentSpan) => { for (let p = s.parentId ? byId.get(s.parentId) : undefined, n = 0; p && n < 64; p = p.parentId ? byId.get(p.parentId) : undefined, n++) if (p.kind === 'agent') return p.name; const r = arRoots(run.spans)[0]; return r?.name ?? run.name }
+  const agentOf = (s: AgentSpan) => nearestAgent(s, byId)?.name ?? arRoots(run.spans)[0]?.name ?? run.name
   return steps.map((s, k) => {
     const done = steps.slice(0, k).filter(p => p.endMs != null && p.endMs <= s.startMs + 1)
     const latest = done.reduce((m, p) => Math.max(m, p.startMs), -Infinity)
@@ -324,12 +342,11 @@ export function runLaneNodes(run: AgentRun, { include }: { include?: (span: Agen
 export async function* parseRunStream(stream: ReadableStream<Uint8Array | string>): AsyncGenerator<unknown> {
   const reader = stream.getReader(), dec = new TextDecoder()
   let buf = '', mode: 'sse' | 'ndjson' | null = null, data: string[] = [], ended = false
-  const parse = (s: string) => { try { return { ok: true as const, v: JSON.parse(s) as unknown } } catch { return { ok: false as const } } }
   function* line(raw: string): Generator<unknown> {
     const l = raw.endsWith('\r') ? raw.slice(0, -1) : raw
     if (!mode) { if (!l.trim()) return; mode = /^(data|event|id|retry):|^:/.test(l) ? 'sse' : 'ndjson' }
-    if (mode === 'ndjson') { if (!l.trim() || l.length > AGENT_RUN_LIMITS.lineChars) return; const j = parse(l); if (j.ok) yield j.v; return }
-    if (!l) { const s = data.join('\n'); data = []; if (!s) return; if (s.trim() === '[DONE]') { ended = true; return } const j = parse(s); if (j.ok) yield j.v; return }
+    if (mode === 'ndjson') { if (!l.trim() || l.length > AGENT_RUN_LIMITS.lineChars) return; const j = tryJson(l); if (j.ok) yield j.v; return }
+    if (!l) { const s = data.join('\n'); data = []; if (!s) return; if (s.trim() === '[DONE]') { ended = true; return } const j = tryJson(s); if (j.ok) yield j.v; return }
     if (l.startsWith('data:') && data.join('').length < AGENT_RUN_LIMITS.lineChars) data.push(l.slice(5).replace(/^ /, ''))
   }
   try {
@@ -362,17 +379,29 @@ export type UseAgentRunOptions = {
   mapper?: () => AgentRunMapper
   /** the run to show before the source sends anything */
   initial?: AgentRun | null
-  /** when a stream ends while its run is still running, close the run at its latest moment (default true) */
+  /**
+   * when a stream ends before its run-end, close the run as 'cancelled' at its latest moment (default true). Either
+   * way the stream counts as closed early: `closedEarly` turns true, `status` becomes 'error' and `onError` gets an
+   * AgentRunClosedEarlyError. Only an explicit run-end makes a run 'ok'.
+   */
   endOnClose?: boolean
   onError?: (error: unknown) => void
 }
 export type AgentRunStatus = 'idle' | 'connecting' | 'live' | 'done' | 'error'
 export type AgentRunState = {
   run: AgentRun | null; status: AgentRunStatus; error: unknown
+  /** the stream ended before the run did (no run-end): the run is truncated, not finished */
+  closedEarly: boolean
   /** applies updates by hand (a WebSocket handler, a test), rendered on the next frame */
   push: (events: AgentRunEvent | readonly AgentRunEvent[]) => void
   /** replaces the run (or clears it) */
   reset: (run?: AgentRun | null) => void
+}
+
+/** What useAgentRun reports when a stream ends while its run is still running. */
+export class AgentRunClosedEarlyError extends Error {
+  readonly run: AgentRun
+  constructor(run: AgentRun) { super('The run’s stream closed before the run ended'); this.name = 'AgentRunClosedEarlyError'; this.run = run }
 }
 
 const arIsPoll = (v: unknown): v is AgentRunPoll => !!arObj(v) && typeof (v as AgentRunPoll).fetchRun === 'function'
@@ -423,6 +452,7 @@ export function useAgentRun(source: AgentRunSource, { mapper, initial = null, en
   const [run, setRun] = useState<AgentRun | null>(() => arIsRun(source) ? source : initial)
   const [status, setStatus] = useState<AgentRunStatus>(() => arIsRun(source) ? (source.status === 'running' ? 'live' : 'done') : source ? 'connecting' : 'idle')
   const [error, setError] = useState<unknown>(null)
+  const [closedEarly, setClosedEarly] = useState(false)
   const live = useRef<AgentRun | null>(run), pending = useRef<null | (() => void)>(null), alive = useRef(true)
   const cb = useRef({ mapper, initial, endOnClose, onError })
   cb.current = { mapper, initial, endOnClose, onError }
@@ -444,6 +474,7 @@ export function useAgentRun(source: AgentRunSource, { mapper, initial = null, en
     return () => { alive.current = false; pending.current?.(); pending.current = null }
   }, [])
   useEffect(() => {
+    setClosedEarly(false)
     if (arIsRun(source)) { live.current = source; flush(); setStatus(source.status === 'running' ? 'live' : 'done'); setError(null); return }
     if (!source) { setStatus('idle'); return }
     const ac = new AbortController(), { signal } = ac
@@ -476,14 +507,18 @@ export function useAgentRun(source: AgentRunSource, { mapper, initial = null, en
         }
         if (signal.aborted) return
         const r = live.current
-        if (r && r.status === 'running' && cb.current.endOnClose) live.current = applyRunEvent(r, { type: 'run-end', at: runLatestMs(r) })
+        if (r && r.status === 'running') {
+          if (cb.current.endOnClose) live.current = applyRunEvent(r, { type: 'run-end', at: runLatestMs(r), status: 'cancelled' })
+          setClosedEarly(true)
+          return fail(new AgentRunClosedEarlyError(live.current ?? r))
+        }
         flush(); setStatus('done')
       } catch (err) { fail(err) }
     })()
     return () => { ac.abort(); pending.current?.(); pending.current = null }
   }, [source, flush, schedule])
 
-  return { run, status, error, push, reset }
+  return { run, status, error, closedEarly, push, reset }
 }
 
 /** Sorts updates into time order (ends, then starts, then events at the same moment; ties keep their order) and folds them. */
@@ -679,6 +714,11 @@ export type FromAiSdkOptions = {
   /** share of a step with tool calls spent running its tools when timings are inferred (default 0.35) */ toolShare?: number
 }
 
+/** `{ costUsd }` when the model has a price, else nothing (to spread into an update). */
+const arCostField = (model: string | undefined, usage: AgentTokens | undefined, pricing: AgentPricing | undefined) => { const c = agentSpanCost(model, usage, pricing); return c != null ? { costUsd: c } : {} }
+/** Inferred step timings when the AI SDK reports none: a base, a time per output token, and extra when the step called tools. */
+const AR_EST = { baseMs: 600, msPerOutputToken: 12, toolMs: 900 }
+
 const arToolCalls = (step: AiSdkStepLike) => {
   const calls = new Map<string, { id: string; name: string; input?: unknown; output?: unknown; error?: string; done: boolean }>()
   const get = (p: ArRec) => { const id = String(p.toolCallId ?? p.id ?? `t${calls.size}`); let c = calls.get(id); if (!c) calls.set(id, c = { id, name: String(p.toolName ?? 'tool'), done: false }); return c }
@@ -710,13 +750,13 @@ export function aiSdkResultToRunEvents(result: AiSdkResultLike, { id, name = 'ge
     const calls = arToolCalls(step), usage = arUsage(step.usage), model = step.response?.modelId ?? result?.response?.modelId
     const s0 = i === 0 ? t0 : Math.max(at, arTime(stepEnds[i - 1]) ?? ts(i) ?? at)
     const exact = arTime(stepEnds[i])
-    const est = s0 + 600 + (usage?.output ?? 0) * 12 + (calls.length ? 900 : 0)
+    const est = s0 + AR_EST.baseMs + (usage?.output ?? 0) * AR_EST.msPerOutputToken + (calls.length ? AR_EST.toolMs : 0)
     const s1 = Math.max(s0, exact ?? ts(i + 1) ?? (i === steps.length - 1 ? arTime(endedAt) : undefined) ?? est)
     const llmEnd = calls.length ? s0 + (s1 - s0) * (1 - Math.min(0.9, Math.max(0, toolShare))) : s1
     const sid = `${runId}:step${i + 1}`, inferred = exact === undefined ? { timing: 'inferred' } : {}
     out.push({ type: 'span-start', span: { id: sid, parentId: root, kind: 'llm', name: `Step ${i + 1}`, startMs: s0, ...(model ? { model } : {}), attributes: { step: i + 1, finishReason: step.finishReason, ...(step.text ? { text: step.text } : {}), ...inferred } } })
     const errored = step.finishReason === 'error'
-    out.push({ type: 'span-end', id: sid, endMs: llmEnd, status: errored ? 'error' : 'ok', ...(errored ? { error: 'The model call failed' } : {}), ...(usage ? { tokens: usage } : {}), ...(usage && agentSpanCost(model, usage, pricing) != null ? { costUsd: agentSpanCost(model, usage, pricing) } : {}) })
+    out.push({ type: 'span-end', id: sid, endMs: llmEnd, status: errored ? 'error' : 'ok', ...(errored ? { error: 'The model call failed' } : {}), ...(usage ? { tokens: usage } : {}), ...arCostField(model, usage, pricing) })
     for (const c of calls) {
       const tid = `${runId}:tool:${c.id}`
       out.push({ type: 'span-start', span: { id: tid, parentId: root, kind: 'tool', name: c.name, startMs: llmEnd, attributes: { toolCallId: c.id, input: c.input, ...inferred } } })
@@ -750,7 +790,7 @@ export function aiSdkRunMapper({ now = Date.now, name = 'streamText', pricing, m
     step++; llm = lastLlm = `${root}:step${step}`
     return [{ type: 'span-start', span: { id: llm, parentId: root, kind: 'llm', name: `Step ${step}`, startMs: t, ...(model ? { model } : {}), attributes: { step } } }]
   }
-  const close = (t: number): AgentRunEvent[] => { if (!llm) return []; const id = llm; llm = null; const u = lastUsage.get(id); return [{ type: 'span-end', id, endMs: t, ...(u ? { tokens: u } : {}), ...(u && agentSpanCost(model, u, pricing) != null ? { costUsd: agentSpanCost(model, u, pricing) } : {}) }] }
+  const close = (t: number): AgentRunEvent[] => { if (!llm) return []; const id = llm; llm = null; const u = lastUsage.get(id); return [{ type: 'span-end', id, endMs: t, ...(u ? { tokens: u } : {}), ...arCostField(model, u, pricing) }] }
   const begin = (t: number, id?: unknown): AgentRunEvent[] => {
     if (started) return []
     started = true; root = `${id ?? 'run'}:root`
@@ -773,7 +813,7 @@ export function aiSdkRunMapper({ now = Date.now, name = 'streamText', pricing, m
     if (meta) {
       if (typeof meta.model === 'string' || typeof meta.modelId === 'string') model = String(meta.model ?? meta.modelId)
       const u = arUsage(meta.usage), target = llm ?? lastLlm
-      if (u && target && type !== 'start' && type !== 'finish') { lastUsage.set(target, u); out.push({ type: 'span-update', id: target, tokens: u, ...(model ? { model } : {}), ...(agentSpanCost(model, u, pricing) != null ? { costUsd: agentSpanCost(model, u, pricing) } : {}) }) }
+      if (u && target && type !== 'start' && type !== 'finish') { lastUsage.set(target, u); out.push({ type: 'span-update', id: target, tokens: u, ...(model ? { model } : {}), ...arCostField(model, u, pricing) }) }
     }
     switch (type) {
       case 'start': out.push(...begin(t, p.messageId)); break
