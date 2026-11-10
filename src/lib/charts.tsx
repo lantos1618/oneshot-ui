@@ -1,29 +1,35 @@
 import { memo, useEffect, useId, useLayoutEffect, useMemo, useRef, useState, type FocusEvent as ReactFocusEvent, type KeyboardEvent as ReactKeyboardEvent, type PointerEvent as ReactPointerEvent, type ReactNode, type Ref, type RefObject, type CSSProperties } from 'react'
 import { motion } from 'motion/react'
-import { AnimatedNumber, Button, DeltaBadge, Icon, IconButton, SparkChart, TOUCH, chartPath, composeRefs, menuItemClass, type Curve, addDays, clamp, cn, dayKey, extent, fmt, isTouch, maxOf, minOf, onMouseLeave, prefersReducedMotion, releaseTouchCapture, safeColor, spring, startOfWeek, surface, useCoarsePointer, useControllable, useOutside, useWidth, plural, rangeStr, downloadBlob, writeClipboard, gridKeyMove, focusStep, useActiveIndex, useStatusFlash, useLive, Legend, useResizeObserver, svgN } from './core'
+import { AnimatedNumber, Button, DeltaBadge, FOCUS, Icon, IconButton, SparkChart, TOUCH, chartPath, colorResolver, composeRefs, focusStep, menuItemClass, surface, type Curve, type RGBA, addDays, clamp, cn, dayKey, extent, fmt, isTouch, maxOf, minOf, onMouseLeave, prefersReducedMotion, releaseTouchCapture, safeColor, spring, startOfWeek, useCoarsePointer, useControllable, useOutside, useWidth, plural, rangeStr, downloadBlob, writeClipboard, gridKeyMove, useActiveIndex, useStatusFlash, useLive, Legend, useResizeObserver, svgN } from './core'
 import { useTween, useViewport } from './motion'
-import { CHART_NEUTRAL, PALETTE, linScale, niceTicks, polarPt, seriesColor, svgWedge, ticksIn } from './vizkit'
-import { TAG_SR_ONLY, TagGlyph, TagTooltip, layoutTimeTags, timeTagLook, timeTagTint, timeTicks, useTagFocus, type TimeTag, type TimeTagKind, type TimeTagStyle } from './annotate'
+import { CHART_NEUTRAL, VIZ_LIT_RING, VizTip, linScale, niceStep, niceTicks, polarPt, seriesColor, svgWedge, textPx, tickDecimals, ticksIn, vizTipAnchor, type VizTipAnchor } from './vizkit'
+import { TAG_LAYOUT, TagGlyph, TagTooltip, layoutTimeTags, resolveTagKinds, timeSpanText, timeTagLook, timeTagTint, timeTicks, useTagFocus, type PlacedTimeTag, type TimeTag, type TimeTagKind, type TimeTagStyle } from './annotate'
 
 export { CHART_NEUTRAL, PALETTE, niceTicks } from './vizkit'
 
 /** Compact numbers: compact(12400) → "12.4K" (core fmt.compact). */
 export const compact = fmt.compact
 
-/** A cached time label per instant: a chart formats every x label on each render to size its axis (511 points for a long series). */
-const chartTimeTexts = new Map<number, string>()
-function chartTimeText(ms: number) {
-  let s = chartTimeTexts.get(ms)
-  if (s === undefined) { if (chartTimeTexts.size > 20000) chartTimeTexts.clear(); s = fmt.time(ms); chartTimeTexts.set(ms, s) }
+/** Cached time labels per instant, with the date once the axis spans a day: a chart formats every x label on each render to size its axis (511 points for a long series). */
+const chartTimeTexts = [new Map<number, string>(), new Map<number, string>()]
+function chartTimeText(ms: number, spanMs: number) {
+  const cache = chartTimeTexts[spanMs >= 86_400_000 ? 1 : 0]
+  let s = cache.get(ms)
+  if (s !== undefined) return s
+  if (cache.size > 20000) cache.clear()
+  s = timeSpanText(ms, spanMs)
+  cache.set(ms, s)
   return s
 }
 
 /** Fixed decimals: chartFixed(1.234, 2) → "1.23". */
-const chartFixed = (v: number, d = 1) => fmt.number(Math.round(v * 10 ** d) / 10 ** d, { minimumFractionDigits: d, maximumFractionDigits: d })
+const chartFixed = (v: number, d = 1) => fmt.fixed(v, d)
 /** Whole percent of a fraction: 0.42 → "42%". */
 const chartPct = (f: number) => fmt.percent(Number.isFinite(f) ? f : 0, 0)
 /** Room for the widest y-tick label. */
-const chartAxisPad = (labels: string[], min = 40) => Math.max(min, Math.ceil(maxOf(labels.map(s => s.length), 0) * 6.2 + 12))
+const chartAxisPad = (labels: string[], min = 40) => Math.max(min, Math.ceil(textPx(maxOf(labels.map(s => s.length), 0), 12)))
+/** Labels for an axis over [lo, hi] with the decimals its tick step needs (0, 0.2, 0.4… rather than 0, 0, 0…). */
+const chartAxisFormat = (lo: number, hi: number, count = 4) => { const d = tickDecimals(niceStep(hi - lo, count)); return (v: number) => chartFixed(v, d) }
 /**
  * One row of chart data: the x label plus one field per series. Chart is generic over its rows, so typed rows
  * (interfaces included) work too and `x` / `series[].key` are checked against their keys; this is the untyped default.
@@ -51,7 +57,11 @@ function useChartReveal(seen: boolean) {
     if (prefersReducedMotion()) { go(); return }
     chartRevealQueue.push(go)
     if (!chartRevealTimer) chartRevealTimer = window.setTimeout(chartRevealPump, 0)
-    return () => { live = false; const k = chartRevealQueue.indexOf(go); if (k >= 0) chartRevealQueue.splice(k, 1) }
+    return () => {
+      live = false
+      const k = chartRevealQueue.indexOf(go)
+      if (k >= 0) chartRevealQueue.splice(k, 1)
+    }
   }, [seen, shown])
   return shown
 }
@@ -79,15 +89,20 @@ export type ChartKitProps = {
   /** the chart's root element: pass it to exportChart */
   ref?: Ref<HTMLDivElement>
 }
-/** One cell of a chart's data table, raw: numbers keep their value for CSV (`data-v`) and are formatted for display. */
-export type ChartCellValue = string | number | null | undefined
-/** A chart's data as raw rows (the first column is the row header) and optional per-column formats for display (numbers default to the locale's). */
-export type ChartTable = { head: string[]; rows: ChartCellValue[][]; formats?: (((v: never) => string) | undefined)[] }
+/**
+ * One cell of a chart's data table, raw: numbers keep their value for CSV (`data-v`) and are formatted for display.
+ * `{ value, text }` gives the raw value and its display text separately (an ISO time shown as "14:05").
+ */
+export type ChartCellValue = string | number | null | undefined | { value: string | number; text: string }
+/** A chart's data as raw rows (the first column is the row header) and optional per-column number formats for display (numbers default to the locale's). */
+export type ChartTable = { head: string[]; rows: ChartCellValue[][]; formats?: (((v: number) => string) | undefined)[] }
+const chartCellSame = (a: ChartCellValue, b: ChartCellValue) => a === b || (typeof a === 'object' && typeof b === 'object' && !!a && !!b && a.value === b.value && a.text === b.text)
+const chartCellRaw = (v: ChartCellValue) => (v !== null && typeof v === 'object' ? v.value : v ?? '')
 /** Plain text of a label that may be a node (BarList labels): strings and numbers, else empty. */
 const chartText = (l: ReactNode): string => (typeof l === 'string' || typeof l === 'number' ? String(l) : Array.isArray(l) ? l.map(chartText).join('') : '')
 
 const chartTableSame = (a: ChartTable, b: ChartTable) => a === b || (a.head.join('\u0000') === b.head.join('\u0000') && a.rows.length === b.rows.length
-  && a.rows.every((r, i) => r.length === b.rows[i].length && r.every((c, j) => c === b.rows[i][j])) && (a.formats ?? []).every((f, i) => f === b.formats?.[i]))
+  && a.rows.every((r, i) => r.length === b.rows[i].length && r.every((c, j) => chartCellSame(c, b.rows[i][j]))) && (a.formats ?? []).every((f, i) => f === b.formats?.[i]))
 /**
  * The data table (memoised: a chart re-renders on every hover, its data rarely). Numbers are end-aligned with tabular
  * digits, formatted by their column's format or the locale's; the visible table scrolls inside a bounded, focusable box.
@@ -97,8 +112,9 @@ const ChartDataTable = memo(function ChartDataTable({ id, sumId, label, summary,
   const numeric = data.head.map((_, ci) => ci > 0 && data.rows.length > 0 && data.rows.every(r => r[ci] === undefined || r[ci] === null || typeof r[ci] === 'number'))
   const text = (v: ChartCellValue, ci: number) => {
     if (v === null || v === undefined) return ''
-    const f = data.formats?.[ci] as ((v: string | number) => string) | undefined
-    return f ? f(v) : typeof v === 'number' ? fmt.number(v) : v
+    if (typeof v === 'object') return v.text
+    if (typeof v === 'string') return v
+    return data.formats?.[ci]?.(v) ?? fmt.number(v)
   }
   return (
     <div id={id} data-chart-noexport {...(visible ? { role: 'region', 'aria-label': label, tabIndex: 0 } : {})}
@@ -112,8 +128,8 @@ const ChartDataTable = memo(function ChartDataTable({ id, sumId, label, summary,
           {data.rows.map((r, ri) => (
             <tr key={ri} className="border-b border-[var(--line)] last:border-b-0">
               {r.map((v, ci) => ci === 0
-                ? <th key={ci} scope="row" data-v={v ?? ''} className="px-2.5 py-1 text-start font-normal whitespace-nowrap">{text(v, ci)}</th>
-                : <td key={ci} data-v={v ?? ''} className={cn('px-2.5 py-1 whitespace-nowrap', numeric[ci] ? 'ui-num text-end' : 'text-start')}>{text(v, ci)}</td>)}
+                ? <th key={ci} scope="row" data-v={chartCellRaw(v)} className="px-2.5 py-1 text-start font-normal whitespace-nowrap">{text(v, ci)}</th>
+                : <td key={ci} data-v={chartCellRaw(v)} className={cn('px-2.5 py-1 whitespace-nowrap', numeric[ci] ? 'ui-num text-end' : 'text-start')}>{text(v, ci)}</td>)}
             </tr>
           ))}
         </tbody>
@@ -140,10 +156,23 @@ export type ChartShellOptions = ChartKitProps & {
   columns?: number
   /** the point the first arrow press lands on (default 0) */
   start?: number
-  /** tooltip body for point `i`: shown over the element marked data-ci={i} when the keyboard lands on it, and by `bind(i)` for pointers */
+  /** tooltip body for point `i`, read on every render (live data updates it); shown while `i` is the active point */
   tip?: (i: number) => ReactNode
+  /**
+   * where point `i`'s tooltip points (client px): give it for marks placed by maths (a crosshair, a polar point) and the
+   * tooltip follows the active point however it became active. Without it the tooltip sits over the element marked
+   * data-ci={i} for the keyboard, and at the pointer for `bind(i)`.
+   */
+  tipAt?: (i: number) => VizTipAnchor | null
 }
-type ChartTip = { x: number; y: number; body: ReactNode }
+/** The active point's tooltip placement: at the pointer, or (`at` null) over its data-ci mark; `body` replaces `tip` for a part such as an outlier. */
+type ChartTipPlace = { i: number; at: VizTipAnchor | null; body?: () => ReactNode }
+/** A client point `x`, `y` px from an element's top left (for ChartShellOptions.tipAt). */
+const chartTipAt = (el: Element | null, x: number, y: number): VizTipAnchor | null => {
+  if (!el || !Number.isFinite(x) || !Number.isFinite(y)) return null
+  const r = el.getBoundingClientRect()
+  return { x: r.left + x, y: r.top + y }
+}
 
 /**
  * Everything a chart shares besides its marks: the active (hovered or keyboard) point, the keyboard model, the polite
@@ -155,47 +184,63 @@ type ChartTip = { x: number; y: number; body: ReactNode }
 export function useChartShell(o: ChartShellOptions) {
   const { box, count, columns = 0, start = 0, tip: tipBody } = o
   const id = useId(), tblId = `${id}-tbl`, sumId = `${id}-sum`
-  const [hover, setHover, leave] = useActiveIndex(count, box)
+  const [hover, setHover] = useActiveIndex(count, box)
   const [say, live] = useLive()
-  const [tip, setTip] = useState<ChartTip | null>(null)
-  useOutside([box], () => setTip(null), !!tip, { escape: true })
+  // only where the tooltip sits is stored; its body comes from `tip` at render time, and it shows only for the active point
+  const [place, setPlace] = useState<ChartTipPlace | null>(null)
   const [open, setOpen] = useState(o.table === 'shown')
   const [mode, setMode] = useState(o.table)
   if (mode !== o.table) { setMode(o.table); setOpen(o.table === 'shown') }
-  const tipAt = (i: number | null) => {
-    const b = box.current, el = i === null ? null : b?.querySelector(`[data-ci="${i}"]`)
-    if (!b || !el || !tipBody) { setTip(null); return }
-    const r = el.getBoundingClientRect(), bb = b.getBoundingClientRect()
-    setTip({ x: r.left - bb.left + Math.min(r.width / 2, 60), y: r.top - bb.top - 34, body: tipBody(i!) })
+  const go = (i: number | null) => {
+    setHover(i)
+    setPlace(i === null ? null : { i, at: null })
+    say(i === null ? '' : o.describe(i))
   }
-  const go = (i: number | null) => { setHover(i); say(i === null ? '' : o.describe(i)); if (tipBody) tipAt(i) }
-  const place = (e: ReactPointerEvent, body: (() => ReactNode) | undefined) => { const r = box.current?.getBoundingClientRect(); if (r && body) setTip({ x: e.clientX - r.left, y: e.clientY - r.top - (isTouch(e) ? 70 : 34), body: body() }) }
+  const atPointer = (i: number, e: ReactPointerEvent, body?: () => ReactNode) => setPlace({ i, at: { x: e.clientX, y: e.clientY, touch: isTouch(e) }, body })
   /** Pointer handlers for point `i`'s element: hover it and show its tooltip (`tip`, or `body` for a part such as an outlier) at the pointer. */
-  const bind = (i: number, body = tipBody && (() => tipBody(i))) => ({
+  const bind = (i: number, body?: () => ReactNode) => ({
     onPointerEnter: () => setHover(i),
-    onPointerDown: (e: ReactPointerEvent) => { releaseTouchCapture(e); setHover(i); place(e, body) },
-    onPointerMove: (e: ReactPointerEvent) => place(e, body),
-    onPointerLeave: onMouseLeave(() => setTip(null)),
+    onPointerDown: (e: ReactPointerEvent) => { releaseTouchCapture(e); setHover(i); atPointer(i, e, body) },
+    onPointerMove: (e: ReactPointerEvent) => atPointer(i, e, body),
+    onPointerLeave: onMouseLeave(() => setPlace(null)),
   })
+  /** The tooltip of the active point now: where it points and its body, or null. */
+  const tipNow = (): { at: VizTipAnchor; body: ReactNode } | null => {
+    if (hover === null) return null
+    if (o.tipAt) {
+      const at = tipBody ? o.tipAt(hover) : null
+      return at && { at, body: tipBody!(hover) }
+    }
+    if (!place || place.i !== hover) return null
+    const body = place.body ?? (tipBody && (() => tipBody(hover)))
+    const at = place.at ?? vizTipAnchor(box.current?.querySelector(`[data-ci="${hover}"]`))
+    return body && at ? { at, body: body() } : null
+  }
   const onKeyDown = (e: ReactKeyboardEvent<HTMLElement>) => {
     if (!count || e.altKey || e.ctrlKey || e.metaKey) return
-    if (e.key === 'Escape') { if (hover !== null) { e.preventDefault(); go(null) } return }
-    const next = hover === null ? (gridKeyMove(e.key, 0, count, columns) === null ? null : start) : gridKeyMove(e.key, hover, count, columns)
+    if (e.key === 'Escape') {
+      if (hover !== null) { e.preventDefault(); go(null) }
+      return
+    }
+    // from no point, an arrow lands on `start`; Home and End still go to the ends
+    const from = hover ?? start
+    const next = hover === null && e.key.startsWith('Arrow') ? (gridKeyMove(e.key, from, count, columns) === null ? null : start) : gridKeyMove(e.key, from, count, columns)
     if (next === null) return
     e.preventDefault()
     go(clamp(next, 0, count - 1))
   }
   const focusProps = {
-    tabIndex: 0, role: 'group', 'aria-roledescription': 'chart', 'aria-label': o.label, 'aria-describedby': sumId, onKeyDown, ...leave,
+    tabIndex: 0, role: 'group', 'aria-roledescription': 'chart', 'aria-label': o.label, 'aria-describedby': sumId, onKeyDown,
+    onPointerLeave: onMouseLeave(() => go(null)),
     onFocus: (e: ReactFocusEvent<HTMLElement>) => { if (e.target === e.currentTarget && hover === null && count && e.currentTarget.matches(':focus-visible')) go(clamp(start, 0, count - 1)) },
     onBlur: (e: ReactFocusEvent<HTMLElement>) => { if (!e.currentTarget.contains(e.relatedTarget as Node | null)) go(null) },
   }
-  return { hover, setHover, bind, tip, focusProps, live, open, setOpen, tblId, sumId, o }
+  return { hover, setHover, bind, tipNow, focusProps, live, open, setOpen, tblId, sumId, o }
 }
 export type ChartShellState = ReturnType<typeof useChartShell>
 
-/** Focus ring for a chart's focusable box (the active point carries the second, data-level mark). */
-const CHART_FOCUS = 'rounded-[var(--r-md)] outline-none focus-visible:outline-solid focus-visible:outline-2 focus-visible:outline-offset-4 focus-visible:outline-[var(--accent)]'
+/** Focus ring for a chart's focusable box, further out than a mark's (the active point carries the second, data-level mark). */
+const CHART_FOCUS = cn('rounded-[var(--r-md)] outline-none focus-visible:outline-solid focus-visible:outline-offset-4', FOCUS.outline)
 
 /**
  * Renders a chart around its marks: the focusable plot box (`boxClassName`, `style`; the marks are `children`) with the
@@ -203,9 +248,9 @@ const CHART_FOCUS = 'rounded-[var(--r-md)] outline-none focus-visible:outline-so
  * table. The box is the chart's root (it carries `ref`, `className` and the export attributes) unless something sits next
  * to it; then an outer root does.
  */
-function ChartShell({ shell, className, boxClassName, style, after, children }:
-  { shell: ChartShellState; className?: string; boxClassName?: string; style?: CSSProperties; after?: ReactNode; children: ReactNode }) {
-  const { o, open, setOpen, tblId, sumId, tip, live, focusProps } = shell
+function ChartShell({ shell, className, boxClassName, style, inset, after, children }:
+  { shell: ChartShellState; className?: string; boxClassName?: string; style?: CSSProperties; inset?: [number, number]; after?: ReactNode; children: ReactNode }) {
+  const { o, open, setOpen, tblId, sumId, tipNow, live, focusProps } = shell
   const { table = 'hidden', exportable = false, ref: userRef, box, label, summary, data } = o
   const root = useRef<HTMLDivElement | null>(null)
   const bar = table === 'toggle' || exportable, visible = table === 'shown' || (table === 'toggle' && open)
@@ -213,12 +258,13 @@ function ChartShell({ shell, className, boxClassName, style, after, children }:
   const rootRef = useMemo(() => composeRefs<HTMLDivElement>(root, userRef), [userRef])
   const boxRef = useMemo(() => (outer ? box : composeRefs<HTMLDivElement>(box, root, userRef)), [outer, box, userRef])
   const rootProps = { 'data-chart-root': '', 'data-chart-name': label }
+  const tip = tipNow()
   const tableEl = data ? <ChartDataTable id={tblId} sumId={sumId} label={label} summary={summary} data={data} visible={visible} /> : <span id={sumId} className="sr-only">{summary}</span>
   const plot = (
-    <div ref={boxRef} {...(outer ? null : rootProps)} {...focusProps} className={cn('relative', CHART_FOCUS, boxClassName, !outer && className)} style={style}>
+    <div ref={boxRef} {...(outer ? null : rootProps)} {...focusProps} data-plot-inset={inset?.join(' ')} className={cn('relative', CHART_FOCUS, boxClassName, !outer && className)} style={style}>
       {live}
       {children}
-      {tip && <ChartTooltip x={tip.x} y={tip.y} width={box.current?.clientWidth ?? 300}>{tip.body}</ChartTooltip>}
+      {tip && <VizTip at={() => tipNow()?.at ?? null}>{tip.body}</VizTip>}
       {!outer && tableEl}
     </div>
   )
@@ -309,18 +355,22 @@ async function chartPng(svg: string, width: number, height: number, scale: numbe
   try {
     try { if (!url) throw new Error('no blob URLs'); await load(url) } catch { await load(`data:image/svg+xml;charset=utf-8,${encodeURIComponent(svg)}`) }
     const c = document.createElement('canvas')
-    c.width = Math.max(1, Math.round(width * s)); c.height = Math.max(1, Math.round(height * s))
+    c.width = Math.max(1, Math.round(width * s))
+    c.height = Math.max(1, Math.round(height * s))
     const ctx = c.getContext('2d')
     if (!ctx) throw new Error('exportChart: no 2D canvas')
-    ctx.scale(s, s); ctx.drawImage(img, 0, 0, width, height)
+    ctx.scale(s, s)
+    ctx.drawImage(img, 0, 0, width, height)
     return await new Promise<Blob>((ok, bad) => c.toBlob(b => (b ? ok(b) : bad(new Error('exportChart: the canvas gave no PNG'))), 'image/png'))
   } finally { if (url) URL.revokeObjectURL(url) }
 }
 
 /* ── SVG from the rendered chart ── */
 
-const chartEsc = (s: string) => s.replace(/[&<>"]/g, c => (c === '&' ? '&amp;' : c === '<' ? '&lt;' : c === '>' ? '&gt;' : '&quot;'))
-const chartN = (n: number) => String(Math.round(n * 100) / 100)
+const CHART_ESC: Record<string, string> = { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }
+const chartEsc = (s: string) => s.replace(/[&<>"]/g, c => CHART_ESC[c])
+/** An opacity or alpha for the export, to 0.01. */
+const chartAlpha = (n: number) => String(Math.round(n * 100) / 100)
 /** Resolve var(--x, fallback) in a value from the element's (inherited) custom properties. */
 function chartResolveVars(value: string, el: Element): string {
   let s = value
@@ -340,26 +390,20 @@ function chartResolveVars(value: string, el: Element): string {
   }
   return s
 }
-/** Any CSS colour (color-mix, oklab, color(srgb …)) as rgb()/rgba(), through a 1×1 canvas; plain values pass through. */
-const chartColorCache = new Map<string, string>()
-let chartColorCtx: CanvasRenderingContext2D | null | undefined
-function chartColor(c: string): string {
-  const v = c.trim()
-  if (!v || /^(#|rgba?\(|none$|transparent$|url\(|currentcolor$|context-)/i.test(v) || /^[a-z]+$/i.test(v)) return v
-  const hit = chartColorCache.get(v)
-  if (hit) return hit
-  let out = v
-  try {
-    if (chartColorCtx === undefined) { const cv = document.createElement('canvas'); cv.width = cv.height = 1; chartColorCtx = cv.getContext('2d', { willReadFrequently: true }) }
-    const ctx = chartColorCtx
-    if (ctx) {
-      ctx.clearRect(0, 0, 1, 1); ctx.fillStyle = '#000'; ctx.fillStyle = v; ctx.fillRect(0, 0, 1, 1)
-      const [r, g, b, a] = ctx.getImageData(0, 0, 1, 1).data
-      out = a === 255 ? `rgb(${r}, ${g}, ${b})` : `rgba(${r}, ${g}, ${b}, ${chartN(a / 255)})`
-    }
-  } catch { /* keep the value as it is */ }
-  chartColorCache.set(v, out)
-  return out
+/** colorResolver's answer for a colour it can't read (compared by identity). */
+const CHART_COLOR_MISS: RGBA = [0, 0, 0, 0]
+type ChartColor = (css: string) => string
+/** Any CSS colour (color-mix, oklab, color(srgb …)) as rgb()/rgba(), resolved in `root`'s theme (one cache per export); plain and unreadable values pass through. */
+function chartColors(root: Element): ChartColor {
+  const resolve = colorResolver(root, CHART_COLOR_MISS)
+  return c => {
+    const v = c.trim()
+    if (!v || /^(#|rgba?\(|none$|transparent$|url\(|currentcolor$|context-)/i.test(v) || /^[a-z]+$/i.test(v)) return v
+    const rgba = resolve(v)
+    if (rgba === CHART_COLOR_MISS) return v
+    const [r, g, b] = rgba.slice(0, 3).map(Math.round), a = rgba[3]
+    return a >= 1 ? `rgb(${r}, ${g}, ${b})` : `rgba(${r}, ${g}, ${b}, ${chartAlpha(a)})`
+  }
 }
 const chartClear = (c: string) => !c || c === 'transparent' || /^rgba\(.*,\s*0\)$/.test(c) || c === 'none'
 /** Initial values: a computed value equal to one of these while the element sets its own value means the engine didn't apply it (jsdom). */
@@ -380,11 +424,11 @@ const CHART_SVG_TEXT: Record<string, string | null> = { 'font-family': null, 'fo
 function chartTransform(cs: CSSStyleDeclaration, ox: number, oy: number) {
   const m = cs.transform
   if (!m || m === 'none' || m === 'matrix(1, 0, 0, 1, 0, 0)') return ''
-  return `translate(${chartN(ox)} ${chartN(oy)}) ${m.replace(/,\s*/g, ' ')} translate(${chartN(-ox)} ${chartN(-oy)})`
+  return `translate(${svgN(ox)} ${svgN(oy)}) ${m.replace(/,\s*/g, ' ')} translate(${svgN(-ox)} ${svgN(-oy)})`
 }
 
 /** One <svg> of the chart, cloned with its computed paint inlined, placed at its position in the export. */
-function chartSvgClone(svg: SVGSVGElement, ox: number, oy: number, opacity: number) {
+function chartSvgClone(svg: SVGSVGElement, ox: number, oy: number, opacity: number, chartColor: ChartColor) {
   const r = svg.getBoundingClientRect(), cs = getComputedStyle(svg)
   const w = svg.clientWidth || parseFloat(svg.getAttribute('width') ?? '') || r.width, h = svg.clientHeight || parseFloat(svg.getAttribute('height') ?? '') || r.height
   const clone = svg.cloneNode(true) as SVGSVGElement
@@ -412,12 +456,15 @@ function chartSvgClone(svg: SVGSVGElement, ox: number, oy: number, opacity: numb
     if (ocs.display === 'none' || ocs.visibility === 'hidden') c.setAttribute('display', 'none')
     for (const a of ['class', 'style', 'aria-hidden', 'role', 'tabindex', 'data-ci', 'data-hm']) c.removeAttribute(a)
   })
-  clone.setAttribute('width', chartN(w)); clone.setAttribute('height', chartN(h)); clone.setAttribute('overflow', 'visible')
-  clone.removeAttribute('x'); clone.removeAttribute('y')
+  clone.setAttribute('width', svgN(w))
+  clone.setAttribute('height', svgN(h))
+  clone.setAttribute('overflow', 'visible')
+  clone.removeAttribute('x')
+  clone.removeAttribute('y')
   // the box's top left before its own CSS transform (the donut is rotated -90° about its centre)
   const cx = r.left + r.width / 2 - ox, cy = r.top + r.height / 2 - oy
   const own = chartTransform(cs, w / 2, h / 2)
-  return `<g transform="translate(${chartN(cx - w / 2)} ${chartN(cy - h / 2)})${own ? ' ' + own : ''}"${opacity < 1 ? ` opacity="${chartN(opacity)}"` : ''}>${new XMLSerializer().serializeToString(clone)}</g>`
+  return `<g transform="translate(${svgN(cx - w / 2)} ${svgN(cy - h / 2)})${own ? ' ' + own : ''}"${opacity < 1 ? ` opacity="${chartAlpha(opacity)}"` : ''}>${new XMLSerializer().serializeToString(clone)}</g>`
 }
 
 /** A box's visible rect after a clip-path inset() (the bar wipes of BarList and FunnelChart). */
@@ -439,18 +486,20 @@ function chartSvgOf(root: Element, background: string, title: string) {
   const x0 = Math.min(...rects.map(r => r.left)) - PAD, y0 = Math.min(...rects.map(r => r.top)) - PAD
   const width = Math.max(1, Math.ceil(Math.max(...rects.map(r => r.right)) + PAD - x0)), height = Math.max(1, Math.ceil(Math.max(...rects.map(r => r.bottom)) + PAD - y0))
   const out: string[] = []
+  const chartColor = chartColors(root)
   type Clip = { l: number; t: number; r: number; b: number } | null
   const inClip = (c: Clip, x: number, y: number) => !c || (x >= c.l - 0.5 && x <= c.r + 0.5 && y >= c.t - 0.5 && y <= c.b + 0.5)
   const text = (node: Text, cs: CSSStyleDeclaration, el: Element, opacity: number, clip: Clip) => {
     const s = (node.textContent ?? '').replace(/\s+/g, ' ').trim()
     if (!s) return
-    const range = document.createRange(); range.selectNodeContents(node)
+    const range = document.createRange()
+    range.selectNodeContents(node)
     const r = typeof range.getBoundingClientRect === 'function' ? range.getBoundingClientRect() : el.getBoundingClientRect()
     if (!inClip(clip, r.left + r.width / 2, r.top + r.height / 2)) return
     const fill = chartColor(chartStyle(cs, 'color', el, (el as HTMLElement).style?.color) || '#000')
-    out.push(`<text x="${chartN((r.left) - x0)}" y="${chartN(r.top + r.height / 2 - y0)}" dominant-baseline="central" fill="${chartEsc(fill)}"`
+    out.push(`<text x="${svgN(r.left - x0)}" y="${svgN(r.top + r.height / 2 - y0)}" dominant-baseline="central" fill="${chartEsc(fill)}"`
       + ` font-family="${chartEsc(cs.fontFamily || 'sans-serif')}" font-size="${chartEsc(cs.fontSize || '12px')}"${cs.fontWeight && cs.fontWeight !== '400' ? ` font-weight="${chartEsc(cs.fontWeight)}"` : ''}`
-      + `${opacity < 1 ? ` opacity="${chartN(opacity)}"` : ''}>${chartEsc(s)}</text>`)
+      + `${opacity < 1 ? ` opacity="${chartAlpha(opacity)}"` : ''}>${chartEsc(s)}</text>`)
   }
   const walk = (e: Element, opacity: number, clip: Clip) => {
     if (skip(e)) return
@@ -458,7 +507,7 @@ function chartSvgOf(root: Element, background: string, title: string) {
     if (cs.display === 'none' || cs.visibility === 'hidden') return
     const o = parseFloat(cs.opacity), op = opacity * (Number.isFinite(o) ? o : 1)
     if (op < 0.01) return
-    if (e instanceof SVGSVGElement) { out.push(chartSvgClone(e, x0, y0, op)); return }
+    if (e instanceof SVGSVGElement) { out.push(chartSvgClone(e, x0, y0, op, chartColor)); return }
     if (!(e instanceof HTMLElement)) return
     const r = e.getBoundingClientRect()
     if (clip && (r.right < clip.l || r.left > clip.r || r.bottom < clip.t || r.top > clip.b)) return
@@ -467,13 +516,14 @@ function chartSvgOf(root: Element, background: string, title: string) {
       const rad = Math.min(parseFloat(cs.borderTopLeftRadius) || 0, r.width / 2, r.height / 2)
       if (!chartClear(bg)) {
         const b = chartClipInset(cs, r)
-        if (b.w > 0.5 && b.h > 0.5) out.push(`<rect x="${chartN(b.x - x0)}" y="${chartN(b.y - y0)}" width="${chartN(b.w)}" height="${chartN(b.h)}"${rad ? ` rx="${chartN(rad)}"` : ''} fill="${chartEsc(bg)}"${op < 1 ? ` opacity="${chartN(op)}"` : ''}/>`)
+        if (b.w > 0.5 && b.h > 0.5) out.push(`<rect x="${svgN(b.x - x0)}" y="${svgN(b.y - y0)}" width="${svgN(b.w)}" height="${svgN(b.h)}"${rad ? ` rx="${svgN(rad)}"` : ''} fill="${chartEsc(bg)}"${op < 1 ? ` opacity="${chartAlpha(op)}"` : ''}/>`)
       }
       for (const [side, x1, y1, x2, y2] of [['top', r.left, r.top, r.right, r.top], ['bottom', r.left, r.bottom, r.right, r.bottom], ['left', r.left, r.top, r.left, r.bottom], ['right', r.right, r.top, r.right, r.bottom]] as const) {
         const bw = parseFloat(cs.getPropertyValue(`border-${side}-width`)) || 0, style = cs.getPropertyValue(`border-${side}-style`)
         const bc = chartColor(chartStyle(cs, `border-${side}-color`, e, e.style.borderColor))
         if (!bw || style === 'none' || style === 'hidden' || chartClear(bc)) continue
-        out.push(`<line x1="${chartN(x1 - x0)}" y1="${chartN(y1 - y0)}" x2="${chartN(x2 - x0)}" y2="${chartN(y2 - y0)}" stroke="${chartEsc(bc)}" stroke-width="${chartN(bw)}"${style === 'dashed' ? ` stroke-dasharray="${chartN(bw * 2)} ${chartN(bw)}"` : style === 'dotted' ? ` stroke-dasharray="${chartN(bw)} ${chartN(bw)}"` : ''}${op < 1 ? ` opacity="${chartN(op)}"` : ''}/>`)
+        const dash = { dashed: ` stroke-dasharray="${svgN(bw * 2)} ${svgN(bw)}"`, dotted: ` stroke-dasharray="${svgN(bw)} ${svgN(bw)}"` }[style] ?? ''
+        out.push(`<line x1="${svgN(x1 - x0)}" y1="${svgN(y1 - y0)}" x2="${svgN(x2 - x0)}" y2="${svgN(y2 - y0)}" stroke="${chartEsc(bc)}" stroke-width="${svgN(bw)}"${dash}${op < 1 ? ` opacity="${chartAlpha(op)}"` : ''}/>`)
       }
     }
     const clips = cs.overflowX !== 'visible' || cs.overflowY !== 'visible'
@@ -497,9 +547,9 @@ function chartSvgOf(root: Element, background: string, title: string) {
 
 const CHART_EXPORTS = [['png', 'Download PNG', 'download'], ['svg', 'Download SVG', 'download'], ['csv', 'Download CSV', 'download'], ['copy', 'Copy image', 'copy']] as const
 /**
- * The ⋯ export menu (a small menu button, not overlay's DropdownMenu, so the chart kit stays free of the overlay
- * module): Download PNG / SVG / CSV and Copy image where the clipboard takes images. ↑/↓, Home/End move; Escape or Tab
- * closes; it opens over the chart, so nothing moves. Copy reports "Copied" on the button and to screen readers.
+ * The ⋯ export menu: Download PNG / SVG / CSV and Copy image where the clipboard takes images. ↑/↓, Home/End move;
+ * Escape or Tab closes; it opens over the chart, so nothing moves. Copy reports "Copied" on the button and to screen
+ * readers once the clipboard took the image; a failed export says so.
  */
 function ChartExportMenu({ root }: { root: RefObject<HTMLElement | null> }) {
   const [open, setOpen] = useState(false)
@@ -510,15 +560,25 @@ function ChartExportMenu({ root }: { root: RefObject<HTMLElement | null> }) {
   const box = useRef<HTMLDivElement>(null), trigger = useRef<HTMLButtonElement>(null), menu = useRef<HTMLDivElement>(null)
   useOutside([box], () => setOpen(false), open)
   useEffect(() => { if (open) menu.current?.querySelector<HTMLElement>('[role="menuitem"]')?.focus() }, [open])
-  const close = (refocus: boolean) => { setOpen(false); if (refocus) trigger.current?.focus() }
+  const close = (refocus: boolean) => {
+    setOpen(false)
+    if (refocus) trigger.current?.focus()
+  }
   const run = async (kind: (typeof CHART_EXPORTS)[number][0]) => {
     close(true)
     if (kind === 'copy') {
       const ok = await writeClipboard(new ClipboardItem({ 'image/png': exportChart(root, { format: 'png', download: false }) }))
-      flash(ok); say(ok ? 'Copied' : 'Couldn’t copy the image')
+      flash(ok)
+      say(ok ? 'Copied' : 'Couldn’t copy the image')
       return
     }
-    try { await exportChart(root, { format: kind }); say('') } catch { flash(false); say('Couldn’t export the chart') }
+    try {
+      await exportChart(root, { format: kind })
+      say('')
+    } catch {
+      flash(false)
+      say('Couldn’t export the chart')
+    }
   }
   const onKey = (e: ReactKeyboardEvent<HTMLDivElement>) => {
     if (e.key === 'Escape') { e.preventDefault(); e.stopPropagation(); close(true); return }
@@ -574,26 +634,11 @@ export function chartDownsample<T>(data: T[], max?: number): T[] {
   for (let i = 0; i < Math.floor(max); i++) out.push(data[Math.round(i * step)])
   return out
 }
-const linePath = (pts: [number, number][]) => chartPath(pts)
 const num = (v: unknown) => (v === null || v === undefined || v === '' ? null : Number(v))
 
-/**
- * Tooltip inside a chart's relative box (the in-box sibling of overlay's PointerTooltip, same surface): right of `x`,
- * flipping left when there is no room, clamped to the box, gliding between points.
- */
-function ChartTooltip({ x, y, children, width }: { x: number; y: number; children: ReactNode; width: number }) {
-  const ref = useRef<HTMLDivElement>(null)
-  const [tw, setTw] = useState(150)
-  useLayoutEffect(() => { const w = ref.current?.offsetWidth; if (w && Math.abs(w - tw) > 1) setTw(w) })
-  const fitsR = x + 12 + tw <= width, fitsL = x - 12 - tw >= -8
-  const right = fitsR || !fitsL
-  const left = clamp(right ? x + 12 : x - 12 - tw, Math.min(0, width - tw), width - tw)
-  return (
-    <motion.div ref={ref} role="tooltip" className={cn(surface.floating, 'pointer-events-none absolute z-10 w-max max-w-[min(300px,calc(100vw-40px))] min-w-[120px] rounded-[var(--r-md)] px-2.5 py-1.5 text-xs')}
-      initial={false} animate={{ left, top: y }} transition={spring(0.1, 0.25)}>
-      {children}
-    </motion.div>
-  )
+/** A chart tooltip body: a bold title over rows (TooltipRow) or lines. */
+function ChartTip({ title, children }: { title?: ReactNode; children?: ReactNode }) {
+  return <>{title !== undefined && <div className="mb-1 font-medium">{title}</div>}{children}</>
 }
 function TooltipRow({ color, label, value, dashed }: { color: string; label: ReactNode; value: ReactNode; dashed?: boolean }) {
   return (
@@ -635,6 +680,25 @@ export type ChartAnnotations = {
   onActiveChange?: (id: string | null) => void; onSelect?: (tag: TimeTag) => void; label?: string
   /** 'current' (default): room for the shown style's rows, eased when data or width change it. 'max': room for every style, so the height never changes: use it for live or streaming data. */
   reserve?: 'current' | 'max'
+}
+/** Rows of tag glyphs on a Chart: a glyph plus the gap to the next row. */
+const TAG_ROW = TAG_LAYOUT.size + TAG_LAYOUT.gap
+/** Room each tag style takes above the plot (`top`) and under the axis (`bottom`) for `rows` rows of glyphs. */
+const CHART_TAG_ROOM: Record<TimeTagStyle, { top: (rows: number) => number; bottom: (rows: number) => number }> = {
+  auto: { top: () => 8 + TAG_LAYOUT.pinStack * TAG_ROW, bottom: rows => rows * TAG_ROW + 6 },
+  pins: { top: rows => 8 + rows * TAG_ROW, bottom: () => 0 },
+  rug: { top: () => 6, bottom: rows => rows * TAG_ROW + 6 },
+  rollup: { top: () => 6, bottom: rows => rows * TAG_ROW + 6 },
+  flags: { top: () => 24, bottom: () => 0 },
+  dots: { top: () => 6, bottom: () => 0 },
+}
+/** Show every Nth x label, N from this tidy set (niceStep past the end). */
+const X_LABEL_EVERY = [1, 2, 3, 4, 5, 6, 10, 12, 15, 20, 25, 50, 100]
+/** How a Chart reads a row's time, or null for a category axis: `xTime` as a mapper; `true`, or annotations over numeric or Date x, read `x`. */
+function chartTimeOf<T>(first: unknown, x: keyof T, xTime: boolean | ((d: T) => number | Date) | undefined, annotated: boolean): ((d: T) => number) | null {
+  if (typeof xTime === 'function') return d => +xTime(d)
+  const auto = xTime === undefined && annotated && (typeof first === 'number' || first instanceof Date)
+  return xTime || auto ? d => +(d[x] as number | Date) : null
 }
 /** Horizontal grid lines at `ticks` (zero solid, the rest dashed) with labels left of `x1` when `format` is given, and an optional right axis. */
 function ChartGridY({ ticks, Y, x1, x2, format, right, dash = '3 3', gap = 8 }:
@@ -704,34 +768,30 @@ export function Chart<T extends object = ChartDatum>({ data: allRows, x, series,
   const S = series.map((s, i) => ({ ...s, type: s.type ?? 'line', color: seriesColor(i, s.color), label: s.label ?? s.key, axis: s.axis ?? 'left', curve: s.curve ?? curve }))
   type RS = (typeof S)[number]
   const hasL = S.some(s => s.axis === 'left'), hasR = S.some(s => s.axis === 'right')
-  // annotations add headroom (pins, flags) and a band under the axis (rug, rollup); set once the layout is known, below
-  const aStyle = A?.style ?? 'auto', ROW = 23
-  const pad = { l: 8, r: 10, t: S.some(s => s.labelOf) ? 22 : 10, b: 24 }
-  let ih = height - pad.t - pad.b
+  const aStyle = A?.style ?? 'auto'
   const n = data.length, slots = S.filter(s => s.type === 'bar' || s.type === 'float'), banded = slots.length > 0
   // stacking: each series sits on the sum of the stackable series before it (same type, same axis)
   const base = (i: number, si: number) => stacked ? S.slice(0, si).filter(s => s.type === S[si].type && s.axis === S[si].axis).reduce((a, s) => a + (num(data[i][s.key]) ?? 0), 0) : 0
   const top = (i: number, si: number) => { const v = num(data[i][S[si].key]); return v === null ? null : v + base(i, si) }
-  const scale = (side: 'left' | 'right', dom?: [number, number]) => {
+  /** A value axis: round ticks over the side's values, `dom` and (with `zero`) 0; null when the side has nothing to show. */
+  const axisOf = (side: 'left' | 'right', dom?: [number, number]) => {
     const v = data.flatMap((d, i) => S.flatMap((s, si) => s.axis !== side ? [] : [top(i, si), s.from ? num(d[s.from]) : null, s.whisker ? num(d[s.whisker.low]) : null, s.whisker ? num(d[s.whisker.high]) : null])
       .concat(side === 'left' && band ? [num(d[band.lower]), num(d[band.upper])] : [])).filter((q): q is number => q !== null && Number.isFinite(q))
     if (!v.length && !dom) return null
-    const lo = minOf(v, Math.min(dom?.[0] ?? Infinity, zero ? 0 : Infinity)), hi = maxOf(v, dom?.[1] ?? -Infinity)
+    const lo = minOf(v, Math.min(dom?.[0] ?? Infinity, zero ? 0 : Infinity))
+    const hi = maxOf(v, Math.max(dom?.[1] ?? -Infinity, zero ? 0 : -Infinity))
     const ticks = niceTicks(lo, hi), y0 = ticks[0], y1 = ticks[ticks.length - 1]
-    return { ticks, Y: (val: number) => linScale(y0, y1 || y0 + 1, pad.t + ih, pad.t)(val), rest: y0 <= 0 && y1 >= 0 ? 0 : y0 }
+    return { ticks, y0, y1, rest: y0 <= 0 && y1 >= 0 ? 0 : y0 }
   }
-  const L = hasL ? scale('left', domain) : null, R = hasR ? scale('right') : null, G = L ?? R
+  const LA = hasL ? axisOf('left', domain) : null, RA = hasR ? axisOf('right') : null
   // the axes take the room their widest tick label needs
-  if (L) pad.l = chartAxisPad(L.ticks.map(format))
-  if (R) pad.r = chartAxisPad(R.ticks.map(rightFormat ?? format))
-  const iw = Math.max(0, w - pad.l - pad.r)
-  const sc = (s: RS) => (s.axis === 'right' ? R : L) ?? G!
+  const padL = LA ? chartAxisPad(LA.ticks.map(format)) : 8, padR = RA ? chartAxisPad(RA.ticks.map(rightFormat ?? format)) : 10
+  const iw = Math.max(0, w - padL - padR)
   const step = iw / Math.max(1, banded ? n : n - 1)
   // time x axis: rows placed by time; tx(ms) maps any time (a tag) onto the plot
-  const v0: unknown = data[0]?.[x]
-  const timeOf = typeof xTime === 'function' ? (d: T) => +xTime(d) : xTime || (xTime === undefined && A && (typeof v0 === 'number' || v0 instanceof Date)) ? (d: T) => +(d[x] as number | Date) : null
+  const timeOf = chartTimeOf<T>(data[0]?.[x], x, xTime, !!A)
   const T = timeOf ? data.map(timeOf) : null
-  const t0 = T?.[0] ?? 0, t1 = T?.[n - 1] ?? 1, linT = linScale(t0, t1 === t0 ? t0 + 1 : t1, pad.l, pad.l + iw)
+  const t0 = T?.[0] ?? 0, t1 = T?.[n - 1] ?? 1, linT = linScale(t0, t1 === t0 ? t0 + 1 : t1, padL, padL + iw)
   /** fractional row index of a time (binary search over the rows' times) */
   const fracAt = (ms: number) => {
     if (!T || n < 2 || ms <= T[0]) return 0
@@ -740,14 +800,14 @@ export function Chart<T extends object = ChartDatum>({ data: allRows, x, series,
     while (hi - lo > 1) { const mid = (lo + hi) >> 1; if (T[mid] <= ms) lo = mid; else hi = mid }
     return lo + (ms - T[lo]) / (T[hi] - T[lo] || 1)
   }
-  const X = (i: number) => (T && !banded ? linT(T[i]) : pad.l + (banded ? step * (i + 0.5) : step * i))
-  const tx = (ms: number) => (banded ? pad.l + step * (fracAt(ms) + 0.5) : linT(ms))
-  const xText = (i: number) => (xFormat ? xFormat(data[i][x], i) : T ? chartTimeText(T[i]) : String(data[i][x] ?? ''))
-  // skip x labels that would collide: show every Nth (N from a tidy 1, 2, 3, 4, 5, 6, 10… set) so each one gets
-  // its estimated 11px width plus a gap. Dense charts (histograms with gap={0}) rely on this.
-  const labelW = maxOf(data.map((_, i) => xText(i).length), 0) * 6.6 + 10
-  const need = Math.max(1, Math.ceil(labelW / (step || 1)))
-  const every = [1, 2, 3, 4, 5, 6, 10, 12, 15, 20, 25, 50, 100].find(k => k >= need) ?? need
+  const X = (i: number) => (T && !banded ? linT(T[i]) : padL + (banded ? step * (i + 0.5) : step * i))
+  const tx = (ms: number) => (banded ? padL + step * (fracAt(ms) + 0.5) : linT(ms))
+  const timeText = (ms: number) => chartTimeText(ms, t1 - t0)
+  const xText = (i: number) => (xFormat ? xFormat(data[i][x], i) : T ? timeText(T[i]) : String(data[i][x] ?? ''))
+  // skip x labels that would collide: show every Nth (N from a tidy set) so each gets its estimated width plus a gap;
+  // dense charts (histograms with gap={0}) rely on this
+  const need = Math.max(1, Math.ceil(textPx(maxOf(data.map((_, i) => xText(i).length), 0), 10) / (step || 1)))
+  const every = niceStep(need, 1, X_LABEL_EVERY)
   const runs = (si: number) => { // indices of each unbroken run of non-null values (nulls leave gaps)
     const out: number[][] = [[]]
     data.forEach((_, i) => { if (top(i, si) === null) { if (out[out.length - 1].length) out.push([]) } else out[out.length - 1].push(i) })
@@ -759,50 +819,35 @@ export function Chart<T extends object = ChartDatum>({ data: allRows, x, series,
   const span = (i: number, si: number): [number, number] | null => {
     const s = S[si]
     if (s.type === 'float') { const a = val(data[i], s.from), b = num(data[i][s.key]); return a === null || b === null ? null : [a, b] }
-    const v = top(i, si); return v === null ? null : [base(i, si), v]
+    const v = top(i, si)
+    return v === null ? null : [base(i, si), v]
   }
-  const fmtOf = (s: RS) => (s.axis === 'right' ? rightFormat ?? format : format)
+  /* ── annotations: tags over time (annotate.tsx) ── */
+  const aTags = !A ? [] : A.spans === 'none' ? A.tags.filter(t => t.end === undefined) : A.tags
+  const tagKinds = useMemo(() => resolveTagKinds(A?.kinds, A?.tags), [A?.kinds, A?.tags])
+  const [activeAt, setActiveRaw] = useControllable<string | null>(A?.activeId, null, A?.onActiveChange)
+  const setActive = (id: string | null) => { if (id !== activeAt) setActiveRaw(id) }
+  const tags = useTagFocus({ tags: aTags, activeId: activeAt, onActive: setActive, onSelect: A?.onSelect, label: A?.label })
+  const tl = A && T && iw > 0 ? layoutTimeTags(aTags, { x: tx, width: w - padR, style: aStyle, domain: [t0, t1] }) : null
+  // room for the tags: 'max' every style it may switch to; 'current' the shown style's rows, eased when they change
+  const aMax = !tl || A?.reserve === 'max', room = CHART_TAG_ROOM[aMax ? aStyle : tl.style], rows = aMax ? TAG_LAYOUT.maxStack : Math.max(1, tl.rows)
+  const [aTop, aBand] = useChartEase(A ? [room.top(rows), room.bottom(rows)] : [0, 0], aMax)
+  // the plot box, settled before any scale is built
+  const pad = { l: padL, r: padR, t: (S.some(s => s.labelOf) ? 22 : 10) + aTop, b: 24 } as const
+  const ih = height - pad.t - pad.b
+  const scaleOf = (a: typeof LA) => a && { ...a, Y: linScale(a.y0, a.y1, pad.t + ih, pad.t) }
+  const L = scaleOf(LA), R = scaleOf(RA), G = L ?? R
+  const sc = (s: RS) => (s.axis === 'right' ? R : L) ?? G!
+  const displayFormatOf = (s: RS) => (s.axis === 'right' ? rightFormat ?? format : format)
+  const tableFormatOf = (s: RS) => (s.axis === 'right' ? rightFormat ?? formatProp : formatProp)
   /** the row under a pointer's x */
   const rowAt = (px: number) => clamp(Math.round(T && !banded ? fracAt(t0 + ((px - pad.l) / (iw || 1)) * (t1 - t0)) : (px - pad.l - (banded ? step / 2 : 0)) / step), 0, n - 1)
   const valueText = (i: number, si: number) => {
     const s = S[si]
-    if (s.type === 'float') { const sp = span(i, si); return sp && `${fmtOf(s)(sp[0])} to ${fmtOf(s)(sp[1])}` }
-    const v = num(data[i][s.key]); return v === null ? null : fmtOf(s)(v)
+    if (s.type === 'float') { const sp = span(i, si); return sp && `${displayFormatOf(s)(sp[0])} to ${displayFormatOf(s)(sp[1])}` }
+    const v = num(data[i][s.key])
+    return v === null ? null : displayFormatOf(s)(v)
   }
-  const names = S.map(s => s.label)
-  const chartLabel = label ?? `${names.length ? fmt.list(names) : 'Data'} chart`
-  // the data table: every row (not the downsampled ones), one column per value the series read, in the chart's format
-  const fmtOf2 = (s: RS) => (s.axis === 'right' ? rightFormat ?? formatProp : formatProp)
-  const col = (head: string, key: keyof T, f?: (v: number) => string): [string, keyof T, ((v: number) => string) | undefined] => [head, key, f]
-  const tcols = S.flatMap(s => [
-    ...(s.from ? [col(`${s.label} (${s.from})`, s.from, fmtOf2(s))] : []),
-    col(s.from || s.whisker ? `${s.label} (${s.key})` : s.label, s.key, fmtOf2(s)),
-    ...(s.whisker ? [s.whisker.low, s.whisker.high].map(k => col(`${s.label} (${k})`, k, fmtOf2(s))) : []),
-  ]).concat(band ? [band.lower, band.upper].map(k => col(`${band.label ?? 'Range'} (${k})`, k, formatProp)) : [])
-  const xCell = (d: T, i: number) => xFormat ? xFormat(d[x], i) : timeOf ? new Date(timeOf(d)).toISOString() : d[x] as ChartCellValue
-  const tableData: ChartTable = {
-    head: [timeOf ? 'Time' : 'Category', ...tcols.map(c => c[0])],
-    rows: allRows.map((d, i) => [xCell(d, i), ...tcols.map(c => num(d[c[1]]))]),
-    formats: [timeOf && !xFormat ? (iso: string) => chartTimeText(Date.parse(iso)) : undefined, ...tcols.map(c => c[2])],
-  }
-  const shell = useChartShell({
-    table, exportable, ref: userRef, box: ref, count: n, label: chartLabel, data: tableData,
-    summary: summary ?? (n ? [`${plural(n, 'point')} from ${xText(0)} to ${xText(n - 1)}.`, ...S.map(s => `${s.label}: ${rangeStr(data.map((_, i) => s.type === 'float' ? num(data[i][s.key]) ?? NaN : top(i, S.indexOf(s)) ?? NaN), fmtOf(s))}.`)].join(' ') : 'No data.'),
-    describe: i => `${xText(i)}: ${S.map((s, si) => { const v = valueText(i, si); return v === null ? null : `${s.label} ${v}` }).filter(Boolean).join(', ')}`,
-  })
-  const { hover, setHover } = shell
-  const onPlotPointer = (e: ReactPointerEvent<SVGSVGElement>) => setHover(rowAt(e.clientX - e.currentTarget.getBoundingClientRect().left))
-  /* ── annotations: tags over time (annotate.tsx) ── */
-  const aTags = !A ? [] : A.spans === 'none' ? A.tags.filter(t => t.end === undefined) : A.tags
-  const [activeAt, setActiveRaw] = useControllable<string | null>(A?.activeId, null, A?.onActiveChange)
-  const setActive = (id: string | null) => { if (id !== activeAt) setActiveRaw(id) }
-  const tags = useTagFocus({ tags: aTags, activeId: activeAt, onActive: setActive, onSelect: A?.onSelect, label: A?.label })
-  const tl = A && T && iw > 0 ? layoutTimeTags(aTags, { x: tx, width: w - pad.r, style: aStyle, domain: [t0, t1] }) : null
-  // room for the tags: 'max' every style it may switch to; 'current' the shown style's rows, eased when they change
-  const aMax = !tl || A?.reserve === 'max', st = aMax ? aStyle : tl.style, rows = aMax ? 3 : Math.max(1, tl.rows)
-  const want = !A ? [0, 0] : [st === 'pins' ? 8 + (aMax && st === aStyle ? 3 : rows) * ROW : st === 'auto' ? 8 + 2 * ROW : st === 'flags' ? 24 : 6, /auto|rug|rollup/.test(st) ? rows * ROW + 6 : 0]
-  const [aTop, aBand] = useChartEase(want, aMax)
-  pad.t += aTop; ih = height - pad.t - pad.b
   const s0 = S.findIndex(s => s.type === 'line' || s.type === 'area')
   /** y of the first line series at a time (interpolated), or the plot floor */
   const lineY = (ms: number) => {
@@ -810,13 +855,62 @@ export function Chart<T extends object = ChartDatum>({ data: allRows, x, series,
     const v = a === null ? b : b === null ? a : a + (b - a) * (f - i)
     return v === null ? pad.t + ih : sc(S[s0]).Y(v)
   }
-  const pinY = (ms: number, row: number) => Math.max(10, lineY(ms) - 17 - row * ROW), rugY = (row: number) => height + 4 + ROW / 2 + row * ROW
-  const look = (t: TimeTag) => timeTagLook(t, A?.kinds)
+  const pinY = (ms: number, row: number) => Math.max(10, lineY(ms) - 17 - row * TAG_ROW), rugY = (row: number) => height + 4 + TAG_ROW / 2 + row * TAG_ROW
+  /** y of a tag glyph per style */
+  const tagY: Record<Exclude<TimeTagStyle, 'auto'>, (ms: number, row: number) => number> = { pins: pinY, rug: (_, row) => rugY(row), rollup: (_, row) => rugY(row), flags: () => pad.t, dots: ms => lineY(ms) }
+  const look = (t: TimeTag) => timeTagLook(t, tagKinds)
   const placed = tl?.points.find(p => p.tag.id === activeAt), host = placed?.hidden ? tl!.points.find(p => p.more?.includes(placed.tag.id)) : placed
   const aSpan = tl?.spans.find(p => p.tag.id === activeAt), aBin = placed?.bin !== undefined ? tl!.bins[placed.bin] : undefined
   const activeTag = placed?.tag ?? aSpan?.tag ?? null
-  const anchor = !tl ? null : aSpan ? { x: clamp((aSpan.x0 + aSpan.x1) / 2, pad.l, w - pad.r), y: pad.t } : !host ? null
-    : { x: aBin ? aBin.x : host.x, y: aBin ? rugY(aBin.row) : tl.style === 'pins' ? pinY(host.ms, host.row) : tl.style === 'rug' ? rugY(host.row) : tl.style === 'flags' ? pad.t : lineY(host.ms) }
+  /** where the active tag's tooltip points: the middle of its span, its rollup chip, or its glyph (or the glyph it folds into) */
+  const tagAnchor = () => {
+    if (!tl) return null
+    if (aSpan) return { x: clamp((aSpan.x0 + aSpan.x1) / 2, pad.l, w - pad.r), y: pad.t }
+    if (!host) return null
+    if (aBin) return { x: aBin.x, y: rugY(aBin.row) }
+    return { x: host.x, y: tagY[tl.style](host.ms, host.row) }
+  }
+  const anchor = tagAnchor()
+  const names = S.map(s => s.label)
+  const chartLabel = label ?? `${names.length ? fmt.list(names) : 'Data'} chart`
+  // the data table: every row (not the downsampled ones), one column per value the series read, in the chart's format
+  const col = (head: string, key: keyof T, f?: (v: number) => string): [string, keyof T, ((v: number) => string) | undefined] => [head, key, f]
+  const tcols = S.flatMap(s => [
+    ...(s.from ? [col(`${s.label} (${s.from})`, s.from, tableFormatOf(s))] : []),
+    col(s.from || s.whisker ? `${s.label} (${s.key})` : s.label, s.key, tableFormatOf(s)),
+    ...(s.whisker ? [s.whisker.low, s.whisker.high].map(k => col(`${s.label} (${k})`, k, tableFormatOf(s))) : []),
+  ]).concat(band ? [band.lower, band.upper].map(k => col(`${band.label ?? 'Range'} (${k})`, k, formatProp)) : [])
+  const xCell = (d: T, i: number): ChartCellValue => {
+    if (xFormat) return xFormat(d[x], i)
+    if (!timeOf) return d[x] as ChartCellValue
+    const ms = timeOf(d)
+    return { value: new Date(ms).toISOString(), text: timeText(ms) }
+  }
+  const tableData: ChartTable = {
+    head: [timeOf ? 'Time' : 'Category', ...tcols.map(c => c[0])],
+    rows: allRows.map((d, i) => [xCell(d, i), ...tcols.map(c => num(d[c[1]]))]),
+    formats: [undefined, ...tcols.map(c => c[2])],
+  }
+  /** the crosshair tooltip points at the highest value in the row (or the plot top) */
+  const crossY = (i: number) => minOf(S.flatMap((s, si) => { const v = top(i, si); return v === null ? [] : [sc(s).Y(v)] }), pad.t + ih / 2)
+  const tipBody = (i: number) => tooltip ? tooltip(data[i], i) : <ChartTip title={xText(i)}>
+    {S.map((s, si) => {
+      if (s.type === 'float') { const sp = span(i, si); return sp && <TooltipRow key={s.key} color={s.colorOf?.(data[i], i) ?? s.color} label={s.label} value={`${displayFormatOf(s)(sp[0])} → ${displayFormatOf(s)(sp[1])}`} /> }
+      const v = num(data[i][s.key])
+      return v !== null && <TooltipRow key={s.key} color={s.color} label={s.label} dashed={s.dashed} value={displayFormatOf(s)(v)} />
+    })}
+    {band && num(data[i][band.lower]) !== null && <TooltipRow color="var(--band)" label={band.label ?? 'Range'} value={`${format(num(data[i][band.lower])!)}–${format(num(data[i][band.upper])!)}`} />}
+  </ChartTip>
+  const shell = useChartShell({
+    table, exportable, ref: userRef, box: ref, count: n, label: chartLabel, data: tableData,
+    summary: summary ?? (n ? [`${plural(n, 'point')} from ${xText(0)} to ${xText(n - 1)}.`, ...S.map(s => `${s.label}: ${rangeStr(data.map((_, i) => s.type === 'float' ? num(data[i][s.key]) ?? NaN : top(i, S.indexOf(s)) ?? NaN), displayFormatOf(s))}.`)].join(' ') : 'No data.'),
+    describe: i => `${xText(i)}: ${S.map((s, si) => { const v = valueText(i, si); return v === null ? null : `${s.label} ${v}` }).filter(Boolean).join(', ')}`,
+    // a tag's tooltip replaces the crosshair's
+    tip: activeTag ? undefined : tipBody,
+    tipAt: i => (w > 0 ? chartTipAt(ref.current, X(i), crossY(i)) : null),
+  })
+  const { hover, setHover } = shell
+  const onPlotPointer = (e: ReactPointerEvent<SVGSVGElement>) => setHover(rowAt(e.clientX - e.currentTarget.getBoundingClientRect().left))
   useOutside([ref], () => setActive(null), !!activeTag, { escape: true })
   const tap = useRef({ type: '', was: false })
   const tagPtr = (t: TimeTag) => ({
@@ -827,54 +921,61 @@ export function Chart<T extends object = ChartDatum>({ data: allRows, x, series,
   })
   const fade = { opacity: seen ? 1 : 0, transition: 'opacity .3s' }
   const whiskers = (caps: boolean) => S.map(s => s.whisker && !!s.whisker.caps === caps && data.map((d, i) => {
-    const lo = num(d[s.whisker!.low]), hi = num(d[s.whisker!.high]), mid = num(d[s.key]); if (lo === null || hi === null || mid === null) return null
+    const lo = num(d[s.whisker!.low]), hi = num(d[s.whisker!.high]), mid = num(d[s.key])
+    if (lo === null || hi === null || mid === null) return null
     const { Y } = sc(s), cx = bx(i, s) + bw / 2, cw = Math.min(7, bw / 2)
     const path = (a: number, b: number) => `M${svgN(cx)},${svgN(a)}L${svgN(cx)},${svgN(b)}` + (caps ? `M${svgN(cx - cw)},${svgN(a)}L${svgN(cx + cw)},${svgN(a)}M${svgN(cx - cw)},${svgN(b)}L${svgN(cx + cw)},${svgN(b)}` : '')
     return <motion.path key={`w${s.key}${i}`} fill="none" stroke={s.whisker!.color ?? (caps ? 'var(--fg2)' : s.colorOf?.(d, i) ?? s.color)} strokeWidth={1.5} strokeLinecap="round"
       initial={{ d: path(Y(mid), Y(mid)) }} animate={{ d: seen ? path(Y(lo), Y(hi)) : path(Y(mid), Y(mid)), opacity: hover === null || hover === i ? 1 : 0.55 }} transition={{ ...spring(0.15, 0.6), delay: seen ? 0.15 : 0 }} />
   }))
+  /** a tag's glyph or hit area in the HTML layer, per style (folded and rollup tags are options only) */
+  const tagMark = (p: PlacedTimeTag, style: Exclude<TimeTagStyle, 'auto'>) => {
+    const { icon, color } = look(p.tag), on = p.tag.id === activeAt || (host === p && !!activeTag), o = { ...tags.option(p.tag), ...tagPtr(p.tag) }
+    if (p.hidden || style === 'rollup') return <span key={p.tag.id} {...o} className="sr-only" />
+    if (style === 'flags') return p.flag
+      ? <div key={p.tag.id} {...o} className={cn(TOUCH.hit, 'pointer-events-auto absolute h-[18px] cursor-pointer rounded-e-[var(--r-sm)] border-s-2 px-1.5 text-[11px] leading-[16px] font-medium whitespace-nowrap text-[var(--fg)]')}
+        style={{ left: p.x - 1, top: pad.t - 22, borderColor: color, background: timeTagTint(color, on ? 32 : 18) }}>{p.tag.label}</div>
+      : <div key={p.tag.id} {...o} className={cn(TOUCH.hit, 'pointer-events-auto absolute w-2.5 cursor-pointer')} style={{ left: p.x - 5, top: pad.t - 10, height: 14 }} />
+    if (style === 'dots') return <span key={p.tag.id} {...o} className={cn(TOUCH.hit, 'pointer-events-auto absolute cursor-pointer rounded-full border-2 border-[var(--card)] motion-safe:transition-transform', on && 'scale-150')}
+      style={{ left: p.x - 5, top: lineY(p.ms) - 5, width: 10, height: 10, background: color }} />
+    return <TagGlyph key={p.tag.id} {...o} icon={icon} color={color} active={on} more={p.more?.length} className={cn(TOUCH.hit, 'pointer-events-auto !absolute cursor-pointer motion-safe:[transition:left_.3s,top_.3s,transform_.15s]')}
+      style={{ left: p.x - TAG_LAYOUT.size / 2, top: tagY[style](p.ms, p.row) - TAG_LAYOUT.size / 2 }} />
+  }
+  // the tags: one Tab stop after the series (useTagFocus); options in time order (spans by their start), as the keyboard walks them
   const tagLayer = tl && aTags.length > 0 && (
-          // the tags: one Tab stop after the series (useTagFocus); glyphs are its options, folded ones visually hidden
-          <div {...tags.props} onFocus={e => { setHover(null); tags.props.onFocus(e) }} className="pointer-events-none absolute inset-0 outline-none" style={fade}>
-            {/* options in time order (spans by their start), as the keyboard walks them */}
-            {[...tl.spans.map(p => [p.from, <div key={p.tag.id} {...tags.option(p.tag)} {...tagPtr(p.tag)} className={cn(TOUCH.hit, 'pointer-events-auto absolute cursor-pointer')}
-              style={{ left: p.x0, width: Math.max(8, p.x1 - p.x0), top: pad.t - 5, height: 12 }} />] as const), ...tl.points.map(p => [p.ms, (() => {
-              const { icon, color } = look(p.tag), on = p.tag.id === activeAt || (host === p && !!activeTag), o = { ...tags.option(p.tag), ...tagPtr(p.tag) }
-              if (p.hidden || tl.style === 'rollup') return <span key={p.tag.id} {...o} style={TAG_SR_ONLY} />
-              if (tl.style === 'flags') return p.flag
-                ? <div key={p.tag.id} {...o} className={cn(TOUCH.hit, 'pointer-events-auto absolute h-[18px] cursor-pointer rounded-e-[var(--r-sm)] border-s-2 px-1.5 text-[11px] leading-[16px] font-medium whitespace-nowrap text-[var(--fg)]')}
-                  style={{ left: p.x - 1, top: pad.t - 22, borderColor: color, background: timeTagTint(color, on ? 32 : 18) }}>{p.tag.label}</div>
-                : <div key={p.tag.id} {...o} className={cn(TOUCH.hit, 'pointer-events-auto absolute w-2.5 cursor-pointer')} style={{ left: p.x - 5, top: pad.t - 10, height: 14 }} />
-              if (tl.style === 'dots') return <span key={p.tag.id} {...o} className={cn(TOUCH.hit, 'pointer-events-auto absolute cursor-pointer rounded-full border-2 border-[var(--card)] motion-safe:transition-transform', on && 'scale-150')}
-                style={{ left: p.x - 5, top: lineY(p.ms) - 5, width: 10, height: 10, background: color }} />
-              const y = tl.style === 'pins' ? pinY(p.ms, p.row) : rugY(p.row)
-              return <TagGlyph key={p.tag.id} {...o} icon={icon} color={color} active={on} more={p.more?.length} className={cn(TOUCH.hit, 'pointer-events-auto !absolute cursor-pointer motion-safe:[transition:left_.3s,top_.3s,transform_.15s]')}
-                style={{ left: p.x - 10, top: y - 10 }} />
-            })()] as const)].sort((a, b) => a[0] - b[0]).map(e => e[1])}
-            {tl.bins.map(b => {
-              const k = A!.kinds?.find(q => q.kind === b.kind), color = b.kind === '*' ? 'var(--c-neutral)' : safeColor(k?.color, 'var(--accent)'), on = aBin === b
-              const first = tl.points.find(p => p.tag.id === b.ids[0])!.tag
-              return <div key={`${b.from}${b.kind}`} aria-hidden {...tagPtr(first)} className={cn(TOUCH.hit, 'ui-num pointer-events-auto absolute flex h-[18px] cursor-pointer items-center gap-0.5 overflow-hidden rounded-full px-1.5 text-[11px] whitespace-nowrap text-[var(--fg)]')}
-                style={{ left: b.x, top: rugY(b.row) - 9, maxWidth: b.w - 2, transform: 'translateX(-50%)', background: timeTagTint(color, on ? 34 : 18), boxShadow: on ? `0 0 0 1.5px ${color}` : undefined }}>
-                <span className="text-[10px]">{b.kind === '*' ? '+' : k?.icon}</span>{b.count}
-              </div>
-            })}
-          </div>
+    <div {...tags.props} onFocus={e => { setHover(null); tags.props.onFocus(e) }} className="pointer-events-none absolute inset-0 outline-none" style={fade}>
+      {[
+        ...tl.spans.map(p => [p.from, <div key={p.tag.id} {...tags.option(p.tag)} {...tagPtr(p.tag)} className={cn(TOUCH.hit, 'pointer-events-auto absolute cursor-pointer')}
+          style={{ left: p.x0, width: Math.max(8, p.x1 - p.x0), top: pad.t - 5, height: 12 }} />] as const),
+        ...tl.points.map(p => [p.ms, tagMark(p, tl.style)] as const),
+      ].sort((a, b) => a[0] - b[0]).map(e => e[1])}
+      {tl.bins.map(b => {
+        const k = tagKinds.get(b.kind), color = b.kind === '*' ? CHART_NEUTRAL : safeColor(k?.color, CHART_NEUTRAL), on = aBin === b
+        const first = tl.points.find(p => p.tag.id === b.ids[0])!.tag
+        return <div key={`${b.from}${b.kind}`} aria-hidden {...tagPtr(first)} className={cn(TOUCH.hit, 'ui-num pointer-events-auto absolute flex h-[18px] cursor-pointer items-center gap-0.5 overflow-hidden rounded-full px-1.5 text-[11px] whitespace-nowrap text-[var(--fg)]')}
+          style={{ left: b.x, top: rugY(b.row) - 9, maxWidth: b.w - 2, transform: 'translateX(-50%)', background: timeTagTint(color, on ? 34 : 18), boxShadow: on ? `0 0 0 1.5px ${color}` : undefined }}>
+          <span className="text-[10px]">{b.kind === '*' ? '+' : k?.icon}</span>{b.count}
+        </div>
+      })}
+    </div>
   )
   return (
-    <ChartShell shell={shell} className={className} style={{ height: height + aBand }}
+    <ChartShell shell={shell} className={className} style={{ height: height + aBand }} inset={[pad.l, pad.r]}
       after={legend && <Legend items={[...S.map(s => ({ label: s.label, color: s.color, dashed: s.dashed })), ...(band ? [{ label: band.label ?? 'Range', color: '', band: true }] : [])]} />}>
       {w > 0 && G && (
         <svg width={w} height={height + aBand} aria-hidden className="block touch-pan-y overflow-visible text-[11px]" onPointerDown={onPlotPointer} onPointerMove={onPlotPointer}>
           <ChartGridY ticks={G.ticks} Y={G.Y} x1={pad.l} x2={w - pad.r} format={L ? format : undefined} right={R ? { ticks: R.ticks, Y: R.Y, format: rightFormat ?? format } : undefined} />
           {T && n > 1
-            ? <ChartAxisX y={height - 6} ticks={timeTicks(t0, t1, iw, chartTimeText, Math.max(56, chartTimeText(t0).length * 6.6 + 18)).map(k => ({ x: tx(k.ms), label: k.label }))} grid={[pad.t, pad.t + ih]} />
+            ? <ChartAxisX y={height - 6} ticks={timeTicks(t0, t1, iw, undefined, Math.max(56, textPx(timeText(t0).length, 18))).map(k => ({ x: tx(k.ms), label: k.label }))} grid={[pad.t, pad.t + ih]} />
             : <ChartAxisX y={height - 6} ticks={data.flatMap((_, i) => i % every === 0 ? [{ x: X(i), label: xText(i) }] : [])} />}
           {tl && <g style={fade}>
-            {tl.spans.map(p => { const c = look(p.tag).color, on = p.tag.id === activeAt; return <g key={p.tag.id}>
-              <rect x={p.x0} y={pad.t} width={Math.max(1, p.x1 - p.x0)} height={ih} fill={c} fillOpacity={on ? 0.24 : 0.1} />
-              <rect x={p.x0} y={pad.t} width={Math.max(1, p.x1 - p.x0)} height={3} fill={c} />
-            </g> })}
+            {tl.spans.map(p => {
+              const c = look(p.tag).color, on = p.tag.id === activeAt
+              return <g key={p.tag.id}>
+                <rect x={p.x0} y={pad.t} width={Math.max(1, p.x1 - p.x0)} height={ih} fill={c} fillOpacity={on ? 0.24 : 0.1} />
+                <rect x={p.x0} y={pad.t} width={Math.max(1, p.x1 - p.x0)} height={3} fill={c} />
+              </g>
+            })}
             {tl.style === 'flags' && tl.points.map(p => <line key={p.tag.id} x1={p.x} x2={p.x} y1={pad.t - (p.flag ? 4 : 10)} y2={pad.t + ih} stroke={look(p.tag).color} strokeDasharray="3 3" strokeOpacity={p.tag.id === activeAt ? 1 : 0.7} strokeWidth={p.tag.id === activeAt ? 2 : 1} />)}
             {aBin && <rect x={tx(aBin.from)} y={pad.t} width={Math.max(1, tx(aBin.to) - tx(aBin.from))} height={ih} fill="var(--line)" fillOpacity={0.5} />}
           </g>}
@@ -886,20 +987,23 @@ export function Chart<T extends object = ChartDatum>({ data: allRows, x, series,
           {hover !== null && <line x1={X(hover)} x2={X(hover)} y1={pad.t} y2={pad.t + ih} stroke="var(--line2)" />}
           {whiskers(false)}
           {S.map((s, si) => (s.type === 'bar' || s.type === 'float') && data.map((d, i) => {
-            const sp = span(i, si); if (!sp) return null
+            const sp = span(i, si)
+            if (!sp) return null
             const { Y } = sc(s), ya = Y(sp[0]), yb = Y(sp[1])
             return <motion.rect key={`${s.key}${i}`} x={bx(i, s)} width={bw} rx={rx} fill={s.colorOf?.(d, i) ?? s.color} stroke={gap ? undefined : 'var(--card)'} strokeWidth={gap ? undefined : 1}
               initial={{ y: ya, height: 0 }} animate={seen ? { y: Math.min(ya, yb), height: Math.max(1, Math.abs(ya - yb)), opacity: hover === null || hover === i ? 1 : 0.55 } : { y: ya, height: 0 }}
               transition={{ ...spring(0.15, 0.55), delay: Math.min(0.3, i * 0.025) }} />
           }))}
           {S.map(s => s.connectors && data.slice(0, -1).map((d, i) => {
-            const v = num(d[s.key]); if (v === null) return null
+            const v = num(d[s.key])
+            if (v === null) return null
             const y = sc(s).Y(v)
             return <motion.line key={`c${s.key}${i}`} x1={bx(i, s) + bw} x2={bx(i + 1, s)} y1={y} y2={y} stroke="var(--fg3)" strokeDasharray="3 3"
               initial={{ opacity: 0 }} animate={{ opacity: seen ? 1 : 0, y1: y, y2: y }} transition={{ duration: 0.3, delay: seen ? 0.45 : 0 }} />
           }))}
           {S.map((s, si) => s.labelOf && data.map((d, i) => {
-            const sp = span(i, si), text = s.labelOf!(d, i); if (!sp || !text) return null
+            const sp = span(i, si), text = s.labelOf!(d, i)
+            if (!sp || !text) return null
             const yTop = Math.min(sc(s).Y(sp[0]), sc(s).Y(sp[1])) - 6
             return <motion.text key={`l${s.key}${i}`} x={bx(i, s) + bw / 2} textAnchor="middle" fill="var(--fg2)" fontWeight={500}
               initial={{ opacity: 0, y: yTop + 6 }} animate={{ opacity: seen ? 1 : 0, y: seen ? yTop : yTop + 6 }} transition={{ ...spring(0.2, 0.5), delay: seen ? 0.35 + i * 0.03 : 0 }}>{text}</motion.text>
@@ -921,36 +1025,24 @@ export function Chart<T extends object = ChartDatum>({ data: allRows, x, series,
           }))}
           {whiskers(true)}
           {hover !== null && S.map((s, si) => { const v = top(hover, si); return (s.type === 'line' || s.type === 'area') && v !== null && <circle key={s.key} cx={X(hover)} cy={sc(s).Y(v)} r={4} fill={s.color} stroke="var(--card)" strokeWidth={2} /> })}
-          {tl && /pins|dots/.test(tl.style) && <g style={fade}>{tl.points.map(p => {
+          {tl && (tl.style === 'pins' || tl.style === 'dots') && <g style={fade}>{tl.points.map(p => {
             const c = look(p.tag).color, y = lineY(p.ms), stem = tl.style === 'pins' && !p.hidden
             return <g key={p.tag.id}>
-              {stem && <line x1={p.x} x2={p.x} y1={y} y2={pinY(p.ms, p.row) + 10} stroke={c} strokeOpacity={0.5} />}
+              {stem && <line x1={p.x} x2={p.x} y1={y} y2={pinY(p.ms, p.row) + TAG_LAYOUT.size / 2} stroke={c} strokeOpacity={0.5} />}
               <circle cx={p.x} cy={y} r={tl.style === 'dots' ? 0 : 2.5} fill={c} />
             </g>
           })}</g>}
-          {activeTag && anchor && !aSpan && tl && <g pointerEvents="none">
-            {(tl.style === 'rug' || tl.style === 'rollup') && <line x1={anchor.x} x2={anchor.x} y1={lineY(host!.ms)} y2={height - 18} stroke="var(--fg3)" strokeDasharray="2 3" />}
-            <circle cx={host!.x} cy={lineY(host!.ms)} r={4.5} fill={look(activeTag).color} stroke="var(--card)" strokeWidth={2} />
+          {activeTag && host && !aSpan && tl && <g pointerEvents="none">
+            {(tl.style === 'rug' || tl.style === 'rollup') && anchor && <line x1={anchor.x} x2={anchor.x} y1={lineY(host.ms)} y2={height - 18} stroke="var(--fg3)" strokeDasharray="2 3" />}
+            <circle cx={host.x} cy={lineY(host.ms)} r={4.5} fill={look(activeTag).color} stroke="var(--card)" strokeWidth={2} />
           </g>}
         </svg>
       )}
       {tagLayer}
       {activeTag && anchor && w > 0 && (
-        <ChartTooltip x={anchor.x} y={clamp(anchor.y - 10, 0, height + aBand - 64)} width={w}>
-          <TagTooltip tag={activeTag} kinds={A?.kinds} extra={aBin && aBin.count > 1 ? `${aBin.kind === '*' ? 'Others' : look(activeTag).kindLabel} × ${aBin.count}, ${fmt.time(aBin.from)} to ${fmt.time(aBin.to)}` : undefined} />
-        </ChartTooltip>
-      )}
-      {hover !== null && w > 0 && !activeTag && (
-        <ChartTooltip x={X(hover)} y={pad.t} width={w}>
-          {tooltip ? tooltip(data[hover], hover) : <>
-            <div className="mb-1 font-medium">{xText(hover)}</div>
-            {S.map((s, si) => {
-              if (s.type === 'float') { const sp = span(hover, si); return sp && <TooltipRow key={s.key} color={s.colorOf?.(data[hover], hover) ?? s.color} label={s.label} value={`${fmtOf(s)(sp[0])} → ${fmtOf(s)(sp[1])}`} /> }
-              const v = num(data[hover][s.key]); return v !== null && <TooltipRow key={s.key} color={s.color} label={s.label} dashed={s.dashed} value={fmtOf(s)(v)} />
-            })}
-            {band && num(data[hover][band.lower]) !== null && <TooltipRow color="var(--band)" label={band.label ?? 'Range'} value={`${format(num(data[hover][band.lower])!)}–${format(num(data[hover][band.upper])!)}`} />}
-          </>}
-        </ChartTooltip>
+        <VizTip at={() => chartTipAt(ref.current, anchor.x, anchor.y)}>
+          <TagTooltip tag={activeTag} kinds={tagKinds} extra={aBin && aBin.count > 1 ? `${aBin.kind === '*' ? 'Others' : look(activeTag).kindLabel} × ${aBin.count}, ${fmt.time(aBin.from)} to ${fmt.time(aBin.to)}` : undefined} />
+        </VizTip>
       )}
     </ChartShell>
   )
@@ -966,32 +1058,39 @@ export function DonutChart({ data, size = 150, thickness = 20, format: formatPro
   { data: Slice[]; size?: number; thickness?: number; format?: (n: number) => string; centerLabel?: string; variant?: 'donut' | 'polar'
     /** accessible name (default "<centerLabel> by share" / "Polar area chart") */ label?: string; className?: string } & ChartKitProps) {
   const [ref, seen] = useChartSeen<HTMLDivElement>()
+  const plot = useRef<HTMLDivElement>(null)
   const format = formatProp ?? fmt.compact, centerLabel = centerProp ?? 'Total'
-  const total = data.reduce((a, d) => a + d.value, 0) || 1
-  const pctOf = (d: Slice) => fmt.percent(Math.round((d.value / total) * 100) / 100, 0)
+  // the sum is what the chart shows; `|| 1` only keeps all-zero data from dividing by zero
+  const sum = data.reduce((a, d) => a + d.value, 0), share = (d: Slice) => d.value / (sum || 1)
+  const pctOf = (d: Slice) => chartPct(share(d))
   const name = label ?? (variant === 'polar' ? 'Polar area chart' : `${centerLabel} by share`)
-  const shell = useChartShell({
-    table, exportable, ref: userRef, box: ref, count: data.length, label: name,
-    data: { head: ['Item', 'Value', 'Share'], rows: data.map(d => [d.label, d.value, d.value / total]), formats: [undefined, formatProp, (f: number) => fmt.percent(Math.round(f * 100) / 100, 0)] },
-    summary: `${plural(data.length, 'slice')}, total ${format(total)}: ${fmt.list(data.map(d => `${d.label} ${format(d.value)} (${pctOf(d)})`))}.`,
-    describe: i => `${data[i].label}: ${format(data[i].value)}, ${pctOf(data[i])} of ${format(total)}`,
-  })
-  const { hover, setHover } = shell
   const colorOf = (d: Slice, i: number) => seriesColor(i, d.color)
   const r = (size - thickness) / 2 - 2, c = 2 * Math.PI * r
   const cx = size / 2, R = size / 2 - 6, max = maxOf(data.map(d => d.value)) || 1
   /** angle of slice edge `k` (equal slices, from 12 o'clock) */
   const at = (k: number) => (k / data.length) * 2 * Math.PI - Math.PI / 2
+  const polar = variant === 'polar'
+  const shell = useChartShell({
+    table, exportable, ref: userRef, box: ref, count: data.length, label: name,
+    data: { head: ['Item', 'Value', 'Share'], rows: data.map(d => [d.label, d.value, share(d)]), formats: [undefined, formatProp, chartPct] },
+    summary: `${plural(data.length, 'slice')}, total ${format(sum)}: ${fmt.list(data.map(d => `${d.label} ${format(d.value)} (${pctOf(d)})`))}.`,
+    describe: i => `${data[i].label}: ${format(data[i].value)}, ${pctOf(data[i])} of ${format(sum)}`,
+    // the donut names the hovered slice in its centre; the polar chart has no centre, so it takes a tooltip
+    tip: polar ? i => <TooltipRow color={colorOf(data[i], i)} label={data[i].label} value={format(data[i].value)} /> : undefined,
+    tipAt: i => { const [x, y] = polarPt(cx, cx, (data[i].value / max) * R * 0.6, at(i + 0.5)); return chartTipAt(plot.current, x, y) },
+  })
+  const { hover, setHover } = shell
   const sliceProps = (i: number) => ({ onPointerEnter: () => setHover(i), onPointerDown: () => setHover(i), onPointerLeave: onMouseLeave(() => setHover(null)) })
   let acc = 0
   return (
     <ChartShell shell={shell} className={className} boxClassName="flex flex-wrap items-center gap-5">
-      <div className="relative" style={{ width: size, height: size }}>
-        {variant === 'donut' ? (
+      <div ref={plot} className="relative" style={{ width: size, height: size }}>
+        {!polar ? (
           <svg width={size} height={size} aria-hidden className="-rotate-90">
             {data.map((d, i) => {
-              const len = (d.value / total) * c, off = acc; acc += len
-              return <motion.circle key={d.label} cx={size / 2} cy={size / 2} r={r} fill="none" stroke={colorOf(d, i)}
+              const len = share(d) * c, off = acc
+              acc += len
+              return <motion.circle key={`${d.label}-${i}`} cx={size / 2} cy={size / 2} r={r} fill="none" stroke={colorOf(d, i)}
                 strokeDasharray={`${Math.max(0, len - 2)} ${c}`} initial={{ strokeDashoffset: c, strokeWidth: thickness }}
                 animate={{ strokeDashoffset: seen ? -off : c, strokeWidth: hover === i ? thickness + 6 : thickness, opacity: hover === null || hover === i ? 1 : 0.4 }}
                 transition={{ ...spring(0.15, 0.8), delay: seen ? i * 0.05 : 0 }} {...sliceProps(i)} />
@@ -1002,25 +1101,22 @@ export function DonutChart({ data, size = 150, thickness = 20, format: formatPro
             {[0.25, 0.5, 0.75, 1].map(f => <circle key={f} cx={cx} cy={cx} r={R * f} fill="none" stroke="var(--line)" />)}
             {data.map((d, i) => {
               const rr = (d.value / max) * R + (hover === i ? 4 : 0)
-              return <motion.path key={d.label} fill={colorOf(d, i)} fillOpacity={0.8} stroke="var(--card)" strokeWidth={2} strokeLinejoin="round"
+              return <motion.path key={`${d.label}-${i}`} fill={colorOf(d, i)} fillOpacity={0.8} stroke="var(--card)" strokeWidth={2} strokeLinejoin="round"
                 initial={{ d: svgWedge(cx, cx, 0, at(i), at(i + 1)) }} animate={{ d: svgWedge(cx, cx, seen ? rr : 0, at(i), at(i + 1)), opacity: hover === null || hover === i ? 1 : 0.45 }}
                 transition={{ ...spring(0.2, 0.7), delay: seen && hover === null ? i * 0.06 : 0 }} {...sliceProps(i)} />
             })}
           </svg>
         )}
-        {variant === 'donut' ? (
+        {!polar && (
           <div aria-hidden className="pointer-events-none absolute inset-0 grid place-content-center text-center">
             <span className="text-xs text-[var(--fg3)]">{hover === null ? centerLabel : data[hover].label}</span>
-            <AnimatedNumber value={hover === null ? total : data[hover].value} className="justify-center text-lg font-semibold" format={{ notation: 'compact', maximumFractionDigits: 1 }} />
+            <AnimatedNumber value={hover === null ? sum : data[hover].value} className="justify-center text-lg font-semibold" format={{ notation: 'compact', maximumFractionDigits: 1 }} />
           </div>
-        ) : hover !== null && (() => {
-          const [x, y] = polarPt(cx, cx, (data[hover].value / max) * R * 0.6, at(hover + 0.5))
-          return <ChartTooltip x={x} y={y - 16} width={size + 150}><TooltipRow color={colorOf(data[hover], hover)} label={data[hover].label} value={format(data[hover].value)} /></ChartTooltip>
-        })()}
+        )}
       </div>
       <div aria-hidden className="flex min-w-[140px] flex-1 flex-col gap-1.5">
         {data.map((d, i) => (
-          <div key={d.label} {...sliceProps(i)} className={cn('flex items-center gap-2 text-[13px] transition-opacity', TOUCH.tap, hover !== null && hover !== i && 'opacity-50')}>
+          <div key={`${d.label}-${i}`} {...sliceProps(i)} className={cn('flex items-center gap-2 text-[13px] transition-opacity', TOUCH.tap, hover !== null && hover !== i && 'opacity-50')}>
             <span className="h-2.5 w-2.5 rounded-[var(--r-sm)]" style={{ background: safeColor(colorOf(d, i)) }} />
             <span className="flex-1 text-[var(--fg2)]">{d.label}</span><span className="ui-num">{format(d.value)}</span>
             <span className="ui-num w-10 text-end text-xs text-[var(--fg3)]">{pctOf(d)}</span>
@@ -1063,42 +1159,42 @@ export function RadarChart({ axes, series, max, size = 240, format: formatProp, 
   const [ref, seen] = useChartSeen<HTMLDivElement>()
   const format = formatProp ?? fmt.compact
   const name = label ?? `Radar chart: ${fmt.list(series.map(s => s.label))}`
-  const shell = useChartShell({
-    table, exportable, ref: userRef, box: ref, count: axes.length, label: name,
-    data: { head: ['Axis', ...series.map(s => s.label)], rows: axes.map((a, i) => [a, ...series.map(s => Number.isFinite(s.values[i]) ? s.values[i] : null)]), formats: [undefined, ...series.map(() => formatProp)] },
-    summary: [`${plural(axes.length, 'axis', 'axes')}: ${fmt.list(axes)}.`, ...series.map(s => `${s.label}: ${rangeStr(s.values, format)}.`)].join(' '),
-    describe: i => `${axes[i]}: ${series.map(s => `${s.label} ${format(s.values[i] ?? 0)}`).join(', ')}`,
-  })
-  const { hover, setHover } = shell
+  const valueAt = (s: { values: number[] }, i: number) => (Number.isFinite(s.values[i]) ? format(s.values[i]) : 'no value')
   // an all-zero (or empty) chart would divide by zero: fall back to a unit scale
   const m = (max ?? maxOf(series.flatMap(s => s.values.filter(Number.isFinite)), 0)) || 1, cx = size / 2, cy = size / 2, R = size / 2 - 34
   const ang = (i: number) => (Math.PI * 2 * i) / (axes.length || 1) - Math.PI / 2
   const pt = (i: number, v: number) => polarPt(cx, cy, R * (v / m), ang(i))
   const colorOf = (i: number) => seriesColor(i, series[i].color)
+  const shell = useChartShell({
+    table, exportable, ref: userRef, box: ref, count: axes.length, label: name,
+    data: { head: ['Axis', ...series.map(s => s.label)], rows: axes.map((a, i) => [a, ...series.map(s => Number.isFinite(s.values[i]) ? s.values[i] : null)]), formats: [undefined, ...series.map(() => formatProp)] },
+    summary: [`${plural(axes.length, 'axis', 'axes')}: ${fmt.list(axes)}.`, ...series.map(s => `${s.label}: ${rangeStr(s.values, format)}.`)].join(' '),
+    describe: i => `${axes[i]}: ${series.map(s => `${s.label} ${valueAt(s, i)}`).join(', ')}`,
+    tip: i => <ChartTip title={axes[i]}>{series.map((s, si) => <TooltipRow key={`${s.label}-${si}`} color={colorOf(si)} dashed={s.dashed} label={s.label} value={valueAt(s, i)} />)}</ChartTip>,
+    tipAt: i => { const [x, y] = pt(i, m * 0.55); return chartTipAt(ref.current, x, y) },
+  })
+  const { hover, setHover } = shell
+  /** the vertices of a series, skipping axes it has no value for */
+  const shape = (s: { values: number[] }, f: (v: number) => number) => s.values.flatMap((v, i) => (Number.isFinite(v) ? [pt(i, f(v))] : []))
   return (
     <ChartShell shell={shell} className={cn('flex flex-col items-center', className)} style={{ width: size, height: size }}
       after={<Legend items={series.map((s, i) => ({ label: s.label, color: colorOf(i), dashed: s.dashed }))} />}>
       <svg width={size} height={size} aria-hidden className="overflow-visible text-[11px]">
-        {[0.25, 0.5, 0.75, 1].map(f => <path key={f} d={linePath(axes.map((_, i) => pt(i, m * f))) + 'Z'} fill="none" stroke="var(--line)" />)}
-        {axes.map((a, i) => { const [x, y] = pt(i, m * 1.16); return <g key={a}><line x1={cx} y1={cy} x2={pt(i, m)[0]} y2={pt(i, m)[1]} stroke={hover === i ? 'var(--fg3)' : 'var(--line)'} /><text x={x} y={y} dy="0.32em" textAnchor="middle" fill={hover === i ? 'var(--fg)' : 'var(--fg2)'}>{a}</text></g> })}
+        {[0.25, 0.5, 0.75, 1].map(f => <path key={f} d={chartPath(axes.map((_, i) => pt(i, m * f))) + 'Z'} fill="none" stroke="var(--line)" />)}
+        {axes.map((a, i) => { const [x, y] = pt(i, m * 1.16); return <g key={`${a}-${i}`}><line x1={cx} y1={cy} x2={pt(i, m)[0]} y2={pt(i, m)[1]} stroke={hover === i ? 'var(--fg3)' : 'var(--line)'} /><text x={x} y={y} dy="0.32em" textAnchor="middle" fill={hover === i ? 'var(--fg)' : 'var(--fg2)'}>{a}</text></g> })}
         {series.map((s, si) => {
-          const d = linePath(s.values.map((v, i) => pt(i, v))) + 'Z', d0 = linePath(s.values.map((_, i) => pt(i, 0))) + 'Z', color = colorOf(si)
-          return <motion.path key={s.label} initial={{ d: d0 }} animate={{ d: seen ? d : d0 }} fill={s.fill === false ? 'none' : color} fillOpacity={0.15} stroke={color} strokeWidth={2}
+          const d = chartPath(shape(s, v => v)) + 'Z', d0 = chartPath(shape(s, () => 0)) + 'Z', color = colorOf(si)
+          return <motion.path key={`${s.label}-${si}`} initial={{ d: d0 }} animate={{ d: seen ? d : d0 }} fill={s.fill === false ? 'none' : color} fillOpacity={0.15} stroke={color} strokeWidth={2}
             strokeDasharray={s.dashed ? '4 3' : undefined} strokeLinejoin="round" transition={{ ...spring(0.2, 0.8), delay: seen ? si * 0.1 : 0 }} />
         })}
         {series.map((s, si) => s.values.map((v, i) => {
+          if (!Number.isFinite(v)) return null
           const [x, y] = seen ? pt(i, v) : [cx, cy]
-          return <motion.circle key={`${s.label}${i}`} fill={colorOf(si)} stroke="var(--card)" strokeWidth={1.5} initial={{ cx, cy, r: 2.5 }}
+          return <motion.circle key={`${si}-${i}`} fill={colorOf(si)} stroke="var(--card)" strokeWidth={1.5} initial={{ cx, cy, r: 2.5 }}
             animate={{ cx: x, cy: y, r: hover === i ? 4.5 : 2.5 }} transition={{ ...spring(0.2, 0.8), delay: seen && hover === null ? si * 0.1 : 0 }} />
         }))}
-        {axes.map((a, i) => <path key={a} d={svgWedge(cx, cy, R * 1.25, ang(i - 0.5), ang(i + 0.5))} fill="transparent" onPointerEnter={() => setHover(i)} onPointerDown={e => { releaseTouchCapture(e); setHover(i) }} />)}
+        {axes.map((a, i) => <path key={`${a}-${i}`} d={svgWedge(cx, cy, R * 1.25, ang(i - 0.5), ang(i + 0.5))} fill="transparent" onPointerEnter={() => setHover(i)} onPointerDown={e => { releaseTouchCapture(e); setHover(i) }} />)}
       </svg>
-      {hover !== null && (() => { const [x, y] = pt(hover, m * 0.55); return (
-        <ChartTooltip x={x} y={y - 20} width={size + 60}>
-          <div className="mb-1 font-medium">{axes[hover]}</div>
-          {series.map((s, si) => <TooltipRow key={s.label} color={colorOf(si)} dashed={s.dashed} label={s.label} value={format(s.values[hover] ?? 0)} />)}
-        </ChartTooltip>
-      ) })()}
     </ChartShell>
   )
 }
@@ -1136,6 +1232,11 @@ export function ScatterChart({ points: allPoints, height = 220, xLabel, yLabel, 
     },
     summary: [`${plural(points.length, 'point')}.`, `${xLabel ?? 'x'} ${rangeStr(points.map(p => p.x), format)}, ${yLabel ?? 'y'} ${rangeStr(points.map(p => p.y), format)}.`, ...(groups.length > 1 ? [`Groups: ${fmt.list(groups)}.`] : []), 'Arrow keys go left to right.'].join(' '),
     describe: k => pointText(points[order[k]]),
+    tip: k => { const p = points[order[k]], c = color(p); return <ChartTip title={p.label}>
+      <TooltipRow color={c} label={xLabel ?? 'x'} value={format(p.x)} /><TooltipRow color={c} label={yLabel ?? 'y'} value={format(p.y)} />
+      {p.r !== undefined && <TooltipRow color={c} label="size" value={format(p.r)} />}
+    </ChartTip> },
+    tipAt: k => { const p = points[order[k]]; return chartTipAt(ref.current, X(p.x), Y(p.y)) },
   })
   const hover = shell.hover === null ? null : order[shell.hover]
   const near = (e: ReactPointerEvent<SVGSVGElement>) => {
@@ -1160,15 +1261,12 @@ export function ScatterChart({ points: allPoints, height = 220, xLabel, yLabel, 
           ))}
         </svg>
       )}
-      {hover !== null && <ChartTooltip x={X(points[hover].x)} y={Y(points[hover].y) - 20} width={w}>
-        {points[hover].label && <div className="mb-1 font-medium">{points[hover].label}</div>}
-        <TooltipRow color={color(points[hover])} label={xLabel ?? 'x'} value={format(points[hover].x)} /><TooltipRow color={color(points[hover])} label={yLabel ?? 'y'} value={format(points[hover].y)} />
-        {points[hover].r !== undefined && <TooltipRow color={color(points[hover])} label="size" value={format(points[hover].r!)} />}
-      </ChartTooltip>}
     </ChartShell>
   )
 }
 
+/** Heatmap intro: the longest cell delay (s) and each cell's fade (ms); hover answers at once after both. */
+const HM_STAGGER_MAX = 0.5, HM_FADE_MS = 300
 /** Shade a cell from muted to `color` by t ∈ [0, 1]. */
 const heat = (t: number, color = 'var(--accent)') => t <= 0 ? 'var(--muted)' : `color-mix(in srgb, ${color} ${Math.round(15 + t * 85)}%, var(--muted))`
 
@@ -1198,7 +1296,11 @@ export function Heatmap({ rows, cols, value, format: formatProp, cell = 18, touc
   useLayoutEffect(() => { if (scrollTo === 'end' && ref.current) ref.current.scrollLeft = ref.current.scrollWidth }, [size, cols.length, scrollTo])
   // the staggered fade-in only applies to the first reveal; later hover changes answer straight away
   const [introDone, setIntroDone] = useState(false)
-  useEffect(() => { if (!seen || introDone) return; const t = setTimeout(() => setIntroDone(true), 900); return () => clearTimeout(t) }, [seen, introDone])
+  useEffect(() => {
+    if (!seen || introDone) return
+    const t = setTimeout(() => setIntroDone(true), HM_STAGGER_MAX * 1000 + HM_FADE_MS + 100)
+    return () => clearTimeout(t)
+  }, [seen, introDone])
   // keyboard: grid mode (one Tab stop; ↑/↓ move by a row, Home/End stay in the row); the active cell is r * nc + c
   const nc = cols.length, flat = vals.flat()
   const gridName = name ?? `Heatmap, ${plural(rows.length, 'row')} by ${plural(nc, 'column')}`
@@ -1229,8 +1331,8 @@ export function Heatmap({ rows, cols, value, format: formatProp, cell = 18, touc
           ...cols.map((_, ci) => {
             const on = hover?.[0] === ri && hover[1] === ci
             return <span key={`${ri}-${ci}`} data-hm={`${ri}-${ci}`} aria-hidden onPointerEnter={() => setHover(ri, ci)} onPointerDown={e => { releaseTouchCapture(e); setHover(ri, ci) }}
-              className={cn('rounded-[var(--r-sm)] transition-[opacity,transform] duration-300 ease-out', on && 'relative z-[1] shadow-[0_0_0_1.5px_var(--card),0_0_0_3px_var(--fg2)]')}
-              style={{ height: size, background: fill(vals[ri][ci] / max), opacity: seen ? 1 : 0, transform: `scale(${seen ? (on ? 1.2 : 1) : 0.6})`, transitionDelay: seen && !introDone ? `${Math.min(0.5, ci * 0.012 + ri * 0.02)}s` : '0s' }} />
+              className={cn('rounded-[var(--r-sm)] transition-[opacity,transform] ease-out', on && cn('relative z-[1]', VIZ_LIT_RING))}
+              style={{ height: size, background: fill(vals[ri][ci] / max), opacity: seen ? 1 : 0, transform: `scale(${seen ? (on ? 1.2 : 1) : 0.6})`, transitionDuration: `${HM_FADE_MS}ms`, transitionDelay: seen && !introDone ? `${Math.min(HM_STAGGER_MAX, ci * 0.012 + ri * 0.02)}s` : '0s' }} />
           }),
         ])}
       </div>
@@ -1238,9 +1340,12 @@ export function Heatmap({ rows, cols, value, format: formatProp, cell = 18, touc
   )
 }
 
+/** Mix of --c4 per contribution level (0 = none). */
 const CAL_LEVELS = [0, 35, 60, 100]
-const calShade = (k: number) => k === 0 ? 'var(--muted)' : `color-mix(in srgb, var(--c4) ${CAL_LEVELS[k]}%, var(--muted))`
-const calLevel = (t: number) => t <= 0 ? 0 : t <= 0.4 ? 1 : t <= 0.7 ? 2 : 3
+/** Share of the busiest day above which a day moves up a level (past 0: level 1, past 0.4: 2, past 0.7: 3). */
+const CAL_BREAKS = [0, 0.4, 0.7]
+const calShade = (k: number) => (k === 0 ? 'var(--muted)' : `color-mix(in srgb, var(--c4) ${CAL_LEVELS[k]}%, var(--muted))`)
+const calLevel = (t: number) => CAL_BREAKS.filter(b => t > b).length
 
 /**
  * GitHub-style contribution grid in 4 levels with a Less → More legend. `values` maps core dayKey(date) → count.
@@ -1255,7 +1360,7 @@ export function CalendarHeatmap({ values, weeks = 26, end: endProp, table, expor
   const start = end && addDays(startOfWeek(end), -(weeks - 1) * 7) // Monday, `weeks` columns back
   const day = (wk: number, d: number) => addDays(start!, wk * 7 + d)
   const month = (wk: number) => fmt.date(day(wk, 0), { month: 'short' })
-  const wd = fmt.weekdays('short') // rows from the locale's first day; every other one is labelled
+  const wd = fmt.weekdays('short') // rows Monday to Sunday; every other one is labelled
   // label a column only where a new month starts
   const cols = start ? Array.from({ length: weeks }, (_, wk) => (wk === 0 || month(wk) !== month(wk - 1) ? month(wk) : '')) : []
   const cell = Math.max(8, Math.min(14, Math.floor((w - 34) / weeks) - 4)) // minus the Heatmap gap (gap-1)
@@ -1264,19 +1369,21 @@ export function CalendarHeatmap({ values, weeks = 26, end: endProp, table, expor
       {w > 0 && start && <Heatmap table={table} exportable={exportable} ref={userRef} name={`Contributions, last ${weeks} weeks`} cell={cell} touchCell={20} scrollTo="end" rows={[wd[0], '', wd[2], '', wd[4], '', '']} cols={cols} value={(r, c) => values[dayKey(day(c, r))] ?? 0} shade={t => calShade(calLevel(t))}
         label={(r, c) => fmt.date(day(c, r), { weekday: 'short', day: 'numeric', month: 'short' })} format={n => plural(n, 'contribution')} />}
       <div className="mt-1 flex items-center justify-end gap-1 text-[11px] text-[var(--fg3)]">
-        {'Less'}{[0, 1, 2, 3].map(k => <span key={k} className="h-2.5 w-2.5 rounded-[var(--r-sm)]" style={{ background: calShade(k) }} />)}{'More'}
+        Less{[0, 1, 2, 3].map(k => <span key={k} className="h-2.5 w-2.5 rounded-[var(--r-sm)]" style={{ background: calShade(k) }} />)}More
       </div>
     </div>
   )
 }
 
+/** The faintest a funnel step gets: steps fade from 1 at the top to this at the bottom, however many there are. */
+const FUNNEL_FADE_MIN = 0.4
 /**
  * Funnel with step-to-step conversion. Bars grow in when scrolled into view (a clip-path wipe from the centre, so nothing
  * reflows); hover, tap or arrow-key a step for its share of the first step.
  */
 export function FunnelChart({ steps, format: formatProp, label: labelProp, table, exportable, ref: userRef, className }: { steps: { label: string; value: number }[]; format?: (n: number) => string; /** accessible name */ label?: string; className?: string } & ChartKitProps) {
   const [ref, seen] = useChartSeen<HTMLDivElement>()
-  const format = formatProp ?? fmt.compact, label = labelProp ?? 'Funnel'
+  const format = formatProp ?? fmt.compact, label = labelProp ?? 'Funnel', color = seriesColor(0)
   const max = steps[0]?.value || 1
   const ofPrev = (i: number) => (i > 0 && steps[i - 1].value ? steps[i].value / steps[i - 1].value : null)
   const share = (i: number) => chartPct(steps[i].value / max)
@@ -1286,26 +1393,27 @@ export function FunnelChart({ steps, format: formatProp, label: labelProp, table
     data: { head: ['Step', 'Count', 'Of first step', 'Of previous'], rows: steps.map((st, i) => [st.label, st.value, st.value / max, ofPrev(i)]), formats: [undefined, formatProp, chartPct, chartPct] },
     summary: `${plural(steps.length, 'step')}: ${fmt.list(steps.map(s => `${s.label} ${format(s.value)}`))}.` + (steps.length > 1 ? ` ${share(steps.length - 1)} reach the last step.` : ''),
     describe: i => `${steps[i].label}: ${format(steps[i].value)}, ${share(i)} of the first step` + (conv(i) !== null ? `, ${conv(i)} of the step before` : ''),
-    tip: i => <>
-      <div className="mb-1 font-medium">{steps[i].label}</div>
-      <TooltipRow color={PALETTE[0]} label="Count" value={format(steps[i].value)} />
-      <TooltipRow color={PALETTE[0]} label="Of first step" value={share(i)} />
-    </>,
+    tip: i => <ChartTip title={steps[i].label}>
+      <TooltipRow color={color} label="Count" value={format(steps[i].value)} />
+      <TooltipRow color={color} label="Of first step" value={share(i)} />
+    </ChartTip>,
   })
   const { hover } = shell
+  const fade = (i: number) => 1 - (i / Math.max(1, steps.length - 1)) * (1 - FUNNEL_FADE_MIN)
   return (
     <ChartShell shell={shell} className={className} boxClassName="flex flex-col gap-1">
       {steps.map((s, i) => {
         const cut = (100 - (s.value / max) * 100) / 2
         return (
-          <div key={s.label} aria-hidden>
+          <div key={`${s.label}-${i}`} aria-hidden>
             {i > 0 && <div className="py-0.5 text-center text-[11px] text-[var(--fg3)]">↓ {conv(i) ?? chartPct(0)}</div>}
             <div className="flex items-center gap-3 text-[13px]" {...shell.bind(i)}>
               <span className="w-24 flex-none truncate text-[var(--fg2)]">{s.label}</span>
               <div className="flex-1">
-                <motion.div data-ci={i} className={cn('h-7 rounded-[var(--r-md)] transition-shadow', hover === i && 'shadow-[0_0_0_2px_var(--card),0_0_0_3.5px_var(--fg3)]')} style={{ background: PALETTE[0] }}
+                <motion.div data-ci={i} className={cn('h-7 rounded-[var(--r-md)] transition-[opacity,box-shadow]', hover === i && VIZ_LIT_RING)}
+                  style={{ background: color, opacity: fade(i) * (hover === null || hover === i ? 1 : 0.6) }}
                   initial={{ clipPath: 'inset(0% 50% 0% 50% round 8px)' }}
-                  animate={{ clipPath: seen ? `inset(0% ${cut}% 0% ${cut}% round 8px)` : 'inset(0% 50% 0% 50% round 8px)', opacity: (1 - i * 0.2) * (hover === null || hover === i ? 1 : 0.6) }}
+                  animate={{ clipPath: seen ? `inset(0% ${cut}% 0% ${cut}% round 8px)` : 'inset(0% 50% 0% 50% round 8px)' }}
                   transition={{ ...spring(0.15, 0.6), delay: seen ? i * 0.08 : 0 }} />
               </div>
               <span className="ui-num w-12 text-end">{format(s.value)}</span>
@@ -1337,7 +1445,7 @@ export function BarList({ items, format: formatProp, color = 'var(--accent)', la
   return (
     <ChartShell shell={shell} className={className} boxClassName="flex flex-col gap-1">
       {items.map((it, i) => (
-        <div key={it.key ?? String(it.label)} onPointerEnter={() => setHover(i)}
+        <div key={it.key ?? `${chartText(it.label)}-${i}`} onPointerEnter={() => setHover(i)}
           className={cn('relative flex h-8 items-center justify-between overflow-hidden rounded-[var(--r-md)] px-2.5 text-[13px] transition-colors', hover === i && 'bg-[var(--muted)]')}>
           <motion.span aria-hidden className="absolute inset-0 rounded-[var(--r-md)]" style={{ background: bar }}
             initial={{ clipPath: wipe(100) }} animate={{ clipPath: wipe(seen ? 100 - (it.value / max) * 100 : 100) }}
@@ -1359,6 +1467,7 @@ export function Treemap({ items, height = 220, format: formatProp, show = 'value
   const [ref, w, seen] = useChartFrame<HTMLDivElement>()
   const format = formatProp ?? fmt.compact, label = labelProp ?? 'Treemap'
   const total = items.reduce((a, d) => a + d.value, 0) || 1
+  const shareOf = (i: number) => items[i].value / total
   type Rect = { x: number; y: number; w: number; h: number; i: number }
   const rects = useMemo(() => {
     const out: Rect[] = []
@@ -1379,14 +1488,13 @@ export function Treemap({ items, height = 220, format: formatProp, show = 'value
     if (row.length) lay(row)
     return out
   }, [items, w, height, total])
-  const pct = (i: number) => Math.round((items[i].value / total) * 100)
   const order = useMemo(() => rects.map(r => r.i), [rects]) // largest first; the active index walks this order
   const shell = useChartShell({
     table, exportable, ref: userRef, box: ref, count: items.length, label,
-    data: { head: ['Item', 'Value', 'Share'], rows: items.map(it => [it.label, it.value, it.value / total]), formats: [undefined, formatProp, (f: number) => chartPct(Math.round(f * 100) / 100)] },
-    summary: `${plural(items.length, 'part')}, largest first: ${fmt.list(order.map(i => `${items[i].label} ${chartPct(pct(i) / 100)}`))}.`,
-    describe: k => { const i = order[k]; return `${items[i].label}: ${format(items[i].value)}, ${chartPct(pct(i) / 100)}` },
-    tip: k => { const i = order[k]; return <TooltipRow color={seriesColor(i, items[i].color)} label={items[i].label} value={show === 'percent' ? chartPct(pct(i) / 100) : `${format(items[i].value)} · ${chartPct(pct(i) / 100)}`} /> },
+    data: { head: ['Item', 'Value', 'Share'], rows: items.map((it, i) => [it.label, it.value, shareOf(i)]), formats: [undefined, formatProp, chartPct] },
+    summary: `${plural(items.length, 'part')}, largest first: ${fmt.list(order.map(i => `${items[i].label} ${chartPct(shareOf(i))}`))}.`,
+    describe: k => { const i = order[k]; return `${items[i].label}: ${format(items[i].value)}, ${chartPct(shareOf(i))}` },
+    tip: k => { const i = order[k]; return <TooltipRow color={seriesColor(i, items[i].color)} label={items[i].label} value={show === 'percent' ? chartPct(shareOf(i)) : `${format(items[i].value)} · ${chartPct(shareOf(i))}`} /> },
   })
   const hover = shell.hover === null ? null : order[shell.hover]
   return (
@@ -1396,13 +1504,13 @@ export function Treemap({ items, height = 220, format: formatProp, show = 'value
         return (
           // the box is laid out at its final rect straight away; `layout` animates the change as a transform (FLIP)
           // and the entrance is a scale from the centre, so no frame ever changes layout properties
-          <motion.div key={it.label} data-ci={k} aria-hidden layout initial={{ scale: 0, opacity: 0 }} animate={seen ? { scale: 1, opacity: 1 } : { scale: 0, opacity: 0 }}
+          <motion.div key={`${it.label}-${r.i}`} data-ci={k} aria-hidden layout initial={{ scale: 0, opacity: 0 }} animate={seen ? { scale: 1, opacity: 1 } : { scale: 0, opacity: 0 }}
             transition={spring(0.2, 0.65)} className="absolute overflow-hidden p-[2px]" style={{ left: r.x, top: r.y, width: r.w, height: r.h }} {...shell.bind(k)}>
-            <motion.div layout className={cn('h-full p-2 text-xs transition-[opacity,box-shadow]', hover === r.i && 'shadow-[inset_0_0_0_2px_var(--card)]')}
-              style={{ borderRadius: 8, background: `color-mix(in srgb, ${safeColor(color, 'var(--accent)')} 72%, var(--fg))`, color: 'var(--card)', opacity: hover === null || hover === r.i ? 1 : 0.7 }}>
-              {r.w > it.label.length * 6.5 + 18 && r.h > 34 && <motion.div layout="position">
+            <motion.div layout className={cn('h-full rounded-[var(--r-md)] p-2 text-xs transition-[opacity,box-shadow]', hover === r.i && 'shadow-[inset_0_0_0_2px_var(--card)]')}
+              style={{ background: `color-mix(in srgb, ${safeColor(color, 'var(--accent)')} 72%, var(--fg))`, color: 'var(--card)', opacity: hover === null || hover === r.i ? 1 : 0.7 }}>
+              {r.w > textPx(it.label.length, 18) && r.h > 34 && <motion.div layout="position">
                 <b className="block truncate font-semibold">{it.label}</b>
-                <span className="ui-num opacity-85">{show === 'percent' ? <AnimatedNumber value={pct(r.i) / 100} format={{ style: 'percent' }} /> : format(it.value)}</span>
+                <span className="ui-num opacity-85">{show === 'percent' ? <AnimatedNumber value={shareOf(r.i)} format={{ style: 'percent', maximumFractionDigits: 0 }} /> : format(it.value)}</span>
               </motion.div>}
             </motion.div>
           </motion.div>
@@ -1422,15 +1530,17 @@ export function SparkTile({ label, value, format, data, color = 'var(--ok)', hei
   const [ref, seen] = useChartSeen<HTMLDivElement>()
   const [boxRef, bw] = useWidth<HTMLDivElement>()
   const shown = useTween(seen ? value : 0, 1100)
-  const n = data.length, lo = minOf(data), hi = maxOf(data), pad = 4
+  const n = data.length, pad = 4
   const ptName = (i: number) => points?.[i] ?? `Point ${i + 1} of ${n}`
+  const px = linScale(0, Math.max(1, n - 1), 0, bw), toY = linScale(minOf(data), maxOf(data), height - pad, pad), py = (i: number) => toY(data[i])
   const shell = useChartShell({
     box: ref, count: n, start: n - 1, label: `${label}: ${fmt.number(value, format)}`,
     summary: n ? `Trend of ${plural(n, 'point')}, ${rangeStr(data, fmt.compact)}, ${data[n - 1] >= data[0] ? 'up' : 'down'} ${chartPct(Math.abs((data[n - 1] - data[0]) / (Math.abs(data[0]) || 1)))} from the first.` : 'No trend data.',
     describe: i => `${ptName(i)}: ${fmt.compact(data[i])}`,
+    tip: i => <TooltipRow color={color} label={ptName(i)} value={fmt.compact(data[i])} />,
+    tipAt: i => (bw > 0 ? chartTipAt(boxRef.current, px(i), py(i)) : null),
   })
   const { hover } = shell
-  const px = linScale(0, Math.max(1, n - 1), 0, bw), py = (i: number) => linScale(lo, hi === lo ? lo + 1 : hi, height - pad, pad)(data[i])
   return (
     <ChartShell shell={shell} className={className} boxClassName="flex flex-col gap-1">
       <span aria-hidden className="text-xs text-[var(--fg3)]">{label}</span>
@@ -1440,7 +1550,6 @@ export function SparkTile({ label, value, format, data, color = 'var(--ok)', hei
         {hover !== null && bw > 0 && <>
           <span className="pointer-events-none absolute inset-y-0 w-px bg-[var(--line2)]" style={{ left: px(hover) }} />
           <span className="pointer-events-none absolute h-2.5 w-2.5 -translate-x-1/2 -translate-y-1/2 rounded-full border-2 border-[var(--card)]" style={{ left: px(hover), top: py(hover), background: safeColor(color) }} />
-          <ChartTooltip x={px(hover)} y={-34} width={bw}><TooltipRow color={color} label={ptName(hover)} value={fmt.compact(data[hover])} /></ChartTooltip>
         </>}
       </div>
     </ChartShell>
@@ -1454,14 +1563,16 @@ export type TickerRow = { symbol: string; name: string; data: number[] }
  */
 export function TickerTable({ rows, className }: { rows: TickerRow[]; className?: string }) {
   return (
-    <div role="table" aria-label={'Prices'} className={cn('flex flex-col', className)}>
+    <div role="table" aria-label="Prices" className={cn('flex flex-col', className)}>
+      <div role="row" className="sr-only">{['Symbol', 'Name', 'Trend', 'Price', 'Change'].map(h => <span key={h} role="columnheader">{h}</span>)}</div>
       {rows.map(r => {
         const first = r.data[0] ?? 0, last = r.data[r.data.length - 1] ?? 0, ch = first ? (last / first - 1) * 100 : 0, up = ch >= 0
         return (
           <div key={r.symbol} role="row" className="grid h-11 grid-cols-[44px_minmax(0,1fr)_64px_62px] items-center gap-3 border-b border-[var(--line)] text-[13px] last:border-b-0 sm:grid-cols-[56px_minmax(0,1fr)_120px_72px_66px]">
             <span role="cell" className="font-[family-name:var(--mono)] text-xs font-semibold">{r.symbol}</span>
-            <span role="cell" className="hidden truncate text-[var(--fg2)] sm:block">{r.name}</span>
-            <SparkChart data={r.data} height={28} endDot color={up ? 'var(--ok)' : 'var(--bad)'} />
+            {/* phones drop the name visually; it stays a cell, so every row reads the same columns */}
+            <span role="cell" className="truncate text-[var(--fg2)] max-sm:sr-only">{r.name}</span>
+            <span role="cell" className="min-w-0"><span className="sr-only">{up ? 'Rising' : 'Falling'}</span><SparkChart data={r.data} height={28} endDot color={up ? 'var(--ok)' : 'var(--bad)'} /></span>
             <span role="cell" className="flex justify-end font-[family-name:var(--mono)] text-xs tabular-nums"><AnimatedNumber value={last} format={{ minimumFractionDigits: 2, maximumFractionDigits: 2 }} /></span>
             <span role="cell" className="flex min-w-[62px] justify-end tabular-nums"><DeltaBadge value={ch} digits={2} title={up ? 'Up since the first price shown' : 'Down since the first price shown'} className="min-w-[62px] justify-center font-[family-name:var(--mono)] tabular-nums" /></span>
           </div>
@@ -1479,7 +1590,7 @@ export function BulletChart({ rows, max = 100, bands = [0.5, 0.75], format: form
   { rows: { label: string; value: number; target: number }[]; max?: number; bands?: number[]; format?: (n: number) => string; /** accessible name */ label?: string; className?: string } & ChartKitProps) {
   const [ref, w, seen] = useChartFrame<HTMLDivElement>()
   const format = formatProp ?? fmt.compact, label = labelProp ?? 'Bullet chart'
-  const L = 72, rowH = 31, iw = Math.max(0, w - L - 4), X = (v: number) => linScale(0, max || 1, L, L + iw)(clamp(v, 0, max))
+  const L = 72, rowH = 31, iw = Math.max(0, w - L - 4), toX = linScale(0, max || 1, L, L + iw), X = (v: number) => toX(clamp(v, 0, max))
   const bandFill = ['var(--line)', 'color-mix(in srgb, var(--line2) 60%, transparent)', 'var(--line2)']
   const met = (r: { value: number; target: number }) => r.value >= r.target
   const shell = useChartShell({
@@ -1487,11 +1598,10 @@ export function BulletChart({ rows, max = 100, bands = [0.5, 0.75], format: form
     data: { head: ['Measure', 'Actual', 'Target', 'Target met'], rows: rows.map(r => [r.label, r.value, r.target, met(r) ? 'Yes' : 'No']), formats: [undefined, formatProp, formatProp] },
     summary: `${plural(rows.length, 'measure')} against targets. ${rows.filter(met).length} of ${rows.length} meet their target.`,
     describe: i => `${rows[i].label}: ${format(rows[i].value)}, target ${format(rows[i].target)}, ${met(rows[i]) ? 'met' : 'below target'}`,
-    tip: i => <>
-      <div className="mb-1 font-medium">{rows[i].label}</div>
+    tip: i => <ChartTip title={rows[i].label}>
       <TooltipRow color={met(rows[i]) ? 'var(--ok)' : CHART_NEUTRAL} label="Actual" value={format(rows[i].value)} />
       <TooltipRow color="var(--fg2)" label="Target" value={format(rows[i].target)} />
-    </>,
+    </ChartTip>,
   })
   const { hover } = shell
   return (
@@ -1501,7 +1611,7 @@ export function BulletChart({ rows, max = 100, bands = [0.5, 0.75], format: form
           {rows.map((r, i) => {
             const y = 6 + i * rowH
             return (
-              <g key={r.label} data-ci={i} {...shell.bind(i)}>
+              <g key={`${r.label}-${i}`} data-ci={i} {...shell.bind(i)}>
                 <rect x={0} y={y - 6} width={w} height={rowH} fill="transparent" />
                 <text x={0} y={y + 13} fill={hover === i ? 'var(--fg)' : 'var(--fg2)'} fontWeight={hover === i ? 600 : undefined}>{r.label}</text>
                 <rect x={L} y={y} width={iw} height={18} rx={3} fill="var(--muted)" />
@@ -1525,13 +1635,15 @@ const statQuantile = (a: number[], p: number) => { const s = [...a].sort((x, y) 
 const statKde = (a: number[], xs: number[], bw: number) => xs.map(x => a.reduce((s, v) => s + Math.exp(-0.5 * ((x - v) / bw) ** 2), 0) / (a.length * bw * 2.5066))
 const statBandwidth = (a: number[]) => 1.06 * statSd(a) * a.length ** -0.2 || 1
 
-
+/** Least-squares fit with its 95% bands over the data's x extent (41 rows of [x, ŷ, CI half-width, prediction half-width]); empty below two points. */
 function regressionFit(P: [number, number][]) {
-  const n = P.length, xs = P.map(p => p[0]), ys = P.map(p => p[1]), mx = statMean(xs), my = statMean(ys)
+  const n = P.length
+  if (n < 2) return { a: 0, b: 0, r2: 0, se: 0, n, seb: 0, band: [] as number[][], pts: P.map(p => [p[0], p[1]]) }
+  const xs = P.map(p => p[0]), ys = P.map(p => p[1]), mx = statMean(xs), my = statMean(ys)
   const sxx = xs.reduce((s, x) => s + (x - mx) ** 2, 0) || 1, sxy = P.reduce((s, [x, y]) => s + (x - mx) * (y - my), 0), b = sxy / sxx, a = my - b * mx
   const res = P.map(([x, y]) => y - (a + b * x)), sse = res.reduce((s, r) => s + r * r, 0), se = Math.sqrt(sse / Math.max(1, n - 2))
   const sst = ys.reduce((s, y) => s + (y - my) ** 2, 0) || 1, t = 1.96 + 2.4 / Math.max(1, n - 2) // ≈ t(0.975, n−2)
-  const x0 = Math.floor(minOf(xs)), x1 = Math.ceil(maxOf(xs))
+  const [x0, x1] = extent(xs)
   const band = Array.from({ length: 41 }, (_, i) => { const x = x0 + ((x1 - x0) * i) / 40, h2 = 1 / n + (x - mx) ** 2 / sxx; return [x, a + b * x, t * se * Math.sqrt(h2), t * se * Math.sqrt(1 + h2)] })
   return { a, b, r2: 1 - sse / sst, se, n, seb: se / Math.sqrt(sxx), band, pts: P.map(p => [p[0], p[1]]) }
 }
@@ -1547,105 +1659,116 @@ export function RegressionChart({ points, prediction = true, height = 240, xDoma
   const fit = useMemo(() => regressionFit(points), [points])
   const collapsed = useMemo(() => ({ ...fit, band: fit.band.map(r => [r[0], r[1], 0, 0]), pts: fit.pts.map(([x]) => [x, fit.a + fit.b * x]) }), [fit])
   const S = useTween(seen ? fit : collapsed)
-  const xd = xDomain ?? extent(points.map(p => p[0])), yd = yDomain ?? [minOf(points.map(p => p[1]), 0), maxOf(points.map(p => p[1]))]
-  const pad = { l: 40, r: 10, t: 10, b: 26 }, iw = Math.max(0, w - pad.l - pad.r), ih = height - pad.t - pad.b
+  const has = fit.band.length > 0
+  const xd = xDomain ?? (has ? extent(points.map(p => p[0])) : [0, 1]), yd = yDomain ?? (has ? [minOf(points.map(p => p[1]), 0), maxOf(points.map(p => p[1]))] : [0, 1])
+  const yTicks = ticksIn(yd[0], yd[1], 5), yAxis = chartAxisFormat(yd[0], yd[1], 5), xAxis = chartAxisFormat(xd[0], xd[1])
+  // readouts: x to the band's step, y one decimal finer than its axis
+  const xDec = has ? tickDecimals((fit.band[40][0] - fit.band[0][0]) / 40) : 0, yDec = tickDecimals(niceStep(yd[1] - yd[0], 5)) + 1
+  const pad = { l: chartAxisPad(yTicks.map(yAxis), 30), r: 10, t: 10, b: 26 }, iw = Math.max(0, w - pad.l - pad.r), ih = height - pad.t - pad.b
   const X = linScale(xd[0], xd[1], pad.l, pad.l + iw), Y = linScale(yd[0], yd[1], pad.t + ih, pad.t)
   const shell = useChartShell({
     table, exportable, ref: userRef, box: ref, count: fit.band.length, start: 20, label, data: { head: ['x', 'y'], rows: points },
-    summary: `${plural(fit.n, 'point')}. Fitted line y = ${chartFixed(fit.a)} + ${chartFixed(fit.b, 2)}x, R² ${chartFixed(fit.r2, 2)}. Arrow keys walk the fitted line.`,
-    describe: i => { const r = fit.band[i]; return `x ${chartFixed(r[0], 0)}: fitted ${chartFixed(r[1])}, 95% CI plus or minus ${chartFixed(r[2])}` + (prediction ? `, prediction plus or minus ${chartFixed(r[3])}` : '') },
+    summary: has ? `${plural(fit.n, 'point')}. Fitted line y = ${chartFixed(fit.a, yDec)} + ${chartFixed(fit.b, 2)}x, R² ${chartFixed(fit.r2, 2)}. Arrow keys walk the fitted line.` : 'No data.',
+    describe: i => { const r = fit.band[i]; return `x ${chartFixed(r[0], xDec)}: fitted ${chartFixed(r[1], yDec)}, 95% CI plus or minus ${chartFixed(r[2], yDec)}` + (prediction ? `, prediction plus or minus ${chartFixed(r[3], yDec)}` : '') },
+    tip: i => { const r = S.band[i]; return <ChartTip title={`x = ${chartFixed(r[0], xDec)}`}>
+      <TooltipRow color="var(--accent)" label="ŷ" value={chartFixed(r[1], yDec)} />
+      <TooltipRow color="var(--band)" label="95% CI" value={`± ${chartFixed(r[2], yDec)}`} />
+      {prediction && <TooltipRow color="var(--band)" label="Prediction" value={`± ${chartFixed(r[3], yDec)}`} />}
+    </ChartTip> },
+    tipAt: i => { const r = S.band[i]; return w > 0 && r ? chartTipAt(ref.current, X(r[0]), Math.max(0, Y(r[1] + r[3]))) : null },
   })
   const { hover, setHover } = shell
   const poly = (k: number) => S.band.map(r => `${svgN(X(r[0]))},${svgN(Y(r[1] + r[k]))}`).join(' ') + ' ' + S.band.slice().reverse().map(r => `${svgN(X(r[0]))},${svgN(Y(r[1] - r[k]))}`).join(' ')
-  const row = hover === null ? null : S.band[hover]
+  const row = hover === null ? null : S.band[hover] ?? null
   const regressionPick = (e: ReactPointerEvent<SVGRectElement>) => {
     const xv = xd[0] + ((e.clientX - e.currentTarget.getBoundingClientRect().left) / (iw || 1)) * (xd[1] - xd[0]), b0 = fit.band[0][0], b1 = fit.band[40][0]
     setHover(clamp(Math.round(((xv - b0) / (b1 - b0 || 1)) * 40), 0, 40))
   }
   const kv = (k: string, v: string) => <span key={k} className="text-xs text-[var(--fg3)]">{k}<b className="ms-1 font-[family-name:var(--mono)] font-semibold text-[var(--fg)]">{v}</b></span>
   return (
-    <ChartShell shell={shell} className={className} style={{ height }} after={footer && <div className="mt-2.5 flex flex-wrap gap-x-4 gap-y-1">
-      {[kv('slope', `${chartFixed(S.b, 2)} ± ${chartFixed(1.96 * S.seb, 2)}`), kv('intercept', chartFixed(S.a)), kv('R²', chartFixed(S.r2, 2)), kv('residual SE', chartFixed(S.se)), kv('n', fmt.number(Math.round(S.n)))]}
+    <ChartShell shell={shell} className={className} style={{ height }} after={footer && has && <div className="mt-2.5 flex flex-wrap gap-x-4 gap-y-1">
+      {[kv('slope', `${chartFixed(S.b, 2)} ± ${chartFixed(1.96 * S.seb, 2)}`), kv('intercept', chartFixed(S.a, yDec)), kv('R²', chartFixed(S.r2, 2)), kv('residual SE', chartFixed(S.se, yDec)), kv('n', fmt.number(Math.round(S.n)))]}
     </div>}>
-        {w > 0 && (
-          <svg width={w} height={height} aria-hidden className="block touch-pan-y overflow-visible text-[11px]">
-            <ChartGridY ticks={ticksIn(yd[0], yd[1], 5)} Y={Y} x1={pad.l} x2={w - pad.r} format={v => chartFixed(v, 0)} dash="2 3" gap={6} />
-            <ChartAxisX y={height - 8} ticks={ticksIn(xd[0], xd[1]).map(t => ({ x: X(t), label: fmt.number(t) }))} />
-            <motion.polygon points={poly(3)} fill="var(--accent)" initial={false} animate={{ opacity: prediction ? 0.07 : 0 }} />
-            <polygon points={poly(2)} fill="var(--accent)" opacity={0.16} />
-            {S.pts.map((p, i) => <circle key={i} cx={X(p[0])} cy={Y(p[1])} r={3} fill="var(--fg2)" opacity={0.55} />)}
-            <path d={linePath(S.band.map(r => [X(r[0]), Y(r[1])]))} fill="none" stroke="var(--accent)" strokeWidth={2.2} />
-            {row && <line x1={X(row[0])} x2={X(row[0])} y1={pad.t} y2={pad.t + ih} stroke="var(--fg3)" strokeDasharray="3 3" />}
-            {row && <circle cx={X(row[0])} cy={Y(row[1])} r={4} fill="var(--accent)" stroke="var(--card)" strokeWidth={2} />}
-            <rect x={pad.l} y={pad.t} width={iw} height={ih} fill="transparent" onPointerDown={e => regressionPick(e)} onPointerMove={e => regressionPick(e)} />
-          </svg>
-        )}
-        {row && w > 0 && (
-          <ChartTooltip x={X(row[0])} y={Math.max(0, Y(row[1] + row[3]) - 10)} width={w}>
-            <div className="mb-1 font-medium">{`x = ${chartFixed(row[0], 0)}`}</div>
-            <TooltipRow color="var(--accent)" label="ŷ" value={chartFixed(row[1])} />
-            <TooltipRow color="var(--band)" label={'95% CI'} value={`± ${chartFixed(row[2])}`} />
-            {prediction && <TooltipRow color="var(--band)" label="Prediction" value={`± ${chartFixed(row[3])}`} />}
-          </ChartTooltip>
-        )}
+      {w > 0 && has && (
+        <svg width={w} height={height} aria-hidden className="block touch-pan-y overflow-visible text-[11px]">
+          <ChartGridY ticks={yTicks} Y={Y} x1={pad.l} x2={w - pad.r} format={yAxis} dash="2 3" gap={6} />
+          <ChartAxisX y={height - 8} ticks={ticksIn(xd[0], xd[1]).map(t => ({ x: X(t), label: xAxis(t) }))} />
+          <motion.polygon points={poly(3)} fill="var(--accent)" initial={false} animate={{ opacity: prediction ? 0.07 : 0 }} />
+          <polygon points={poly(2)} fill="var(--accent)" opacity={0.16} />
+          {S.pts.map((p, i) => <circle key={i} cx={X(p[0])} cy={Y(p[1])} r={3} fill="var(--fg2)" opacity={0.55} />)}
+          <path d={chartPath(S.band.map(r => [X(r[0]), Y(r[1])]))} fill="none" stroke="var(--accent)" strokeWidth={2.2} />
+          {row && <line x1={X(row[0])} x2={X(row[0])} y1={pad.t} y2={pad.t + ih} stroke="var(--fg3)" strokeDasharray="3 3" />}
+          {row && <circle cx={X(row[0])} cy={Y(row[1])} r={4} fill="var(--accent)" stroke="var(--card)" strokeWidth={2} />}
+          <rect x={pad.l} y={pad.t} width={iw} height={ih} fill="transparent" onPointerDown={e => regressionPick(e)} onPointerMove={e => regressionPick(e)} />
+        </svg>
+      )}
     </ChartShell>
   )
 }
 
 export type BoxGroup = { label: string; values: number[]; color?: string }
+/** Most outlier dots drawn per group (the farthest from the median); the rest are counted in a "+N" label. */
+const BOX_OUTLIER_DOTS = 12
 function boxStats(a: number[]) {
-  const q1 = statQuantile(a, 0.25), q3 = statQuantile(a, 0.75), iqr = q3 - q1
+  const q1 = statQuantile(a, 0.25), q2 = statQuantile(a, 0.5), q3 = statQuantile(a, 0.75), iqr = q3 - q1
   const lo = Math.max(minOf(a), q1 - 1.5 * iqr), hi = Math.min(maxOf(a), q3 + 1.5 * iqr), inner = a.filter(v => v >= lo && v <= hi)
   const ys = Array.from({ length: 41 }, (_, k) => lo + ((hi - lo) * k) / 40)
+  const out = a.filter(v => v < lo || v > hi)
   // the violin is the density between the whisker ends, so outliers show as dots instead of long spikes
-  return { q1, q2: statQuantile(a, 0.5), q3, lo, hi, ys, dens: statKde(inner, ys, statBandwidth(inner)), out: a.filter(v => v < lo || v > hi).slice(0, 6) }
+  return { q1, q2, q3, lo, hi, ys, dens: statKde(inner, ys, statBandwidth(inner)), out, dots: [...out].sort((x, y) => Math.abs(y - q2) - Math.abs(x - q2)).slice(0, BOX_OUTLIER_DOTS) }
 }
 /**
- * Distributions per group: box (median, quartiles, 1.5 × IQR whiskers), KDE violin, or both, with outliers as dots.
- * Hover or tap a box or outlier for numbers. New values morph in place.
+ * Distributions per group: box (median, quartiles, 1.5 × IQR whiskers), KDE violin, or both, with outliers as dots
+ * (past a dozen, the farthest are drawn and the rest counted). Hover or tap a box or outlier for numbers. Groups
+ * without values are left out. New values morph in place.
  */
-export function BoxViolinChart({ groups, mode = 'both', domain, height = 200, format: formatProp, label: labelProp, table, exportable, ref: userRef, className }:
+export function BoxViolinChart({ groups: allGroups, mode = 'both', domain, height = 200, format: formatProp, label: labelProp, table, exportable, ref: userRef, className }:
   { groups: BoxGroup[]; mode?: 'box' | 'violin' | 'both'; domain?: [number, number]; height?: number; format?: (v: number) => string; /** accessible name */ label?: string; className?: string } & ChartKitProps) {
   const [ref, w, seen] = useChartFrame<HTMLDivElement>()
   const format = formatProp ?? ((v: number) => chartFixed(v)), label = labelProp ?? 'Box and violin chart'
-  // the box and violin morph between samples; outliers (their count varies) tween on their own, so a changed count only
-  // snaps the dots. useTween snaps whenever the shape changes, so adding or removing groups never indexes past the end.
-  const stats = useMemo(() => groups.map(g => { const { out, ...k } = boxStats(g.values); return k }), [groups])
-  const outs = useMemo(() => groups.map(g => boxStats(g.values).out), [groups])
-  const collapsed = useMemo(() => stats.map(k => ({ ...k, q1: k.q2, q3: k.q2, lo: k.q2, hi: k.q2, ys: k.ys.map(() => k.q2), dens: k.dens.map(() => 0) })), [stats])
-  const collapsedOuts = useMemo(() => outs.map((o, i) => o.map(() => stats[i].q2)), [outs, stats])
-  const S = useTween(seen ? stats : collapsed), O = useTween(seen ? outs : collapsedOuts)
+  const groups = useMemo(() => allGroups.filter(g => g.values.length > 0), [allGroups])
   const all = groups.flatMap(g => g.values), dom = domain ?? (all.length ? extent(all) : [0, 1])
-  const pad = { l: 30, r: 10, t: 8, b: 24 }, iw = Math.max(0, w - pad.l - pad.r), ih = height - pad.t - pad.b
+  const ticks = ticksIn(dom[0], dom[1]), axis = formatProp ?? chartAxisFormat(dom[0], dom[1])
+  // the box and violin morph between samples; the drawn outliers (their count varies) tween on their own, so a changed
+  // count only snaps the dots. useTween snaps whenever the shape changes, so adding or removing groups never indexes past the end.
+  const full = useMemo(() => groups.map(g => boxStats(g.values)), [groups])
+  const stats = useMemo(() => full.map(({ out: _o, dots: _d, ...k }) => k), [full])
+  const dots = useMemo(() => full.map(k => k.dots), [full])
+  const collapsed = useMemo(() => stats.map(k => ({ ...k, q1: k.q2, q3: k.q2, lo: k.q2, hi: k.q2, ys: k.ys.map(() => k.q2), dens: k.dens.map(() => 0) })), [stats])
+  const collapsedDots = useMemo(() => dots.map((o, i) => o.map(() => stats[i].q2)), [dots, stats])
+  const S = useTween(seen ? stats : collapsed), O = useTween(seen ? dots : collapsedDots)
+  const pad = { l: chartAxisPad(ticks.map(axis), 30), r: 10, t: 8, b: 24 }, iw = Math.max(0, w - pad.l - pad.r), ih = height - pad.t - pad.b
   const Y = linScale(dom[0], dom[1], pad.t + ih, pad.t), slot = iw / Math.max(1, groups.length), JIT = [-4, 3, -2, 5, -5, 2]
   const colorOf = (i: number) => seriesColor(i, groups[i].color)
-  const boxTip = (i: number) => { const k = stats[i], c = colorOf(i); return <>
-    <div className="mb-1 font-medium">{groups[i].label}</div>
+  const outs = (i: number) => full[i].out.length
+  const boxTip = (i: number) => { const k = stats[i], c = colorOf(i); return <ChartTip title={groups[i].label}>
     <TooltipRow color={c} label="median" value={format(k.q2)} />
     <TooltipRow color={c} label="IQR" value={`${format(k.q1)} – ${format(k.q3)}`} />
     <TooltipRow color={c} label="whiskers" value={`${format(k.lo)} – ${format(k.hi)}`} />
-  </> }
+    {outs(i) > 0 && <TooltipRow color="var(--bad)" label="outliers" value={fmt.number(outs(i))} />}
+  </ChartTip> }
   const shell = useChartShell({
     table, exportable, ref: userRef, box: ref, count: groups.length, label, tip: boxTip,
     data: {
       head: ['Group', 'Lower whisker', 'Q1', 'Median', 'Q3', 'Upper whisker', 'Outliers', 'n'],
-      rows: groups.map((g, i) => { const k = stats[i]; return [g.label, k.lo, k.q1, k.q2, k.q3, k.hi, outs[i].length, g.values.length] }),
+      rows: groups.map((g, i) => { const k = stats[i]; return [g.label, k.lo, k.q1, k.q2, k.q3, k.hi, outs(i), g.values.length] }),
       formats: [undefined, format, format, format, format, format],
     },
-    summary: `${plural(groups.length, 'group')}: ${fmt.list(groups.map((g, i) => `${g.label} median ${format(stats[i].q2)}`))}.`,
-    describe: i => { const k = stats[i]; return `${groups[i].label}: median ${format(k.q2)}, quartiles ${format(k.q1)} to ${format(k.q3)}, whiskers ${format(k.lo)} to ${format(k.hi)}` + (outs[i].length ? `, ${plural(outs[i].length, 'outlier')}` : '') },
+    summary: groups.length ? `${plural(groups.length, 'group')}: ${fmt.list(groups.map((g, i) => `${g.label} median ${format(stats[i].q2)}`))}.` : 'No data.',
+    describe: i => { const k = stats[i]; return `${groups[i].label}: median ${format(k.q2)}, quartiles ${format(k.q1)} to ${format(k.q3)}, whiskers ${format(k.lo)} to ${format(k.hi)}` + (outs(i) ? `, ${plural(outs(i), 'outlier')}` : '') },
   })
   const { hover, setHover, bind } = shell
   return (
     <ChartShell shell={shell} className={className} style={{ height }}>
-      {w > 0 && (
+      {w > 0 && groups.length > 0 && (
         <svg width={w} height={height} aria-hidden className="block overflow-visible text-[11px]">
-          <ChartGridY ticks={ticksIn(dom[0], dom[1])} Y={Y} x1={pad.l} x2={w - pad.r} format={v => chartFixed(v, 0)} dash="2 3" gap={6} />
+          <ChartGridY ticks={ticks} Y={Y} x1={pad.l} x2={w - pad.r} format={axis} dash="2 3" gap={6} />
           {S.map((k, i) => {
             const g = groups[i], color = colorOf(i), cx = pad.l + slot * (i + 0.5), mx = maxOf(k.dens) || 1, wv = slot * 0.36, bxw = mode === 'both' ? 9 : 16
             const right = k.ys.map((v, j) => `L${svgN(cx + (k.dens[j] / mx) * wv)},${svgN(Y(v))}`).join(''), left = k.ys.map((v, j) => `L${svgN(cx - (k.dens[j] / mx) * wv)},${svgN(Y(v))}`).reverse().join('')
+            const drawn = O[i] ?? [], more = outs(i) - drawn.length
             return (
-              <g key={g.label} data-ci={i} opacity={hover === null || hover === i ? 1 : 0.5} onPointerEnter={() => setHover(i)}>
+              <g key={`${g.label}-${i}`} data-ci={i} opacity={hover === null || hover === i ? 1 : 0.5} onPointerEnter={() => setHover(i)}>
                 {mode !== 'box' && <path d={`M${svgN(cx)},${svgN(Y(k.lo))}${right}L${svgN(cx)},${svgN(Y(k.hi))}${left}Z`} fill={color} fillOpacity={mode === 'both' ? 0.16 : 0.3} stroke={color} strokeOpacity={0.7} strokeWidth={1.2} strokeLinejoin="round" />}
                 {mode !== 'violin' && <>
                   <line x1={cx} x2={cx} y1={Y(k.lo)} y2={Y(k.hi)} stroke="var(--fg2)" />
@@ -1654,8 +1777,9 @@ export function BoxViolinChart({ groups, mode = 'both', domain, height = 200, fo
                   <line x1={cx - bxw} x2={cx + bxw} y1={Y(k.q2)} y2={Y(k.q2)} stroke="var(--fg)" strokeWidth={1.5} pointerEvents="none" />
                 </>}
                 {mode === 'violin' && <circle cx={cx} cy={Y(k.q2)} r={3} fill="var(--fg)" stroke="transparent" strokeWidth={16} {...bind(i)} />}
-                {(O[i] ?? []).map((v, j) => <circle key={j} cx={cx + JIT[j % JIT.length]} cy={Y(v)} r={2.8} fill="var(--bad)" opacity={0.9} stroke="transparent" strokeWidth={14}
-                  {...bind(i, () => <><div className="mb-1 font-medium">{g.label}</div><TooltipRow color="var(--bad)" label="outlier" value={format(v)} /></>)} />)}
+                {drawn.map((v, j) => <circle key={j} cx={cx + JIT[j % JIT.length]} cy={Y(v)} r={2.8} fill="var(--bad)" opacity={0.9} stroke="transparent" strokeWidth={14}
+                  {...bind(i, () => <ChartTip title={g.label}><TooltipRow color="var(--bad)" label="outlier" value={format(v)} /></ChartTip>)} />)}
+                {more > 0 && <text x={cx + 9} y={Y(drawn[0])} dy="0.32em" fill="var(--bad)" fontSize={10}>+{more}</text>}
                 <text x={cx} y={height - 7} textAnchor="middle" fill={hover === i ? 'var(--fg)' : 'var(--fg3)'} fontWeight={hover === i ? 600 : undefined}>{g.label}</text>
               </g>
             )
@@ -1668,53 +1792,61 @@ export function BoxViolinChart({ groups, mode = 'both', domain, height = 200, fo
 
 /**
  * Histogram with a kernel-density curve, mean (dashed), median and a ±1σ shaded band. `bins` is usually driven by a slider;
- * bins, density and markers all morph when it or the data changes. Hover or tap a bar for its range and count.
+ * heights, density and markers all morph when it or the data changes. Hover or tap a bar for its range and count.
  */
 export function DensityHistogram({ values, bins = 18, domain, height = 190, label: labelProp, table, exportable, ref: userRef, className }: { values: number[]; bins?: number; domain?: [number, number]; height?: number; /** accessible name */ label?: string; className?: string } & ChartKitProps) {
   const [ref, w, seen] = useChartFrame<HTMLDivElement>()
   const label = labelProp ?? 'Histogram with density curve'
+  const has = values.length > 0
   const [d0, d1] = domain ?? [NaN, NaN]
-  const dom = useMemo(() => (Number.isFinite(d0) ? [d0, d1] : niceTicks(minOf(values), maxOf(values)).filter((_, i, a) => i === 0 || i === a.length - 1)) as [number, number], [d0, d1, values])
+  const dom = useMemo(() => {
+    if (Number.isFinite(d0) && d1 > d0) return [d0, d1] as [number, number]
+    if (!has) return [0, 1] as [number, number]
+    const t = niceTicks(minOf(values), maxOf(values))
+    return (t[t.length - 1] > t[0] ? [t[0], t[t.length - 1]] : [t[0] - 1, t[0] + 1]) as [number, number]
+  }, [d0, d1, values, has])
+  const width = (dom[1] - dom[0]) / bins
   const xs = useMemo(() => Array.from({ length: 81 }, (_, i) => dom[0] + ((dom[1] - dom[0]) * i) / 80), [dom])
-  const kde = useMemo(() => statKde(values, xs, statBandwidth(values)), [values, xs])
+  const kde = useMemo(() => (has ? statKde(values, xs, statBandwidth(values)) : xs.map(() => 0)), [values, xs, has])
   const stats = useMemo(() => {
-    const width = (dom[1] - dom[0]) / bins, counts = Array(Math.max(40, bins)).fill(0)
-    values.forEach(v => { const k = Math.floor((v - dom[0]) / width); if (k >= 0 && k < bins) counts[k]++ })
-    const dens = counts.map(c => c / (values.length * width))
-    return { dens, bins, kde, m: statMean(values), md: statQuantile(values, 0.5), sd: statSd(values), ymax: maxOf(kde, maxOf(dens)) * 1.12 }
-  }, [values, bins, kde, dom])
+    const counts: number[] = Array(Math.max(40, bins)).fill(0)
+    // bins are [from, to) except the last, which keeps the domain's maximum
+    values.forEach(v => { if (v >= dom[0] && v <= dom[1]) counts[Math.min(bins - 1, Math.floor((v - dom[0]) / width))]++ })
+    const dens = counts.map(c => (has ? c / (values.length * width) : 0))
+    return { counts, dens, kde, m: has ? statMean(values) : 0, md: has ? statQuantile(values, 0.5) : 0, sd: has ? statSd(values) : 0, ymax: maxOf(kde, maxOf(dens)) * 1.12 || 1 }
+  }, [values, bins, kde, dom, width, has])
   const collapsed = useMemo(() => ({ ...stats, dens: stats.dens.map(() => 0), kde: stats.kde.map(() => 0), sd: 0 }), [stats])
   const S = useTween(seen ? stats : collapsed, 450)
   const pad = { l: 12, r: 8, t: 10, b: 24 }, iw = Math.max(0, w - pad.l - pad.r), ih = height - pad.t - pad.b
   const X = linScale(dom[0], dom[1], pad.l, pad.l + iw), Y = (v: number) => pad.t + ih - Math.min(1, v / (S.ymax || 1)) * ih
-  const nb = Math.round(S.bins), bwv = (dom[1] - dom[0]) / nb
-  const binLo = (i: number) => dom[0] + (i * (dom[1] - dom[0])) / bins, binN = (i: number) => Math.round(stats.dens[i] * values.length * ((dom[1] - dom[0]) / bins))
-  const binTip = (i: number) => <><div className="mb-1 font-medium">{chartFixed(binLo(i), 0)}–{chartFixed(binLo(i + 1), 0)}</div><TooltipRow color="var(--accent)" label="values" value={fmt.number(binN(i))} /></>
+  const axis = chartAxisFormat(dom[0], dom[1]), edge = (v: number) => chartFixed(v, tickDecimals(width)), stat = (v: number) => chartFixed(v, tickDecimals(niceStep(dom[1] - dom[0], 4)) + 1)
+  const binLo = (i: number) => dom[0] + i * width, binN = (i: number) => stats.counts[i]
+  const binTip = (i: number) => <ChartTip title={`${edge(binLo(i))}–${edge(binLo(i + 1))}`}><TooltipRow color="var(--accent)" label="values" value={fmt.number(binN(i))} /></ChartTip>
   const shell = useChartShell({
-    table, exportable, ref: userRef, box: ref, count: bins, label, tip: binTip,
-    data: { head: ['Range', 'Count'], rows: Array.from({ length: bins }, (_, i) => [`${binLo(i)}–${binLo(i + 1)}`, binN(i)]), formats: [(r: string) => r.split('–').map(v => chartFixed(+v, 0)).join('–')] },
-    summary: `${plural(values.length, 'value')} in ${bins} bins from ${chartFixed(dom[0], 0)} to ${chartFixed(dom[1], 0)}. Mean ${chartFixed(stats.m)}, median ${chartFixed(stats.md)}, standard deviation ${chartFixed(stats.sd)}.`,
-    describe: i => `${chartFixed(binLo(i), 0)} to ${chartFixed(binLo(i + 1), 0)}: ${plural(binN(i), 'value')}`,
+    table, exportable, ref: userRef, box: ref, count: has ? bins : 0, label, tip: binTip,
+    data: { head: ['From', 'To', 'Count'], rows: Array.from({ length: has ? bins : 0 }, (_, i) => [binLo(i), binLo(i + 1), binN(i)]), formats: [edge, edge] },
+    summary: has ? `${plural(values.length, 'value')} in ${bins} bins from ${axis(dom[0])} to ${axis(dom[1])}. Mean ${stat(stats.m)}, median ${stat(stats.md)}, standard deviation ${stat(stats.sd)}.` : 'No data.',
+    describe: i => `${edge(binLo(i))} to ${edge(binLo(i + 1))}: ${plural(binN(i), 'value')}`,
   })
   const { hover } = shell
   return (
     <ChartShell shell={shell} className={className} style={{ height }}>
-      {w > 0 && (
+      {w > 0 && has && (
         <svg width={w} height={height} aria-hidden className="block overflow-visible text-[11px]">
           <line x1={pad.l} x2={w - pad.r} y1={pad.t + ih} y2={pad.t + ih} stroke="var(--line)" />
           <rect x={X(S.m - S.sd)} y={pad.t} width={Math.max(0, X(S.m + S.sd) - X(S.m - S.sd))} height={ih} fill="color-mix(in srgb, var(--fg) 6%, transparent)" />
-          {Array.from({ length: nb }, (_, i) => {
-            const lo = dom[0] + i * bwv
-            return <rect key={i} data-ci={i} x={X(lo) + 1} y={Y(S.dens[i])} width={Math.max(0, X(lo + bwv) - X(lo) - 2)} height={Math.max(0, Y(0) - Y(S.dens[i]))} rx={2} fill="var(--accent)" opacity={hover === i ? 0.5 : 0.22}
+          {Array.from({ length: bins }, (_, i) => {
+            const lo = binLo(i)
+            return <rect key={i} data-ci={i} x={X(lo) + 1} y={Y(S.dens[i])} width={Math.max(0, X(lo + width) - X(lo) - 2)} height={Math.max(0, Y(0) - Y(S.dens[i]))} rx={2} fill="var(--accent)" opacity={hover === i ? 0.5 : 0.22}
               {...shell.bind(i)} />
           })}
           <path d={chartPath(xs.map((v, i) => [X(v), Y(S.kde[i])]))} fill="none" stroke="var(--accent)" strokeWidth={2} pointerEvents="none" />
           <line x1={X(S.m)} x2={X(S.m)} y1={pad.t} y2={pad.t + ih} stroke="var(--bad)" strokeWidth={1.5} strokeDasharray="4 3" pointerEvents="none" />
           <line x1={X(S.md)} x2={X(S.md)} y1={pad.t} y2={pad.t + ih} stroke="var(--fg)" strokeWidth={1.5} pointerEvents="none" />
-          <ChartAxisX y={height - 8} ticks={ticksIn(dom[0], dom[1]).map(t => ({ x: X(t), label: fmt.number(t) }))} />
-          <text x={w - pad.r} y={pad.t + 10} textAnchor="end" fill="var(--bad)">{`mean ${chartFixed(S.m)}`}</text>
-          <text x={w - pad.r} y={pad.t + 24} textAnchor="end" fill="var(--fg)">{`median ${chartFixed(S.md)}`}</text>
-          <text x={w - pad.r} y={pad.t + 38} textAnchor="end" fill="var(--fg3)">{`σ ${chartFixed(S.sd)}`}</text>
+          <ChartAxisX y={height - 8} ticks={ticksIn(dom[0], dom[1]).map(t => ({ x: X(t), label: axis(t) }))} />
+          <text x={w - pad.r} y={pad.t + 10} textAnchor="end" fill="var(--bad)">mean {stat(S.m)}</text>
+          <text x={w - pad.r} y={pad.t + 24} textAnchor="end" fill="var(--fg)">median {stat(S.md)}</text>
+          <text x={w - pad.r} y={pad.t + 38} textAnchor="end" fill="var(--fg3)">σ {stat(S.sd)}</text>
         </svg>
       )}
     </ChartShell>
@@ -1722,19 +1854,27 @@ export function DensityHistogram({ values, bins = 18, domain, height = 190, labe
 }
 
 export type ForestRow = { label: string; effect: number; se: number }
+const lo95 = (e: number, se: number) => e - 1.96 * se, hi95 = (e: number, se: number) => e + 1.96 * se
+/** A forest plot's default domain: round ends around every 95% interval (pooled included) and zero. */
+function forestDomain(rows: ForestRow[], pooled: number, pse: number): [number, number] {
+  const ends = rows.flatMap(r => [lo95(r.effect, r.se), hi95(r.effect, r.se)]).concat(rows.length ? [lo95(pooled, pse), hi95(pooled, pse)] : [], 0).filter(Number.isFinite)
+  const [lo, hi] = extent(ends), t = niceTicks(lo, hi > lo ? hi : lo + 0.1)
+  return [t[0], t[t.length - 1]]
+}
 /**
  * Forest plot: effect sizes with 95% CI whiskers, squares sized by inverse-variance weight, a pooled diamond and a zero line.
- * Rows whose interval clears 0 are coloured as significant. New rows morph in place; hover or tap a row for its numbers.
- * Below 400px wide the right column shows the effect only (the interval stays drawn and is in the tooltip).
+ * Rows whose interval clears 0 are coloured as significant. The domain covers every interval unless `domain` is given;
+ * then an interval that runs past it ends in an arrow at the edge. New rows morph in place; hover or tap a row for its
+ * numbers. Below 400px wide the right column shows the effect only (the interval stays drawn and is in the tooltip).
  */
-export function ForestPlot({ rows, domain = [-0.1, 0.2], ticks = [-0.1, 0, 0.1, 0.2], height = 220, label: labelProp, valueLabel: valueProp, lower: lowerProp, higher: higherProp, name: nameProp, table, exportable, ref: userRef, className }:
+export function ForestPlot({ rows, domain: domainProp, ticks: ticksProp, height = 220, label: labelProp, valueLabel: valueProp, lower: lowerProp, higher: higherProp, name: nameProp, table, exportable, ref: userRef, className }:
   { rows: ForestRow[]; domain?: [number, number]; ticks?: number[]; height?: number; label?: string; valueLabel?: string; lower?: string; higher?: string; /** accessible name */ name?: string; className?: string } & ChartKitProps) {
   const [ref, w, seen] = useChartFrame<HTMLDivElement>()
   const label = labelProp ?? 'Segment', valueLabel = valueProp ?? 'Lift [95% CI]', lower = lowerProp ?? '← worse', higher = higherProp ?? 'better →', name = nameProp ?? 'Forest plot'
   /** +12.3% (signed, one decimal) */
   const forestPct = (v: number) => fmt.number(v, { style: 'percent', minimumFractionDigits: 1, maximumFractionDigits: 1, signDisplay: 'exceptZero' })
-  /** the interval ends without the % sign: −1.2, 0.0, 3.4 */
-  const forestCi = (v: number) => fmt.number(Math.round(v * 1000) / 10 || 0, { minimumFractionDigits: 1, maximumFractionDigits: 1 })
+  /** the interval ends without the % sign: −1.2, 0.0, 3.4 (no "−0.0") */
+  const forestCi = (v: number) => fmt.fixed(Math.round(v * 1000) / 10 || 0, 1)
   const ci = (e: number, lo: number, hi: number) => `${forestPct(e)}, 95% CI ${forestPct(lo)} to ${forestPct(hi)}`
   const state = useMemo(() => {
     const wsum = rows.reduce((a, r) => a + 1 / r.se ** 2, 0) || 1
@@ -1742,17 +1882,27 @@ export function ForestPlot({ rows, domain = [-0.1, 0.2], ticks = [-0.1, 0, 0.1, 
   }, [rows])
   const collapsed = useMemo(() => ({ rows: state.rows.map(([, se]) => [0, se * 0.001]), pooled: 0, pse: state.pse * 0.001 }), [state])
   const S = useTween(seen ? state : collapsed)
+  const domain = domainProp ?? forestDomain(rows, state.pooled, state.pse)
+  const inside = (v: number) => v >= domain[0] - 1e-9 && v <= domain[1] + 1e-9
+  const ticks = (ticksProp ?? ticksIn(domain[0], domain[1])).filter(inside)
+  const tickText = (v: number) => fmt.number(v, { style: 'percent', maximumFractionDigits: Math.max(0, tickDecimals(niceStep(domain[1] - domain[0], 4)) - 2), signDisplay: 'exceptZero' })
   const narrow = w > 0 && w < 400
-  const L = 72, R = narrow ? 50 : 118, T = 18, B = 34, X = (v: number) => linScale(domain[0], domain[1], L, L + Math.max(0, w - L - R))(clamp(v, domain[0], domain[1]))
+  const L = 72, R = narrow ? 50 : 118, T = 18, B = 34, toX = linScale(domain[0], domain[1], L, L + Math.max(0, w - L - R)), X = (v: number) => toX(clamp(v, domain[0], domain[1]))
   const rowH = (height - T - B) / (rows.length + 1.4), wts = S.rows.map(r => 1 / r[1] ** 2), maxW = maxOf(wts, 0) || 1, wsum = wts.reduce((a, b) => a + b, 0) || 1
   const py = T + rowH * (rows.length + 0.9), plo = S.pooled - 1.96 * S.pse, phi = S.pooled + 1.96 * S.pse
   const rowSig = (r: ForestRow) => r.effect - 1.96 * r.se > 0 || r.effect + 1.96 * r.se < 0
-  const lo95 = (e: number, se: number) => e - 1.96 * se, hi95 = (e: number, se: number) => e + 1.96 * se
-  const rowTip = (i: number) => i < rows.length ? <>
-    <div className="mb-1 font-medium">{rows[i].label}</div>
-    <div className="text-[var(--fg2)]">{ci(rows[i].effect, lo95(rows[i].effect, rows[i].se), hi95(rows[i].effect, rows[i].se))}</div>
-    <div className="text-[var(--fg2)]">{rowSig(rows[i]) ? 'significant' : 'not significant'} · {`weight ${fmt.percent(wts[i] / wsum, 0)}`}</div>
-  </> : <><div className="mb-1 font-medium">Pooled (inverse-variance)</div><div className="text-[var(--fg2)]">{ci(state.pooled, lo95(state.pooled, state.pse), hi95(state.pooled, state.pse))}</div></>
+  /** an arrow at the axis end an interval runs past (from the data, not the tween) */
+  const clipMarks = (e: number, se: number, cy: number, color: string) => ([[lo95(e, se) < domain[0] - 1e-9, -1], [hi95(e, se) > domain[1] + 1e-9, 1]] as const).map(([past, dir]) => {
+    if (!past) return null
+    const x = X(dir < 0 ? domain[0] : domain[1])
+    return <path key={dir} data-clip={dir < 0 ? 'lo' : 'hi'} d={`M${svgN(x)},${svgN(cy - 4)}L${svgN(x + dir * 6)},${svgN(cy)}L${svgN(x)},${svgN(cy + 4)}Z`} fill={color} pointerEvents="none" />
+  })
+  const rowTip = (i: number) => i < rows.length
+    ? <ChartTip title={rows[i].label}>
+      <div className="text-[var(--fg2)]">{ci(rows[i].effect, lo95(rows[i].effect, rows[i].se), hi95(rows[i].effect, rows[i].se))}</div>
+      <div className="text-[var(--fg2)]">{rowSig(rows[i]) ? 'significant' : 'not significant'} · weight {chartPct(wts[i] / wsum)}</div>
+    </ChartTip>
+    : <ChartTip title="Pooled (inverse-variance)"><div className="text-[var(--fg2)]">{ci(state.pooled, lo95(state.pooled, state.pse), hi95(state.pooled, state.pse))}</div></ChartTip>
   const round6 = (v: number) => Math.round(v * 1e6) / 1e6
   const shell = useChartShell({
     table, exportable, ref: userRef, box: ref, count: rows.length + 1, label: name, tip: rowTip,
@@ -1775,17 +1925,20 @@ export function ForestPlot({ rows, domain = [-0.1, 0.2], ticks = [-0.1, 0, 0.1, 
           <text x={w - 2} y={10} textAnchor="end" fontWeight={600} fill="var(--fg2)">{narrow ? valueLabel.replace(/\s*\[.*\]\s*$/, '') : valueLabel}</text>
           {ticks.map(v => <g key={v}>
             <line x1={X(v)} x2={X(v)} y1={T} y2={height - B} stroke={v ? 'var(--line)' : 'var(--fg2)'} strokeWidth={v ? 1 : 1.2} strokeDasharray={v ? '2 3' : undefined} />
-            <text x={X(v)} y={height - B + 14} textAnchor="middle" fill="var(--fg3)">{fmt.number(v, { style: 'percent', maximumFractionDigits: 0, signDisplay: 'exceptZero' })}</text>
+            <text x={X(v)} y={height - B + 14} textAnchor="middle" fill="var(--fg3)">{tickText(v)}</text>
           </g>)}
-          <text x={X(0) - 4} y={height - 4} textAnchor="end" fill="var(--fg3)">{lower}</text>
-          <text x={X(0) + 4} y={height - 4} fill="var(--fg3)">{higher}</text>
+          {inside(0) && <>
+            <text x={X(0) - 4} y={height - 4} textAnchor="end" fill="var(--fg3)">{lower}</text>
+            <text x={X(0) + 4} y={height - 4} fill="var(--fg3)">{higher}</text>
+          </>}
           {rows.map((r, i) => {
             const [e, se] = S.rows[i], lo = e - 1.96 * se, hi = e + 1.96 * se, cy = T + rowH * (i + 0.5), sig = lo > 0 || hi < 0, col = sig ? 'var(--accent)' : 'var(--fg3)', sz = 4 + 4 * Math.sqrt(wts[i] / maxW)
             return (
-              <g key={r.label}>
+              <g key={`${r.label}-${i}`}>
                 {hover === i && <rect x={2} y={cy - rowH / 2 + 1} width={w - 4} height={rowH - 2} rx={4} fill="var(--muted)" />}
                 <text x={L - 8} y={cy} dy="0.32em" textAnchor="end" fill="var(--fg)">{r.label}</text>
                 <line x1={X(lo)} x2={X(hi)} y1={cy} y2={cy} stroke={col} strokeWidth={1.6} strokeLinecap="round" />
+                {clipMarks(r.effect, r.se, cy, col)}
                 <rect data-ci={i} x={0} y={cy - rowH / 2} width={w} height={rowH} fill="transparent" {...shell.bind(i)} />
                 <rect x={X(e) - sz / 2} y={cy - sz / 2} width={sz} height={sz} rx={1.5} fill={col} pointerEvents="none" />
                 <text x={w - 2} y={cy} dy="0.32em" textAnchor="end" fontFamily="var(--mono)" pointerEvents="none" fill={sig ? 'var(--fg)' : 'var(--fg3)'}>{forestPct(e)}{narrow ? '' : ` [${forestCi(lo)}, ${forestCi(hi)}]`}</text>
@@ -1794,8 +1947,9 @@ export function ForestPlot({ rows, domain = [-0.1, 0.2], ticks = [-0.1, 0, 0.1, 
           })}
           <line x1={8} x2={w - 2} y1={py - rowH * 0.6} y2={py - rowH * 0.6} stroke="var(--line)" />
           {hover === rows.length && <rect x={2} y={py - rowH / 2 + 1} width={w - 4} height={rowH - 2} rx={4} fill="var(--muted)" />}
-          <text x={L - 8} y={py} dy="0.32em" textAnchor="end" fontWeight={600} fill="var(--fg)">{'Pooled'}</text>
+          <text x={L - 8} y={py} dy="0.32em" textAnchor="end" fontWeight={600} fill="var(--fg)">Pooled</text>
           <path d={`M${svgN(X(plo))},${svgN(py)}L${svgN(X(S.pooled))},${svgN(py - 6)}L${svgN(X(phi))},${svgN(py)}L${svgN(X(S.pooled))},${svgN(py + 6)}Z`} fill="var(--fg)" />
+          {rows.length > 0 && clipMarks(state.pooled, state.pse, py, 'var(--fg)')}
           <rect data-ci={rows.length} x={0} y={py - rowH / 2} width={w} height={rowH} fill="transparent" {...shell.bind(rows.length)} />
           <text x={w - 2} y={py} dy="0.32em" textAnchor="end" fontFamily="var(--mono)" fontWeight={600} pointerEvents="none" fill="var(--fg)">{forestPct(S.pooled)}{narrow ? '' : ` [${forestCi(plo)}, ${forestCi(phi)}]`}</text>
         </svg>
