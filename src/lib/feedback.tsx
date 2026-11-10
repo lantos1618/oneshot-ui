@@ -1,6 +1,6 @@
-import { createContext, isValidElement, useCallback, useContext, useEffect, useLayoutEffect, useMemo, useRef, useState, useSyncExternalStore, type MouseEvent as ReactMouseEvent, type ReactNode } from 'react'
-import { AnimatePresence, type AnimationPlaybackControls, animate, motion, useAnimate, useInView, useIsPresent, useMotionValue, useTransform, type Transition } from 'motion/react'
-import { AnimatedNumber, Badge, Button, type ButtonProps, Icon, IconButton, type IconName, Spinner, TONE_SOFT, type Tone, clamp, cn, prefersReducedMotion, resolveColor, spring, uiAddHost, uiShared, useControllable, surface, useResizeObserver, useStatusFlash, writeClipboard, FLASH_MS, useFlash, useLatest } from './core'
+import { createContext, isValidElement, useCallback, useContext, useEffect, useLayoutEffect, useMemo, useRef, useState, useSyncExternalStore, type CSSProperties, type MouseEvent as ReactMouseEvent, type ReactNode, type Ref } from 'react'
+import { AnimatedNumber, Badge, Button, type ButtonProps, Icon, IconButton, type IconName, Spinner, TONE_SOFT, type Tone, clamp, cn, prefersReducedMotion, EASE_OUT_CSS, composeRefs, presenceProps, resolveColor, spring, springVar, uiAddHost, uiShared, useControllable, usePlayState, usePresence, surface, useResizeObserver, useStatusFlash, writeClipboard, FLASH_MS, useFlash, useLatest } from './core'
+import { Presence, PresenceList, Swap, play, useSwipe } from './motion'
 import { CheckMark } from './fields'
 
 /** A toast's id: the one `toast()` returns, or your own (`toast({ id: 'save', … })` replaces the toast with that id). */
@@ -153,6 +153,8 @@ const TOAST_STACK: Record<ToastPosition, string> = {
 }
 const TOAST_PHONE = 'max-[640px]:left-[max(12px,env(safe-area-inset-left))] max-[640px]:right-[max(12px,env(safe-area-inset-right))] max-[640px]:w-auto max-[640px]:max-w-none max-[640px]:translate-x-0'
 const TOAST_ALIGN = { start: 'start-0', center: 'start-0 end-0 mx-auto w-fit', end: 'end-0' } as const
+/** A toast's distance from the stack's edge is its `translate`; it springs when the stack changes. */
+const TOAST_LIFT = 'transition-[translate] duration-[450ms] ease-[var(--ui-spring)] motion-reduce:transition-none'
 const toastSubscribeHidden = (cb: () => void) => { document.addEventListener('visibilitychange', cb); return () => document.removeEventListener('visibilitychange', cb) }
 
 /**
@@ -203,16 +205,18 @@ function ToastRegion({ queue }: { queue: ToastQueue }) {
         for (let k = shown.length - 1; k >= 0; k--) { lift.set(shown[k].id, acc); acc += (heights[String(shown[k].id)] ?? 0) + 8 }
         return (
           <div key={pos} className={cn('fixed h-0 w-[340px] max-w-[calc(100vw-32px)]', TOAST_STACK[pos], TOAST_PHONE)}>
-            <AnimatePresence initial={false}>
-              {shown.map(x => <Toast key={x.id} t={x} lift={lift.get(x.id) ?? 0} top={top} align={align} paused={paused} onSize={report} onClose={close} announce={announce}
-                onHover={setHover} />)}
+            {/* appear: the region mounts with its first toast already queued */}
+            <PresenceList items={shown} keyOf={x => x.id} appear>
+              {(x, { exiting }) => <Toast t={x} present={!exiting} lift={lift.get(x.id) ?? 0} top={top} align={align} paused={paused} onSize={report} onClose={close} announce={announce}
+                onHover={setHover} />}
+            </PresenceList>
+            <Presence>
               {more > 0 && (
-                <motion.div key="more" className={cn('absolute', top ? 'top-0' : 'bottom-0', TOAST_ALIGN[align], align === 'center' && 'flex justify-center')}
-                  initial={{ opacity: 0 }} animate={{ opacity: 1, y: top ? acc : -acc }} exit={{ opacity: 0 }} transition={spring(0.3, 0.45)}>
+                <div className={cn('ui-in absolute', TOAST_LIFT, top ? 'top-0' : 'bottom-0', TOAST_ALIGN[align], align === 'center' && 'flex justify-center')} style={{ translate: `0 ${top ? acc : -acc}px` }}>
                   <Badge size="sm" className="shadow-[var(--shadow)]">+{`${more} more`}</Badge>
-                </motion.div>
+                </div>
               )}
-            </AnimatePresence>
+            </Presence>
           </div>
         )
       })}
@@ -237,13 +241,17 @@ const TOAST_TONE: Record<ToastTone, { icon: IconName | null; tint: string; word:
  * dragged and while the region is paused, and restarts when the toast is updated. A tone change (a promise settling)
  * morphs the icon in place. `lift` is its distance from the stack's edge.
  */
-function Toast({ t, lift, top, align, paused, onSize, onClose: closeById, announce, onHover }: {
-  t: ToastItem; lift: number; top: boolean; align: keyof typeof TOAST_ALIGN; paused: boolean; onSize: (id: ToastId, h: number) => void
+function Toast({ t, present, lift: liftNow, top, align, paused, onSize, onClose: closeById, announce, onHover, ref, ...presence }: {
+  t: ToastItem; /** false once dismissed, while it animates out */ present: boolean; lift: number; top: boolean; align: keyof typeof TOAST_ALIGN; paused: boolean; onSize: (id: ToastId, h: number) => void
   onClose: (id: ToastId, reason: ToastDismissReason) => void; announce: (id: ToastId, rev: number, tone: ToastTone | undefined, text: string) => void; onHover: (on: boolean) => void
+  ref?: Ref<HTMLDivElement>
 }) {
   const [dragging, setDragging] = useState(false)
+  // a toast on its way out is no longer in the stack: it keeps the place it had
+  const [lift, setLift] = useState(liftNow)
+  if (present && lift !== liftNow) setLift(liftNow)
   // leaving while hovered (toast.dismiss, a timer elsewhere) sends no pointerleave: un-pause the region on the way out
-  const hovered = useRef(false), present = useIsPresent()
+  const hovered = useRef(false)
   useEffect(() => { if (!present && hovered.current) { hovered.current = false; onHover(false) } }, [present, onHover])
   useEffect(() => () => { if (hovered.current) onHover(false) }, [onHover])
   const box = useRef<HTMLDivElement>(null), titleEl = useRef<HTMLElement>(null), descEl = useRef<HTMLSpanElement>(null)
@@ -265,28 +273,36 @@ function Toast({ t, lift, top, align, paused, onSize, onClose: closeById, announ
   }, [paused, dragging, onClose, t.rev, duration])
   // swipe: toward the stack's own edge (end, or start for start stacks; centred stacks either way)
   const side = align === 'start' ? -1 : align === 'end' ? 1 : 0, v = top ? 1 : -1
-  const out = (n: number) => n * (side || 1)
+  const toEdge = (n: number) => (side ? n * side : Math.abs(n))
+  const swipe = useSwipe(box, {
+    elastic: side === 0 ? [0.9, 0.9] : side > 0 ? [0.1, 0.9] : [0.9, 0.1],
+    onStart: () => setDragging(true),
+    onRelease: ({ offset, velocity, shown }) => {
+      if (toEdge(offset) <= 80 && toEdge(velocity) <= 500) { setDragging(false); return false }
+      // it leaves the way it was thrown, from where the finger let go
+      box.current?.style.setProperty('--ui-xo', `${shown + 60 * (side || Math.sign(velocity || offset) || 1)}px`)
+      onClose('swipe')
+      return true
+    },
+  })
   const { icon, tint: iconTone } = look
   return (
-    <motion.div ref={box} initial={{ opacity: 0, y: v * lift - v * 20, scale: 0.95 }} animate={{ opacity: 1, y: v * lift, scale: 1 }}
-      exit={{ opacity: 0, x: side ? 60 * side : 0, scale: side ? 1 : 0.95, transition: { duration: 0.2 } }} transition={spring(0.3, 0.45)}
-      drag="x" dragConstraints={{ left: 0, right: 0 }} dragElastic={side === 0 ? 0.9 : (side > 0) ? { left: 0.1, right: 0.9 } : { left: 0.9, right: 0.1 }}
-      onDragStart={() => setDragging(true)}
-      onDragEnd={(_, i) => { if ((side ? out(i.offset.x) : Math.abs(i.offset.x)) > 80 || (side ? out(i.velocity.x) : Math.abs(i.velocity.x)) > 500) onClose('swipe'); else setDragging(false) }}
+    <div ref={composeRefs(box, ref)} {...presence} onPointerDown={swipe}
       onPointerEnter={() => { hovered.current = true; onHover(true) }} onPointerLeave={() => { hovered.current = false; onHover(false) }}
-      className={cn(surface.floating, 'pointer-events-auto absolute flex max-w-full min-w-[260px] cursor-grab touch-pan-y items-center gap-3 p-3 pe-2 text-[13px] active:cursor-grabbing max-[640px]:start-0 max-[640px]:end-0 max-[640px]:w-auto max-[640px]:min-w-0',
-        top ? 'top-0' : 'bottom-0', TOAST_ALIGN[align])}>
+      style={{ translate: `0 ${v * lift}px`, '--ui-y': `${v * -20}px`, '--ui-xo': `${60 * side}px`, '--ui-so': side ? 1 : 0.95 } as CSSProperties}
+      className={cn(surface.floating, 'ui-in pointer-events-auto absolute flex max-w-full min-w-[260px] cursor-grab touch-pan-y items-center gap-3 p-3 pe-2 text-[13px] [--ui-d:.45s] [--ui-do:.2s] [--ui-s:.95] [--ui-yo:0] active:cursor-grabbing max-[640px]:start-0 max-[640px]:end-0 max-[640px]:w-auto max-[640px]:min-w-0',
+        TOAST_LIFT, top ? 'top-0' : 'bottom-0', TOAST_ALIGN[align])}>
       <span aria-hidden className={cn('relative grid h-5 w-5 flex-none place-items-center overflow-hidden rounded-full transition-colors duration-300', iconTone)}>
-        <AnimatePresence initial={false} mode="popLayout">
-          <motion.span key={tone} className="grid place-items-center" initial={{ scale: 0.4, opacity: 0 }} animate={{ scale: 1, opacity: 1 }} exit={{ scale: 0.4, opacity: 0 }} transition={spring(0.45, 0.35)}>
+        <Swap k={tone}>
+          <span className="ui-in grid place-items-center [--ui-d:.35s] [--ui-e:var(--ui-spring-pop)] [--ui-s:.4]">
             {icon ? <Icon name={icon} size={11} strokeWidth={3} /> : <Spinner size={12} className="!border-[1.5px]" />}
-          </motion.span>
-        </AnimatePresence>
+          </span>
+        </Swap>
       </span>
       <div className="min-w-0 flex-1 select-none"><span className="sr-only">{toneWord}: </span><b ref={titleEl} className="block font-medium">{t.title}</b>{t.description && <span ref={descEl} className="text-xs text-[var(--fg3)]">{t.description}</span>}</div>
       {t.action && <Button size="sm" onClick={e => { t.action!.onClick(e); if (!e.defaultPrevented) onClose('action') }}>{t.action.label ?? 'Undo'}</Button>}
       <IconButton icon="x" label={'Dismiss notification'} onClick={() => onClose('close')} />
-    </motion.div>
+    </div>
   )
 }
 
@@ -314,7 +330,7 @@ export function Progress({ value, max = 100, tone = 'primary', className, label 
   const f = progressFraction(value, max)
   return (
     <div role="progressbar" aria-label={label ?? 'Progress'} aria-valuenow={Math.round(f * Math.max(0, max))} aria-valuemin={0} aria-valuemax={Math.max(0, max)} className={cn('h-1.5 overflow-hidden rounded-full bg-[var(--muted)]', className)}>
-      <motion.div className="h-full rounded-full transition-colors duration-300" style={{ background: PROGRESS_TONE[tone] }} initial={false} animate={{ width: `${f * 100}%` }} transition={spring(0.1, 0.5)} />
+      <div className="h-full rounded-full" style={{ background: PROGRESS_TONE[tone], width: `${f * 100}%`, transition: 'width .5s var(--ui-spring-soft), background-color .3s' }} />
     </div>
   )
 }
@@ -325,13 +341,13 @@ export function Progress({ value, max = 100, tone = 'primary', className, label 
  * measures (ProgressRing adds the progressbar role).
  */
 export function Ring({ value, size = 20, stroke = 2.5, color = 'var(--primary)', track = 'var(--muted)', transition = spring(0.1, 0.6), className, barClassName }:
-  { value: number; size?: number; stroke?: number; color?: string; track?: string; transition?: Transition; className?: string; barClassName?: string }) {
+  { value: number; size?: number; stroke?: number; color?: string; track?: string; /** how the arc moves to a new value: default spring(0.1, 0.6) */ transition?: ReturnType<typeof spring>; className?: string; barClassName?: string }) {
   const r = (size - stroke) / 2, c = 2 * Math.PI * r, mid = size / 2
   return (
     <svg width={size} height={size} viewBox={`0 0 ${size} ${size}`} aria-hidden className={cn('-rotate-90', className)}>
       <circle cx={mid} cy={mid} r={r} fill="none" stroke={track} strokeWidth={stroke} />
-      <motion.circle cx={mid} cy={mid} r={r} fill="none" stroke={color} strokeWidth={stroke} strokeLinecap="round" strokeDasharray={c} className={barClassName}
-        initial={false} animate={{ strokeDashoffset: c * (1 - (Number.isFinite(value) ? clamp(value, 0, 1) : 0)) }} transition={transition} />
+      <circle cx={mid} cy={mid} r={r} fill="none" stroke={color} strokeWidth={stroke} strokeLinecap="round" strokeDasharray={c} className={barClassName}
+        style={{ strokeDashoffset: c * (1 - (Number.isFinite(value) ? clamp(value, 0, 1) : 0)), transition: `stroke-dashoffset ${transition.duration}s ${springVar(transition.bounce)}` }} />
     </svg>
   )
 }
@@ -343,12 +359,12 @@ export function Ring({ value, size = 20, stroke = 2.5, color = 'var(--primary)',
 export function ProgressRing({ value, size = 56, stroke = 5, label, tone = 'primary', className, 'aria-label': ariaLabel }:
   { value: number; size?: number; stroke?: number; label?: ReactNode; tone?: ProgressTone; className?: string; 'aria-label'?: string }) {
   const f = progressFraction(value, 100)
-  const [scope, animate] = useAnimate()
+  const scope = useRef<HTMLDivElement>(null)
   const prev = useRef(f)
   useEffect(() => {
-    if (f >= 1 && prev.current < 1 && scope.current) animate(scope.current, { scale: [1, 1.08, 1] }, { duration: 0.45, ease: 'easeOut' })
+    if (f >= 1 && prev.current < 1) play(scope.current, { scale: [1, 1.08, 1] }, { duration: 0.45, ease: 'easeOut' })
     prev.current = f
-  }, [f, animate, scope])
+  }, [f])
   return (
     <div ref={scope} className={cn('relative inline-grid place-items-center', className)} style={{ width: size, height: size }} role="progressbar" aria-label={ariaLabel ?? 'Progress'} aria-valuenow={Math.round(f * 100)} aria-valuemin={0} aria-valuemax={100}>
       <Ring value={f} size={size} stroke={stroke} color={PROGRESS_TONE[tone]} />
@@ -372,13 +388,12 @@ export function EmptyState({ icon, title, description, action, bob = true, size 
 }
 function EmptyStateMd({ icon, title, description, action, bob, className }: { icon: IconName; title: ReactNode; description?: ReactNode; action?: ReactNode; bob: boolean; className?: string }) {
   // the loop runs only while the icon is on screen (an endless animation off screen still costs a frame each tick)
-  const ref = useRef<HTMLSpanElement>(null), onScreen = useInView(ref)
+  const pause = usePlayState<HTMLSpanElement>()
   return (
     <div className={cn('flex flex-col items-center gap-3 py-4 text-center', className)}>
-      <motion.span ref={ref} initial={{ scale: 0.8, opacity: 0 }} animate={{ scale: 1, opacity: 1 }} transition={spring(0.4, 0.5)}
-        className="grid h-12 w-12 place-items-center rounded-[var(--r-lg)] bg-[var(--muted)] text-[var(--fg3)]">
-        <motion.span className="grid" animate={bob && onScreen ? { y: [0, -5, 0], transition: { duration: 2.6, repeat: Infinity, ease: 'easeInOut' } } : { y: 0, transition: { duration: 0.2 } }}><Icon name={icon} size={22} /></motion.span>
-      </motion.span>
+      <span ref={pause.ref} className="ui-in grid h-12 w-12 place-items-center rounded-[var(--r-lg)] bg-[var(--muted)] text-[var(--fg3)] [--ui-d:.5s] [--ui-e:var(--ui-spring-pop)] [--ui-s:.8]">
+        <span className={cn('grid', bob && 'ui-bob')} style={pause.style}><Icon name={icon} size={22} /></span>
+      </span>
       <div><div className="font-semibold">{title}</div>{description && <div className="text-xs text-[var(--fg3)]">{description}</div>}</div>
       {action}
     </div>
@@ -389,24 +404,20 @@ function EmptyStateMd({ icon, title, description, action, bob, className }: { ic
  * Animated height. `open` toggles the content between 0 and its height (it unmounts when closed): Accordion, Banner,
  * TreeView and ThinkingSteps use it. While open, the height also follows the content with a spring, so state swaps
  * inside never jump (permission cards, wizards, tabs of different heights). Leave `open` out for that alone (AutoHeight).
+ * `transition` is a spring(bounce, duration): its duration, and the library spring easing nearest its bounce.
  */
 export function Collapse({ open = true, children, className, transition = spring(0.1, 0.32) }:
-  { open?: boolean; children: ReactNode; className?: string; /** default spring(0.1, 0.32) */ transition?: Transition }) {
-  return (
-    <AnimatePresence initial={false}>
-      {open && <CollapsePanel className={className} transition={transition}>{children}</CollapsePanel>}
-    </AnimatePresence>
-  )
-}
-function CollapsePanel({ children, className, transition }: { children: ReactNode; className?: string; transition: Transition }) {
+  { open?: boolean; children: ReactNode; className?: string; /** default spring(0.1, 0.32) */ transition?: ReturnType<typeof spring> }) {
+  const p = usePresence<HTMLDivElement>(open)
   const inner = useRef<HTMLDivElement>(null)
   // 'auto' until measured: the first frame (and the server render) is the natural height, so opening and hydrating never shift
   const [h, setH] = useState<number | 'auto'>('auto')
-  useResizeObserver(inner, el => setH(el.offsetHeight))
+  useResizeObserver(inner, el => setH(el.offsetHeight), [p.mounted])
+  if (!p.mounted) return null
   return (
-    <motion.div initial={{ height: 0, opacity: 0 }} animate={{ height: h, opacity: 1 }} exit={{ height: 0, opacity: 0 }} transition={transition} className={cn('overflow-hidden', className)}>
+    <div ref={p.ref} {...presenceProps(p)} className={cn('ui-open', className)} style={{ height: h, '--ui-d': `${transition.duration}s`, '--ui-e': springVar(transition.bounce) } as CSSProperties}>
       <div ref={inner}>{children}</div>
-    </motion.div>
+    </div>
   )
 }
 
@@ -417,14 +428,10 @@ export function AutoHeight({ children, className }: { children: ReactNode; class
 
 /** Three bouncing dots: someone (the assistant, a teammate) is typing. The bounce pauses while off screen. `label` is announced. */
 export function TypingDots({ label, className }: { label?: string; className?: string }) {
-  const ref = useRef<HTMLSpanElement>(null)
-  const onScreen = useInView(ref) // the bounce repeats forever: only run it while visible
+  const pause = usePlayState<HTMLSpanElement>() // the bounce repeats forever: only run it while visible
   return (
-    <span ref={ref} role="status" aria-label={label ?? 'Assistant is typing'} className={cn('inline-flex gap-1 py-1.5', className)}>
-      {[0, 1, 2].map(i => (
-        <motion.span key={i} className="h-1.5 w-1.5 rounded-full bg-[var(--fg3)]" animate={onScreen ? { y: [0, -4, 0], opacity: [0.4, 1, 0.4] } : { y: 0, opacity: 0.6 }}
-          transition={onScreen ? { duration: 0.7, repeat: Infinity, delay: i * 0.12 } : { duration: 0.15 }} />
-      ))}
+    <span ref={pause.ref} role="status" aria-label={label ?? 'Assistant is typing'} className={cn('inline-flex gap-1 py-1.5', className)}>
+      {[0, 1, 2].map(i => <span key={i} className="ui-dot h-1.5 w-1.5 rounded-full bg-[var(--fg3)] opacity-60" style={{ ...pause.style, '--ui-delay': `${i * 0.12}s` } as CSSProperties} />)}
     </span>
   )
 }
@@ -458,9 +465,14 @@ export function AsyncButton({ onClick, onError, children, successLabel = 'Saved'
   const state = loading ? 'loading' : result || 'idle'
   const [w, setW] = useState<number>()
   const probe = useRef<HTMLButtonElement>(null)
-  const busy = useRef(false) // width changes tween only around a run; otherwise (fonts loading, new label) they snap
+  const [busy, setBusy] = useState(false) // width changes tween only around a run; otherwise (fonts loading, new label) they snap
+  useEffect(() => {
+    if (state !== 'idle' || !busy) return
+    const t = setTimeout(() => setBusy(false), 500) // after the frame has tweened back to the label's width
+    return () => clearTimeout(t)
+  }, [state, busy])
   const run = async () => {
-    busy.current = true
+    setBusy(true)
     setLoading(true)
     try { await onClick(); flash('done') } catch (err) { flash('error'); onError?.(err) } finally { setLoading(false) }
   }
@@ -470,22 +482,19 @@ export function AsyncButton({ onClick, onError, children, successLabel = 'Saved'
   // the probe follows web fonts finishing loading, too
   useResizeObserver(probe, el => setW(state === 'loading' ? el.offsetHeight : el.offsetWidth), [state, children, successLabel, errorLabel, size])
   return (
-    <motion.span className={cn('relative inline-flex align-middle', className)} initial={false} animate={{ width: w ?? 'auto' }}
-      transition={state === 'idle' && !busy.current ? { duration: 0 } : spring(0.12, 0.4)} onAnimationComplete={() => { if (state === 'idle') busy.current = false }}>
+    <span className={cn('relative inline-flex align-middle', className)} style={{ width: w ?? 'auto', transition: busy ? 'width .4s var(--ui-spring-soft)' : undefined }}>
       <Button variant={variant} size={size} disabled={state !== 'idle'} onClick={run} aria-live="polite" {...p}
         className={cn('w-full !px-0', state === 'done' && '!border-[var(--ok)] !bg-[var(--ok)] !text-[var(--card)] !opacity-100',
           state === 'error' && '!border-[var(--bad)] !bg-[var(--bad)] !text-[var(--card)] !opacity-100', state === 'loading' && '!opacity-100')}>
-        <AnimatePresence mode="popLayout" initial={false}>
-          <motion.span key={state} className="flex items-center gap-1.5 whitespace-nowrap" initial={{ opacity: 0, scale: 0.6 }} animate={{ opacity: 1, scale: 1 }} exit={{ opacity: 0, scale: 0.6 }} transition={spring(0.3, 0.3)}>
-            {body(true)}
-          </motion.span>
-        </AnimatePresence>
+        <Swap k={state}>
+          <span className="ui-in flex items-center gap-1.5 whitespace-nowrap [--ui-s:.6]">{body(true)}</span>
+        </Swap>
       </Button>
       {/* invisible twin at natural width: what the frame tweens to */}
       <span aria-hidden className="pointer-events-none invisible absolute top-0 start-0 w-max">
         <Button ref={probe} variant={variant} size={size} tabIndex={-1}><span className="flex items-center gap-1.5">{body(false)}</span></Button>
       </span>
-    </motion.span>
+    </span>
   )
 }
 
@@ -498,11 +507,14 @@ export function LikeButton({ count, liked: likedProp, defaultLiked = false, onCh
   const [liked, setLiked] = useControllable(likedProp, defaultLiked, onChange)
   const [initial] = useState(liked)
   const total = count + (liked ? 1 : 0) - (initial ? 1 : 0)
+  const heart = useRef<HTMLSpanElement>(null), was = useRef(liked)
+  useEffect(() => {
+    if (liked && !was.current) play(heart.current, { scale: [1, 1.45, 1], rotate: [0, -12, 0] }, { duration: 0.45, ease: 'easeOut' })
+    was.current = liked
+  }, [liked])
   return (
     <Button aria-pressed={liked} aria-label={`Like, ${total}`} className={className} onClick={() => setLiked(!liked)}>
-      {/* keyframes need a timed ease: motion's springs take only two */}
-      <motion.span animate={liked ? { scale: [1, 1.45, 1], rotate: [0, -12, 0] } : { scale: 1, rotate: 0 }} transition={liked ? { duration: 0.45, ease: 'easeOut' } : spring(0.5, 0.5)}
-        className={liked ? 'text-[var(--bad)]' : ''}><Icon name="heart" fill={liked ? 'currentColor' : 'none'} /></motion.span>
+      <span ref={heart} className={liked ? 'text-[var(--bad)]' : ''}><Icon name="heart" fill={liked ? 'currentColor' : 'none'} /></span>
       <AnimatedNumber value={total} />
     </Button>
   )
@@ -544,10 +556,9 @@ export function CopyButton({ text, label: labelProp, copiedLabel: copiedProp, fa
     <>
       <Button size={size} variant={variant} aria-label={iconOnly ? said : undefined} title={iconOnly ? said : undefined} className={className} {...rest}
         onClick={async () => { const ok = await copy(); onCopy?.(ok) }}>
-        <AnimatePresence mode="popLayout" initial={false}>
-          <motion.span key={state} initial={{ scale: 0.5, opacity: 0 }} animate={{ scale: 1, opacity: 1 }} exit={{ scale: 0.5, opacity: 0 }} transition={spring(0.5, 0.4)}
-            className={cn('grid', copied ? 'text-[var(--ok)]' : failed ? 'text-[var(--bad)]' : '')}><Icon name={copied ? 'check' : failed ? 'alert' : 'copy'} size={small ? 14 : 16} strokeWidth={copied ? 3 : 2} /></motion.span>
-        </AnimatePresence>
+        <Swap k={state}>
+          <span className={cn('ui-in grid [--ui-d:.4s] [--ui-e:var(--ui-spring-pop)] [--ui-s:.5]', copied ? 'text-[var(--ok)]' : failed ? 'text-[var(--bad)]' : '')}><Icon name={copied ? 'check' : failed ? 'alert' : 'copy'} size={small ? 14 : 16} strokeWidth={copied ? 3 : 2} /></span>
+        </Swap>
         {!iconOnly && (
           <span className="grid text-start [&>span]:col-start-1 [&>span]:row-start-1">
             {failed ? <span>{failedLabel}</span> : <>
@@ -579,31 +590,40 @@ export function HoldToConfirm({ onConfirm, duration = 1200, children, doneLabel,
   { onConfirm: () => void; duration?: number; /** default "Hold to delete" */ children?: ReactNode; /** default "Deleted" */ doneLabel?: ReactNode; resetAfter?: number; status?: Partial<Record<HoldPhase, ReactNode>> | false; className?: string }) {
   const [phase, setPhase] = useState<HoldPhase>('idle')
   const phaseRef = useRef<HoldPhase>('idle')
-  const p = useMotionValue(0)
-  // the fill grows from the start edge: the clip trims the end side
-  const clip = useTransform(p, v => `inset(0 ${100 - v * 100}% 0 0)`)
-  const ctl = useRef<AnimationPlaybackControls | null>(null), reset = useRef<ReturnType<typeof setTimeout>>(undefined)
-  const [scope, animateEl] = useAnimate()
+  // progress 0…1 lives in two animations: the fill's scaleX and the inverted label's clip (it trims the end side)
+  const fill = useRef<HTMLSpanElement>(null), over = useRef<HTMLSpanElement>(null), scope = useRef<HTMLSpanElement>(null)
+  const run = useRef<{ from: number; to: number; anims: Animation[] }>({ from: 0, to: 0, anims: [] })
+  const timer = useRef<ReturnType<typeof setTimeout>>(undefined), reset = useRef<ReturnType<typeof setTimeout>>(undefined)
   const confirm = useLatest(onConfirm)
   const set = (ph: HoldPhase) => { phaseRef.current = ph; setPhase(ph) }
-  useEffect(() => () => { ctl.current?.stop(); clearTimeout(reset.current) }, [])
+  const at = () => { const r = run.current, u = r.anims[0]?.effect?.getComputedTiming().progress; return r.from + (r.to - r.from) * (typeof u === 'number' ? u : 1) }
+  const sweep = (to: number, timing: KeyframeAnimationOptions) => {
+    const from = at(), clip = (v: number) => `inset(0 ${100 - v * 100}% 0 0)`
+    run.current.anims.forEach(a => a.cancel())
+    run.current = { from, to, anims: [
+      fill.current?.animate?.({ transform: [`scaleX(${from})`, `scaleX(${to})`] }, { ...timing, fill: 'forwards' }),
+      over.current?.animate?.({ clipPath: [clip(from), clip(to)] }, { ...timing, fill: 'forwards' }),
+    ].filter(a => !!a) }
+  }
+  useEffect(() => () => { clearTimeout(timer.current); clearTimeout(reset.current) }, [])
 
   const finish = () => {
     if (phaseRef.current !== 'holding') return
-    set('done'); p.set(1); confirm.current()
-    if (scope.current) animateEl(scope.current, { scale: [1, 1.06, 1] }, { duration: 0.35, ease: 'easeOut' })
-    reset.current = setTimeout(() => { p.set(0); set('idle') }, resetAfter)
+    set('done'); confirm.current()
+    play(scope.current, { scale: [1, 1.06, 1] }, { duration: 0.35, ease: 'easeOut' })
+    reset.current = setTimeout(() => { sweep(0, { duration: 0 }); set('idle') }, resetAfter)
   }
   const ms = Math.max(HOLD_MIN_MS, Number.isFinite(duration) ? duration : 1200) // never instant: a hold must be a hold
   const start = () => {
     if (phaseRef.current === 'done' || phaseRef.current === 'holding') return
-    set('holding'); ctl.current?.stop()
-    ctl.current = animate(p, 1, { duration: (ms / 1000) * (1 - p.get()), ease: 'linear', onComplete: finish })
+    const left = ms * (1 - at())
+    set('holding'); sweep(1, { duration: left, easing: 'linear' })
+    timer.current = setTimeout(finish, left)
   }
   const stop = () => {
     if (phaseRef.current !== 'holding') return
-    ctl.current?.stop(); set('cancelled')
-    ctl.current = animate(p, 0, spring(0.1, 0.3))
+    clearTimeout(timer.current); set('cancelled')
+    sweep(0, { duration: 300, easing: EASE_OUT_CSS })
   }
   const done = doneLabel ?? 'Deleted'
   const label = phase === 'done' ? <><Icon name="check" size={13} strokeWidth={3} />{done}</> : children ?? 'Hold to delete'
@@ -618,9 +638,9 @@ export function HoldToConfirm({ onConfirm, duration = 1200, children, doneLabel,
           onPointerUp={stop} onPointerLeave={stop} onPointerCancel={stop} onContextMenu={e => e.preventDefault()}
           onKeyDown={e => { if ((e.key === ' ' || e.key === 'Enter') && !e.repeat) { e.preventDefault(); start() } }}
           onKeyUp={e => { if (e.key === ' ' || e.key === 'Enter') stop() }} onBlur={stop}>
-          <motion.span aria-hidden className="absolute inset-0 origin-left bg-[var(--bad)]" style={{ scaleX: p }} />
+          <span ref={fill} aria-hidden className="absolute inset-0 origin-left bg-[var(--bad)]" style={{ transform: 'scaleX(0)' }} />
           <span className="relative flex items-center gap-1.5">{label}</span>
-          <motion.span aria-hidden className="absolute inset-0 flex items-center justify-center gap-1.5 text-white" style={{ clipPath: clip }}>{label}</motion.span>
+          <span ref={over} aria-hidden className="absolute inset-0 flex items-center justify-center gap-1.5 text-white" style={{ clipPath: 'inset(0 100% 0 0)' }}>{label}</span>
         </Button>
       </span>
       {/* always mounted (empty while idle), so the first change is announced */}
@@ -677,10 +697,9 @@ export function OfflineIndicator({ online, onRetry, retryEvery = 5, paused = fal
   return (
     <div className={cn('pointer-events-none absolute inset-x-0 top-0 z-10 overflow-hidden', className)}>
       <span role="status" className="sr-only">{live}</span>
-      <AnimatePresence initial={false}>
+      <Presence>
         {mode !== 'hidden' && (
-          <motion.div key="bar" initial={{ y: '-100%' }} animate={{ y: 0 }} exit={{ y: '-100%', transition: { duration: 0.25 } }} transition={spring(0.2, 0.35)}
-            className={cn('pointer-events-auto grid min-h-9 items-center px-3 py-1.5 text-xs transition-[background-color,color] duration-300', offline ? TONE_SOFT.warn : TONE_SOFT.ok)}>
+          <div className={cn('ui-in pointer-events-auto grid min-h-9 items-center px-3 py-1.5 text-xs transition-[background-color,color] duration-300 [--ui-d:.35s] [--ui-do:.25s] [--ui-o:1] [--ui-y:-100%]', offline ? TONE_SOFT.warn : TONE_SOFT.ok)}>
             <div inert={!offline} className={cn(layer, offline ? 'opacity-100' : 'opacity-0')}>
               <Icon name="wifiOff" size={14} className="flex-none" />
               <span className="min-w-0 flex-1">
@@ -701,9 +720,9 @@ export function OfflineIndicator({ online, onRetry, retryEvery = 5, paused = fal
               <Icon name="check" size={14} strokeWidth={2.6} className="flex-none" />
               <span className="min-w-0 flex-1">{backMessage ?? 'Back online.'}</span>
             </div>
-          </motion.div>
+          </div>
         )}
-      </AnimatePresence>
+      </Presence>
     </div>
   )
 }

@@ -49,6 +49,9 @@ export function springEasing(bounce = 0.25, duration = 0.45): { easing: string; 
   return { easing, fallback, ms }
 }
 
+/** The CSS variable holding the spring easing closest to `bounce` (TOKENS has three: soft 0.1, default 0.25, pop 0.5), for transitions written inline. */
+export const springVar = (bounce: number) => `var(--ui-spring${bounce >= 0.4 ? '-pop' : bounce >= 0.18 ? '' : '-soft'})`
+
 /**
  * Named springs, so similar elements move alike: `press` (a tap pops back), `pop` (a mark or badge appearing), `panel`
  * (popovers, menus), `layout` (items sliding to a new place), `settle` (calm repositioning, reorder).

@@ -1,5 +1,5 @@
 import { type CSSProperties, type HTMLAttributes, type Key, type PointerEvent as RPointerEvent, type ReactElement, type Ref, type RefObject, cloneElement, isValidElement, useEffect, useLayoutEffect, useRef, useState } from 'react'
-import { EASE_OUT, EASE_OUT_CSS, MOTION, clamp, cn, composeRefs, isCoarsePointer, prefersReducedMotion, presenceProps, spring, springEasing, uiShared, useInView, usePresence, useReducedMotion, whenAnimationsDone } from './core'
+import { EASE_OUT, EASE_OUT_CSS, MOTION, clamp, cn, composeRefs, isCoarsePointer, prefersReducedMotion, presenceProps, spring, springEasing, uiShared, useInView, useLatest, usePointerDrag, usePresence, useReducedMotion, whenAnimationsDone } from './core'
 
 /**
  * Where an element is relative to the viewport: `visible` while at least `amount` of it is on screen, `seen` once it has
@@ -145,6 +145,58 @@ export function useFlip(ref: RefObject<HTMLElement | null>, { selector = ':scope
     ro.observe(box)
     return () => { mo.disconnect(); ro.disconnect() }
   }, [ref, selector, max])
+}
+
+/**
+ * Swipe to dismiss along one axis. The element in `ref` follows the pointer, damped by `elastic` for moves to the
+ * negative and the positive side. On release `onRelease({ offset, velocity, shown })` decides (pointer travel in px, px/s
+ * over the last 100 ms, and how far the element is drawn): return true when the swipe counts, and the element stays
+ * where it was let go for the caller's exit; anything else springs it back. A press becomes a drag only after `slop` px
+ * along the axis, so clicks on controls inside still work (0 for a dedicated handle). Returns the onPointerDown
+ * handler; give the element `touch-pan-y` (axis x) or the handle `touch-none`.
+ */
+export function useSwipe(ref: RefObject<HTMLElement | null>, options: {
+  axis?: 'x' | 'y'; elastic?: readonly [negative: number, positive: number]; slop?: number; onStart?: () => void
+  onRelease: (s: { offset: number; velocity: number; shown: number }) => boolean | void }) {
+  const o = useLatest(options), axis = options.axis ?? 'x'
+  const trail = useRef<[number, number][]>([]), pending = useRef<(() => void) | null>(null)
+  useEffect(() => () => pending.current?.(), [])
+  const along = (p: { dx: number; dy: number }) => (axis === 'x' ? p.dx : p.dy)
+  const shown = (d: number) => d * (o.current.elastic ?? [1, 1])[d < 0 ? 0 : 1]
+  const at = (px: number) => `translate${axis.toUpperCase()}(${px}px)`
+  const drag = usePointerDrag({
+    cursor: 'grabbing',
+    onStart: () => { trail.current = []; o.current.onStart?.() },
+    onMove: p => {
+      const d = along(p), now = p.event.timeStamp
+      trail.current = [...trail.current.filter(([t]) => now - t < 100), [now, d]]
+      if (ref.current) ref.current.style.transform = at(shown(d))
+    },
+    onEnd: (p, cancelled) => {
+      const d = along(p), [t0, d0] = trail.current[0] ?? [0, d], dt = p.event.timeStamp - t0
+      const velocity = dt > 0 && trail.current.length ? ((d - d0) / dt) * 1000 : 0
+      if (!cancelled && o.current.onRelease({ offset: d, velocity, shown: shown(d) })) return
+      const el = ref.current
+      if (!el) return
+      el.style.transform = ''
+      if (shown(d) && !prefersReducedMotion()) motionAnimate(el, [{ transform: at(shown(d)) }, { transform: 'none' }], spring(0.3, 0.4))
+    },
+  })
+  return (e: RPointerEvent) => {
+    if (e.button !== 0) return
+    const slop = o.current.slop ?? 4, id = e.pointerId, x0 = e.clientX, y0 = e.clientY
+    if (!slop) { drag.start(e, ref.current); return }
+    pending.current?.()
+    const stop = () => { pending.current = null; removeEventListener('pointermove', move); removeEventListener('pointerup', stop); removeEventListener('pointercancel', stop) }
+    const move = (ev: PointerEvent) => {
+      if (ev.pointerId !== id) return
+      const dx = Math.abs(ev.clientX - x0), dy = Math.abs(ev.clientY - y0), a = axis === 'x' ? dx : dy, across = axis === 'x' ? dy : dx
+      if (across > slop && across > a) { stop(); return } // a scroll, not a swipe
+      if (a > slop) { stop(); drag.start({ pointerId: id, clientX: x0, clientY: y0 }, ref.current) }
+    }
+    pending.current = stop
+    addEventListener('pointermove', move); addEventListener('pointerup', stop); addEventListener('pointercancel', stop)
+  }
 }
 
 const indicatorRects = uiShared('active-indicator', () => new Map<string, { rect: DOMRect; at: number }>())

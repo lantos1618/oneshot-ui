@@ -42,7 +42,8 @@ html.ui-theming *,html.ui-theming *::before,html.ui-theming *::after{transition:
  * plays the reverse, with `--ui-xo`/`--ui-yo`/`--ui-so`/`--ui-ro` overriding the end and `--ui-do` the duration. One-shots
  * (`ui-pop`, `ui-pulse`) replay when the element's key changes. `ui-grow` opens to its height (grid rows), `ui-collapse`
  * does the same while staying mounted (`data-open`; set `visibility` inline, the class delays it until the panel has
- * closed); both need one child without vertical padding or border, which would keep the row from closing fully. Springs are `linear()` easings sampled from spring(). Reduced motion keeps the fades and drops the movement.
+ * closed); both need one child without vertical padding or border, which would keep the row from closing fully.
+ * `ui-open` is Collapse's measured height (it also follows the content while open). Springs are `linear()` easings sampled from spring(). Reduced motion keeps the fades and drops the movement.
  */
 const MOTION_CSS = /* @__PURE__ */ (() => {
   const springs = [['', 0.25], ['-pop', 0.5], ['-soft', 0.1]] as const
@@ -52,7 +53,7 @@ const MOTION_CSS = /* @__PURE__ */ (() => {
   const stagger = [2, 3, 4, 5, 6, 7, 8].map(n => `[data-menu-list]>.ui-in:nth-child(${n}){--ui-delay:${((n - 1) * 0.03).toFixed(2)}s}`).join('')
   return `:root{--ui-ease-out:${EASE_OUT_CSS};--ui-ease-in:cubic-bezier(.4,0,1,1);${vars('fallback')}}
 @supports (transition-timing-function:linear(0,1)){:root{${vars('easing')}}}
-@layer components{.ui-in,.ui-pop,.ui-pulse,.ui-grow,[data-ui-exit]{${reset}}
+@layer components{.ui-in,.ui-pop,.ui-pulse,.ui-grow,.ui-open,[data-ui-exit]{${reset}}
 @keyframes ui-in{from{opacity:var(--ui-o,0);transform:${t}}}
 @keyframes ui-out{to{opacity:var(--ui-o,0);transform:translate(var(--ui-xo,var(--ui-x,0)),var(--ui-yo,var(--ui-y,0))) scale(var(--ui-so,var(--ui-s,1))) rotate(var(--ui-ro,var(--ui-r,0deg)))}}
 @keyframes ui-pop{from{transform:scale(var(--ui-s,.5)) rotate(var(--ui-r,0deg))}}
@@ -62,8 +63,10 @@ const MOTION_CSS = /* @__PURE__ */ (() => {
 @keyframes ui-fade{from{opacity:var(--ui-o,0)}}
 @keyframes ui-fade-out{to{opacity:0}}
 @keyframes ui-draw{from{stroke-dashoffset:1.05}}
-@keyframes ui-bob{50%{transform:translateY(-4px)}}
-@keyframes ui-dot{0%,100%{transform:none;opacity:.4}50%{transform:translateY(-3px);opacity:1}}
+@keyframes ui-open{from{height:0;opacity:0}}
+@keyframes ui-close{to{height:0;opacity:0}}
+@keyframes ui-bob{50%{transform:translateY(-5px)}}
+@keyframes ui-dot{0%,100%{transform:none;opacity:.4}50%{transform:translateY(-4px);opacity:1}}
 .ui-in{animation:ui-in var(--ui-d,.3s) var(--ui-e,var(--ui-spring)) var(--ui-delay,0s) backwards}
 .ui-pop{animation:ui-pop var(--ui-d,.35s) var(--ui-e,var(--ui-spring-pop)) var(--ui-delay,0s) backwards}
 .ui-pulse{animation:ui-pulse var(--ui-d,.35s) var(--ui-e,ease-out) var(--ui-delay,0s)}
@@ -71,12 +74,14 @@ const MOTION_CSS = /* @__PURE__ */ (() => {
 .ui-grow>*,.ui-collapse>*{min-height:0;overflow:hidden}
 .ui-collapse{display:grid;grid-template-rows:0fr;opacity:0;transition:grid-template-rows .3s var(--ui-ease-out),opacity .3s,visibility 0s .3s}
 .ui-collapse[data-open]{grid-template-rows:1fr;opacity:1;transition:grid-template-rows .3s var(--ui-ease-out),opacity .3s}
-.ui-bob{animation:ui-bob 2.4s ease-in-out infinite;animation-play-state:var(--ui-play,running)}
-.ui-dot{animation:ui-dot 1s ease-in-out var(--ui-delay,0s) infinite;animation-play-state:var(--ui-play,running)}
+.ui-open{overflow:hidden;animation:ui-open var(--ui-d,.32s) var(--ui-e,var(--ui-spring-soft)) backwards;transition:height var(--ui-d,.32s) var(--ui-e,var(--ui-spring-soft))}
+.ui-bob{animation:ui-bob 2.6s ease-in-out infinite;animation-play-state:var(--ui-play,running)}
+.ui-dot{animation:ui-dot .7s ease-in-out var(--ui-delay,0s) infinite;animation-play-state:var(--ui-play,running)}
 ${stagger}
 [data-ui-still]{animation:none}
 [data-ui-exit]{animation:ui-out var(--ui-do,.15s) var(--ui-ease-in) forwards;pointer-events:none}
 .ui-grow[data-ui-exit]{animation:ui-shrink var(--ui-do,.2s) var(--ui-ease-out) var(--ui-delay,0s) forwards}
+.ui-open[data-ui-exit]{animation:ui-close var(--ui-d,.32s) var(--ui-e,var(--ui-spring-soft)) forwards}
 @media (prefers-reduced-motion:reduce){.ui-in{animation-name:ui-fade;animation-duration:.15s;animation-timing-function:linear}
 [data-ui-exit]{animation-name:ui-fade-out;animation-duration:.1s}
 .ui-grow,.ui-grow[data-ui-exit],.ui-collapse,.ui-collapse[data-open]{animation-duration:1ms;transition-duration:0s}
