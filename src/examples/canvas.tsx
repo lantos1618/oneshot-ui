@@ -1,4 +1,4 @@
-import type { CanvasEdit } from '../lib/aiagent'
+import type { CanvasEdit } from './canvas-demo'
 
 /* Sample AICanvas content: a themed pricing card, three scripted edits and an explainer. */
 
@@ -42,8 +42,8 @@ const aiDemoExplain = (n: number, ln: string) => /border-radius/.test(ln) ? 'Thi
   : /<button/.test(ln) ? 'This is the call to action. It stretches to the card width so it is easy to hit on mobile.'
   : `Line ${n} is part of the card’s ${/[{}]|:/.test(ln) ? 'styles' : 'markup'}. Ask me to change it and I’ll edit it in place.`
 /**
- * The showcase's canvas content: a pricing card, three scripted edits and an explainer. Spread it into the
- * component to get the demo: <AICanvas {...AI_CANVAS_SAMPLE} />. The component itself starts empty.
+ * The showcase's canvas content: a pricing card, three scripted edits and an explainer. canvasDemoProps() turns it
+ * into AICanvas props: <AICanvas {...canvasDemoProps()} />. The component itself starts empty.
  */
 export const AI_CANVAS_SAMPLE = {
   file: 'pricing-card.html', initial: aiPricingCard(null, false, false), edits: AI_CANVAS_DEMO_EDITS, explain: aiDemoExplain,

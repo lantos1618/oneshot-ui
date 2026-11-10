@@ -1,12 +1,15 @@
 import { useEffect, useLayoutEffect, useRef, useState, type PointerEvent as RPointerEvent, type ReactNode } from 'react'
 import { AnimatePresence, motion, useReducedMotion } from 'motion/react'
 import { Input } from './inputs'
-import { Avatar, Badge, Button, Icon, IconButton, TOUCH, cn, isCoarsePointer, safeColor, spring, surface, useControllable, useWidth, plural, fmt } from './core'
+import { Avatar, Badge, Button, EASE_OUT, Icon, IconButton, TOUCH, cn, isCoarsePointer, isTouch, onColorLabel, onMouseLeave, safeColor, spring, surface, svgN, uid, useControllable, useLatest, useNow, useWidth, plural, fmt } from './core'
 import { play, useFrameLoop, useViewport } from './motion'
 import { AnimatedList } from './data'
 import { Collapse, TypingDots, useToast, EmptyState } from './feedback'
 
-export type Comment = { id: string; author: string; time: string; text: string; replies?: Comment[] }
+/** When a comment or message was written: `createdAt` (epoch ms or ISO) is shown relative to now; `time` is shown as it is (e.g. "2 h"). */
+export type CollabTime = { createdAt?: number | string; time?: string }
+export type Comment = CollabTime & { id: string; author: string; text: string; replies?: Comment[] }
+const collabTime = ({ time, createdAt }: CollabTime) => time ?? (createdAt == null ? '' : fmt.relative(typeof createdAt === 'string' ? Date.parse(createdAt) : createdAt))
 
 function CommentBox({ onSubmit, placeholder, autoFocus }: { onSubmit: (text: string) => void; placeholder: string; autoFocus?: boolean }) {
   const [t, setT] = useState('')
@@ -19,11 +22,10 @@ function CommentBox({ onSubmit, placeholder, autoFocus }: { onSubmit: (text: str
 }
 
 /** Threaded comments with inline reply boxes. */
-export function CommentThread({ comments, onChange, me: meProp, className }: { comments: Comment[]; onChange: (c: Comment[]) => void; /** your name on new comments (default "You", translated) */ me?: string; className?: string }) {
+export function CommentThread({ comments, onChange, me = 'You', className }: { comments: Comment[]; onChange: (c: Comment[]) => void; /** your name on new comments (default "You") */ me?: string; className?: string }) {
   const [replyTo, setReplyTo] = useState<string | null>(null)
-  const me = meProp ?? 'You'
   const add = (text: string, parent: string | null) => {
-    const c: Comment = { id: String(Date.now()), author: me, time: 'Just now', text }
+    const c: Comment = { id: uid('comment'), author: me, createdAt: Date.now(), text }
     const ins = (list: Comment[]): Comment[] => parent === null ? [...list, c] : list.map(x => x.id === parent ? { ...x, replies: [...(x.replies ?? []), c] } : { ...x, replies: x.replies && ins(x.replies) })
     onChange(ins(comments)); setReplyTo(null)
   }
@@ -32,7 +34,7 @@ export function CommentThread({ comments, onChange, me: meProp, className }: { c
       <div className="flex gap-2.5">
         <Avatar name={c.author} size={26} className={COLLAB_AV} />
         <div className="min-w-0 flex-1 text-[13px]">
-          <div><b className="font-medium">{c.author}</b> <span className="text-xs text-[var(--fg3)]">{c.time}</span></div>
+          <div><b className="font-medium">{c.author}</b> <span className="text-xs text-[var(--fg3)]">{collabTime(c)}</span></div>
           <p className="m-0 text-[var(--fg2)]">{c.text}</p>
           {depth === 0 && <button onClick={() => setReplyTo(replyTo === c.id ? null : c.id)} className="cursor-pointer border-0 bg-transparent p-0 text-xs text-[var(--fg3)] hover:text-[var(--fg)] [@media(pointer:coarse)]:min-h-8 [@media(pointer:coarse)]:pe-3">{'Reply'}</button>}
           {c.replies && render(c.replies, depth + 1)}
@@ -47,7 +49,7 @@ export function CommentThread({ comments, onChange, me: meProp, className }: { c
 /** Avatar initials stay readable (≥ 11px) on touch screens, where small avatars otherwise shrink them to ~9px. */
 const COLLAB_AV = '[@media(pointer:coarse)]:!h-[30px] [@media(pointer:coarse)]:!w-[30px] [@media(pointer:coarse)]:!text-[11px]'
 
-export type ThreadMessage = { id: string; author: string; text: string; time: string }
+export type ThreadMessage = CollabTime & { id: string; author: string; text: string }
 export type AnchoredThread = {
   id: string; messages: ThreadMessage[]
   /** emoji → count (including yours) */
@@ -62,18 +64,18 @@ export type AnchoredParagraph = (string | { thread: string; text: string })[]
 /**
  * Comments anchored to highlighted text: the document sits on the left, threads on the right.
  * Hovering a highlight or a thread lights up both; clicking a highlight focuses its thread's reply box.
- * Threads take emoji reactions, replies, and Resolve (dims the anchor, toast with Undo) / Reopen.
+ * Threads take emoji reactions, replies, and Resolve (dims the anchor, toast with Undo) / Reopen. `me` is the name
+ * new replies are signed with.
  */
-export function AnchoredComments({ doc, threads, defaultThreads = [], onChange, me = 'Alex Lee', reactions = ['👍', '🎉', '👀'], className }:
-  { doc: AnchoredParagraph[]; threads?: AnchoredThread[]; defaultThreads?: AnchoredThread[]; onChange?: (t: AnchoredThread[]) => void; me?: string; reactions?: string[]; className?: string }) {
+export function AnchoredComments({ doc, threads, defaultThreads = [], onChange, me, reactions = ['👍', '🎉', '👀'], className }:
+  { doc: AnchoredParagraph[]; threads?: AnchoredThread[]; defaultThreads?: AnchoredThread[]; onChange?: (t: AnchoredThread[]) => void; me: string; reactions?: string[]; className?: string }) {
   const [list, setList] = useControllable(threads, defaultThreads, onChange)
-  const latest = useRef(list); latest.current = list
+  const latest = useLatest(list)
   const [hot, setHot] = useState<string | null>(null)
   const [drafts, setDrafts] = useState<Record<string, string>>({})
   const [pop, setPop] = useState<Record<string, number>>({})
   const cards = useRef<Record<string, HTMLDivElement | null>>({})
   const toast = useToast()
-  const fmtN = (n: number) => fmt.number(n)
   const [wrap, w] = useWidth<HTMLDivElement>()
   const patch = (id: string, f: (t: AnchoredThread) => AnchoredThread) => setList(latest.current.map(t => t.id === id ? f(t) : t))
   const byId = (id: string) => list.find(t => t.id === id)
@@ -93,11 +95,11 @@ export function AnchoredComments({ doc, threads, defaultThreads = [], onChange, 
   }
   const reply = (id: string) => {
     const v = (drafts[id] ?? '').trim(); if (!v) return
-    patch(id, x => ({ ...x, messages: [...x.messages, { id: `${id}-${Date.now()}`, author: me, text: v, time: 'now' }] }))
+    patch(id, x => ({ ...x, messages: [...x.messages, { id: uid('reply'), author: me, text: v, createdAt: Date.now() }] }))
     setDrafts(d => ({ ...d, [id]: '' }))
   }
   const focusThread = (id: string) => {
-    setHot(id); play(cards.current[id], { x: [0, -4, 0] }, { duration: 0.32, ease: [0.22, 1, 0.36, 1] }) // "look here" nudge
+    setHot(id); play(cards.current[id], { x: [0, -4, 0] }, { duration: 0.32, ease: EASE_OUT }) // "look here" nudge
     cards.current[id]?.scrollIntoView({ block: 'nearest', behavior: 'smooth' })
     // on touch, focusing the reply box would pop the keyboard over the thread you just jumped to
     if (!isCoarsePointer()) cards.current[id]?.querySelector('input')?.focus({ preventScroll: true })
@@ -114,7 +116,7 @@ export function AnchoredComments({ doc, threads, defaultThreads = [], onChange, 
               return (
                 <mark key={j} role="button" tabIndex={0} aria-label={(res ? `${run.text}: open comment thread (resolved)` : `${run.text}: open comment thread`)}
                   onClick={() => focusThread(run.thread)} onKeyDown={e => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); focusThread(run.thread) } }}
-                  onMouseEnter={() => setHot(run.thread)} onMouseLeave={() => setHot(null)} onFocus={() => setHot(run.thread)} onBlur={() => setHot(null)}
+                  onPointerEnter={e => { if (!isTouch(e)) setHot(run.thread) }} onPointerLeave={onMouseLeave(() => setHot(null))} onFocus={() => setHot(run.thread)} onBlur={() => setHot(null)}
                   className={cn('cursor-pointer rounded-[var(--r-sm)] px-px transition-[background-color,color] duration-200 outline-none focus-visible:shadow-[0_0_0_2px_var(--warn)]',
                     // touch: a taller hit area via padding, with the highlight kept to the text (content box)
                     '[@media(pointer:coarse)]:bg-clip-content [@media(pointer:coarse)]:py-[7px]',
@@ -130,14 +132,14 @@ export function AnchoredComments({ doc, threads, defaultThreads = [], onChange, 
       <div className="flex flex-col gap-2.5">
         {list.map(t => (
           <motion.div key={t.id} ref={el => { cards.current[t.id] = el }} initial={false} animate={{ opacity: t.resolved ? 0.65 : 1, scale: 1 }} transition={{ duration: 0.2 }}
-            onMouseEnter={() => setHot(t.id)} onMouseLeave={() => setHot(null)}
+            onPointerEnter={e => { if (!isTouch(e)) setHot(t.id) }} onPointerLeave={onMouseLeave(() => setHot(null))}
             className={cn('overflow-hidden rounded-[var(--r-lg)] border bg-[var(--card)] transition-[box-shadow,border-color] duration-200',
               hot === t.id && !t.resolved ? 'border-[var(--warn)] shadow-[0_0_0_3px_var(--warn-soft)]' : 'border-[var(--line)]')}>
             <AnimatedList items={t.messages} keyOf={x => x.id} className="!gap-0" render={x => (
               <div className="flex gap-2 px-3 py-2.5">
                 <Avatar name={x.author} size={26} className={cn('!border-0', COLLAB_AV)} />
                 <div className="min-w-0">
-                  <b className="text-xs font-semibold">{x.author}</b><span className="ms-1.5 text-[11px] text-[var(--fg3)]">{x.time}</span>
+                  <b className="text-xs font-semibold">{x.author}</b><span className="ms-1.5 text-[11px] text-[var(--fg3)]">{collabTime(x)}</span>
                   <p className="m-0 mt-0.5 text-[13px] leading-normal">{x.text}</p>
                 </div>
               </div>
@@ -156,7 +158,7 @@ export function AnchoredComments({ doc, threads, defaultThreads = [], onChange, 
                       initial={pop[t.id + e] ? { scale: 0.8 } : false} animate={{ scale: 1 }} transition={spring(0.6, 0.35)}
                       className={cn('inline-flex h-6 cursor-pointer items-center gap-1 rounded-full border px-2 text-xs [@media(pointer:coarse)]:h-9 [@media(pointer:coarse)]:min-w-11 [@media(pointer:coarse)]:justify-center [@media(pointer:coarse)]:px-2.5 [@media(pointer:coarse)]:text-sm',
                         mine ? 'border-[var(--accent)] bg-[var(--accent-soft)]' : 'border-[var(--line)] bg-[var(--card)] hover:bg-[var(--muted)]')}>
-                      <span>{e}</span>{n > 0 && <span className="tabular-nums text-[var(--fg2)]">{fmtN(n)}</span>}
+                      <span>{e}</span>{n > 0 && <span className="tabular-nums text-[var(--fg2)]">{fmt.number(n)}</span>}
                     </motion.button>
                   )
                 })}
@@ -170,7 +172,6 @@ export function AnchoredComments({ doc, threads, defaultThreads = [], onChange, 
                   placeholder={'Reply…'} aria-label={'Reply'} className={cn('!h-[30px] min-w-0 flex-1 !px-2 [@media(pointer:coarse)]:!text-base', TOUCH.row)} onFocus={() => setHot(t.id)} />
                 {/* the input shrinks (min-w-0), so the button is never pushed out of a narrow card */}
                 <Button size="sm" variant="primary" type="submit" disabled={!(drafts[t.id] ?? '').trim()} className={cn('flex-none', TOUCH.row)}>{'Reply'}</Button>
-
               </form>
             </>)}
           </motion.div>
@@ -181,65 +182,72 @@ export function AnchoredComments({ doc, threads, defaultThreads = [], onChange, 
 }
 
 export type Collaborator = { name: string; /** a plain CSS colour (hex, rgb(), named) or token such as var(--c3), which keeps it theme-aware; anything else falls back to the accent */ color: string }
-
-const PRESENCE_PEOPLE: Collaborator[] = [{ name: 'Bea Kim', color: 'var(--c3)' }, { name: 'Chris Moe', color: 'var(--c4)' }, { name: 'Dana Ng', color: 'var(--warn)' }]
-const PRESENCE_ME: Collaborator = { name: 'Alex Lee', color: 'var(--accent)' }
+/** Someone's cursor on the shared canvas: `x` and `y` are fractions (0–1) of its width and height, so they carry across screen sizes. */
+export type PresenceCursor = Collaborator & { id?: string; x: number; y: number }
 
 function CollabCursor({ name, color: raw, elRef, hidden }: { name: string; color: string; elRef: (el: HTMLDivElement | null) => void; hidden?: boolean }) {
   const color = safeColor(raw, 'var(--accent)') // data → style/fill: no `;`, url() or other breakouts
   return (
-    // positioned by translate(x, y) from the canvas' left edge (pointer geometry), so the anchor is physical
     <div ref={elRef} aria-hidden className="pointer-events-none absolute top-0 left-0 z-[3] transition-opacity duration-150 will-change-transform" style={{ opacity: hidden ? 0 : 1 }}>
       <svg width="16" height="18" viewBox="0 0 16 18"><path d="M1 1l13 7-6 1.6L5.4 16z" fill={color} stroke="#fff" strokeWidth="1.4" strokeLinejoin="round" /></svg>
-      <span className="absolute top-3.5 left-3 rounded-[5px_5px_5px_2px] px-2 py-0.5 text-[11px] font-semibold whitespace-nowrap text-white"
-        style={{ background: `color-mix(in srgb, ${color} 52%, #000)` }}>{name}</span>
+      <span className="absolute top-3.5 left-3 rounded-[5px_5px_5px_2px] px-2 py-0.5 text-[11px] font-semibold whitespace-nowrap" style={onColorLabel(color)}>{name}</span>
     </div>
   )
 }
+const cursorKey = (c: PresenceCursor) => c.id ?? c.name
+const cursorAt = (x: number, y: number) => `translate(${svgN(x)}px,${svgN(y)}px)`
 
 /**
- * Live presence on a mock document: collaborators' cursors drift about with name labels, your own
- * "You" cursor follows the pointer inside the canvas, and an avatar stack ringed in each person's colour
- * counts who's here. Cursors pause while off screen and stay put under reduced motion.
+ * Live presence on a shared canvas: each of `cursors` (your collaborators, from your presence channel) is drawn with
+ * its name and glides to each new position, and an avatar stack ringed in each person's colour counts who's here.
+ * `children` is the document under the cursors. With `me`, your own cursor follows the pointer inside the canvas and
+ * `onCursorMove` reports where it is (fractions, null when it leaves) so you can broadcast it. Gliding pauses while
+ * off screen; under reduced motion cursors jump to their positions.
  */
-export function LivePresence({ people = PRESENCE_PEOPLE, me = PRESENCE_ME, title: titleProp, actions, className }:
-  { people?: Collaborator[]; me?: Collaborator; title?: string; actions?: ReactNode; className?: string }) {
+export function LivePresence({ cursors, me, label = 'Shared document', onCursorMove, actions, children, className }:
+  { cursors: readonly PresenceCursor[]; me?: Collaborator; label?: string; onCursorMove?: (at: { x: number; y: number } | null) => void
+    actions?: ReactNode; children?: ReactNode; className?: string }) {
   const box = useRef<HTMLDivElement>(null)
-  const title = titleProp ?? 'Q4 planning'
-  const els = useRef<(HTMLDivElement | null)[]>([])
+  const els = useRef(new Map<string, HTMLDivElement>())
+  const shown = useRef(new Map<string, { x: number; y: number }>())
   const mine = useRef<HTMLDivElement | null>(null)
   const [meOn, setMeOn] = useState(false)
-  const reduce = useReducedMotion()
+  const [gliding, setGliding] = useState(false)
+  const reduce = !!useReducedMotion()
   const { visible } = useViewport(box, { amount: 0 })
-  const bots = useRef<{ x: number; y: number; tx: number; ty: number; t: number }[]>([])
-  const place = () => bots.current.forEach((b, i) => { const c = els.current[i]; if (c) c.style.transform = `translate(${b.x.toFixed(1)}px,${b.y.toFixed(1)}px)` })
-  useLayoutEffect(() => { // start positions (also all that reduced motion gets)
-    bots.current = people.map((_, i) => ({ x: 40 + i * 70, y: 40 + i * 30, tx: 40 + i * 70, ty: 40 + i * 30, t: 0 }))
-    place()
-  }, [people.length]) // eslint-disable-line react-hooks/exhaustive-deps
-  // cursors drift only while the canvas is on screen
-  useFrameLoop(visible && !reduce, dt => {
-    const el = box.current; if (!el) return
-    const W = el.clientWidth, H = el.clientHeight
-    bots.current.forEach(b => {
-      b.t -= dt
-      if (b.t <= 0) { b.tx = 20 + Math.random() * Math.max(10, W - 90); b.ty = 20 + Math.random() * Math.max(10, H - 50); b.t = 1 + Math.random() * 2.5 }
-      const k = Math.min(1, dt * 2.2); b.x += (b.tx - b.x) * k; b.y += (b.ty - b.y) * k
-    })
-    place()
-  })
-  const move = (e: RPointerEvent) => {
-    const r = box.current!.getBoundingClientRect()
-    if (mine.current) mine.current.style.transform = `translate(${e.clientX - r.left}px,${e.clientY - r.top}px)`
-    if (!meOn) setMeOn(true)
+  const want = useLatest(cursors)
+  /** Moves each cursor `dt` seconds towards its position (new ones start there); true while any is still on its way. */
+  const step = (dt: number) => {
+    const el = box.current; if (!el) return false
+    const W = el.clientWidth, H = el.clientHeight, k = Math.min(1, dt * 2.2), seen = new Set<string>()
+    let busy = false
+    for (const c of want.current) {
+      const key = cursorKey(c), tx = c.x * W, ty = c.y * H
+      let p = shown.current.get(key)
+      if (!p || reduce) p = { x: tx, y: ty }
+      else { p.x += (tx - p.x) * k; p.y += (ty - p.y) * k; if (Math.abs(tx - p.x) + Math.abs(ty - p.y) < 0.5) { p.x = tx; p.y = ty } else busy = true }
+      shown.current.set(key, p); seen.add(key)
+      const cur = els.current.get(key); if (cur) cur.style.transform = cursorAt(p.x, p.y)
+    }
+    for (const key of shown.current.keys()) if (!seen.has(key)) shown.current.delete(key)
+    return busy
   }
-  const all = [me, ...people]
+  useLayoutEffect(() => { setGliding(step(0)) }, [cursors, reduce]) // eslint-disable-line react-hooks/exhaustive-deps
+  useFrameLoop(gliding && visible && !reduce, dt => { if (!step(dt)) setGliding(false) })
+  const move = (e: RPointerEvent) => {
+    if (!me) return
+    const r = box.current!.getBoundingClientRect()
+    if (mine.current) mine.current.style.transform = cursorAt(e.clientX - r.left, e.clientY - r.top)
+    if (!meOn) setMeOn(true)
+    onCursorMove?.({ x: (e.clientX - r.left) / (r.width || 1), y: (e.clientY - r.top) / (r.height || 1) })
+  }
+  const all = [...(me ? [{ ...me, key: '' }] : []), ...cursors.map(c => ({ ...c, key: cursorKey(c) }))]
   return (
     <div className={cn('flex flex-col gap-3', className)}>
       <div className="flex items-center justify-between gap-2">
         <div className="flex">
           {all.map((p, i) => (
-            <span key={p.name} className={cn('relative rounded-full', i > 0 && '-ms-1')} style={{ boxShadow: `0 0 0 2px var(--card), 0 0 0 3.5px ${safeColor(p.color, 'var(--accent)')}`, zIndex: all.length - i }}>
+            <span key={p.key} className={cn('relative rounded-full', i > 0 && '-ms-1')} style={{ boxShadow: `0 0 0 2px var(--card), 0 0 0 3.5px ${safeColor(p.color, 'var(--accent)')}`, zIndex: all.length - i }}>
               <Avatar name={p.name} size={28} className="!border-0 [@media(pointer:coarse)]:!text-[11px]" />
             </span>
           ))}
@@ -247,20 +255,19 @@ export function LivePresence({ people = PRESENCE_PEOPLE, me = PRESENCE_ME, title
         <div className="flex items-center gap-2"><span className="text-xs text-[var(--fg3)]" aria-live="polite">{plural(all.length, 'person here', 'people here')}</span>{actions}</div>
       </div>
       {/* touch: tap or drag sideways to place your cursor (it stays put); vertical swipes still scroll the page */}
-      <div ref={box} onPointerMove={move} onPointerDown={move} onPointerLeave={e => e.pointerType === 'mouse' && setMeOn(false)} role="img" aria-label={`${title}: ${fmt.list(all.map(p => p.name))} editing`}
-        className={cn(surface.md, 'relative min-h-[200px] flex-1 cursor-none touch-pan-y overflow-hidden !bg-[var(--bg)]')}>
-        <div className="absolute inset-4 flex flex-col gap-2">
-          <b className="text-sm">{title}</b>
-          {['92%', '92%', '64%', '92%', '64%'].map((wd, i) => <div key={i} className="h-[9px] rounded-[var(--r-sm)] bg-[var(--line)]" style={{ width: wd }} />)}
-        </div>
-        {people.map((p, i) => <CollabCursor key={p.name} name={p.name.split(' ')[0]} color={p.color} elRef={el => { els.current[i] = el }} />)}
-        <CollabCursor name={'You'} color={me.color} hidden={!meOn} elRef={el => { mine.current = el }} />
+      <div ref={box} onPointerMove={move} onPointerDown={move} role="group" aria-label={all.length ? `${label}: ${fmt.list(all.map(p => p.name))} editing` : label}
+        onPointerLeave={e => { if (me && e.pointerType === 'mouse') { setMeOn(false); onCursorMove?.(null) } }}
+        className={cn(surface.md, 'relative min-h-[200px] flex-1 touch-pan-y overflow-hidden !bg-[var(--bg)]', me && 'cursor-none')}>
+        {children}
+        {cursors.map(c => { const key = cursorKey(c); return <CollabCursor key={key} name={c.name.split(' ')[0]} color={c.color} elRef={el => { if (el) els.current.set(key, el); else els.current.delete(key) }} /> })}
+        {me && <CollabCursor name={'You'} color={me.color} hidden={!meOn} elRef={el => { mine.current = el }} />}
       </div>
     </div>
   )
 }
 
-export type InboxMessage = { from: 'me' | 'them'; text: string }
+/** A chat message. A message you sent is `sending` while `onSend` works on it and `failed` if it rejected. */
+export type InboxMessage = { id: string; from: 'me' | 'them'; text: string; status?: 'sending' | 'failed' }
 export type InboxConversation = {
   id: string; name: string; role: string; location: string
   /** IANA zone used for the live "Local time" in the details pane */
@@ -268,10 +275,8 @@ export type InboxConversation = {
   online: boolean; last: string; unread?: number; messages: InboxMessage[]; files?: string[]
 }
 
-const INBOX_REPLIES = ['Sounds good 👍', 'On it', 'Can we chat at 4?', 'Perfect, thanks!', 'Let me check and get back to you']
-/** Most messages a ChatInbox thread keeps in memory (older ones drop off the top). */
+/** Most messages a ChatInbox thread keeps (older ones drop off the top). */
 const INBOX_MAX_MESSAGES = 500
-const INBOX_PINGS = ['Quick one: are we still on for the review?', 'Sent you the notes from today', 'Can you take a look when you have a sec?', 'Heads up, the build is green again']
 function InboxTyping({ name }: { name: string }) {
   return (
     <motion.div initial={{ opacity: 0, y: 6 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0, transition: { duration: 0.1 } }}
@@ -282,75 +287,62 @@ function InboxTyping({ name }: { name: string }) {
 }
 
 /**
- * Three-pane chat inbox: searchable conversation list (unread counts, online dots, last-message time),
- * the thread (day divider, bubbles, typing indicator, simulated replies) and a details pane (role,
- * location, live local time, shared files). The thread slides on switching; a reply that lands while you
- * are elsewhere bumps that conversation's unread count, and background threads occasionally ping.
- * Under ~860px the details pane becomes a slide-over; under ~620px the list and thread swap.
+ * Three-pane chat inbox: searchable conversation list (unread counts, online dots, last-message time), the thread
+ * (day divider, bubbles, typing indicator) and a details pane (role, location, live local time, shared files, and Call
+ * / Profile when `onCall` / `onProfile` are given). The thread slides on switching.
+ * `conversations` + `onConversationsChange` (or `defaultConversations`) hold the data: sending appends your message and
+ * calls `onSend(conversationId, text)`; while its promise is pending the message shows as sending, and a rejection marks
+ * it failed with Retry. Replies are yours to add (new messages in `conversations`), as is `typing` (who is typing now).
+ * `selected` / `onSelectedChange` is the open conversation. Under ~860px the details pane becomes a slide-over; under
+ * ~620px the list and thread swap.
  */
-export function ChatInbox({ conversations, replies = INBOX_REPLIES, simulateIncoming = true, className }:
-  { conversations: InboxConversation[]; replies?: string[]; simulateIncoming?: boolean; className?: string }) {
-  const [list, setList] = useState(conversations)
-  const [cur, setCur] = useState(conversations[0]?.id)
+export function ChatInbox({ conversations, defaultConversations = [], onConversationsChange, selected, defaultSelected, onSelectedChange, onSend, typing = {}, onCall, onProfile, className }: {
+  conversations?: InboxConversation[]; defaultConversations?: InboxConversation[]; onConversationsChange?: (c: InboxConversation[]) => void
+  selected?: string; defaultSelected?: string; onSelectedChange?: (id: string) => void
+  onSend?: (conversationId: string, text: string) => void | Promise<void>
+  /** conversation ids whose other person is typing */ typing?: Readonly<Record<string, boolean>>
+  onCall?: (c: InboxConversation) => void; onProfile?: (c: InboxConversation) => void
+  className?: string }) {
+  const [list, setListState] = useControllable(conversations, defaultConversations, onConversationsChange)
+  // what was last set, so a send that settles before the next render builds on it
+  const latest = useRef(list); latest.current = list
+  const setList = (next: InboxConversation[]) => { latest.current = next; setListState(next) }
+  const [cur, setCur] = useControllable(selected, defaultSelected ?? list[0]?.id ?? '', onSelectedChange)
   const [dir, setDir] = useState(0)
   const [q, setQ] = useState('')
   const [draft, setDraft] = useState('')
-  const [typing, setTyping] = useState<Record<string, boolean>>({})
   const [pane, setPane] = useState<'list' | 'thread'>('list')
   const [details, setDetails] = useState(false)
-  const [clock, setClock] = useState<number | null>(null)
-  const curRef = useRef(cur); curRef.current = cur
-  const timers = useRef<number[]>([])
   const scroller = useRef<HTMLDivElement>(null)
   const composer = useRef<HTMLInputElement>(null)
   const [wrap, w] = useWidth<HTMLDivElement>()
   const wide = w === 0 || w >= 860, mid = !wide && w >= 620, narrow = !wide && !mid
   const c = list.find(x => x.id === cur) ?? list[0]
-  const later = (ms: number, f: () => void) => { const id = window.setTimeout(() => { timers.current = timers.current.filter(x => x !== id); f() }, ms); timers.current.push(id) }
-  useEffect(() => () => timers.current.forEach(clearTimeout), [])
   const { visible: onScreen } = useViewport(wrap, { amount: 0 })
-  const onScreenRef = useRef(false); onScreenRef.current = onScreen
-  useEffect(() => { // the local-time clock: read after mount, then every 30 s while on screen (and once on coming back)
-    setClock(Date.now())
-    if (!onScreen) return
-    const t = setInterval(() => setClock(Date.now()), 30000); return () => clearInterval(t)
-  }, [onScreen])
+  const clock = useNow(30000, onScreen) // read after mount, then every 30 s while on screen
   useEffect(() => { const el = scroller.current; if (el) el.scrollTo({ top: el.scrollHeight, behavior: 'smooth' }) }, [c?.messages.length, typing[c?.id ?? ''], cur])
-
-  const deliver = (id: string, text: string) => {
-    setTyping(t => ({ ...t, [id]: false }))
-    setList(l => l.map(x => x.id === id ? { ...x, messages: [...x.messages, { from: 'them' as const, text }].slice(-INBOX_MAX_MESSAGES), last: 'now', unread: id === curRef.current ? 0 : (x.unread ?? 0) + 1 } : x))
-  }
-  // background threads ping now and then (a few times at most) while the inbox is on screen
-  useEffect(() => {
-    if (!simulateIncoming) return
-    let left = 3, t = 0
-    const schedule = () => { t = window.setTimeout(() => {
-      const others = list.filter(x => x.id !== curRef.current)
-      if (onScreenRef.current && left > 0 && others.length) {
-        left--; const o = others[Math.floor(Math.random() * others.length)]
-        setTyping(m => ({ ...m, [o.id]: true }))
-        later(1500, () => deliver(o.id, INBOX_PINGS[Math.floor(Math.random() * INBOX_PINGS.length)]))
-      }
-      if (left > 0) schedule()
-    }, 14000 + Math.random() * 8000) }
-    schedule()
-    return () => clearTimeout(t)
-  }, [simulateIncoming]) // eslint-disable-line react-hooks/exhaustive-deps
+  const patchMessage = (convId: string, msgId: string, status: InboxMessage['status']) =>
+    setList(latest.current.map(x => x.id === convId ? { ...x, messages: x.messages.map(m => { if (m.id !== msgId) return m; const { status: _, ...rest } = m; return status ? { ...rest, status } : rest }) } : x))
 
   const select = (id: string) => {
     if (id === cur) { setPane('thread'); return }
     const a = list.findIndex(x => x.id === cur), b = list.findIndex(x => x.id === id)
     setDir(Math.sign(b - a) || 1); setCur(id); setPane('thread'); setDraft('')
-    setList(l => l.map(x => x.id === id ? { ...x, unread: 0 } : x))
+    if (list.find(x => x.id === id)?.unread) setList(list.map(x => x.id === id ? { ...x, unread: 0 } : x))
     if (!isCoarsePointer()) requestAnimationFrame(() => composer.current?.focus({ preventScroll: true }))
+  }
+  /** Hands a message to `onSend` (adding it to the thread, or updating it on Retry); a pending promise shows it as sending. */
+  const deliver = (convId: string, msg: InboxMessage, add: boolean) => {
+    const r = onSend?.(convId, msg.text), pending = !!r && typeof (r as Promise<void>).then === 'function'
+    const { status: _, ...rest } = msg, m: InboxMessage = pending ? { ...rest, status: 'sending' } : rest
+    setList(latest.current.map(x => x.id !== convId ? x : add
+      ? { ...x, messages: [...x.messages, m].slice(-INBOX_MAX_MESSAGES), last: fmt.time(Date.now()) }
+      : { ...x, messages: x.messages.map(y => y.id === m.id ? m : y) }))
+    if (pending) (r as Promise<void>).then(() => patchMessage(convId, m.id, undefined), () => patchMessage(convId, m.id, 'failed'))
   }
   const send = () => {
     const v = draft.trim(); if (!v || !c) return
-    const at = c.id
-    setList(l => l.map(x => x.id === at ? { ...x, messages: [...x.messages, { from: 'me' as const, text: v }].slice(-INBOX_MAX_MESSAGES), last: 'now' } : x)); setDraft('')
-    later(700, () => setTyping(t => ({ ...t, [at]: true })))
-    later(2100, () => deliver(at, replies[Math.floor(Math.random() * replies.length)]))
+    setDraft(''); deliver(c.id, { id: uid('msg'), from: 'me', text: v }, true)
   }
   const shown = list.filter(x => x.name.toLowerCase().includes(q.trim().toLowerCase()))
   // local time in another zone; `clock` is read after mount, so the server never renders a time
@@ -380,7 +372,7 @@ export function ChatInbox({ conversations, replies = INBOX_REPLIES, simulateInco
             </div>
           )
         })}
-        {!shown.length && <EmptyState size="sm" title={`No conversations match “${q}”`} />}
+        {!shown.length && <EmptyState size="sm" title={q.trim() ? `No conversations match “${q}”` : 'No conversations yet'} />}
       </div>
     </aside>
   )
@@ -390,7 +382,10 @@ export function ChatInbox({ conversations, replies = INBOX_REPLIES, simulateInco
       <Avatar name={c.name} size={64} status={c.online ? 'online' : undefined} className="!border-0" />
       <b className="mt-1 text-sm">{c.name}</b>
       <span className="text-xs text-[var(--fg3)]">{c.role}</span>
-      <div className="mt-2 flex gap-2"><Button size="sm" className={TOUCH.tap36}><Icon name="phone" size={13} />{'Call'}</Button><Button size="sm" className={TOUCH.tap36}><Icon name="user" size={13} />{'Profile'}</Button></div>
+      {(onCall || onProfile) && <div className="mt-2 flex gap-2">
+        {onCall && <Button size="sm" className={TOUCH.tap36} onClick={() => onCall(c)}><Icon name="phone" size={13} />{'Call'}</Button>}
+        {onProfile && <Button size="sm" className={TOUCH.tap36} onClick={() => onProfile(c)}><Icon name="user" size={13} />{'Profile'}</Button>}
+      </div>}
       <dl className="m-0 mt-3 w-full text-start text-xs">
         {[['Location', c.location], ['Local time', time], ['Shared files', fmt.number(c.files?.length ?? 0)]].map(([k, v]) => (
           <div key={k} className="flex justify-between border-b border-[var(--line)] py-2"><dt className="text-[var(--fg3)]">{k}</dt><dd className="m-0 ui-num">{v}</dd></div>
@@ -416,10 +411,14 @@ export function ChatInbox({ conversations, replies = INBOX_REPLIES, simulateInco
         className="flex min-h-0 flex-1 flex-col gap-1.5 overflow-auto p-3" role="log" aria-label={`Messages with ${c.name}`}>
         <div className="my-2 flex items-center gap-3 text-[11px] text-[var(--fg3)]"><span className="h-px flex-1 bg-[var(--line)]" />{'Today'}<span className="h-px flex-1 bg-[var(--line)]" /></div>
         <AnimatePresence initial={false}>
-          {c.messages.map((msg, i) => (
-            <motion.div key={i} initial={{ opacity: 0, y: 10, scale: 0.96 }} animate={{ opacity: 1, y: 0, scale: 1 }} transition={spring(0.3, 0.35)}
-              className={cn('rounded-[var(--r-lg)] px-3 py-2 text-[13px] leading-[1.45] [overflow-wrap:anywhere]', narrow ? 'max-w-[84%]' : 'max-w-[70%]', msg.from === 'me' ? 'origin-bottom-right self-end rounded-ee-[5px] bg-[var(--primary)] text-[var(--on-primary)]' : 'origin-bottom-left self-start rounded-es-[5px] bg-[var(--muted)]')}>
-              {msg.text}
+          {c.messages.map(msg => (
+            <motion.div key={msg.id} initial={{ opacity: 0, y: 10, scale: 0.96 }} animate={{ opacity: msg.status === 'sending' ? 0.6 : 1, y: 0, scale: 1 }} transition={spring(0.3, 0.35)}
+              className={cn('flex flex-col gap-0.5', narrow ? 'max-w-[84%]' : 'max-w-[70%]', msg.from === 'me' ? 'origin-bottom-right items-end self-end' : 'origin-bottom-left items-start self-start')}>
+              <div className={cn('rounded-[var(--r-lg)] px-3 py-2 text-[13px] leading-[1.45] [overflow-wrap:anywhere]', msg.from === 'me' ? 'rounded-ee-[5px] bg-[var(--primary)] text-[var(--on-primary)]' : 'rounded-es-[5px] bg-[var(--muted)]')}>
+                {msg.text}
+              </div>
+              {msg.status === 'failed' && <span role="alert" className="flex items-center gap-1.5 text-[11px] text-[var(--bad)]">{'Not sent'}
+                <button type="button" onClick={() => deliver(c.id, msg, false)} className="cursor-pointer border-0 bg-transparent p-0 font-semibold text-inherit underline underline-offset-2 [@media(pointer:coarse)]:min-h-8">{'Retry'}</button></span>}
             </motion.div>
           ))}
           {typing[c.id] && <InboxTyping key="typing" name={c.name.split(' ')[0]} />}

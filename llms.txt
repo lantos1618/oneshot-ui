@@ -23,7 +23,7 @@ and motion. Attach the ones you need plus ui-provider.tsx; they share one UIProv
 - shadcn CLI: `npx shadcn add https://lantos1618.github.io/oneshot-ui/r/data-grid.json` (pulls in ui-provider)
 - Index with sizes, exports and embedded components: https://lantos1618.github.io/oneshot-ui/index.json
 - The same files from npm: https://unpkg.com/@lyndon/ui@0.11.0/dist-registry/files/<name>.tsx
-- Whole library in one file (dist-single/ui-all.tsx, ~648.0k tokens): only for tools with a very large context; prefer the drop-ins
+- Whole library in one file (dist-single/ui-all.tsx, ~637.0k tokens): only for tools with a very large context; prefer the drop-ins
 
 ## Tags
 
@@ -280,27 +280,27 @@ Import from: @lyndon/ui/lanes, @lyndon/ui/gitgraph.
 
 Import from: @lyndon/ui/media.
 
-- [audio-player](https://lantos1618.github.io/oneshot-ui/files/audio-player.tsx): Audio player: cover, title, back / forward 10 s, speed cycle and a waveform you click or drag to seek (hovering previews the jump; on touch, tap or swipe sideways along it, while a vertical swipe still scrolls the page). (component, ~20.4k tokens; tags: keyboard, accessible)
-- [avatar-cropper](https://lantos1618.github.io/oneshot-ui/files/avatar-cropper.tsx): Avatar cropper: the photo sits under a circular mask; drag (or arrow keys) to reposition, clamped so the circle stays covered; zoom with the slider, the wheel, a two-finger pinch or + / −. (component, ~15.7k tokens; tags: uploads, settings, touch)
+- [audio-player](https://lantos1618.github.io/oneshot-ui/files/audio-player.tsx): Audio player: cover, title, back / forward 10 s, speed cycle and a waveform you click or drag to seek (hovering previews the jump; on touch, tap or swipe sideways along it, while a vertical swipe still scrolls the page). (component, ~21.4k tokens; tags: keyboard, accessible)
+- [avatar-cropper](https://lantos1618.github.io/oneshot-ui/files/avatar-cropper.tsx): Avatar cropper: the photo sits under a circular mask; drag (or arrow keys) to reposition, clamped so the circle stays covered; zoom with the slider, the wheel, a two-finger pinch or + / −. (component, ~15.8k tokens; tags: uploads, settings, touch)
 - [carousel](https://lantos1618.github.io/oneshot-ui/files/carousel.tsx): Scroll-snap carousel with arrows, dots, swipe and ← / → (all wrap around). (component, ~2.3k tokens; tags: marketing, touch, keyboard)
-- [image-compare](https://lantos1618.github.io/oneshot-ui/files/image-compare.tsx): Before / after comparison: drag anywhere (or arrow keys / Home / End on the handle). (component, ~2.7k tokens; tags: comparison, touch)
-- [lightbox](https://lantos1618.github.io/oneshot-ui/files/lightbox.tsx): Full-screen image viewer. (component, ~11.3k tokens; tags: keyboard, touch, marketing, animated)
-- [masonry-gallery](https://lantos1618.github.io/oneshot-ui/files/masonry-gallery.tsx): Pinterest-style masonry: each tile drops into the shortest column; columns follow the width (two on phones). (component, ~20.3k tokens; tags: marketing, animated)
+- [image-compare](https://lantos1618.github.io/oneshot-ui/files/image-compare.tsx): Before / after comparison: drag anywhere (or arrow keys / Home / End on the handle). (component, ~2.9k tokens; tags: comparison, touch)
+- [lightbox](https://lantos1618.github.io/oneshot-ui/files/lightbox.tsx): Full-screen image viewer. (component, ~11.8k tokens; tags: keyboard, touch, marketing, animated)
+- [masonry-gallery](https://lantos1618.github.io/oneshot-ui/files/masonry-gallery.tsx): Pinterest-style masonry: each tile drops into the shortest column; columns follow the width (two on phones). (component, ~21.1k tokens; tags: marketing, animated)
 - [media-card](https://lantos1618.github.io/oneshot-ui/files/media-card.tsx): Article / video card: image with a tag and duration badge, date line, title, description, author and a bookmark toggle. (component, ~6.8k tokens; tags: marketing, people)
-- [mini-audio-player](https://lantos1618.github.io/oneshot-ui/files/mini-audio-player.tsx): Slim pill player: play, title, a thin draggable progress bar (← / → when focused; a 32px touch band on phones) and the time. (component, ~9.7k tokens; tags: chat, touch)
+- [mini-audio-player](https://lantos1618.github.io/oneshot-ui/files/mini-audio-player.tsx): Slim pill player: play, title, a thin draggable progress bar (← / → when focused; a 32px touch band on phones) and the time. (component, ~19.2k tokens; tags: chat, touch)
 - [progressive-image](https://lantos1618.github.io/oneshot-ui/files/progressive-image.tsx): Image that blurs up: a tiny placeholder shows blurred, then the full image crossfades in. (component, ~4.3k tokens; tags: async, accessible)
-- [video-player](https://lantos1618.github.io/oneshot-ui/files/video-player.tsx): Video player with custom controls: big play button, title that fades while playing, seek bar with buffer, hover time and drag, back 5 s, mute + volume, time, speed cycle and fullscreen. (component, ~27.1k tokens; tags: keyboard, touch, accessible)
-- [voice-note](https://lantos1618.github.io/oneshot-ui/files/voice-note.tsx): Chat-style voice note bubble: play, a waveform you tap or drag to seek, elapsed / total time and a speed chip. (component, ~10.4k tokens; tags: chat, touch)
-- [waveform](https://lantos1618.github.io/oneshot-ui/files/waveform.tsx): Waveform bars from `peaks` (0..1 each). (component, ~743 tokens; tags: animated, keyboard, accessible)
+- [video-player](https://lantos1618.github.io/oneshot-ui/files/video-player.tsx): Video player with custom controls: big play button, title that fades while playing, seek bar with buffer, hover time and drag, back 5 s, mute + volume, time, speed cycle and fullscreen. (component, ~27.7k tokens; tags: keyboard, touch, accessible)
+- [voice-note](https://lantos1618.github.io/oneshot-ui/files/voice-note.tsx): Chat-style voice note bubble: play, a waveform you tap or drag to seek, elapsed / total time and a speed chip. (component, ~19.9k tokens; tags: chat, touch)
+- [waveform](https://lantos1618.github.io/oneshot-ui/files/waveform.tsx): Waveform bars from `peaks` (0..1 each). (component, ~788 tokens; tags: animated, keyboard, accessible)
 
 ## Extras: collab
 
 Import from: @lyndon/ui/collab.
 
-- [anchored-comments](https://lantos1618.github.io/oneshot-ui/files/anchored-comments.tsx): Comments anchored to highlighted text: the document sits on the left, threads on the right. (component, ~16.8k tokens; tags: review, editing)
-- [chat-inbox](https://lantos1618.github.io/oneshot-ui/files/chat-inbox.tsx): Three-pane chat inbox: searchable conversation list (unread counts, online dots, last-message time), the thread (day divider, bubbles, typing indicator, simulated replies) and a details pane (role, location, live local time, shared files). (component, ~13.5k tokens; tags: chat, people)
-- [comment-thread](https://lantos1618.github.io/oneshot-ui/files/comment-thread.tsx): Threaded comments with inline reply boxes. (component, ~6.3k tokens; tags: review, editing)
-- [live-presence](https://lantos1618.github.io/oneshot-ui/files/live-presence.tsx): Live presence on a mock document: collaborators' cursors drift about with name labels, your own "You" cursor follows the pointer inside the canvas, and an avatar stack ringed in each person's colour counts who's here. (component, ~5.0k tokens; tags: people, real-time)
+- [anchored-comments](https://lantos1618.github.io/oneshot-ui/files/anchored-comments.tsx): Comments anchored to highlighted text: the document sits on the left, threads on the right. (component, ~17.2k tokens; tags: review, editing)
+- [chat-inbox](https://lantos1618.github.io/oneshot-ui/files/chat-inbox.tsx): Three-pane chat inbox: searchable conversation list (unread counts, online dots, last-message time), the thread (day divider, bubbles, typing indicator) and a details pane (role, location, live local time, shared files, and Call / Profile when `onCall` / `onProfile` are given). (component, ~14.1k tokens; tags: chat, people)
+- [comment-thread](https://lantos1618.github.io/oneshot-ui/files/comment-thread.tsx): Threaded comments with inline reply boxes. (component, ~8.0k tokens; tags: review, editing)
+- [live-presence](https://lantos1618.github.io/oneshot-ui/files/live-presence.tsx): Live presence on a shared canvas: each of `cursors` (your collaborators, from your presence channel) is drawn with its name and glides to each new position, and an avatar stack ringed in each person's colour counts who's here. (component, ~5.5k tokens; tags: people, real-time)
 
 ## Extras: data
 
@@ -355,15 +355,16 @@ Import from: @lyndon/ui/aistream, @lyndon/ui/ai, @lyndon/ui/aichat.
 - [thinking-steps](https://lantos1618.github.io/oneshot-ui/files/thinking-steps.tsx): Reasoning as a vertical stepper. (component, ~7.5k tokens; tags: agents, streaming, animated)
 - [tool-call](https://lantos1618.github.io/oneshot-ui/files/tool-call.tsx): Collapsible tool-call row: shimmering label and spinner while running, a check and the past tense when done. (component, ~2.7k tokens; tags: agents)
 - [tool-card](https://lantos1618.github.io/oneshot-ui/files/tool-card.tsx): A tool call from a message: status icon, tool name and state, and (click to open) its arguments and result, as data (indented JSON, or `renderValue`, e.g. (component, ~8.1k tokens; tags: agents)
-- [voice-input](https://lantos1618.github.io/oneshot-ui/files/voice-input.tsx): Mic button with a live waveform. (component, ~5.0k tokens; tags: chat, animated, inputs)
+- [voice-input](https://lantos1618.github.io/oneshot-ui/files/voice-input.tsx): Mic button with a live waveform. (component, ~5.1k tokens; tags: chat, animated, inputs)
 
 ## Extras: agents
 
 Import from: @lyndon/ui/agentrun, @lyndon/ui/aiagent.
 
-- [agent-run](https://lantos1618.github.io/oneshot-ui/files/agent-run.tsx): One model of an agent run (spans, events, tokens, cost) with a streaming reducer and useAgentRun, plus adapters from OpenTelemetry GenAI traces (OTLP/JSON), Vercel AI SDK results and UI streams, and LangGraph astream_events. (hook, ~18.2k tokens; tags: agents, monitoring, streaming, real-time, new)
-- [agent-transit-map](https://lantos1618.github.io/oneshot-ui/files/agent-transit-map.tsx): Live multi-agent "transit map", driven by the same WorkflowEngine as StateMachine. (diagram, ~46.3k tokens; tags: agents, workflows, real-time, experimental, ai)
-- [ai-canvas](https://lantos1618.github.io/oneshot-ui/files/ai-canvas.tsx): Chat on the left, a living document on the right. (component, ~21.1k tokens; tags: editing, experimental, code)
+- [agent-run](https://lantos1618.github.io/oneshot-ui/files/agent-run.tsx): One model of an agent run (spans, events, tokens, cost) with a streaming reducer and useAgentRun, plus adapters from OpenTelemetry GenAI traces (OTLP/JSON), Vercel AI SDK results and UI streams, and LangGraph astream_events. (hook, ~18.6k tokens; tags: agents, monitoring, streaming, real-time, new)
+- [agent-run-closed-early-error](https://lantos1618.github.io/oneshot-ui/files/agent-run-closed-early-error.tsx): What useAgentRun reports when a stream ends while its run is still running. (component, ~459 tokens; tags: agents)
+- [agent-transit-map](https://lantos1618.github.io/oneshot-ui/files/agent-transit-map.tsx): A multi-agent "transit map": agent teams are lines, agents and tools are stations, orchestrators are hubs. (diagram, ~17.0k tokens; tags: agents, workflows, real-time, experimental, ai)
+- [ai-canvas](https://lantos1618.github.io/oneshot-ui/files/ai-canvas.tsx): Chat on the left, a living document on the right. (component, ~23.2k tokens; tags: editing, experimental, code)
 
 ## Extras: theming
 

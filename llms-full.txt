@@ -23,7 +23,7 @@ and motion. Attach the ones you need plus ui-provider.tsx; they share one UIProv
 - shadcn CLI: `npx shadcn add https://lantos1618.github.io/oneshot-ui/r/data-grid.json` (pulls in ui-provider)
 - Index with sizes, exports and embedded components: https://lantos1618.github.io/oneshot-ui/index.json
 - The same files from npm: https://unpkg.com/@lyndon/ui@0.11.0/dist-registry/files/<name>.tsx
-- Whole library in one file (dist-single/ui-all.tsx, ~648.0k tokens): only for tools with a very large context; prefer the drop-ins
+- Whole library in one file (dist-single/ui-all.tsx, ~637.0k tokens): only for tools with a very large context; prefer the drop-ins
 
 ## Tags
 
@@ -1806,7 +1806,7 @@ Any DAG as rows: layoutLanes (headless: order, lanes, colours and each row's edg
 
 Import from: @lyndon/ui/media.
 
-### Audio player (`audio-player`, ~20.4k tokens)
+### Audio player (`audio-player`, ~21.4k tokens)
 
 Audio player: cover, title, back / forward 10 s, speed cycle and a waveform you click or drag to seek (hovering previews the jump; on touch, tap or swipe sideways along it, while a vertical swipe still scrolls the page). The waveform is a slider: ← / → seek 2 s, Home / End, Space plays. Pass `track` (createAudioTrack) to share playback with other players, or just `src`.
 
@@ -1817,7 +1817,7 @@ Audio player: cover, title, back / forward 10 s, speed cycle and a waveform you 
 - Embeds: Badge, Button, Icon, IconButton, MagnetMarks, Slot, Spinner, Waveform
 - npm: motion, react
 
-### Avatar cropper (`avatar-cropper`, ~15.7k tokens)
+### Avatar cropper (`avatar-cropper`, ~15.8k tokens)
 
 Avatar cropper: the photo sits under a circular mask; drag (or arrow keys) to reposition, clamped so the circle stays covered; zoom with the slider, the wheel, a two-finger pinch or + / −. "Choose photo" loads a local file and 48 / 32 / 22 px previews update live. `onChange` receives the 256 px circle crop as a PNG data URL once the crop settles (not on every pointer move). Chosen files must be images of at most `maxBytes` (15 MB) and `maxPixels` (40 megapixels, checked from the header before anything is drawn); they load as object URLs, revoked when replaced or on unmount. A rejected file shows why (and calls `onError`).
 
@@ -1839,7 +1839,7 @@ Scroll-snap carousel with arrows, dots, swipe and ← / → (all wrap around). E
 - Embeds: Icon
 - npm: motion, react
 
-### Image compare (`image-compare`, ~2.7k tokens)
+### Image compare (`image-compare`, ~2.9k tokens)
 
 Before / after comparison: drag anywhere (or arrow keys / Home / End on the handle). Wiggles once when scrolled into view to show it moves. On touch, a sideways drag (or any drag on the handle) moves the divider and a tap jumps it, while a vertical swipe over the image still scrolls the page.
 
@@ -1850,7 +1850,7 @@ Before / after comparison: drag anywhere (or arrow keys / Home / End on the hand
 - Embeds: Badge, Icon
 - npm: motion, react
 
-### Lightbox (`lightbox`, ~11.3k tokens)
+### Lightbox (`lightbox`, ~11.8k tokens)
 
 Full-screen image viewer. Opens from (and closes back into) the thumbnail `originFor(id)` returns. Thumbnails strip, swipe to change, click / double-click / wheel / + − to zoom, drag to pan, ← / → to move, Esc to close. Touch: swipe sideways to change, pinch or double-tap to zoom, swipe down to close. Renders in the themed overlay layer with the shared scroll lock; focus is trapped while open; the chrome respects the safe areas.
 
@@ -1861,9 +1861,9 @@ Full-screen image viewer. Opens from (and closes back into) the thumbnail `origi
 - Embeds: Button, Icon, IconButton, OverlayPortal, Slot, Spinner
 - npm: motion, react, react-dom
 
-### Masonry gallery (`masonry-gallery`, ~20.3k tokens)
+### Masonry gallery (`masonry-gallery`, ~21.1k tokens)
 
-Pinterest-style masonry: each tile drops into the shortest column; columns follow the width (two on phones). On touch screens the Save button and the title overlay are always visible (no hover there). Category chips filter with a reflow, "Load more" staggers new tiles in (and says "That’s everything" when `hasMore` is false), Save toggles per tile, and clicking opens the Lightbox from the tile. The layout comes from each item's `ratio` (height / width), so the full height is reserved before any image loads and nothing below moves; tiles fade in when the gallery scrolls into view.
+Pinterest-style masonry: each tile drops into the shortest column; columns follow the width (two on phones). On touch screens the Save button and the title overlay are always visible (no hover there). Category chips filter with a reflow, "Load more" staggers new tiles in (and says "That’s everything" when `hasMore` is false), and clicking opens the Lightbox from the tile. With `onSave(item, saved)` each tile has a Save toggle: the tile shows "Saving…" while a returned promise is pending, and only once it resolves does the tile flip and a "Saved" toast appear (a rejection shows "Couldn’t save"). `saved` / `defaultSaved` are the saved ids. The layout comes from each item's `ratio` (height / width), so the full height is reserved before any image loads and nothing below moves; tiles fade in when the gallery scrolls into view.
 
 - File: https://lantos1618.github.io/oneshot-ui/files/masonry-gallery.tsx
 - Kind: component; area: media; tags: marketing, animated
@@ -1883,7 +1883,7 @@ Article / video card: image with a tag and duration badge, date line, title, des
 - Embeds: Avatar, Badge, Button, Icon, IconButton, Slot, Spinner
 - npm: motion, react
 
-### Mini audio player (`mini-audio-player`, ~9.7k tokens)
+### Mini audio player (`mini-audio-player`, ~19.2k tokens)
 
 Slim pill player: play, title, a thin draggable progress bar (← / → when focused; a 32px touch band on phones) and the time. Share `track` to sync with a full player.
 
@@ -1891,7 +1891,7 @@ Slim pill player: play, title, a thin draggable progress bar (← / → when foc
 - Kind: component; area: media; tags: chat, touch
 - Import: `@lyndon/ui/media`
 - Exports: MiniAudioPlayer
-- Embeds: Icon
+- Embeds: Badge, Button, Icon, IconButton, Slot, Spinner
 - npm: motion, react
 
 ### Progressive image (`progressive-image`, ~4.3k tokens)
@@ -1905,9 +1905,9 @@ Image that blurs up: a tiny placeholder shows blurred, then the full image cross
 - Embeds: Button, Icon, Slot, Spinner
 - npm: motion, react
 
-### Video player (`video-player`, ~27.1k tokens)
+### Video player (`video-player`, ~27.7k tokens)
 
-Video player with custom controls: big play button, title that fades while playing, seek bar with buffer, hover time and drag, back 5 s, mute + volume, time, speed cycle and fullscreen. Controls hide when idle. Keys (when the player itself is focused): Space / K play, ← / → seek 2 s, M mute, F fullscreen. Its controls keep their own keys (the seek bar: ← / → and Home / End), so nothing fires twice. Touch: tap shows or hides the controls (tap while paused plays), double-tap the left or right half to seek ∓5 s, and the seek bar and buttons grow to finger size. Clicking the picture toggles playback. While `preparing` (no `src` yet) the poster shows with Play enabled: pressing it shows "Starting…" and playback begins as soon as the source arrives (press again to cancel).
+Video player with custom controls: big play button, title that fades while playing, seek bar with buffer, hover time and drag, back 5 s, mute + volume, time, speed cycle and fullscreen. Controls hide when idle. Keys (when the player itself is focused): Space / K play, ← / → seek 2 s, M mute, F fullscreen. Its controls keep their own keys (the seek bar: ← / → and Home / End), so nothing fires twice. Touch: tap shows or hides the controls (tap while paused plays), double-tap the left or right half to seek ∓5 s, and the seek bar and buttons grow to finger size. Clicking the picture toggles playback. While `preparing` (no `src` yet) the poster shows with Play enabled: pressing it shows "Starting…" and playback begins as soon as the source arrives (press again to cancel). With no `src` and not preparing it says `emptyLabel`.
 
 - File: https://lantos1618.github.io/oneshot-ui/files/video-player.tsx
 - Kind: component; area: media; tags: keyboard, touch, accessible
@@ -1916,7 +1916,7 @@ Video player with custom controls: big play button, title that fades while playi
 - Embeds: Badge, Button, FormFieldContext, Icon, IconButton, MagnetBubble, MagnetMarks, Slider, Slot, Spinner
 - npm: motion, react
 
-### Voice note (`voice-note`, ~10.4k tokens)
+### Voice note (`voice-note`, ~19.9k tokens)
 
 Chat-style voice note bubble: play, a waveform you tap or drag to seek, elapsed / total time and a speed chip.
 
@@ -1924,10 +1924,10 @@ Chat-style voice note bubble: play, a waveform you tap or drag to seek, elapsed 
 - Kind: component; area: media; tags: chat, touch
 - Import: `@lyndon/ui/media`
 - Exports: VoiceNote
-- Embeds: Icon, Waveform
+- Embeds: Badge, Button, Icon, IconButton, Slot, Spinner, Waveform
 - npm: motion, react
 
-### Waveform (`waveform`, ~743 tokens)
+### Waveform (`waveform`, ~788 tokens)
 
 Waveform bars from `peaks` (0..1 each). `played` (0..1) colours the bars before it, `hover` (0..1) previews a seek, `bars` resamples to that many bars. `intro` grows the bars in the first time they scroll into view; `live` makes them bounce (a listening microphone). Bars stretch to fill the width unless `barWidth` fixes it. Decorative (aria-hidden): put it inside the control that owns the value (useSeekSlider).
 
@@ -1942,9 +1942,9 @@ Waveform bars from `peaks` (0..1 each). `played` (0..1) colours the bars before 
 
 Import from: @lyndon/ui/collab.
 
-### Anchored comments (`anchored-comments`, ~16.8k tokens)
+### Anchored comments (`anchored-comments`, ~17.2k tokens)
 
-Comments anchored to highlighted text: the document sits on the left, threads on the right. Hovering a highlight or a thread lights up both; clicking a highlight focuses its thread's reply box. Threads take emoji reactions, replies, and Resolve (dims the anchor, toast with Undo) / Reopen.
+Comments anchored to highlighted text: the document sits on the left, threads on the right. Hovering a highlight or a thread lights up both; clicking a highlight focuses its thread's reply box. Threads take emoji reactions, replies, and Resolve (dims the anchor, toast with Undo) / Reopen. `me` is the name new replies are signed with.
 
 - File: https://lantos1618.github.io/oneshot-ui/files/anchored-comments.tsx
 - Kind: component; area: collaboration; tags: review, editing
@@ -1953,9 +1953,9 @@ Comments anchored to highlighted text: the document sits on the left, threads on
 - Embeds: AnimatedList, Avatar, Badge, Button, FormFieldContext, Icon, IconButton, Input, Slot, Spinner
 - npm: motion, react
 
-### Chat inbox (`chat-inbox`, ~13.5k tokens)
+### Chat inbox (`chat-inbox`, ~14.1k tokens)
 
-Three-pane chat inbox: searchable conversation list (unread counts, online dots, last-message time), the thread (day divider, bubbles, typing indicator, simulated replies) and a details pane (role, location, live local time, shared files). The thread slides on switching; a reply that lands while you are elsewhere bumps that conversation's unread count, and background threads occasionally ping. Under ~860px the details pane becomes a slide-over; under ~620px the list and thread swap.
+Three-pane chat inbox: searchable conversation list (unread counts, online dots, last-message time), the thread (day divider, bubbles, typing indicator) and a details pane (role, location, live local time, shared files, and Call / Profile when `onCall` / `onProfile` are given). The thread slides on switching. `conversations` + `onConversationsChange` (or `defaultConversations`) hold the data: sending appends your message and calls `onSend(conversationId, text)`; while its promise is pending the message shows as sending, and a rejection marks it failed with Retry. Replies are yours to add (new messages in `conversations`), as is `typing` (who is typing now). `selected` / `onSelectedChange` is the open conversation. Under ~860px the details pane becomes a slide-over; under ~620px the list and thread swap.
 
 - File: https://lantos1618.github.io/oneshot-ui/files/chat-inbox.tsx
 - Kind: component; area: collaboration; tags: chat, people
@@ -1964,7 +1964,7 @@ Three-pane chat inbox: searchable conversation list (unread counts, online dots,
 - Embeds: Avatar, Badge, Button, EmptyState, FormFieldContext, Icon, IconButton, Input, Slot, Spinner, TypingDots
 - npm: motion, react
 
-### Comment thread (`comment-thread`, ~6.3k tokens)
+### Comment thread (`comment-thread`, ~8.0k tokens)
 
 Threaded comments with inline reply boxes.
 
@@ -1975,9 +1975,9 @@ Threaded comments with inline reply boxes.
 - Embeds: AnimatedList, Avatar, Button, Collapse, FormFieldContext, Input, Slot, Spinner
 - npm: motion, react
 
-### Live presence (`live-presence`, ~5.0k tokens)
+### Live presence (`live-presence`, ~5.5k tokens)
 
-Live presence on a mock document: collaborators' cursors drift about with name labels, your own "You" cursor follows the pointer inside the canvas, and an avatar stack ringed in each person's colour counts who's here. Cursors pause while off screen and stay put under reduced motion.
+Live presence on a shared canvas: each of `cursors` (your collaborators, from your presence channel) is drawn with its name and glides to each new position, and an avatar stack ringed in each person's colour counts who's here. `children` is the document under the cursors. With `me`, your own cursor follows the pointer inside the canvas and `onCursorMove` reports where it is (fractions, null when it leaves) so you can broadcast it. Gliding pauses while off screen; under reduced motion cursors jump to their positions.
 
 - File: https://lantos1618.github.io/oneshot-ui/files/live-presence.tsx
 - Kind: component; area: collaboration; tags: people, real-time
@@ -2421,7 +2421,7 @@ A tool call from a message: status icon, tool name and state, and (click to open
 - Embeds: ApprovalCard, Badge, Button, Collapse, Icon, ShimmerText, Slot, Spinner
 - npm: motion, react
 
-### Voice input (`voice-input`, ~5.0k tokens)
+### Voice input (`voice-input`, ~5.1k tokens)
 
 Mic button with a live waveform. While listening, interim words appear in grey; when you stop, the transcript settles into its final form. Controlled with `listening` / `onListeningChange`, or uncontrolled. Feed it what your speech API heard so far as `transcript` (it reveals the words as they arrive); with none it just listens and reports an empty result.
 
@@ -2437,7 +2437,7 @@ Mic button with a live waveform. While listening, interim words appear in grey; 
 
 Import from: @lyndon/ui/agentrun, @lyndon/ui/aiagent.
 
-### Agent runs (useAgentRun) (`agent-run`, ~18.2k tokens)
+### Agent runs (useAgentRun) (`agent-run`, ~18.6k tokens)
 
 One model of an agent run (spans, events, tokens, cost) with a streaming reducer and useAgentRun, plus adapters from OpenTelemetry GenAI traces (OTLP/JSON), Vercel AI SDK results and UI streams, and LangGraph astream_events. TraceWaterfall, AgentTransitMap and LaneGraph draw a run.
 
@@ -2445,28 +2445,38 @@ One model of an agent run (spans, events, tokens, cost) with a streaming reducer
 - Kind: hook; area: ai; tags: agents, monitoring, streaming, real-time, new
 - Import: `@lyndon/ui/agentrun`
 - Exports: useAgentRun, applyRunEvent, runFromEvents, runToEvents, runTotals, runLatestMs, runLaneNodes, agentSpanCost, otelTraceIds, otelToRunEvents, fromOtel, aiSdkResultToRunEvents, fromAiSdkResult, aiSdkRunMapper, fromAiSdkUIStream, langGraphRunMapper, fromLangGraphEvents, AGENT_RUN_LIMITS
+- Embeds: AgentRunClosedEarlyError
 - npm: react
 
-### Agent transit map (`agent-transit-map`, ~46.3k tokens)
+### Agent run closed early error (`agent-run-closed-early-error`, ~459 tokens)
 
-Live multi-agent "transit map", driven by the same WorkflowEngine as StateMachine. The Indexing loop and the Intake endpoint fire events into a queue (drawn on the map, under Intake); jobs start as slots free up and travel their state graph along the drawn lines, bends included. Agents take one job at a time: the others line up on the incoming line with a counter, and track segments warm up (grey, amber, red) as tokens pile onto them. Orchestrators route with guards, Product forks reviews and joins them, endpoints emit follow-up triggers. Human and Risk stations wait for approval when human-in-the-loop is on: the station gets a countdown ring and an approval card floats beside it, over the map, so nothing on the page moves. Pause, speed and max-jobs controls, fire-event chips, and a live trace table (time, tokens, USD) whose connectors link a follow-up job to the job that triggered it: hover a row, or press its job button, to follow that job on the map. The still drawing renders once; tokens and the train are composited layers moved every frame without re-rendering (30 fps on touch screens); the panels refresh about 8 times a second, and only the parts that changed. Reduced motion places tokens at their stations without travel. On phones the map keeps a readable size and scrolls sideways inside the card, as does the trace table. Pass `machines` whose stations are the map's (the sample is `AGENT_WORKFLOWS` / `AGENT_WORKFLOW_ORDER` in `@lyndon/ui/examples`); without any, the map is drawn with no traffic. `run` draws a real agent run instead (an AgentRun from useAgentRun, fromOtel, fromAiSdkResult or fromLangGraphEvents, finished or live): each span stops at a station (`stations`, default transitRunStation: model calls at Analyst, retrievals at Recall, people at Human, tools by name), each running agent is a numbered token that glides to where its latest step is, stations count their visits and turn red where a step failed, and the trace table lists the steps on the run's own timeline. Hover or tap a row to light its line.
+What useAgentRun reports when a stream ends while its run is still running.
+
+- File: https://lantos1618.github.io/oneshot-ui/files/agent-run-closed-early-error.tsx
+- Kind: component; area: ai; tags: agents
+- Import: `@lyndon/ui/agentrun`
+- Exports: AgentRunClosedEarlyError
+
+### Agent transit map (`agent-transit-map`, ~17.0k tokens)
+
+A multi-agent "transit map": agent teams are lines, agents and tools are stations, orchestrators are hubs. `run` draws a real agent run (an AgentRun from useAgentRun, fromOtel, fromAiSdkResult or fromLangGraphEvents, finished or live): each span stops at a station (`stations`, default transitRunStation: model calls at Analyst, retrievals at Recall, people at Human, tools by name), each running agent is a numbered token that glides along the lines to where its latest step is, stations count their visits and turn red where a step failed, and the trace table lists the steps on the run's own timeline. Hover or tap a row to light its line. Without a run the map is drawn with no traffic. Tokens are composited layers moved by a frame loop (30 fps on touch screens); reduced motion places them at their stations. On phones the map keeps a readable size and scrolls sideways inside the card, as does the trace. The showcase's live simulation (the WorkflowEngine driving the map) is `TransitSimMap` in the examples.
 
 - File: https://lantos1618.github.io/oneshot-ui/files/agent-transit-map.tsx
 - Kind: diagram; area: diagrams; tags: agents, workflows, real-time, experimental, ai
 - Import: `@lyndon/ui/aiagent`
 - Exports: AgentTransitMap
-- Embeds: Badge, Button, Chip, FormFieldContext, Icon, IconButton, MagnetBubble, MagnetMarks, ScrollEdges, Slider, Slot, Spinner, Switch, WorkflowEngine
-- npm: motion, react, react-dom
+- Embeds: Badge, Icon, ScrollEdges
+- npm: motion, react
 
-### AI canvas (`ai-canvas`, ~21.1k tokens)
+### AI canvas (`ai-canvas`, ~23.2k tokens)
 
-Chat on the left, a living document on the right. Asking for a change streams the edit into the file: added lines type in highlighted, removed lines strike through and collapse. Toggle Code/Preview (the preview is a sandboxed iframe), step through versions, copy, click or tap a line (or arrow to it and press Enter) to "Ask about line N", or use the suggestion chips. Below 768px chat and document stack, rows grow to finger height on touch, and the document scrolls into view while an edit streams in. A pill shows line count and version. The preview loads nothing remote (CSP in the frame); `allowRemote` lets https images in. Starts empty: pass `initial`, and either `respond` (your model: return the new document and a reply) or scripted `edits` (matched by prompt, else offered in order). The showcase content is `AI_CANVAS_SAMPLE` in `@lyndon/ui/examples`.
+Chat on the left, a living document on the right. Asking for a change streams the edit into the file: added lines type in highlighted, removed lines strike through and collapse. Toggle Code/Preview (the preview is a sandboxed iframe), step through versions, copy, click or tap a line (or arrow to it and press Enter) to "Ask about line N", or use a suggestion chip. Below 768px chat and document stack, rows grow to finger height on touch, and the document scrolls into view while an edit streams in. A pill shows line count and version. The preview loads nothing remote (CSP in the frame); `allowRemote` lets https images in. Starts empty: pass `initial` and `respond(prompt, code, context)`, your model: return the new document and a reply. A question about a line ("Ask about line N", or a prompt starting "Explain line N") reaches `respond` with `{ line, lineText }`, or `explain(line, text)` when you pass one. Without either, nothing can be asked. When `respond` throws, the reply shows the failure with Retry and `onError` gets the error. `suggestions` offers the next prompt not yet sent as a chip. The showcase's scripted demo is `canvasDemoProps()` in the examples.
 
 - File: https://lantos1618.github.io/oneshot-ui/files/ai-canvas.tsx
 - Kind: component; area: ai; tags: editing, experimental, code
 - Import: `@lyndon/ui/aiagent`
 - Exports: AICanvas
-- Embeds: ActiveIndicator, Badge, Button, Chip, CopyButton, EmptyState, FormFieldContext, Icon, IconButton, ScrollEdges, SegmentedControl, SendButton, Slot, Spinner, TypingDots
+- Embeds: ActiveIndicator, Badge, Button, Chip, CopyButton, EmptyState, FormFieldContext, Icon, IconButton, ScrollEdges, SegmentedControl, SendButton, Slot, Spinner, StreamingText, TypingDots
 - npm: motion, react
 
 

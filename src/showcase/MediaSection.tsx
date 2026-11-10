@@ -81,7 +81,9 @@ const galleryBlank = Array.from({ length: 16 }, (_, i) => galleryItem(0, i, fals
 function GalleryDemo() {
   const [items, setItems] = useState<GalleryItem[]>(galleryBlank)
   useEffect(() => { let live = true; galleryStart().then(x => { if (live) setItems(x) }); return () => { live = false } }, [])
-  return <MasonryGallery items={items} categories={['All', 'Nature', 'City', 'Travel', 'Abstract']} hasMore={items.length < 40} onLoadMore={() => setItems(x => [...x, ...makeGalleryItems(x.length, 8)])} />
+  // demo host: a save "reaches the board" after a short wait
+  return <MasonryGallery items={items} categories={['All', 'Nature', 'City', 'Travel', 'Abstract']} hasMore={items.length < 40} onLoadMore={() => setItems(x => [...x, ...makeGalleryItems(x.length, 8)])}
+    onSave={() => new Promise<void>(res => setTimeout(res, 350))} />
 }
 
 const CARDS: [MediaArtKind, string, string, string, number, number][] = [

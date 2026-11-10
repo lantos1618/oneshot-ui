@@ -1,15 +1,13 @@
-import { Fragment, memo, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, useSyncExternalStore, type ReactNode } from 'react'
-import { AnimatePresence, cubicBezier, motion, useReducedMotion } from 'motion/react'
-import { flushSync } from 'react-dom'
-import { Badge, Button, Chip, FONT_CSS, Icon, IconButton, Spinner, TOUCH, cn, ScrollEdges, sleep, spring, surface, themeCSS, useMediaQuery, useRoving, useScrollEdges, useTheme, useWidth, plural, fmt, svgN, svgTranslate } from './core'
+import { memo, useEffect, useLayoutEffect, useMemo, useRef, useState, type ReactNode } from 'react'
+import { AnimatePresence, motion, useReducedMotion } from 'motion/react'
+import { Badge, Button, Chip, FONT_CSS, Icon, IconButton, RUN_STATUS, Spinner, TOUCH, cn, ScrollEdges, onColorLabel, spring, surface, themeCSS, uid, useLatest, useMediaQuery, useRoving, useScrollEdges, useTheme, plural, fmt, svgN, svgTranslate } from './core'
 import { CopyButton, TypingDots, EmptyState } from './feedback'
-import { SegmentedControl, Switch } from './fields'
-import { Slider } from './inputs'
-import { SendButton } from './ai'
+import { SegmentedControl } from './fields'
+import { SendButton, StreamingText } from './ai'
 import { lcsDiff } from './code'
-import { WorkflowEngine, type WorkflowJob, type WorkflowMachine, type WorkflowToken } from './statechart'
+import type { WorkflowMachine } from './statechart'
 import { useFrameLoop, useViewport } from './motion'
-import { runLatestMs, runTotals, type AgentRun, type AgentSpan } from './agentrun'
+import { nearestAgent, runLatestMs, runTotals, type AgentRun, type AgentSpan } from './agentrun'
 
 /* Tiny HTML/CSS highlighter for the canvas (code's highlightCode has no HTML/CSS mode yet) ─ */
 
@@ -40,16 +38,6 @@ function aiHighlight(line: string): ReactNode[] {
 /** Line diff for the streaming edit (code's lcsDiff): '=' kept, '+' added, '-' removed, in display order. */
 const aiLineDiff = (a: string[], b: string[]): ['=' | '+' | '-', string][] => lcsDiff(a, b).map(s => [s.type, s.type === '+' ? b[s.b!] : a[s.a!]])
 
-export type CanvasEdit = { prompt: string; reply: string; code: string }
-/** The default explainer: says whether a line is style or markup. */
-const aiExplainKind = (ln: string) => /[{}]|:\s/.test(ln) ? 'styles' : 'markup'
-/** What AICanvas's `respond` may return: an edit to stream in (`code` is the whole new document), a plain reply, or nothing. */
-export type CanvasReply = { reply: string; code?: string } | string | null | undefined
-
-type CvMsg = { id: number; role: 'u' | 'a'; text: string; tool?: { state: 'run' | 'done'; add: number; del: number; ver: number }; dots?: boolean; stream?: boolean }
-type CvDiff = { lines: ['=' | '+' | '-', string][]; typing: number; chars: number; collapsing: boolean }
-
-const AI_NO_EDITS: CanvasEdit[] = []
 
 /** The page's Google Fonts stylesheets, matched by exact host (https://fonts.googleapis.com only). */
 const aiFontLink = (href: string) => { try { const u = new URL(href); return u.protocol === 'https:' && u.hostname === 'fonts.googleapis.com' } catch { return false } }
@@ -104,103 +92,145 @@ body{box-sizing:border-box;min-height:100vh;display:flex;align-items:center;just
   )
 }
 
+/** What AICanvas's `respond` may return: an edit to stream in (`code` is the whole new document), a plain reply, or nothing. */
+export type CanvasReply = { reply: string; code?: string } | string | null | undefined
+/** What AICanvas passes `respond` with a prompt: for a question about a line, its number (1-based) and text. */
+export type CanvasContext = { line?: number; lineText?: string }
+
+type CvMsg = {
+  id: string; role: 'u' | 'a'; text: string; tool?: { state: 'run' | 'done'; add: number; del: number; ver: number }; dots?: boolean; stream?: boolean
+  /** the reply failed: what to ask again on Retry */ failed?: { prompt: string; ctx: CanvasContext }
+}
+type CvDiff = { lines: ['=' | '+' | '-', string][]; typing: number; chars: number; phase: 'type' | 'hold' | 'collapse'; t: number }
+type CvStats = { add: number; del: number; ver: number }
+/** The edit animation: characters typed per second, then a pause and the removed lines' collapse (seconds). */
+const CV_TYPE_CPS = 900, CV_HOLD = 0.35, CV_COLLAPSE = 0.3
+/** The next added line at or after `i` (lines.length when there is none). */
+const cvNextAdd = (lines: CvDiff['lines'], i: number) => { while (i < lines.length && lines[i][0] !== '+') i++; return i }
+const CV_LINE_Q = /^explain line (\d+)/i
+
 /**
  * Chat on the left, a living document on the right. Asking for a change streams the edit into the file: added lines
  * type in highlighted, removed lines strike through and collapse. Toggle Code/Preview (the preview is a sandboxed
  * iframe), step through versions, copy, click or tap a line (or arrow to it and press Enter) to "Ask about line N",
- * or use the suggestion chips. Below 768px chat and document stack, rows grow to finger height on touch, and the
+ * or use a suggestion chip. Below 768px chat and document stack, rows grow to finger height on touch, and the
  * document scrolls into view while an edit streams in. A pill shows line count and version. The preview loads nothing
- * remote (CSP in the frame); `allowRemote` lets https images in. Starts empty: pass `initial`, and either `respond`
- * (your model: return the new document and a reply) or scripted `edits` (matched by prompt, else offered in order).
- * The showcase content is `AI_CANVAS_SAMPLE` in `@lyndon/ui/examples`.
+ * remote (CSP in the frame); `allowRemote` lets https images in.
+ * Starts empty: pass `initial` and `respond(prompt, code, context)`, your model: return the new document and a reply.
+ * A question about a line ("Ask about line N", or a prompt starting "Explain line N") reaches `respond` with
+ * `{ line, lineText }`, or `explain(line, text)` when you pass one. Without either, nothing can be asked. When
+ * `respond` throws, the reply shows the failure with Retry and `onError` gets the error. `suggestions` offers the next
+ * prompt not yet sent as a chip. The showcase's scripted demo is `canvasDemoProps()` in the examples.
  */
-export function AICanvas({ file = 'untitled.html', initial = '', edits = AI_NO_EDITS, respond, explain: explainProp, intro, allowRemote = false, className }:
-  { file?: string; initial?: string; edits?: CanvasEdit[]; respond?: (prompt: string, code: string) => CanvasReply | Promise<CanvasReply>; explain?: (n: number, line: string) => string; intro?: string; allowRemote?: boolean; className?: string }) {
-  const reduce = useReducedMotion()
-  const explain = explainProp ?? ((n: number, ln: string) => `Line ${n} is part of the document’s ${(aiExplainKind(ln)) === 'styles' ? 'styles' : 'markup'}. Ask me to change it and I’ll edit it in place.`)
+export function AICanvas({ file = 'untitled.html', initial = '', respond, explain, suggestions, intro, allowRemote = false, onError, className }: {
+  file?: string; initial?: string
+  respond?: (prompt: string, code: string, context: CanvasContext) => CanvasReply | Promise<CanvasReply>
+  explain?: (line: number, text: string) => string | Promise<string>
+  suggestions?: readonly string[]; intro?: string; allowRemote?: boolean; onError?: (error: unknown) => void; className?: string }) {
+  const reduce = !!useReducedMotion()
   const asked = useRef<{ text: string; n: number } | null>(null) // the "Ask about line N" prompt
   const [V, setV] = useState([initial])
   const [cur, setCur] = useState(0)
   const [view, setView] = useState<'code' | 'prev'>('code')
-  const [msgs, setMsgs] = useState<CvMsg[]>(intro ? [{ id: 0, role: 'a', text: intro }] : [])
-  const [step, setStep] = useState(0)
+  const [msgs, setMsgs] = useState<CvMsg[]>(intro ? [{ id: 'intro', role: 'a', text: intro }] : [])
+  const [sent, setSent] = useState<ReadonlySet<string>>(() => new Set())
   const [busy, setBusy] = useState(false)
   const [text, setText] = useState('')
   const [selLine, setSelLine] = useState<{ n: number; top: number } | null>(null)
-  const [diff, setDiff] = useState<CvDiff | null>(null)
+  const [diff, setDiffState] = useState<CvDiff | null>(null)
+  const dref = useRef<CvDiff | null>(null) // the frame loop reads and advances this, so a frame never works from a stale render
+  const setDiff = (d: CvDiff | null) => { dref.current = d; setDiffState(d) }
   const [flash, setFlash] = useState(0)
   const narrow = useMediaQuery('(max-width: 767px)'), docPane = useRef<HTMLDivElement>(null)
   const codeRef = useRef<HTMLDivElement>(null), logRef = useRef<HTMLDivElement>(null), inRef = useRef<HTMLInputElement>(null), alive = useRef(true)
-  const Vref = useRef(V); Vref.current = V
+  const Vref = useLatest(V), applied = useRef<((s: CvStats) => void) | null>(null)
+  const canAsk = !!respond, canAskLine = !!(respond || explain)
   useEffect(() => { alive.current = true; return () => { alive.current = false } }, [])
   useEffect(() => { const el = logRef.current; if (el) el.scrollTop = el.scrollHeight }, [msgs])
-  const push = (m: Omit<CvMsg, 'id'>) => { const id = Date.now() + Math.random(); setMsgs(ms => [...ms, { ...m, id }]); return id }
-  const patch = (id: number, p: Partial<CvMsg>) => setMsgs(ms => ms.map(m => m.id === id ? { ...m, ...p } : m))
-  const streamInto = async (id: number, t: string) => { const w = t.split(' '); for (let i = 1; i <= w.length; i++) { if (!alive.current) return; patch(id, { text: w.slice(0, i).join(' '), stream: i < w.length }); await sleep(reduce ? 0 : 20) } }
+  const push = (m: Omit<CvMsg, 'id'>) => { const id = uid('cv'); setMsgs(ms => [...ms, { ...m, id }]); return id }
+  const patch = (id: string, p: Partial<CvMsg>) => setMsgs(ms => ms.map(m => m.id === id ? { ...m, ...p } : m))
 
-  const apply = async (newCode: string) => {
+  /** Commits the new version the diff was building and settles the edit's promise. */
+  const commit = (d: CvDiff, code: string) => {
+    dref.current = null
+    const nv = [...Vref.current, code]; setV(nv); setCur(nv.length - 1); setDiff(null); setFlash(f => f + 1)
+    applied.current?.({ add: d.lines.filter(x => x[0] === '+').length, del: d.lines.filter(x => x[0] === '-').length, ver: nv.length }); applied.current = null
+  }
+  const target = useRef('')
+  /** Streams `newCode` into the document (typed in on the frame loop) and resolves with the edit's size once it lands. */
+  const apply = (newCode: string) => new Promise<CvStats>(res => {
     setView('code'); setSelLine(null)
     // stacked on phones: bring the document into view so the edit can be watched as it streams in
     if (narrow && docPane.current) { const r = docPane.current.getBoundingClientRect(); if (r.top > innerHeight - 160 || r.bottom < 80) docPane.current.scrollIntoView({ block: 'nearest', behavior: reduce ? 'auto' : 'smooth' }) }
     const base = Vref.current[Vref.current.length - 1]
     const lines = aiLineDiff(base.split('\n'), newCode.split('\n'))
-    setDiff({ lines, typing: -1, chars: 0, collapsing: false })
-    await sleep(60)
-    const first = codeRef.current?.querySelector<HTMLElement>('[data-changed]')
-    if (first && codeRef.current) codeRef.current.scrollTo({ top: Math.max(0, first.offsetTop - 80), behavior: reduce ? 'auto' : 'smooth' })
-    for (let i = 0; i < lines.length; i++) {
-      if (lines[i][0] !== '+') continue
-      const l = lines[i][1]
-      for (let k = 0; k <= l.length; k += 7) { if (!alive.current) return; setDiff(d => d && { ...d, typing: i, chars: k }); if (!reduce) await sleep(6) }
-      setDiff(d => d && { ...d, typing: i, chars: Infinity })
-      const el = codeRef.current?.querySelector<HTMLElement>(`[data-i="${i}"]`), box = codeRef.current
-      if (el && box && el.offsetTop > box.scrollTop + box.clientHeight - 40) box.scrollTop = el.offsetTop - box.clientHeight / 2
-    }
-    setDiff(d => d && { ...d, typing: lines.length })
-    if (!reduce) await sleep(350)
-    setDiff(d => d && { ...d, collapsing: true })
-    if (!reduce) await sleep(300)
-    const nv = [...Vref.current, newCode]; setV(nv); setCur(nv.length - 1); setDiff(null); setFlash(f => f + 1)
-    return { add: lines.filter(x => x[0] === '+').length, del: lines.filter(x => x[0] === '-').length, ver: nv.length }
-  }
+    const d: CvDiff = { lines, typing: cvNextAdd(lines, 0), chars: 0, phase: 'type', t: 0 }
+    applied.current = res; target.current = newCode
+    if (reduce) commit(d, newCode); else setDiff(d)
+  })
+  useFrameLoop(!!diff && !reduce, dt => {
+    const d = dref.current; if (!d) return
+    if (d.phase === 'type') {
+      const len = d.lines[d.typing]?.[1].length ?? 0, chars = d.chars + dt * CV_TYPE_CPS
+      if (chars < len) { setDiff({ ...d, chars }); return }
+      const next = cvNextAdd(d.lines, d.typing + 1)
+      setDiff(next < d.lines.length ? { ...d, typing: next, chars: 0 } : { ...d, typing: d.lines.length, chars: 0, phase: 'hold', t: 0 })
+    } else if (d.phase === 'hold') setDiff(d.t + dt >= CV_HOLD ? { ...d, phase: 'collapse', t: 0 } : { ...d, t: d.t + dt })
+    else if (d.t + dt >= CV_COLLAPSE) commit(d, target.current)
+    else setDiff({ ...d, t: d.t + dt })
+  })
+  // once the diff renders, scroll to its first change; then keep the line being typed in view
+  const diffLines = diff?.lines, typing = diff?.typing
+  useLayoutEffect(() => {
+    const box = codeRef.current, first = box?.querySelector<HTMLElement>('[data-changed]')
+    if (box && first) box.scrollTo({ top: Math.max(0, first.offsetTop - 80), behavior: reduce ? 'auto' : 'smooth' })
+  }, [diffLines]) // eslint-disable-line react-hooks/exhaustive-deps
+  useLayoutEffect(() => {
+    const box = codeRef.current, el = box?.querySelector<HTMLElement>(`[data-i="${typing}"]`)
+    if (box && el && el.offsetTop > box.scrollTop + box.clientHeight - 40) box.scrollTop = el.offsetTop - box.clientHeight / 2
+  }, [typing])
 
-  const send = async (raw: string) => {
-    const q = raw.trim(); if (!q || busy) return
-    setBusy(true); setText(''); push({ role: 'u', text: q })
-    const id = push({ role: 'a', text: '', dots: true })
-    await sleep(700); if (!alive.current) return
-    const m = q.match(/^explain line (\d+)/i), ask = asked.current?.text === q ? asked.current.n : null
-    asked.current = null
-    if (m || ask) {
-      const n = ask ?? Number(m![1]), ln = V[cur].split('\n')[n - 1] ?? ''
-      patch(id, { dots: false }); await streamInto(id, explain(n, ln)); setBusy(false); return
-    }
-    if (respond) {
-      let r: CanvasReply
-      try { r = await respond(q, V[V.length - 1]) } catch { r = 'Something went wrong. Try again.' }
+  /** Gets the reply for message `id`: `explain` for a line when given, else `respond`; an edit streams in first. */
+  const answer = async (id: string, q: string, ctx: CanvasContext) => {
+    let r: CanvasReply
+    try {
+      r = ctx.line != null && explain ? await explain(ctx.line, ctx.lineText ?? '') : await respond!(q, Vref.current[Vref.current.length - 1], ctx)
+    } catch (err) {
       if (!alive.current) return
-      const reply = typeof r === 'string' ? r : r?.reply ?? ''
-      if (r && typeof r === 'object' && typeof r.code === 'string') {
-        patch(id, { dots: false, tool: { state: 'run', add: 0, del: 0, ver: 0 } })
-        const done = await apply(r.code); if (!done || !alive.current) return
-        patch(id, { tool: { state: 'done', ...done } })
-      } else patch(id, { dots: false })
-      await streamInto(id, reply || 'No change.'); setBusy(false); return
+      patch(id, { dots: false, text: 'Couldn’t get a reply.', failed: { prompt: q, ctx } }); setBusy(false); onError?.(err); return
     }
-    const idx = edits.findIndex(e => e.prompt.toLowerCase() === q.toLowerCase()), e = edits[idx >= 0 ? idx : step]
-    if (!e) { patch(id, { dots: false, text: V.length > 1 ? `I have no more edits. Use the version arrows to step back through v1 to v${V.length}.` : 'I can’t edit this document yet.' }); setBusy(false); return }
-    patch(id, { dots: false, tool: { state: 'run', add: 0, del: 0, ver: 0 } })
-    const r = await apply(e.code); if (!r || !alive.current) return
-    setStep(s => Math.max(s, (idx >= 0 ? idx : step) + 1))
-    patch(id, { tool: { state: 'done', ...r } })
-    await streamInto(id, e.reply); setBusy(false)
+    if (!alive.current) return
+    const reply = typeof r === 'string' ? r : r?.reply ?? ''
+    if (r && typeof r === 'object' && typeof r.code === 'string') {
+      patch(id, { dots: false, tool: { state: 'run', add: 0, del: 0, ver: 0 } })
+      const done = await apply(r.code); if (!alive.current) return
+      patch(id, { tool: { state: 'done', ...done } })
+    }
+    patch(id, { dots: false, text: reply || 'No change.', stream: true })
+  }
+  const send = (raw: string, lineAsked?: number) => {
+    const q = raw.trim(); if (!q || busy) return
+    const m = CV_LINE_Q.exec(q), n = lineAsked ?? (asked.current?.text === q ? asked.current.n : m ? Number(m[1]) : undefined)
+    asked.current = null
+    if (n == null && !canAsk) return
+    setBusy(true); setText(''); setSent(s => new Set(s).add(q)); push({ role: 'u', text: q })
+    const ctx: CanvasContext = n == null ? {} : { line: n, lineText: V[cur].split('\n')[n - 1] ?? '' }
+    void answer(push({ role: 'a', text: '', dots: true }), q, ctx)
+  }
+  const retry = (m: CvMsg) => { if (!m.failed || busy) return; setBusy(true); patch(m.id, { failed: undefined, text: '', dots: true }); void answer(m.id, m.failed.prompt, m.failed.ctx) }
+  const askLine = (n: number) => {
+    const ln = shownLines[n - 1].trim(), q = `Explain line ${n}: ${ln.slice(0, 40) + (ln.length > 40 ? '…' : '')}`
+    setSelLine(null)
+    if (!canAsk) { send(q, n); return } // only an explainer: nothing to add to the question
+    asked.current = { text: q, n }; setText(q); inRef.current?.focus()
   }
 
   const shown = V[cur]
   const shownLines = shown.split('\n'), lineCount = shownLines.length
+  const suggestion = canAsk ? suggestions?.find(s => !sent.has(s)) : undefined
   // code lines are real buttons with one Tab stop: arrows move between lines, Enter or a click opens "Ask about line N"
   const pickLine = (i: number, el?: HTMLElement | null) => {
-    if (!el) return
+    if (!el || !canAskLine) return
     const top = el.offsetTop - (codeRef.current?.scrollTop ?? 0) + (el.offsetHeight - 20) / 2
     setSelLine(s => s?.n === i + 1 ? null : { n: i + 1, top })
   }
@@ -216,7 +246,7 @@ export function AICanvas({ file = 'untitled.html', initial = '', edits = AI_NO_E
           {msgs.map(m => m.role === 'u'
             ? <motion.div key={m.id} initial={{ opacity: 0, y: 8 }} animate={{ opacity: 1, y: 0 }} transition={spring(0.25, 0.35)} className="max-w-[85%] self-end rounded-[14px] rounded-ee-[4px] bg-[var(--primary)] px-3 py-2 text-[13px] text-[var(--on-primary)]">{m.text}</motion.div>
             : <motion.div key={m.id} initial={{ opacity: 0, y: 8 }} animate={{ opacity: 1, y: 0 }} transition={spring(0.25, 0.35)} className="max-w-[95%] text-[13px] leading-normal">
-              <div className="mb-1 flex items-center gap-1.5 text-xs font-medium text-[var(--fg3)]"><i className="h-2 w-2 rounded-full bg-[var(--accent)]" />{'Assistant'}</div>
+              <div className="mb-1 flex items-center gap-1.5 text-xs font-medium text-[var(--fg3)]"><i className="h-2 w-2 rounded-full bg-[var(--accent)]" />Assistant</div>
               {m.dots && <TypingDots />}
               {m.tool && <div className={cn('mt-1.5 flex flex-wrap items-center gap-2 px-2.5 py-2 text-xs text-[var(--fg2)]', surface.md)}>
                 {m.tool.state === 'run' ? <><Spinner size={12} tone="accent" label={`Editing ${file}`} /><span>Editing <b className="font-medium text-[var(--fg)]">{file}</b></span></>
@@ -224,20 +254,22 @@ export function AICanvas({ file = 'untitled.html', initial = '', edits = AI_NO_E
                     <span className="font-[family-name:var(--mono)] text-[var(--ok)]">+{m.tool.add}</span><span className="font-[family-name:var(--mono)] text-[var(--bad)]">−{m.tool.del}</span><span className="flex-1" />
                     <Button size="sm" variant="ghost" className={cn('!h-6', TOUCH.tap)} onClick={() => { setCur(m.tool!.ver - 1); setView('prev'); if (narrow) docPane.current?.scrollIntoView({ block: 'nearest', behavior: reduce ? 'auto' : 'smooth' }) }}>{`View v${m.tool.ver}`}</Button></>}
               </div>}
-              {m.text && <div className={cn(m.tool && 'mt-2', m.stream && 'ui-caret')}>{m.text}</div>}
+              {m.failed ? <div role="alert" className="flex flex-wrap items-center gap-2 text-[var(--bad)]">{m.text}<Button size="sm" variant="ghost" className={cn('!h-6', TOUCH.tap)} onClick={() => retry(m)} disabled={busy}>Retry</Button></div>
+                : m.text && <div className={cn(m.tool && 'mt-2')}>{m.stream ? <StreamingText text={m.text} wordDelay={20} onDone={() => { patch(m.id, { stream: false }); setBusy(false) }} /> : m.text}</div>}
             </motion.div>)}
         </div>
         <div className="flex flex-wrap gap-1.5">
-          {!busy && step < edits.length && (
-            <motion.span key={step} initial={{ opacity: 0, y: 4 }} animate={{ opacity: 1, y: 0 }} className="inline-flex">
-              <Chip icon="sparkles" onClick={() => send(edits[step].prompt)}><span>{edits[step].prompt}</span></Chip>
+          {!busy && suggestion && (
+            <motion.span key={suggestion} initial={{ opacity: 0, y: 4 }} animate={{ opacity: 1, y: 0 }} className="inline-flex">
+              <Chip icon="sparkles" onClick={() => send(suggestion)}><span>{suggestion}</span></Chip>
             </motion.span>
           )}
         </div>
-        <div className="flex items-center gap-2 rounded-full border border-[var(--line)] bg-[var(--card)] py-1 pe-1 ps-4 focus-within:border-[var(--fg3)]">
-          <input ref={inRef} value={text} onChange={e => setText(e.target.value)} onKeyDown={e => { if (e.key === 'Enter' && !e.nativeEvent.isComposing) send(text) }} placeholder={'Ask for a change'} aria-label={'Ask for a change'}
+        <div className={cn('flex items-center gap-2 rounded-full border border-[var(--line)] bg-[var(--card)] py-1 pe-1 ps-4 focus-within:border-[var(--fg3)]', !canAsk && 'opacity-60')}>
+          <input ref={inRef} value={text} disabled={!canAsk} onChange={e => setText(e.target.value)} onKeyDown={e => { if (e.key === 'Enter' && !e.nativeEvent.isComposing) send(text) }}
+            placeholder={canAsk ? 'Ask for a change' : 'No assistant connected'} aria-label={'Ask for a change'}
             className={cn('h-8 min-w-0 flex-1 border-0 bg-transparent text-[13px] outline-none placeholder:text-[var(--fg3)]', TOUCH.input)} />
-          <SendButton onClick={() => send(text)} disabled={busy || !text.trim()} />
+          <SendButton onClick={() => send(text)} disabled={busy || !canAsk || !text.trim()} />
         </div>
       </div>
 
@@ -255,27 +287,27 @@ export function AICanvas({ file = 'untitled.html', initial = '', edits = AI_NO_E
         </div>
         <div className="relative min-h-0 flex-1">
           {empty ? (
-            <EmptyState size="sm" icon="file" className="absolute inset-0 grid place-content-center bg-[var(--card)] p-6" title={'Nothing here yet. Ask for something and it will appear here.'} />
+            <EmptyState size="sm" icon="file" className="absolute inset-0 grid place-content-center bg-[var(--card)] p-6" title={canAsk ? 'Nothing here yet. Ask for something and it will appear here.' : 'Nothing here yet.'} />
           ) : view === 'code' ? (
             <div ref={el => { codeRef.current = el; edgeRef(el) }} onScroll={() => setSelLine(null)} className="absolute inset-0 overflow-auto overscroll-x-contain bg-[var(--card)] [contain:inline-size]">
               <motion.pre key={diff ? 'diff' : `v${cur}-${flash}`} initial={diff ? false : { opacity: 0.3 }} animate={{ opacity: 1 }} transition={{ duration: 0.2 }}
                 className="m-0 min-w-max pt-3 pb-12 font-[family-name:var(--mono)] text-xs leading-[1.65]" onKeyDown={diff ? undefined : roving.onKeyDown}>
                 {diff ? diff.lines.map(([t, l], i) => {
-                  const n = t === '-' ? '' : ++num
-                  const txt = t === '+' ? (i < diff.typing || diff.chars === Infinity && i === diff.typing ? l : i === diff.typing ? l.slice(0, diff.chars) : '') : l
+                  const n = t === '-' ? '' : ++num, typed = t === '+' && i === diff.typing
+                  const txt = t === '+' ? (i < diff.typing ? l : typed ? l.slice(0, Math.floor(diff.chars)) : '') : l
                   return (
                     <AnimatePresence key={i} initial={false}>
-                      {!(t === '-' && diff.collapsing) && (
+                      {!(t === '-' && diff.phase === 'collapse') && (
                         <motion.div data-i={i} data-changed={t !== '=' ? '' : undefined} exit={{ opacity: 0, height: 0 }} transition={{ duration: 0.18 }}
                           className={cn('flex px-3', t === '-' && 'bg-[color-mix(in_srgb,var(--bad)_14%,transparent)] line-through opacity-70', t === '+' && i <= diff.typing && 'bg-[color-mix(in_srgb,var(--ok)_16%,transparent)]')}>
-                          <span className="me-4 w-6 flex-none text-end text-[var(--fg3)] select-none">{n}</span><span className="whitespace-pre">{t === '+' && i === diff.typing && diff.chars !== Infinity ? txt : aiHighlight(txt)}{txt ? '' : ' '}</span>
+                          <span className="me-4 w-6 flex-none text-end text-[var(--fg3)] select-none">{n}</span><span className="whitespace-pre">{typed ? txt : aiHighlight(txt)}{txt ? '' : ' '}</span>
                         </motion.div>)}
                     </AnimatePresence>
                   )
                 }) : shownLines.map((l, i) => (
-                  <button key={i} type="button" data-line={i} tabIndex={i === Math.min(roving.active, lineCount - 1) ? 0 : -1} aria-pressed={selLine?.n === i + 1}
+                  <button key={i} type="button" data-line={i} tabIndex={i === Math.min(roving.active, lineCount - 1) ? 0 : -1} aria-pressed={canAskLine ? selLine?.n === i + 1 : undefined}
                     onFocus={() => roving.setActive(i)} onClick={e => { roving.setActive(i); pickLine(i, e.currentTarget) }}
-                    className={cn('flex w-full cursor-pointer border-0 bg-transparent px-3 text-start [font:inherit] text-inherit outline-none [@media(pointer:coarse)]:min-h-8 [@media(pointer:coarse)]:items-center',
+                    className={cn('flex w-full border-0 bg-transparent px-3 text-start [font:inherit] text-inherit outline-none [@media(pointer:coarse)]:min-h-8 [@media(pointer:coarse)]:items-center', canAskLine && 'cursor-pointer',
                       selLine?.n === i + 1 ? 'bg-[color-mix(in_srgb,var(--accent)_14%,transparent)]' : 'hover:bg-[color-mix(in_srgb,var(--muted)_70%,transparent)] focus-visible:bg-[color-mix(in_srgb,var(--muted)_70%,transparent)] focus-visible:shadow-[inset_2px_0_0_var(--accent)]')}>
                     <span className="me-4 w-6 flex-none text-end text-[var(--fg3)] select-none">{i + 1}</span><span className="whitespace-pre">{aiHighlight(l)}{l ? '' : ' '}</span>
                   </button>
@@ -291,7 +323,7 @@ export function AICanvas({ file = 'untitled.html', initial = '', edits = AI_NO_E
           <AnimatePresence>
             {selLine && view === 'code' && (
               <motion.button key={selLine.n} initial={{ opacity: 0, x: 6 }} animate={{ opacity: 1, x: 0 }} exit={{ opacity: 0 }} transition={{ duration: 0.18 }}
-                style={{ top: selLine.top - 4 }} onClick={() => { const ln = shownLines[selLine.n - 1].trim(), q = `Explain line ${selLine.n}: ${ln.slice(0, 40) + (ln.length > 40 ? '…' : '')}`; asked.current = { text: q, n: selLine.n }; setText(q); setSelLine(null); inRef.current?.focus() }}
+                style={{ top: selLine.top - 4 }} onClick={() => askLine(selLine.n)} disabled={busy && !canAsk}
                 className="absolute end-4 z-[3] h-7 cursor-pointer rounded-full border border-[var(--line)] bg-[var(--card)] px-2.5 text-xs font-medium shadow-[var(--shadow)] [@media(pointer:coarse)]:-mt-1.5 [@media(pointer:coarse)]:h-10 [@media(pointer:coarse)]:px-3.5 [@media(pointer:coarse)]:text-[13px]"><span>{`Ask about line ${selLine.n}`}</span></motion.button>
             )}
           </AnimatePresence>
@@ -302,18 +334,21 @@ export function AICanvas({ file = 'untitled.html', initial = '', edits = AI_NO_E
   )
 }
 
-/** Display names for the map's line and zone ids; stations are named by their id. */
-const AT_NAMES: Record<string, string> = {
-  research: 'Research', payments: 'Payments', approvals: 'Approvals', evals: 'Evals', memory: 'Memory', index: 'Indexing loop',
-  zoneRead: 'Zone 1 · read', zoneWrite: 'Zone 2 · write', zoneQuality: 'Zone 4 · quality', zoneMoney: 'Zone 3 · money',
-}
-const atName = (n: string) => AT_NAMES[n] ?? n
+/* The transit map: geometry and drawing shared by the run view here and the showcase's simulation ─────────────── */
 
 type Pt = [number, number]
+/** The map's lines: fixed hues like a transit map's, the same in light and dark. */
+const AT_LINES: Record<string, { label: string; color: string }> = {
+  research: { label: 'Research', color: '#7B78D8' }, payments: { label: 'Payments', color: '#C8603F' }, approvals: { label: 'Approvals', color: '#4A9C78' },
+  evals: { label: 'Evals', color: '#B07A2E' }, memory: { label: 'Memory', color: '#C45C7C' }, index: { label: 'Indexing loop', color: '#2E9DB0' },
+}
+const AT_ZONE_NAMES: Record<string, string> = { zoneRead: 'Zone 1 · read', zoneWrite: 'Zone 2 · write', zoneQuality: 'Zone 4 · quality', zoneMoney: 'Zone 3 · money' }
+/** Display name of a line, zone or station (stations are named by their id). */
+const atName = (n: string) => AT_LINES[n]?.label ?? AT_ZONE_NAMES[n] ?? n
+const atColor = (k: string) => AT_LINES[k]?.color ?? 'var(--fg3)'
+
 const AT_W = 1000, AT_H = 720
 const AT_R: Pt = [250, 300], AT_P: Pt = [640, 300], AT_F: Pt = [640, 560], AT_LC: Pt = [342, 140], AT_LR = 92
-const AT_LINES: Record<string, [string, string]> = { research: ['Research', '#7B78D8'], payments: ['Payments', '#C8603F'], approvals: ['Approvals', '#4A9C78'], evals: ['Evals', '#B07A2E'], memory: ['Memory', '#C45C7C'], index: ['Indexing loop', '#2E9DB0'] }
-const AT_C = (k: string) => AT_LINES[k]?.[1] ?? 'var(--fg3)'
 const AT_PATH: Record<string, Pt[]> = { research: [[70, 300], AT_R, AT_P, [840, 300]], payments: [[70, 120], AT_R, [250, 360], [450, 560], AT_F, [840, 560]], approvals: [[640, 60], AT_P, AT_F, [640, 690]], evals: [AT_P, [780, 160], [900, 160]], memory: [[250, 50], AT_R] }
 const AT_ST: [string, string, Pt, number, number, 'start' | 'middle' | 'end'][] = [['Intake', 'research', [70, 300], 0, 26, 'start'], ['Analyst', 'research', [445, 300], 0, 30, 'middle'], ['Deploy', 'research', [840, 300], 0, 30, 'middle'], ['Search', 'payments', [70, 120], 0, -14, 'start'], ['Pay agent', 'payments', [350, 460], -18, 10, 'end'], ['Ledger', 'payments', [840, 560], 0, 30, 'middle'], ['Human', 'approvals', [640, 60], 20, 5, 'start'], ['Risk', 'approvals', [640, 420], 20, 5, 'start'], ['Audit', 'approvals', [640, 690], 20, 5, 'start'], ['Grader', 'evals', [710, 230], 22, 18, 'start'], ['Evals', 'evals', [900, 160], 0, -16, 'middle'], ['Memory', 'memory', [250, 50], -18, 5, 'end'], ['Recall', 'memory', [250, 210], -18, 5, 'end']]
 const AT_LOOPST: [string, number, number, 'start' | 'middle' | 'end', number][] = [['Embed', 0, -14, 'middle', 270], ['Cache', 16, 4, 'start', 0], ['Refresh', 0, 26, 'middle', 90]]
@@ -321,7 +356,9 @@ const AT_ZONES: [number, number, number, number, 'zoneRead' | 'zoneWrite' | 'zon
 const AT_HUBS: [string, Pt, number, number, 'start' | 'end'][] = [['Research', AT_R, 14, -24, 'start'], ['Product', AT_P, -16, -24, 'end'], ['Finance', AT_F, 18, -24, 'start']]
 const atSame = (a: Pt, b: Pt) => a[0] === b[0] && a[1] === b[1]
 const atCum = Object.fromEntries(Object.entries(AT_PATH).map(([k, pts]) => { const c = [0]; for (let i = 1; i < pts.length; i++) c.push(c[i - 1] + Math.hypot(pts[i][0] - pts[i - 1][0], pts[i][1] - pts[i - 1][1])); return [k, c] }))
+/** A line's length in map units (the Indexing loop is a circle). */
 const atLen = (k: string) => k === 'index' ? 2 * Math.PI * AT_LR : atCum[k][atCum[k].length - 1]
+/** The point at arc position `s` along line `k`, with the track's direction there (deg). */
 function atPoint(k: string, s: number): { x: number; y: number; a: number } {
   if (k === 'index') { const L = atLen(k), th = Math.PI + (((s % L) + L) % L) / AT_LR; return { x: AT_LC[0] + AT_LR * Math.cos(th), y: AT_LC[1] + AT_LR * Math.sin(th), a: th * 180 / Math.PI + 90 } }
   const pts = AT_PATH[k], c = atCum[k]; s = Math.max(0, Math.min(c[c.length - 1], s))
@@ -329,6 +366,7 @@ function atPoint(k: string, s: number): { x: number; y: number; a: number } {
   const [a, b] = [pts[i - 1], pts[i]], L = c[i] - c[i - 1], t = L ? (s - c[i - 1]) / L : 0
   return { x: a[0] + (b[0] - a[0]) * t, y: a[1] + (b[1] - a[1]) * t, a: Math.atan2(b[1] - a[1], b[0] - a[0]) * 180 / Math.PI }
 }
+/** The arc position on line `k` nearest to a point. */
 function atNear(k: string, pt: Pt): number {
   if (k === 'index') { const th = Math.atan2(pt[1] - AT_LC[1], pt[0] - AT_LC[0]); return ((((th - Math.PI) % (2 * Math.PI)) + 2 * Math.PI) % (2 * Math.PI)) * AT_LR }
   const pts = AT_PATH[k], c = atCum[k]; let best = 0, bd = Infinity
@@ -347,23 +385,11 @@ function atDir(pts: Pt[], pt: Pt): Pt {
   }
   return best
 }
+/** Arc position of each station and hub, per line. */
 const AT_SP: Record<string, Record<string, number>> = {}
 AT_ST.forEach(([n, k, pt]) => { (AT_SP[k] ??= {})[n] = atNear(k, pt) })
 Object.entries(AT_PATH).forEach(([k, pts]) => AT_HUBS.forEach(([n, pt]) => { if (pts.some(p => atSame(p, pt))) (AT_SP[k] ??= {})[n] = atNear(k, pt) }))
 AT_SP.memory.Index = atNear('memory', [AT_LC[0] - AT_LR, AT_LC[1]])
-
-const AT_HITL_TIMEOUT = 25, AT_QMAX = 8, AT_WIN = 30
-/** map units a token covers per simulated second along a line; the Indexing-loop train is slower */
-const AT_SPEED = 150, AT_LOOP_SPEED = 70
-const AT_LOOP_L = atLen('index')
-/** map units between tokens queued at a busy agent (the head keeps AT_HEAD from the station, clear of its ring); the first AT_QVIS line up, the rest stack on the last slot */
-const AT_GAP = 24, AT_QVIS = 4, AT_HEAD = 34
-/** trace table: rows are absolutely placed in a fixed-height list, so new jobs never push the page */
-const AT_ROWS = 6, AT_ROW_H = 42
-/** approval cards: fixed size, stacked by transform inside an overlay on the map (nothing below them moves) */
-const AT_CARD_W = 272, AT_CARD_H = 80, AT_CARD_GAP = 6, AT_CARDS = 2
-/** event-queue panel in the empty corner under Intake (map units) */
-const AT_EQ: Pt = [48, 396], AT_EQ_W = 214, AT_EQ_ROWS = 5, AT_EQ_ROW = 32
 const atPos = (line: string, station: string): number | undefined => AT_SP[line]?.[station]
 /** The polyline between two arc positions of a line, bends included (for congestion heat). */
 function atSubPath(k: string, a: number, b: number) {
@@ -373,188 +399,55 @@ function atSubPath(k: string, a: number, b: number) {
   out.push(`L${svgN(p1.x)},${svgN(p1.y)}`)
   return out.join(' ')
 }
-/** Track segments between neighbouring stations, per line: the unit the congestion heat is painted on. */
+/** Track segments between neighbouring stations, per line: the unit congestion heat is painted on. */
 const AT_SEGS = Object.keys(AT_PATH).flatMap(k => {
   const ss = [...new Set(Object.values(AT_SP[k] ?? {}).map(v => Math.round(v * 10) / 10))].sort((x, y) => x - y)
   return ss.slice(0, -1).map((a, i) => ({ key: `${k}:${i}`, line: k, a, b: ss[i + 1], d: atSubPath(k, a, ss[i + 1]) }))
 })
-/** Heat by tokens on (or queued at the end of) a segment: 1 a faint wash, 2 warm, 3+ hot. */
-const AT_HEAT: [string, number, number][] = [['var(--fg3)', 0, 8], ['var(--fg3)', 0.22, 16], ['var(--warn)', 0.45, 20], ['var(--bad)', 0.45, 25]]
-/** Heat changes ease over 500 ms with the library's default transition curve (what the CSS transition used). */
-const AT_HEAT_MS = 500, atHeatEase = cubicBezier(0.4, 0, 0.2, 1)
-type AtRgb = [number, number, number]
-/** '#rgb', '#rrggbb' or 'rgb(…)' as [r, g, b]; null for anything else (that colour then switches without a blend). */
-function atRgb(c: string): AtRgb | null {
-  c = c.trim()
-  const h = /^#([\da-f]{3}|[\da-f]{6})$/i.exec(c)?.[1]
-  if (h) return (h.length === 3 ? [...h].map(x => parseInt(x + x, 16)) : [0, 2, 4].map(i => parseInt(h.slice(i, i + 2), 16))) as AtRgb
-  const m = /^rgba?\(\s*([\d.]+)[\s,]+([\d.]+)[\s,]+([\d.]+)/i.exec(c)
-  return m ? [+m[1], +m[2], +m[3]] : null
-}
-type AtHeatSeg = { lv: number; on: boolean; from: number[]; cur: number[]; t0: number }
-/**
- * The congestion heat's tween, driven by the map's frame loop (in step with the tokens, 30 fps on touch) instead of CSS
- * transitions, which would restyle, lay out and repaint the map at the display's full rate for half a second after
- * every change. Values are [r, g, b, opacity, width]; a finished tween writes the token colour itself (var(--warn)), so
- * the heat follows a theme change while idle (blends re-read the colours at most once a second).
- */
-function atHeatTween() {
-  const segs: AtHeatSeg[] = AT_SEGS.map(() => ({ lv: 0, on: true, from: [], cur: [], t0: -1 }))
-  const els: (SVGPathElement | null)[] = []
-  let pal: (AtRgb | null)[] | null = null, palAt = -1e9
-  const target = (g: AtHeatSeg, p: (AtRgb | null)[]) => { const [, o, w] = AT_HEAT[g.lv], c = p[Math.max(0, g.lv - 1)] ?? [0, 0, 0]; return [c[0], c[1], c[2], g.on ? o : o * 0.25, w] }
-  const css: string[] = []
-  const write = (i: number, v: number[], done: boolean) => {
-    const el = els[i], g = segs[i]; if (!el) return
-    const stroke = done || !pal?.[Math.max(0, g.lv - 1)] ? AT_HEAT[g.lv][0] : `rgb(${Math.round(v[0])},${Math.round(v[1])},${Math.round(v[2])})`
-    const c = `stroke:${stroke};opacity:${Math.round(v[3] * 1000) / 1000};stroke-width:${Math.round(v[4] * 10) / 10}`
-    if (css[i] !== c) { css[i] = c; el.style.cssText = c } // one write, and none when nothing changed
-  }
-  return {
-    /** registers a heat path (data-i is its segment index) and paints it as it stands */
-    reg: (el: SVGPathElement | null) => { if (!el) return; const i = Number(el.dataset.i); els[i] = el; const g = segs[i]; write(i, g.cur.length ? g.cur : [0, 0, 0, AT_HEAT[g.lv][1] * (g.on ? 1 : 0.25), AT_HEAT[g.lv][2]], true) },
-    /** new levels (a digit per segment) and lit lines; starts tweens for what changed, or jumps there when `instant`. True if a tween started. */
-    set(levels: string, lit: Set<string> | null, now: number, instant: boolean, host: Element | null) {
-      // the theme's colours, re-read at most once a second (a finished tween writes var(--…), so only blends need them)
-      if (host && (!pal || now - palAt > 1000)) { const cs = getComputedStyle(host); pal = ['--fg3', '--warn', '--bad'].map(v => atRgb(cs.getPropertyValue(v))); palAt = now }
-      const p = pal ?? [null, null, null]
-      let started = false
-      segs.forEach((g, i) => {
-        const lv = +(levels[i] ?? 0), on = !lit || lit.has(AT_SEGS[i].line)
-        if (lv === g.lv && on === g.on) return
-        const was = g.cur.length ? g.cur : target(g, p), blend = !!p[Math.max(0, g.lv - 1)] && !!p[Math.max(0, lv - 1)]
-        g.lv = lv; g.on = on
-        // a colour that can't be blended (not hex or rgb) switches at once; opacity and width still ease
-        g.from = [...was]; if (!blend) g.from.splice(0, 3, ...target(g, p).slice(0, 3))
-        if (instant) { g.cur = target(g, p); g.t0 = -1; write(i, g.cur, true) } else { g.t0 = now; started = true }
-      })
-      return started
-    },
-    busy: () => segs.some(g => g.t0 >= 0),
-    /** advances running tweens to `now`; true while any is still running */
-    step(now: number) {
-      if (!pal) return false
-      let busy = false
-      segs.forEach((g, i) => {
-        if (g.t0 < 0) return
-        const u = Math.min(1, (now - g.t0) / AT_HEAT_MS), e = atHeatEase(u), to = target(g, pal!)
-        g.cur = u >= 1 ? to : g.from.map((a, k) => a + (to[k] - a) * e)
-        if (u >= 1) g.t0 = -1; else busy = true
-        write(i, g.cur, u >= 1)
-      })
-      return busy
-    },
-  }
-}
+
 /** Pads a number to a fixed width (mono font), so a changing value never moves the text's start (no layout shift). */
 const atPad = (s: string, n: number) => s.padStart(n, ' ')
-/**
- * The engine behind the map: travel time follows the drawn distance, the Indexing loop fires the next workflow each
- * time its train completes a lap, Intake fires request.received, agents meter tokens and USD while they work, and
- * human-in-the-loop stations wait 25 s for Approve / Reject before policy approves them.
- */
-function atEngine(machines: Record<string, WorkflowMachine>, order: string[]) {
-  return new WorkflowEngine(machines, order, {
-    speed: 1.5, maxJobs: 3, hitlWait: AT_HITL_TIMEOUT, queueMax: AT_QMAX,
-    lap: [(AT_LOOP_L * 0.45) / AT_LOOP_SPEED, AT_LOOP_L / AT_LOOP_SPEED],
-    travelTime: (line, from, to) => { const a = atPos(line, from), b = atPos(line, to); return a === undefined || b === undefined ? 0 : Math.abs(b - a) / AT_SPEED },
-    meter: { tokens: 900, usd: 0.0011 },
-    // jobs that start in Memory are triggered by the Indexing loop; others (Intake) by their own line
-    source: t => { const m = machines[t], line = m.states[m.start].at[0]; return line === 'memory' ? 'index' : line },
-  })
-}
-/** Which way a token runs along its line on its latest move (+1 towards higher arc length). */
-function atDirOf(tk: WorkflowToken) {
-  const m = tk.move ?? tk.last; if (!m) return 1
-  const a = atPos(tk.line, m.from), b = atPos(tk.line, m.to)
-  return a === undefined || b === undefined ? 1 : Math.sign(b - a) || 1
-}
-/**
- * Where every token should be drawn, as [line, arc position]. Moving tokens follow the drawn line; tokens queued at a
- * busy agent line up on the line they came in on, oldest nearest the station; a token heading for an agent with a queue
- * stops at the back of it. With reduced motion a moving token is placed where it is going (no travel).
- */
-function atLayout(eng: WorkflowEngine, agents: Set<string>, reduce: boolean) {
-  const slot = new Map<number, number>(), side = new Map<string, number>()
-  for (const [stn, q] of Object.entries(eng.queues)) q.forEach(tk => {
-    const k = `${stn}|${tk.line}|${atDirOf(tk)}`, n = side.get(k) ?? 0
-    slot.set(tk.uid, n); side.set(k, n + 1)
-  })
-  const out = new Map<number, [string, number]>()
-  for (const j of eng.jobs) if (!j.done) for (const tk of j.tokens) {
-    const m = tk.move ?? (tk.phase === 'queue' ? tk.last : null)
-    if (!m) { out.set(tk.uid, [tk.line, atPos(tk.line, eng.machines[j.type].states[tk.state].at[1]) ?? 0]); continue }
-    const a = atPos(tk.line, m.from) ?? 0, b = atPos(tk.line, m.to) ?? a, dir = Math.sign(b - a) || 1
-    const back = (k: number) => { const s = b - dir * (AT_HEAD + AT_GAP * Math.min(k, AT_QVIS - 1)); return dir > 0 ? Math.max(s, Math.min(a + 6, b)) : Math.min(s, Math.max(a - 6, b)) }
-    if (tk.phase === 'queue') { out.set(tk.uid, [tk.line, back(slot.get(tk.uid) ?? 0)]); continue }
-    let s = reduce ? b : a + (b - a) * eng.progress(tk)
-    const busy = agents.has(m.to) && ((eng.busy[m.to] && eng.busy[m.to] !== tk) || !!eng.queues[m.to]?.length)
-    if (busy) { const lim = back(side.get(`${m.to}|${tk.line}|${dir}`) ?? 0); s = dir > 0 ? Math.min(s, lim) : Math.max(s, lim) }
-    out.set(tk.uid, [tk.line, s])
-  }
-  return out
-}
-/** Congestion: tokens moving along, or queued at the end of, each segment of track, as a heat level digit (0–3) per segment. */
-function atHeatKey(eng: WorkflowEngine) {
-  const heat: Record<string, number> = {}
-  for (const [k, n] of Object.entries(eng.occupancy())) {
-    const [line, from, to] = k.split('|'), a = atPos(line, from), b = atPos(line, to)
-    if (a === undefined || b === undefined) continue
-    const lo = Math.min(a, b) - 0.5, hi = Math.max(a, b) + 0.5
-    AT_SEGS.forEach(sg => { if (sg.line === line && sg.a >= lo && sg.b <= hi) heat[sg.key] = (heat[sg.key] ?? 0) + n })
-  }
-  return AT_SEGS.map(sg => Math.min(3, heat[sg.key] ?? 0)).join('')
-}
-const AT_NO_MACHINES: Record<string, WorkflowMachine> = {}, AT_NO_ORDER: string[] = []
-type AtSpark = { id: number; x: number; y: number; text: string; t: number }
-type AtFade = { id: number; x: number; y: number; line: string; jid: number; t: number; small: boolean }
-type AtDisp = { line: string; s: number; tr: string }
+/** A memo signature from parts (joined by a separator no part contains, so different values never give the same signature). */
+const atSig = (...parts: unknown[]) => parts.join('\u001f')
+/** A signature of a list of signatures (its own separator, so lists of different lengths never collide). */
+const atSigs = (items: readonly string[]) => items.join('\u001e')
+/** memo() comparer for parts that pass a signature of everything they draw. */
+const atSigEq = (a: { sig: string }, b: { sig: string }) => a.sig === b.sig
 
-// the track is a 6px band painted in the middle, so on touch the input itself can be a 32px target
-const AT_RANGE = 'min-w-[90px] max-w-[200px] flex-1'
-const AT_JOB_DOT = 'grid h-[18px] w-[18px] flex-none place-items-center rounded-full text-[11px] font-bold text-white [@media(pointer:coarse)]:text-[11px]'
-const AT_TRACE_COLS = 'grid-cols-[minmax(150px,26%)_1fr_64px_64px_72px] gap-3'
-/** A mouse hovering a row follows its job; a click or tap pins it (touch has no hover). Buttons inside keep their own clicks. */
-const atFollow = (id: number, setHover: (h: number | null) => void, setPin: (f: (p: number | null) => number | null) => void) => ({
+const AT_JOB_DOT = 'grid h-[18px] w-[18px] flex-none place-items-center rounded-full text-[11px] font-bold [@media(pointer:coarse)]:text-[11px]'
+/** The trace table's columns: name, time strip, time, tokens, USD. */
+const AT_TRACE_GRID = 'grid-cols-[minmax(150px,28%)_1fr_64px_64px_72px] gap-3'
+/** Trace rows are a fixed height in a fixed-height list, so new rows never push the page. */
+const AT_ROWS = 6, AT_ROW_H = 42
+/** A mouse hovering a row follows it; a click or tap pins it (touch has no hover). Buttons inside keep their own clicks. */
+const atFollow = <K,>(id: K, setHover: (h: K | null) => void, setPin: (f: (p: K | null) => K | null) => void) => ({
   onPointerEnter: (e: React.PointerEvent) => { if (e.pointerType === 'mouse') setHover(id) },
   onPointerLeave: (e: React.PointerEvent) => { if (e.pointerType === 'mouse') setHover(null) },
   onClick: (e: React.MouseEvent) => { if ((e.target as Element).closest('button')) return; setPin(p => p === id ? null : id) },
 })
 const atDim = (on: boolean) => cn('transition-opacity duration-200', !on && 'opacity-15')
-/** memo() comparer for parts that pass a signature of everything they draw. */
-const atSigEq = (a: { sig: string }, b: { sig: string }) => a.sig === b.sig
 
 /*
- * Layers. The map is five stacked layers of the same size: the still drawing (zones, congestion heat, lines, ticks: an SVG
- * that re-renders only when the heat or the followed job changes), the train and approval pulses (HTML), the event queue,
- * hubs and countdown rings (SVG), the tokens (HTML), and the labels and queue counters (SVG). Moving parts are HTML boxes
- * sized in % of the map and placed by `transform` in % of their own size, so a frame only moves composited layers: no
- * layout, no repaint of the drawing, no measuring.
+ * Layers. The map is stacked layers of the same size: the still drawing (zones, congestion heat, lines, ticks: an SVG
+ * that re-renders only when the followed lines change), pulses (HTML), hubs and marks (SVG), the tokens (HTML), and the
+ * labels (SVG). Moving parts are HTML boxes sized in % of the map and placed by `transform` in % of their own size, so
+ * a frame only moves composited layers: no layout, no repaint of the drawing, no measuring.
  */
 /** Box of `u`×`u` map units, in % of the map. */
 const atBox = (u: number) => ({ width: `${(u / AT_W) * 100}%`, height: `${(u / AT_H) * 100}%` })
-/** Translate a `u`-unit box so its centre sits on map point p (0.1-unit steps, like the drawing's own transforms). */
-const atAt = (p: { x: number; y: number }, u: number) =>
-  `translate(${(((Math.round(p.x * 10) / 10) - u / 2) / u * 100).toFixed(2)}%,${(((Math.round(p.y * 10) / 10) - u / 2) / u * 100).toFixed(2)}%)`
-const AT_TOK = 30, AT_TRAIN = 28, AT_PULSE = 38, AT_FLASH = 14
-/**
- * The Indexing-loop train runs on the compositor: a box centred on the loop is turned by a looping rotate animation
- * (one lap per AT_LOOP_L / AT_LOOP_SPEED sim-seconds at speed 1, playbackRate = the engine's speed), with the train
- * at its edge facing along the track. The map's refresh keeps it in step with the engine clock. No script per frame.
- */
-const AT_TRAIN_BOX = 2 * AT_LR + AT_TRAIN, AT_LAP_MS = (AT_LOOP_L / AT_LOOP_SPEED) * 1000
-/** Where the train is at sim time `clock`, as the loop box's rotation (deg, 0 = the loop's right-hand point). */
-const atTrainDeg = (clock: number) => ((((AT_LOOP_L * 0.55 + AT_LOOP_SPEED * clock) / AT_LR) * 180 / Math.PI + 180) % 360 + 360) % 360
+const atPct = (v: number, u: number) => `${((v - u / 2) / u * 100).toFixed(2)}%`
+/** Translate a `u`-unit box so its centre sits on map point p. */
+const atAt = (p: { x: number; y: number }, u: number) => `translate(${atPct(p.x, u)},${atPct(p.y, u)})`
+const AT_TOK = 30, AT_PULSE = 38
 /** A `u`-unit box centred on map point (x, y) by its position and margins (both margins are % of the map's width), so its
  * animations can stay pure scale + opacity, which run on the compositor (a % translate would keep them on the main thread). */
 const atCentred = (x: number, y: number, u: number) => ({ left: `${(x / AT_W) * 100}%`, top: `${(y / AT_H) * 100}%`, marginLeft: `${(-u / 2 / AT_W) * 100}%`, marginTop: `${(-u / 2 / AT_W) * 100}%`, ...atBox(u) })
 // each layer is a fixed-size box with strict containment: a change inside one lays out and repaints that layer only
-const AT_SVG_LAYER = 'pointer-events-none absolute top-0 left-0 block h-full w-full [contain:strict]' // rtl-lint-ignore: map layer
+const AT_SVG_LAYER = 'pointer-events-none absolute top-0 left-0 block h-full w-full [contain:strict]'
 const AT_HTML_LAYER = 'pointer-events-none absolute inset-0 [contain:strict]'
-
 const AT_VIEWBOX = `0 0 ${AT_W} ${AT_H}`
 
-/** The still drawing: zones, congestion heat, lines and ticks (three stacked SVGs). Re-renders only when the followed job's lines (`lit`) change; the heat paths are styled by the map's heat tween (`regHeat`). */
+/** The still drawing: zones, congestion heat, lines and ticks (three stacked SVGs). Re-renders only when the followed lines (`lit`) change; the heat paths are styled by `regHeat`. */
 const AtMapBase = memo(function AtMapBase({ lit, fs, regHeat }: { lit: string | null; fs: number; regHeat: (el: SVGPathElement | null) => void }) {
   const litSet = useMemo(() => lit === null ? null : new Set(lit.split(',')), [lit])
   const on = (k: string) => !litSet || litSet.has(k)
@@ -573,92 +466,25 @@ const AtMapBase = memo(function AtMapBase({ lit, fs, regHeat }: { lit: string | 
     </svg>
     <svg viewBox={AT_VIEWBOX} aria-hidden className={AT_SVG_LAYER}>
       <g fill="none" strokeWidth={8} strokeLinejoin="round">
-        {Object.entries(AT_PATH).map(([k, pts]) => <path key={k} d={'M' + pts.map(p => p.join(',')).join(' L')} stroke={AT_C(k)} className={atDim(on(k))} />)}
-        <path d={`M${AT_LC[0] - AT_LR},${AT_LC[1]} A${AT_LR},${AT_LR} 0 1,1 ${AT_LC[0] + AT_LR},${AT_LC[1]} A${AT_LR},${AT_LR} 0 1,1 ${AT_LC[0] - AT_LR},${AT_LC[1]}`} stroke={AT_C('index')} className={atDim(on('index'))} />
+        {Object.entries(AT_PATH).map(([k, pts]) => <path key={k} d={'M' + pts.map(p => p.join(',')).join(' L')} stroke={atColor(k)} className={atDim(on(k))} />)}
+        <path d={`M${AT_LC[0] - AT_LR},${AT_LC[1]} A${AT_LR},${AT_LR} 0 1,1 ${AT_LC[0] + AT_LR},${AT_LC[1]} A${AT_LR},${AT_LR} 0 1,1 ${AT_LC[0] - AT_LR},${AT_LC[1]}`} stroke={atColor('index')} className={atDim(on('index'))} />
       </g>
       <g>
         {Object.entries(AT_PATH).flatMap(([k, pts]) => [pts[0], pts[pts.length - 1]].filter(p => ![AT_R, AT_P, AT_F].some(h => atSame(h, p))).map((p, i) => {
           const [ux, uy] = atDir(pts, p), nx = -uy, ny = ux
-          return <line key={k + i} x1={p[0] - nx * 11} y1={p[1] - ny * 11} x2={p[0] + nx * 11} y2={p[1] + ny * 11} stroke={AT_C(k)} strokeWidth={4} className={atDim(on(k))} />
+          return <line key={k + i} x1={p[0] - nx * 11} y1={p[1] - ny * 11} x2={p[0] + nx * 11} y2={p[1] + ny * 11} stroke={atColor(k)} strokeWidth={4} className={atDim(on(k))} />
         }))}
         {AT_ST.map(([n, k, pt]) => {
           const pts = AT_PATH[k]; if (atSame(pts[0], pt) || atSame(pts[pts.length - 1], pt)) return null
-          const [ux, uy] = atDir(pts, pt); return <line key={n} x1={pt[0]} y1={pt[1]} x2={pt[0] - uy * 10} y2={pt[1] + ux * 10} stroke={AT_C(k)} strokeWidth={3} className={atDim(on(k))} />
+          const [ux, uy] = atDir(pts, pt); return <line key={n} x1={pt[0]} y1={pt[1]} x2={pt[0] - uy * 10} y2={pt[1] + ux * 10} stroke={atColor(k)} strokeWidth={3} className={atDim(on(k))} />
         })}
-        {AT_LOOPST.map(([n, , , , ang]) => { const a = ang * Math.PI / 180; return <line key={n} x1={AT_LC[0] + Math.cos(a) * AT_LR} y1={AT_LC[1] + Math.sin(a) * AT_LR} x2={AT_LC[0] + Math.cos(a) * (AT_LR + 10)} y2={AT_LC[1] + Math.sin(a) * (AT_LR + 10)} stroke={AT_C('index')} strokeWidth={3} className={atDim(on('index'))} /> })}
+        {AT_LOOPST.map(([n, , , , ang]) => { const a = ang * Math.PI / 180; return <line key={n} x1={AT_LC[0] + Math.cos(a) * AT_LR} y1={AT_LC[1] + Math.sin(a) * AT_LR} x2={AT_LC[0] + Math.cos(a) * (AT_LR + 10)} y2={AT_LC[1] + Math.sin(a) * (AT_LR + 10)} stroke={atColor('index')} strokeWidth={3} className={atDim(on('index'))} /> })}
       </g>
     </svg>
   </>
 })
-
-/** The global event queue panel (waiting for a job slot), redrawn only when what it shows changes. */
-const AtQueuePanel = memo(function AtQueuePanel({ queue, qlen, qmax, maxJobs, running, active, dropped, narrow }:
-  { sig: string; queue: { id: number; ev: string; from: string }[]; qlen: number; qmax: number; maxJobs: number; running: number; active: number; dropped: number; narrow: boolean }) {
-  return (
-    <g transform={`translate(${AT_EQ[0]},${AT_EQ[1]})`} aria-label={`Event queue, ${qlen} waiting`}>
-      <rect width={AT_EQ_W} height={44 + AT_EQ_ROWS * AT_EQ_ROW + 46} rx={12} fill="var(--card)" stroke="var(--line2)" />
-      <text x={14} y={26} fill="var(--fg)" style={{ font: '600 15px var(--font)' }}>{'Event queue'}</text>
-      <text x={AT_EQ_W - 14} y={26} textAnchor="end" fill="var(--fg3)" style={{ font: `${narrow ? 14 : 13}px var(--mono)` }}>{fmt.number(qlen)}/{fmt.number(qmax)}</text>
-      <AnimatePresence initial={false}>
-        {queue.map((q, i) => (
-          <motion.g key={q.id} initial={{ opacity: 0, x: -10, y: 40 + i * AT_EQ_ROW }} animate={{ opacity: 1, x: 0, y: 40 + i * AT_EQ_ROW }} exit={{ opacity: 0, x: 10 }} transition={spring(0.25, 0.35)}>
-            <rect x={10} width={AT_EQ_W - 20} height={26} rx={13} fill="var(--muted)" stroke={i === 0 ? 'var(--fg3)' : 'none'} />
-            <circle cx={25} cy={13} r={4.5} fill={AT_C(q.from)} />
-            <text x={37} y={18} fill="var(--fg)" style={{ font: '14px var(--mono)' }}>{q.ev}</text>
-          </motion.g>))}
-      </AnimatePresence>
-      {!qlen && <text x={14} y={62} fill="var(--fg3)" style={{ font: '14px var(--font)' }}>{'empty'}</text>}
-      {qlen > AT_EQ_ROWS && <text x={AT_EQ_W - 14} y={40 + AT_EQ_ROWS * AT_EQ_ROW + 4} textAnchor="end" fill="var(--fg3)" style={{ font: `${narrow ? 14 : 13}px var(--font)` }}>{`+${qlen - AT_EQ_ROWS} more`}</text>}
-      <g transform={`translate(14,${44 + AT_EQ_ROWS * AT_EQ_ROW + 22})`}>
-        {Array.from({ length: maxJobs }, (_, i) => <circle key={i} cx={6 + i * 15} cy={0} r={5} fill={i < running ? 'var(--fg2)' : 'none'} stroke="var(--fg3)" strokeWidth={1.5} />)}
-        <text x={14 + maxJobs * 15} y={5} fill="var(--fg2)" style={{ font: '14px var(--font)' }}>{`${active}/${maxJobs} jobs`}{dropped ? ` · ${dropped} dropped` : ''}</text>
-      </g>
-    </g>
-  )
-}, atSigEq)
-
-/**
- * The map's short-lived marks (event sparks and the loop's event label), animated by the map's frame loop (with the
- * tokens, 30 fps on touch) instead of a script animation of their own at the display's full rate. Each starts when it
- * mounts; timings and easing are what the motion animations used (ease-in-out; keyframes evenly spaced).
- */
-const atEaseInOut = cubicBezier(0.42, 0, 0.58, 1)
-/** Value at `u` (0–1) along evenly spaced keyframes, each step eased. */
-const atKeys = (k: number[], u: number) => { const n = k.length - 1, i = Math.min(n - 1, Math.floor(u * n)), f = atEaseInOut(Math.min(1, u * n - i)); return k[i] + (k[i + 1] - k[i]) * f }
-type AtMarkKind = 'ring' | 'text' | 'ev'
-const AT_MARK_MS: Record<AtMarkKind, number> = { ring: 900, text: 1800, ev: 1600 }
-function atMarkPaint(el: SVGElement, kind: AtMarkKind, u: number) {
-  if (kind === 'ring') { const e = atEaseInOut(u); el.setAttribute('r', (6 + 20 * e).toFixed(2)); el.style.opacity = (1 - e).toFixed(3) }
-  else if (kind === 'text') { el.style.opacity = atKeys([0, 1, 1, 0], u).toFixed(3); el.setAttribute('transform', `translate(0,${(-10 * atEaseInOut(u)).toFixed(2)})`) }
-  else el.style.opacity = atKeys([0, 1, 1, 0.35], u).toFixed(3)
-}
-function atMarks() {
-  const live = new Map<SVGElement, { kind: AtMarkKind; t0: number }>()
-  return {
-    /** registers a mark (data-mark is its kind); it starts now */
-    reg: (el: SVGElement | null) => {
-      if (!el) return
-      const kind = el.dataset.mark as AtMarkKind
-      live.set(el, { kind, t0: performance.now() }); atMarkPaint(el, kind, 0)
-      return () => { live.delete(el) }
-    },
-    busy: () => live.size > 0,
-    /** advances the marks to `now`; true while any is still running */
-    step(now: number) {
-      for (const [el, m] of live) { const u = Math.min(1, (now - m.t0) / AT_MARK_MS[m.kind]); atMarkPaint(el, m.kind, u); if (u >= 1) live.delete(el) }
-      return live.size > 0
-    },
-  }
-}
-/** Event sparks (an expanding ring and the event's name), redrawn only when one starts or ends; the map's frame loop animates them (`reg`). */
-const AtSparks = memo(function AtSparks({ sparks, reg }: { sig: string; sparks: AtSpark[]; reg: (el: SVGElement | null) => void }) {
-  return <g>
-    {sparks.map(s => <g key={s.id}>
-      <circle ref={reg} data-mark="ring" cx={s.x} cy={s.y} r={6} fill="none" stroke="var(--accent)" strokeWidth={2} />
-      <text ref={reg} data-mark="text" x={s.x} y={s.y - 16} textAnchor="middle" fill="var(--accent)" style={{ font: '600 11px var(--mono)', opacity: 0 }}>{s.text}</text>
-    </g>)}
-  </g>
-}, atSigEq)
+/** A map with no congestion: its heat paths stay unstyled. */
+const atNoHeat = () => {}
 
 /** The Index station and the three orchestrator hubs (still). */
 const AtHubs = memo(function AtHubs() {
@@ -670,13 +496,16 @@ const AtHubs = memo(function AtHubs() {
 
 /** Station, loop and hub names (still; they sit over the tokens). */
 const AtLabels = memo(function AtLabels({ fs }: { fs: number }) {
-  const nm = atName
   return <>
-    {AT_ST.map(([n, , pt, dx, dy, anc]) => <text key={n} x={pt[0] + dx} y={pt[1] + dy} textAnchor={anc}>{nm(n)}</text>)}
-    {AT_LOOPST.map(([n, dx, dy, anc, ang]) => { const a = ang * Math.PI / 180; return <text key={n} x={AT_LC[0] + Math.cos(a) * AT_LR + dx + Math.cos(a) * 6} y={AT_LC[1] + Math.sin(a) * AT_LR + dy} textAnchor={anc}>{nm(n)}</text> })}
-    <text x={AT_LC[0] - AT_LR - 18} y={AT_LC[1] + 5} textAnchor="end" fill="var(--fg)" fontWeight={600}>{'Index'}</text>
-    {AT_HUBS.map(([n, [x, y], dx, dy, anc]) => <text key={n} x={x + dx} y={y + dy} textAnchor={anc} fill="var(--fg)" style={{ font: `600 ${15 * fs}px var(--font)` }}>{nm(n)}</text>)}
+    {AT_ST.map(([n, , pt, dx, dy, anc]) => <text key={n} x={pt[0] + dx} y={pt[1] + dy} textAnchor={anc}>{n}</text>)}
+    {AT_LOOPST.map(([n, dx, dy, anc, ang]) => { const a = ang * Math.PI / 180; return <text key={n} x={AT_LC[0] + Math.cos(a) * AT_LR + dx + Math.cos(a) * 6} y={AT_LC[1] + Math.sin(a) * AT_LR + dy} textAnchor={anc}>{n}</text> })}
+    <text x={AT_LC[0] - AT_LR - 18} y={AT_LC[1] + 5} textAnchor="end" fill="var(--fg)" fontWeight={600}>Index</text>
+    {AT_HUBS.map(([n, [x, y], dx, dy, anc]) => <text key={n} x={x + dx} y={y + dy} textAnchor={anc} fill="var(--fg)" style={{ font: `600 ${15 * fs}px var(--font)` }}>{n}</text>)}
   </>
+})
+/** The labels' layer. */
+const AtLabelLayer = memo(function AtLabelLayer({ fs, children }: { fs: number; children?: ReactNode }) {
+  return <svg viewBox={AT_VIEWBOX} aria-hidden className={AT_SVG_LAYER}><g style={{ font: `${13 * fs}px var(--font)` }} fill="var(--fg2)"><AtLabels fs={fs} />{children}</g></svg>
 })
 
 /**
@@ -696,60 +525,118 @@ function AtPulse({ x, y, active }: { x: number; y: number; active: boolean }) {
     <svg viewBox={`${-AT_PULSE / 2} ${-AT_PULSE / 2} ${AT_PULSE} ${AT_PULSE}`} className="block h-full w-full overflow-visible"><circle r={18} fill="none" stroke="var(--warn)" strokeWidth={2} /></svg>
   </div>
 }
-/** An orchestrator's routing flash (a red dot that pops and fades), once per mount; on the compositor. */
-function AtFlash({ x, y }: { x: number; y: number }) {
-  const ref = useRef<HTMLDivElement>(null)
-  useEffect(() => {
-    const el = ref.current; if (!el || typeof el.animate !== 'function') return
-    const k = (s: number, o: number) => ({ transform: `scale(${s})`, opacity: o, easing: 'ease-in-out' })
-    const a = el.animate([k(0.4, 1), k(1.2, 1), k(1, 0)], { duration: 1000, fill: 'forwards' })
-    return () => a.cancel()
-  }, [])
-  return <div ref={ref} className="absolute rounded-full bg-[var(--bad)] opacity-0" style={atCentred(x, y, AT_FLASH)} />
+
+/** A numbered token in its line's colour: smaller for a fork's child, with a dashed ring while queued. */
+function AtTokenGlyph({ n, color, small, queued }: { n: ReactNode; color: string; small?: boolean; queued?: boolean }) {
+  return <svg viewBox={`${-AT_TOK / 2} ${-AT_TOK / 2} ${AT_TOK} ${AT_TOK}`} className="block h-full w-full overflow-visible">
+    {queued && <circle r={small ? 11 : 13} fill="none" stroke="var(--fg3)" strokeWidth={1.5} strokeDasharray="3 2.5" />}
+    <circle r={small ? 8 : 10} fill={color} stroke="var(--card)" strokeWidth={2.5} />
+    <text y={3.6} textAnchor="middle" fill="#fff" style={{ font: '700 10px var(--font)' }}>{n}</text>
+  </svg>
 }
 
-/** The trace window's slide at sim time `clock`. */
-const atStrip = (clock: number) => `translateX(${((AT_WIN - clock) / AT_WIN) * 100}%)`
-/** Everything the map draws apart from the clock (tokens, queue, heat, approvals, marks, the trace's rows and states), as a string: the map re-renders when it changes. */
-function atStructSig(eng: WorkflowEngine, F: { sparks: { id: number }[]; fading: { id: number }[]; hubFlash: number[]; evLabel: { n: number } }) {
-  const tk = (k: WorkflowToken) => `${k.uid}${k.phase}${k.line}${k.state}${k.next ?? ''}`
-  return [
-    eng.jobs.map(j => `${j.id}${j.done ? (j.rejected ? 'r' : 'd') : ''}${j.state}:${j.tokens.map(tk).join('/')}`).join(','),
-    eng.queue.map(q => q.id).join(','), eng.dropped, eng.waiting.map(tk).join(','),
-    Object.entries(eng.queues).map(([s, q]) => q.length ? `${s}${q.length}${q[0].uid}` : '').join(''),
-    atHeatKey(eng), F.sparks.map(s => s.id).join(','), F.fading.map(f => f.id).join(','), F.hubFlash.join(','), F.evLabel.n,
-  ].join('|')
+/** Where a token is drawn: a line and an arc position on it. */
+type AtGlide = { line: string; s: number }
+/**
+ * Moves a token's drawn place `d` towards arc position `s` on `line` by at most `v` map units, switching lines at a
+ * shared station first; a gap over `snap` units is jumped. True once it is there.
+ */
+function atGlide(d: AtGlide, line: string, s: number, v: number, snap = Infinity) {
+  if (d.line !== line) { const p = atPoint(d.line, d.s); d.line = line; d.s = atNear(line, [p.x, p.y]) }
+  const gap = Math.abs(s - d.s)
+  d.s = gap <= v || gap > snap ? s : d.s + Math.sign(s - d.s) * v
+  return d.s === s
 }
-/** The engine clock as a tiny store: running trace rows subscribe, so they refresh without their row (a motion element) re-rendering. */
-function atClockStore() {
-  let v = 0
-  const subs = new Set<() => void>()
-  return { get: () => v, set: (x: number) => { v = x; subs.forEach(f => f()) }, sub: (f: () => void) => { subs.add(f); return () => { subs.delete(f) } } }
+/**
+ * Token boxes moved by a frame loop. `reg` is their ref (data-id names the box); `placeOf(id, at)` is the transform a
+ * box mounts with, remembered so React keeps passing the same value and never undoes the loop's writes; `write(id,
+ * transform)` moves a box (skipped when unchanged).
+ */
+function useAtTokenEls() {
+  return useMemo(() => {
+    const els = new Map<string, HTMLElement>(), born = new Map<string, string>(), last = new Map<string, string>()
+    return {
+      reg: (el: HTMLElement | null) => {
+        if (!el) return
+        const id = el.dataset.id!
+        els.set(id, el); last.set(id, el.style.transform)
+        return () => { els.delete(id); born.delete(id); last.delete(id) }
+      },
+      placeOf: (id: string, at: () => string) => { let b = born.get(id); if (b === undefined) born.set(id, b = at()); return b },
+      write: (id: string, tr: string) => { const el = els.get(id); if (el && last.get(id) !== tr) { last.set(id, tr); el.style.transform = tr } },
+    }
+  }, [])
 }
-type AtClock = ReturnType<typeof atClockStore>
-/** Approvals waiting at each station, as countdown-ring data. */
-function atRings(eng: WorkflowEngine, machines: Record<string, WorkflowMachine>) {
-  const at = (tk: WorkflowToken) => `${tk.line}|${machines[tk.job.type].states[tk.state].at[1]}`
-  return [...new Set(eng.waiting.map(at))].map(k => {
-    const [line, stn] = k.split('|'), q = eng.waiting.filter(tk => at(tk) === k)
-    return { k, ...atPoint(line, atPos(line, stn) ?? 0), n: q.length, frac: Math.max(0, q[0].t / eng.hitlWait) }
-  })
+
+/** The map, scrolling sideways inside its card on phones (where it keeps a readable size). */
+function AtMapScroll({ narrow, hintClass, children }: { narrow: boolean; hintClass?: string; children: ReactNode }) {
+  const [ref, edges] = useScrollEdges<HTMLDivElement>()
+  return <>
+    <div ref={ref} className={cn(narrow && '-mx-1 overflow-x-auto overscroll-x-contain rounded-[var(--r-md)] px-1 [contain:inline-size] [scrollbar-width:thin]')} tabIndex={narrow ? 0 : undefined} aria-label={narrow ? 'Transit map, scrolls sideways' : undefined}>
+      <div className={cn('relative', narrow && 'min-w-[820px]')}>{children}</div>
+    </div>
+    {narrow && <ScrollEdges {...edges} hint={'Swipe the map'} className={hintClass} />}
+  </>
 }
-/** The countdown rings on stations waiting for a human (and how many wait there); they follow the clock store. */
-function AtRings({ eng, machines, clock }: { eng: WorkflowEngine; machines: Record<string, WorkflowMachine>; clock: AtClock }) {
-  useSyncExternalStore(clock.sub, () => atRings(eng, machines).map(r => `${r.k}${r.n}${(r.frac * 107).toFixed(1)}`).join(','), () => '')
-  const C = 2 * Math.PI * 17
-  return <>{atRings(eng, machines).map(r => (
-    <g key={r.k} transform={svgTranslate(r.x, r.y)}>
-      <circle r={17} fill="var(--card)" stroke="color-mix(in srgb, var(--warn) 25%, transparent)" strokeWidth={4} />
-      <circle r={17} fill="none" stroke="var(--warn)" strokeWidth={4} strokeLinecap="round" strokeDasharray={`${(r.frac * C).toFixed(1)} ${C.toFixed(1)}`} transform="rotate(-90)" />
-      {r.n > 1 && <g transform="translate(16,-16)"><circle r={9} fill="var(--warn)" /><text y={4} textAnchor="middle" fill="var(--card)" style={{ font: '700 11px var(--font)' }}>{r.n}</text></g>}
-    </g>))}</>
+
+/** A legend entry: a line's colour, or a swatch drawn by `swatch` (classes). */
+type AtLegendItem = { label: string; swatch: string }
+const AT_LEGEND_ITEM = 'inline-flex items-center gap-2'
+/** The map's legend: the `lines` shown, then the `extras`. */
+function AtLegend({ lines, extras }: { lines: readonly string[]; extras: readonly AtLegendItem[] }) {
+  return (
+    <div className="mt-1.5 mb-3 flex flex-wrap justify-center gap-x-5 gap-y-2 text-[13px] text-[var(--fg2)] max-sm:justify-start max-sm:gap-x-4">
+      {lines.map(k => <span key={k} className={AT_LEGEND_ITEM}><i className="inline-block h-[7px] w-5 rounded-[var(--r-sm)]" style={{ background: atColor(k) }} />{atName(k)}</span>)}
+      {extras.map(x => <span key={x.label} className={AT_LEGEND_ITEM}><i className={cn('inline-block', x.swatch)} />{x.label}</span>)}
+    </div>
+  )
 }
-/** An approval's seconds left (amber under 6); follows the clock store, re-rendering when the whole second changes. */
-function AtCountdown({ tk, clock }: { tk: WorkflowToken; clock: AtClock }) {
-  const [n, soon] = useSyncExternalStore(clock.sub, () => `${Math.ceil(tk.t)}|${tk.t < 6 ? 1 : ''}`, () => '0|').split('|')
-  return <span className={cn('w-8 flex-none font-[family-name:var(--mono)] text-xs whitespace-pre', soon ? 'text-[var(--warn)]' : 'text-[var(--fg3)]')} title={'Approved by policy when it runs out'}>{atPad(`${Number(n)}s`, 3)}</span>
+const AT_LEGEND_ORCH: AtLegendItem = { label: 'Orchestrator', swatch: 'h-3 w-3 rounded-full bg-[var(--card)] shadow-[inset_0_0_0_2.5px_var(--fg)]' }
+const AT_LEGEND_WAIT: AtLegendItem = { label: 'Waiting for approval', swatch: 'h-3.5 w-3.5 rounded-full shadow-[inset_0_0_0_3px_var(--warn)]' }
+const AT_LEGEND_RUN: AtLegendItem[] = [
+  { label: 'Agent (numbered, matches the trace)', swatch: 'h-3.5 w-3.5 rounded-full bg-[var(--fg2)]' },
+  { label: 'Stop (visits)', swatch: 'h-3.5 w-3.5 rounded-full bg-[var(--card)] shadow-[inset_0_0_0_2.5px_var(--fg2)]' },
+  { label: 'Failed here', swatch: 'h-3.5 w-3.5 rounded-full bg-[var(--card)] shadow-[inset_0_0_0_2.5px_var(--bad)]' },
+  AT_LEGEND_WAIT,
+]
+
+/** The trace table: a header (title, the time `axis`, the number columns) over the rows, scrolling sideways on phones. */
+function AtTraceFrame({ axis, narrow, children }: { axis: ReactNode; narrow: boolean; children: ReactNode }) {
+  const [ref, edges] = useScrollEdges<HTMLDivElement>()
+  return (
+    <div className="relative border-t border-[var(--line)]">
+      <div ref={ref} className="overflow-x-auto overscroll-x-contain [contain:inline-size]" tabIndex={narrow ? 0 : undefined} aria-label={narrow ? 'Trace table, scrolls sideways' : undefined}>
+        <div className="min-w-[640px]">
+          <div className={cn('grid h-9 items-center border-b border-[var(--line)] text-xs text-[var(--fg3)]', AT_TRACE_GRID)}>
+            <span className="sticky start-0 z-[1] bg-[var(--card)] text-sm font-semibold text-[var(--fg)]">Trace</span>
+            <span className="relative h-full font-[family-name:var(--mono)] text-[11px]">{axis}</span>
+            {['time', 'tokens', 'USD'].map(h => <span key={h} className="text-end font-[family-name:var(--mono)]">{h}</span>)}
+          </div>
+          {children}
+        </div>
+      </div>
+      {narrow && <ScrollEdges left={false} right={edges.right} touched={edges.touched} hint={'Swipe the trace'} />}
+    </div>
+  )
+}
+const AT_NUM = 'text-end font-[family-name:var(--mono)] text-xs whitespace-pre'
+/** A trace row's time, tokens and cost, padded to fixed widths (a dash when unknown). */
+function AtNums({ seconds, tokens, usd }: { seconds: number; tokens?: number | null; usd?: number | null }) {
+  return <>
+    <span className={AT_NUM}>{atPad(fmt.seconds(seconds), 6)}</span>
+    <span className={AT_NUM}>{atPad(tokens ? fmt.compact(tokens) : '—', 6)}</span>
+    <span className={AT_NUM}>{atPad(usd != null ? fmt.usd(usd) : '—', 8)}</span>
+  </>
+}
+/** A trace row's name cell: the numbered dot in `color`, the name and a status line. */
+function AtRowName({ n, color, name, status, bad, title, children }: { n: ReactNode; color: string; name: string; status: ReactNode; bad?: boolean; title?: string; children?: ReactNode }) {
+  return (
+    <div className="sticky start-0 z-[1] flex min-w-0 items-center gap-2 bg-[var(--card)] whitespace-nowrap max-sm:shadow-[6px_0_6px_-6px_rgba(0,0,0,.25)]">
+      {children ?? <span className={AT_JOB_DOT} style={onColorLabel(color)}>{n}</span>}
+      <span className={cn('max-w-[60%] flex-none truncate', bad && 'text-[var(--bad)]')}>{name}</span>
+      <span className={cn('min-w-0 flex-1 truncate text-[11px]', bad ? 'text-[var(--bad)]' : 'text-[var(--fg3)]')} title={title}>{status}</span>
+    </div>
+  )
 }
 /** A trace bar's look: solid, or hatched while waiting; the opacity is folded into the colour (no layer per bar). */
 const atSegFill = (s: { kind: string; sub: boolean }, c: string) => {
@@ -757,443 +644,57 @@ const atSegFill = (s: { kind: string; sub: boolean }, c: string) => {
   const col = a === 100 ? c : `color-mix(in srgb, ${c} ${a}%, transparent)`
   return s.kind === 'wait' ? `repeating-linear-gradient(135deg, ${col} 0 3px, transparent 3px 7px)` : col
 }
-/** A trace row's time strip and numbers; a running job's refresh with the clock store, a finished job's never. */
-function AtTraceCells({ j, clock: store, strip }: { j: WorkflowJob; clock: AtClock; strip: (el: HTMLDivElement | null) => void }) {
-  const clock = useSyncExternalStore(store.sub, () => j.done ? j.t1 ?? store.get() : store.get(), () => 0)
-  const tx = (v: number) => `${(v / AT_WIN) * 100}%`
-  return <>
-    <div className="relative h-3.5 overflow-x-clip">
-      {/* the window slides by transform: the map writes it into every strip (a finished row never re-renders for it) */}
-      <div ref={strip} className="absolute inset-0">
-        {j.segs.map((s, k) => { const b = s.t1 ?? clock; if (b < clock - AT_WIN) return null; return (
-          <span key={k} title={s.label} className={cn('absolute rounded-[var(--r-sm)]', s.sub ? 'top-[3px] h-2' : 'top-0 h-3.5')}
-            style={{ left: tx(s.t0), width: `max(1px, ${tx(b - s.t0)})`, background: atSegFill(s, AT_C(s.line)) }} />) })}
-      </div>
-    </div>
-    <span className="text-end font-[family-name:var(--mono)] text-xs whitespace-pre">{atPad(`${fmt.number((j.t1 ?? clock) - j.t0, { minimumFractionDigits: 1, maximumFractionDigits: 1 })}s`, 6)}</span>
-    <span className="text-end font-[family-name:var(--mono)] text-xs whitespace-pre">{atPad(fmt.compact(Math.round(j.usage.tokens / 100) * 100), 6)}</span>
-    <span className="text-end font-[family-name:var(--mono)] text-xs whitespace-pre">{atPad(fmt.usd(j.usage.usd), 8)}</span>
-  </>
-}
-type AtRowProps = {
-  sig: string; j: WorkflowJob; i: number; cur: string; hover: boolean; pinned: boolean; clock: AtClock
-  /** registers the row's time strip, which the map slides by writing its transform (rows don't re-render for it) */
-  strip: (el: HTMLDivElement | null) => void
-  setHover: (h: number | null) => void; setPin: (f: (p: number | null) => number | null) => void
-}
-/**
- * One trace row; re-renders only when its place, state or highlight changes (its numbers and bars refresh on their own).
- * A fixed-size box with strict containment, so its changing numbers lay out only itself.
- */
-const AtTraceRow = memo(function AtTraceRow({ j, i, cur, hover, pinned, clock, strip, setHover, setPin }: AtRowProps) {
-  return (
-    <motion.div initial={{ opacity: 0 }} animate={{ opacity: j.done ? 0.6 : 1 }} exit={{ opacity: 0 }} transition={{ duration: 0.25 }}
-      {...atFollow(j.id, setHover, setPin)} style={{ transform: `translateY(${i * AT_ROW_H}px)`, height: AT_ROW_H }}
-      className={cn('absolute inset-x-0 top-0 grid cursor-pointer items-center border-b border-[var(--line)] text-[13px] [contain:strict] hover:bg-[color-mix(in_srgb,var(--muted)_60%,transparent)]', AT_TRACE_COLS, hover && 'bg-[color-mix(in_srgb,var(--muted)_60%,transparent)]')}>
-      <div className="sticky start-0 z-[1] flex min-w-0 items-center gap-2 bg-[var(--card)] whitespace-nowrap max-sm:shadow-[6px_0_6px_-6px_rgba(0,0,0,.25)]">
-        <button type="button" aria-pressed={pinned} aria-label={`Follow job ${String(j.id)}, ${j.name}, on the map`} /* the id as shown on the dot and the map */ onClick={() => setPin(p => p === j.id ? null : j.id)}
-          className={cn(AT_JOB_DOT, TOUCH.hit, 'cursor-pointer border-0 transition-[background] duration-300 [text-shadow:0_0_2px_rgba(0,0,0,.55)]')} style={{ background: `color-mix(in srgb, ${AT_C(j.tokens[0]?.line ?? 'memory')} 70%, #000)` }}>{j.id}</button>
-        <span className="max-w-[62%] flex-none truncate">{j.name}</span>
-        <span className={cn('min-w-0 flex-1 truncate text-[11px]', j.done ? 'text-[var(--ok)]' : 'text-[var(--fg3)]')}>{cur}</span>
-      </div>
-      <AtTraceCells j={j} clock={clock} strip={strip} />
-    </motion.div>
-  )
-}, atSigEq)
-
-/** The job tokens: composited boxes the frame loop moves (`reg`); re-rendered only when a token comes, goes or changes look. */
-const AtTokens = memo(function AtTokens({ tokens, hj, reg, place }:
-  { sig: string; tokens: WorkflowToken[]; hj: WorkflowJob | null; reg: (el: HTMLDivElement | null) => void; place: (tk: WorkflowToken) => string }) {
-  return <>{tokens.map(tk => { const q = tk.phase === 'queue'; return (
-    <div key={tk.uid} data-uid={tk.uid} ref={reg} className={cn('absolute top-0 left-0 will-change-transform', atDim(!hj || hj === tk.job))} style={{ ...atBox(AT_TOK), transform: place(tk) }}>
-      <svg viewBox={`${-AT_TOK / 2} ${-AT_TOK / 2} ${AT_TOK} ${AT_TOK}`} className="block h-full w-full overflow-visible">
-        {q && <circle r={tk.parent ? 11 : 13} fill="none" stroke="var(--fg3)" strokeWidth={1.5} strokeDasharray="3 2.5" />}
-        <circle r={tk.parent ? 8 : 10} fill={AT_C(tk.line)} stroke="var(--card)" strokeWidth={2.5} />
-        <text y={3.6} textAnchor="middle" fill="#fff" style={{ font: '700 10px var(--font)' }}>{tk.job.id}</text>
-      </svg>
-    </div>) })}</>
-}, atSigEq)
-
-/** One approval card (fixed size, stacked by transform); its countdown refreshes on its own, the card only when it moves or is followed. */
-const AtCard = memo(function AtCard({ tk, i, hover, machines, eng, clock, done, setHover, setPin }:
-  { sig: string; tk: WorkflowToken; i: number; hover: boolean; machines: Record<string, WorkflowMachine>; eng: WorkflowEngine; clock: AtClock; done: () => void
-    setHover: (h: number | null) => void; setPin: (f: (p: number | null) => number | null) => void }) {
-  const st = machines[tk.job.type].states[tk.state], amount = Number(tk.job.data.amount) || 0, y = i * (AT_CARD_H + AT_CARD_GAP)
-  return (
-    <motion.div role="group" aria-label={`${tk.job.name} needs your approval`} initial={{ opacity: 0, x: -8, y }} animate={{ opacity: 1, x: 0, y }} exit={{ opacity: 0, x: -8 }} transition={spring(0.25, 0.35)}
-      {...atFollow(tk.job.id, setHover, setPin)}
-      className={cn('pointer-events-auto absolute top-0 start-0 flex w-full flex-col justify-between overflow-hidden rounded-[var(--r-md)] border bg-[color-mix(in_srgb,var(--warn)_5%,var(--card))] px-2.5 py-2 text-[13px] shadow-[0_6px_20px_-8px_rgba(0,0,0,.28)]',
-        hover ? 'border-[var(--warn)]' : 'border-[color-mix(in_srgb,var(--warn)_45%,var(--line))]')} style={{ height: AT_CARD_H }}>
-      <div className="flex items-center gap-2">
-        <span className={AT_JOB_DOT} style={{ background: `color-mix(in srgb, ${AT_C(tk.line)} 70%, #000)` }}>{tk.job.id}</span>
-        <b className="min-w-0 flex-1 truncate font-medium">{tk.job.name}</b>
-        <AtCountdown tk={tk} clock={clock} />
-      </div>
-      <div className="flex items-center gap-1.5 [@media(pointer:coarse)]:[&>button]:min-h-9">
-        <span className="min-w-0 flex-1 truncate text-xs text-[var(--fg3)]">{st.label}{amount ? ` · ${fmt.money(amount, 'CHF')}` : ''}</span>
-        <Button size="sm" onClick={() => { eng.resolve(tk, 'reject'); done() }}>{'Reject'}</Button>
-        <Button size="sm" variant="primary" onClick={() => { eng.resolve(tk, 'approve'); done() }}>{'Approve'}</Button>
-      </div>
-    </motion.div>
-  )
-}, atSigEq)
-
-/** The map's legend (still). */
-const AtLegend = memo(function AtLegend() {
-  const nm = atName
-  return (
-    <div className="mt-1.5 mb-3 flex flex-wrap justify-center gap-x-5 gap-y-2 text-[13px] text-[var(--fg2)] max-sm:justify-start max-sm:gap-x-4">
-      {Object.entries(AT_LINES).map(([k, [, c]]) => <span key={k} className="inline-flex items-center gap-2"><i className="inline-block h-[7px] w-5 rounded-[var(--r-sm)]" style={{ background: c }} />{nm(k)}</span>)}
-      <span className="inline-flex items-center gap-2"><i className="inline-block h-2.5 w-2.5 rounded-full bg-[var(--bad)]" />{'Routing decision'}</span>
-      <span className="inline-flex items-center gap-2"><i className="inline-block h-3 w-3 rounded-full bg-[var(--card)] shadow-[inset_0_0_0_2.5px_var(--fg)]" />{'Orchestrator'}</span>
-      <span className="inline-flex items-center gap-2"><i className="inline-block h-3.5 w-3.5 rounded-full bg-[var(--fg2)]" />{'Job (numbered, matches the trace)'}</span>
-      <span className="inline-flex items-center gap-2"><i className="inline-block h-3.5 w-3.5 rounded-full bg-[var(--fg2)] outline-[1.5px] outline-offset-[1.5px] outline-[var(--fg3)] outline-dashed" />{'Queued for a busy agent'}</span>
-      <span className="inline-flex items-center gap-2"><i className="inline-block h-2.5 w-7 rounded-full bg-[linear-gradient(90deg,color-mix(in_srgb,var(--fg3)_35%,transparent),color-mix(in_srgb,var(--warn)_60%,transparent),color-mix(in_srgb,var(--bad)_65%,transparent))]" />{'Congestion'}</span>
-      <span className="inline-flex items-center gap-2"><i className="inline-block h-3.5 w-3.5 rounded-full shadow-[inset_0_0_0_3px_var(--warn)]" />{'Waiting for approval'}</span>
-    </div>
-  )
-})
-
-/** Pause, speed, human in the loop, max jobs and the fire-event chips; re-renders only when one of them changes. */
-const AtControls = memo(function AtControls({ eng, machines, chips, rerender }:
-  { sig: string; eng: WorkflowEngine; machines: Record<string, WorkflowMachine>; chips: string[]; rerender: () => void }) {
-  return (
-    <div className="flex flex-wrap items-center gap-x-3 gap-y-2 pb-3 text-xs text-[var(--fg2)]">
-      <IconButton size="icon" variant="default" tone="default" label={eng.paused ? 'Play' : 'Pause'} icon={<Icon name={eng.paused ? 'play' : 'pause'} size={14} filled />} onClick={() => { eng.paused = !eng.paused; rerender() }} />
-      <label className="contents"><span>{'Speed'}</span><Slider min={0.25} max={3} step={0.25} value={eng.speed} onChange={v => { eng.speed = v; rerender() }} className={AT_RANGE} /></label>
-      <span className="ui-num w-9">{fmt.number(eng.speed)}×</span>
-      <span className="contents [@media(pointer:coarse)]:[&>label]:min-h-8"><Switch checked={eng.hitl} onChange={v => { eng.setHitl(v); rerender() }} label={<span className="me-1">{'Human in the loop'}</span>} /></span>
-      <label className="contents"><span className="ms-2 max-sm:ms-0">{'Max jobs'}</span><Slider min={1} max={6} step={1} value={eng.maxJobs} onChange={v => { eng.maxJobs = v; rerender() }} className={AT_RANGE} /></label>
-      <span className="ui-num w-3.5">{fmt.number(eng.maxJobs)}</span>
-      <span className="flex-1 max-sm:hidden" />
-      <span className="max-sm:basis-full">{'Fire event'}</span>
-      <span className="flex flex-wrap gap-1.5">{chips.map(ty => (
-        <Chip key={ty} onClick={() => { eng.fire(ty); rerender() }} className="!h-7 font-[family-name:var(--mono)] !text-[11px] !font-normal [@media(pointer:coarse)]:!h-9">{machines[ty].event}</Chip>))}</span>
-    </div>
-  )
-}, atSigEq)
 
 /**
- * Live multi-agent "transit map", driven by the same WorkflowEngine as StateMachine. The Indexing
- * loop and the Intake endpoint fire events into a queue (drawn on the map, under Intake); jobs start as slots free up
- * and travel their state graph along the drawn lines, bends included. Agents take one job at a time: the others line
- * up on the incoming line with a counter, and track segments warm up (grey, amber, red) as tokens pile onto them.
- * Orchestrators route with guards, Product forks reviews and joins them, endpoints emit follow-up triggers. Human and
- * Risk stations wait for approval when human-in-the-loop is on: the station gets a countdown ring and an approval card
- * floats beside it, over the map, so nothing on the page moves. Pause, speed and max-jobs controls, fire-event chips,
- * and a live trace table (time, tokens, USD) whose connectors link a follow-up job to the job that triggered it: hover
- * a row, or press its job button, to follow that job on the map. The still drawing renders once; tokens and the train
- * are composited layers moved every frame without re-rendering (30 fps on touch screens); the panels refresh about 8
- * times a second, and only the parts that changed. Reduced motion places tokens at their stations without
- * travel. On phones the map keeps a readable size and scrolls sideways inside the card, as does the trace table.
- * Pass `machines` whose stations are the map's (the sample is `AGENT_WORKFLOWS` / `AGENT_WORKFLOW_ORDER` in
- * `@lyndon/ui/examples`); without any, the map is drawn with no traffic.
- * `run` draws a real agent run instead (an AgentRun from useAgentRun, fromOtel, fromAiSdkResult or
- * fromLangGraphEvents, finished or live): each span stops at a station (`stations`, default transitRunStation: model
- * calls at Analyst, retrievals at Recall, people at Human, tools by name), each running agent is a numbered token that
- * glides to where its latest step is, stations count their visits and turn red where a step failed, and the trace
- * table lists the steps on the run's own timeline. Hover or tap a row to light its line.
+ * The transit map's geometry and drawing pieces, for building a simulation on the map (the showcase's TransitSimMap in
+ * the examples uses them). Internal: may change in any release.
  */
-export function AgentTransitMap({ run, stations, ...rest }: {
-  machines?: Record<string, WorkflowMachine>; order?: string[]
-  /** draw this agent run instead of the simulation (finished or live, e.g. from useAgentRun) */
+export const transitMapKit = {
+  AT_W, AT_H, AT_LC, AT_LR, AT_HUBS, AT_ST, AT_SP, AT_SEGS, AT_TOK, AT_PULSE, AT_ROWS, AT_ROW_H, AT_JOB_DOT, AT_TRACE_GRID, AT_SVG_LAYER, AT_HTML_LAYER, AT_VIEWBOX,
+  AT_LEGEND_ORCH, AT_LEGEND_WAIT, AT_LINE_IDS: Object.keys(AT_LINES),
+  atName, atColor, atLen, atPoint, atNear, atPos, atPad, atSig, atSigs, atSigEq, atFollow, atDim, atBox, atAt, atCentred, atSegFill, atGlide,
+  AtMapBase, AtHubs, AtLabelLayer, AtPulse, AtTokenGlyph, AtMapScroll, AtLegend, AtTraceFrame, AtNums, AtRowName, useAtTokenEls,
+}
+
+/** AgentTransitMap without a run: the map and its legend, no traffic. */
+function AtStaticMap({ className }: { className?: string }) {
+  const narrow = useMediaQuery('(max-width: 639px)'), fs = narrow ? 1.2 : 1
+  return (
+    <div className={cn('flex flex-col', className)}>
+      <div className="relative">
+        <AtMapScroll narrow={narrow}>
+          <AtMapBase lit={null} fs={fs} regHeat={atNoHeat} />
+          <svg viewBox={AT_VIEWBOX} aria-hidden className={AT_SVG_LAYER}><AtHubs /></svg>
+          <AtLabelLayer fs={fs} />
+        </AtMapScroll>
+      </div>
+      <AtLegend lines={Object.keys(AT_LINES)} extras={[AT_LEGEND_ORCH]} />
+    </div>
+  )
+}
+
+/**
+ * A multi-agent "transit map": agent teams are lines, agents and tools are stations, orchestrators are hubs. `run`
+ * draws a real agent run (an AgentRun from useAgentRun, fromOtel, fromAiSdkResult or fromLangGraphEvents, finished or
+ * live): each span stops at a station (`stations`, default transitRunStation: model calls at Analyst, retrievals at
+ * Recall, people at Human, tools by name), each running agent is a numbered token that glides along the lines to where
+ * its latest step is, stations count their visits and turn red where a step failed, and the trace table lists the
+ * steps on the run's own timeline. Hover or tap a row to light its line. Without a run the map is drawn with no
+ * traffic. Tokens are composited layers moved by a frame loop (30 fps on touch screens); reduced motion places them
+ * at their stations. On phones the map keeps a readable size and scrolls sideways inside the card, as does the trace.
+ * The showcase's live simulation (the WorkflowEngine driving the map) is `TransitSimMap` in the examples.
+ */
+export function AgentTransitMap({ run, stations, className }: {
+  /** @deprecated ignored: the simulation moved to the examples (TransitSimMap); without `run` the map is drawn empty */
+  machines?: Record<string, WorkflowMachine>
+  /** @deprecated ignored, like `machines` */
+  order?: string[]
+  /** the agent run to draw (finished or live, e.g. from useAgentRun) */
   run?: AgentRun | null
   /** where a run's spans stop: [line, station] by span name or kind, or a function (default transitRunStation) */
   stations?: TransitRunStations
   className?: string }) {
-  return run ? <AtRunMap run={run} stations={stations} className={rest.className} /> : <AtSimMap {...rest} />
-}
-
-/** The simulation: the WorkflowEngine on the map's geometry (AgentTransitMap without a run). */
-function AtSimMap({ machines = AT_NO_MACHINES, order = AT_NO_ORDER, className }:
-  { machines?: Record<string, WorkflowMachine>; order?: string[]; className?: string }) {
-  const eng = useMemo(() => atEngine(machines, order), [machines, order])
-  const nm = atName
-  const agents = useMemo(() => new Set(Object.values(machines).flatMap(m => Object.values(m.states).filter(s => s.work).map(s => s.at[1]))), [machines])
-  const [, setTick] = useState(0)
-  const rerender = useCallback(() => setTick(x => (x + 1) % 1e6), [])
-  const [hovered, setHover] = useState<number | null>(null), [pin, setPin] = useState<number | null>(null)
-  const hover = hovered ?? pin // the job being followed on the map
-  const { ref: host, visible } = useViewport<HTMLDivElement>(null, { amount: 0 })
-  const narrow = useMediaQuery('(max-width: 639px)')
-  const reduce = !!useReducedMotion()
-  const [stageRef, stageW] = useWidth<HTMLDivElement>()
-  const [mapScrollRef, mapEdges] = useScrollEdges<HTMLDivElement>()
-  const [traceScrollRef, traceEdges] = useScrollEdges<HTMLDivElement>()
-  const fx = useRef({ sparks: [] as AtSpark[], fading: [] as AtFade[], hubFlash: [0, 0, 0], evLabel: { text: '', n: 0 }, uid: 0 })
-  const tokenEls = useRef(new Map<number, HTMLDivElement>()), trainEl = useRef<HTMLDivElement>(null), trainAnim = useRef<Animation | null>(null), since = useRef(0)
-  const disp = useRef(new Map<number, AtDisp>())
-  /** each token's transform when it mounted: React keeps passing that same value, so it never undoes the frame loop's writes */
-  const born = useRef(new Map<number, string>()), trainBorn = useRef('')
-  /** Puts the train where the engine clock says (jumping only if it drifted more than half a degree) and runs or stops it with the map. */
-  const syncTrain = useCallback((running: boolean) => {
-    const el = trainEl.current, a = trainAnim.current; if (!el) return
-    const deg = atTrainDeg(eng.clock)
-    if (!a) { el.style.transform = `rotate(${deg.toFixed(1)}deg)`; return } // reduced motion: it steps with the panels
-    const want = (deg / 360) * AT_LAP_MS
-    let d = want - (Number(a.currentTime ?? 0) % AT_LAP_MS); d -= Math.round(d / AT_LAP_MS) * AT_LAP_MS
-    if (Math.abs(d) > AT_LAP_MS / 720) a.currentTime = want
-    if (a.playbackRate !== eng.speed) a.playbackRate = eng.speed
-    if (running && a.playState !== 'running') a.play(); else if (!running && a.playState === 'running') a.pause()
-  }, [eng])
-  useEffect(() => {
-    const el = trainEl.current; if (!el || reduce || typeof el.animate !== 'function') return
-    const a = el.animate([{ transform: 'rotate(0deg)' }, { transform: 'rotate(360deg)' }], { duration: AT_LAP_MS, iterations: Infinity, easing: 'linear' })
-    a.pause(); trainAnim.current = a
-    return () => { a.cancel(); trainAnim.current = null }
-  }, [reduce])
-  const reduceRef = useRef(reduce); reduceRef.current = reduce
-  const heatTw = useMemo(() => atHeatTween(), []), clockStore = useMemo(() => atClockStore(), [])
-  const loopOn = visible && !eng.paused
-  const marks = useMemo(() => atMarks(), [])
-  // heat tweens and marks started (or left running) while the frame loop is stopped (paused) run on a loop of their own
-  const [heatSolo, setHeatSolo] = useState(false)
-  const xyOf = (tk: WorkflowToken) => { const d = disp.current.get(tk.uid); return d ? atPoint(d.line, d.s) : atPoint(tk.line, atPos(tk.line, machines[tk.job.type].states[tk.state].at[1]) ?? 0) }
-  // engine events → the short-lived marks on the map (sparks, fading tokens, hub flashes, the loop's event label)
-  useEffect(() => eng.subscribe(ev => {
-    const F = fx.current, now = performance.now(), calm = reduceRef.current
-    if (ev.kind === 'queued') {
-      if (ev.cause === 'intake' && !calm) { const q = atPoint('research', AT_SP.research.Intake); F.sparks = [...F.sparks, { id: ++F.uid, x: q.x, y: q.y, text: ev.ev, t: now }] }
-      else if (ev.cause !== 'emit') F.evLabel = { text: ev.ev, n: F.evLabel.n + 1 }
-    } else if (ev.kind === 'enter') {
-      const st = eng.machines[ev.job.type].states[ev.state], hi = st.orch ? AT_HUBS.findIndex(h => h[0] === st.at[1]) : -1
-      if (hi >= 0 && !calm) F.hubFlash[hi]++
-    } else if (ev.kind === 'trigger' && ev.ev && !calm) {
-      const p = xyOf(ev.token); F.sparks = [...F.sparks, { id: ++F.uid, x: p.x, y: p.y, text: ev.ev, t: now }]
-    } else if (ev.kind === 'done') {
-      const p = xyOf(ev.token); F.fading = [...F.fading, { id: ev.token.uid, x: p.x, y: p.y, line: ev.token.line, jid: ev.job.id, t: now, small: !!ev.token.parent }]
-      disp.current.delete(ev.token.uid)
-    }
-  }), [eng]) // eslint-disable-line react-hooks/exhaustive-deps
-  useEffect(() => { // two events to start with, so the map is busy as soon as it is seen
-    const t1 = setTimeout(() => eng.fire(), 400), t2 = setTimeout(() => eng.fire(), 2000)
-    return () => { clearTimeout(t1); clearTimeout(t2) }
-  }, [eng])
-  // every frame: step the engine, then glide each token towards its place on the line and write its transform straight
-  // into its composited box (no React state, no layout); React re-renders about 8 times a second for counters, heat and panels
-  useFrameLoop(loopOn, (dt, now) => {
-    eng.tick(dt)
-    heatTw.step(now); marks.step(now)
-    const calm = reduceRef.current
-    const want = atLayout(eng, agents, calm), D = disp.current, v = (AT_SPEED * eng.speed * 2 + 60) * dt
-    for (const [uid, [line, s]] of want) {
-      let d = D.get(uid)
-      if (!d || calm) d = { line, s, tr: d?.tr ?? '' }
-      else {
-        if (d.line !== line) { const p = atPoint(d.line, d.s); d.line = line; d.s = atNear(line, [p.x, p.y]) } // changing lines at a shared station
-        const diff = s - d.s; d.s = Math.abs(diff) > 320 ? s : d.s + Math.max(-v, Math.min(v, diff))
-      }
-      const tr = atAt(atPoint(d.line, d.s), AT_TOK), el = tokenEls.current.get(uid)
-      if (tr !== d.tr && el) { d.tr = tr; el.style.transform = tr }
-      D.set(uid, d)
-    }
-    for (const uid of D.keys()) if (!want.has(uid)) D.delete(uid)
-    if ((since.current += dt) >= 0.125) {
-      since.current = 0
-      syncTrain(true)
-      const F = fx.current, now = performance.now()
-      if (F.sparks.some(s => now - s.t >= 1900)) F.sparks = F.sparks.filter(s => now - s.t < 1900)
-      if (F.fading.some(f => now - f.t >= 800)) F.fading = F.fading.filter(f => now - f.t < 800)
-      stripNow.current = atStrip(eng.clock)
-      for (const el of strips.current) el.style.transform = stripNow.current
-      // the map re-renders only when what it shows changed (a token, the queue, heat, approvals, marks); running trace
-      // rows, countdowns and rings follow the clock store on their own. Committed in this frame, so the panels repaint
-      // with the tokens instead of in a frame of their own.
-      const sig = atStructSig(eng, fx.current)
-      flushSync(() => { if (sig !== lastSig.current) { lastSig.current = sig; rerender() } clockStore.set(eng.clock) })
-    }
-  }, { coarseFps: 30 })
-  const strips = useRef(new Set<HTMLDivElement>()), stripNow = useRef(atStrip(eng.clock)), lastSig = useRef('')
-  const regStrip = useCallback((el: HTMLDivElement | null) => {
-    if (!el) return
-    strips.current.add(el); el.style.transform = stripNow.current
-    return () => { strips.current.delete(el) }
-  }, [])
-  // the trace window slides by transform, not layout: written straight into each row's strip (an inherited custom
-  // property would restyle every element of every row instead)
-  useLayoutEffect(() => { stripNow.current = atStrip(eng.clock); for (const el of strips.current) if (el.style.transform !== stripNow.current) el.style.transform = stripNow.current })
-  // paused mid-tween, or a mark mounted while paused (setHeatSolo(true) settles: same value, no further render)
-  useLayoutEffect(() => { if (!loopOn && (heatTw.busy() || marks.busy())) setHeatSolo(true) }) // eslint-disable-line react-hooks/exhaustive-deps
-  useFrameLoop(heatSolo && !loopOn, (_, now) => { const a = heatTw.step(now), b = marks.step(now); if (!a && !b) setHeatSolo(false) }, { coarseFps: 30 })
-  /** A token's box mounts at its current place; from then on only the frame loop moves it. */
-  const regToken = useCallback((el: HTMLDivElement | null) => {
-    if (!el) return
-    const uid = Number(el.dataset.uid)
-    tokenEls.current.set(uid, el)
-    const d = disp.current.get(uid); if (d) d.tr = el.style.transform
-    return () => { tokenEls.current.delete(uid); born.current.delete(uid) }
-  }, [])
-  const F = fx.current
-  const hj = hover !== null ? eng.jobs.find(j => j.id === hover) ?? null : null
-  const lit = (k: string) => !hj || hj.lines.has(k)
-  const tokens = eng.jobs.filter(j => !j.done).flatMap(j => j.tokens)
-  const intakeType = eng.intake ? eng.typeOf(eng.intake) : undefined
-  const chips = [...order, ...(intakeType && !order.includes(intakeType) ? [intakeType] : [])].filter(t => machines[t])
-  const placeOf = (tk: WorkflowToken) => { let b = born.current.get(tk.uid); if (b === undefined) born.current.set(tk.uid, b = atAt(xyOf(tk), AT_TOK)); return b }
-  if (!trainBorn.current) trainBorn.current = `rotate(${atTrainDeg(eng.clock).toFixed(1)}deg)`
-  useEffect(() => syncTrain(loopOn), [syncTrain, loopOn, reduce])
-  const stationXY = (line: string, stn: string) => atPoint(line, atPos(line, stn) ?? 0)
-
-  const heatKey = atHeatKey(eng)
-  const litKey = hj ? [...hj.lines].join(',') : null
-  useLayoutEffect(() => {
-    if (heatTw.set(heatKey, hj ? hj.lines : null, performance.now(), reduce, host.current) && !loopOn) setHeatSolo(true)
-  }, [heatTw, heatKey, litKey, reduce, loopOn]) // eslint-disable-line react-hooks/exhaustive-deps
-  // queue counters: one per agent with a queue, beside the head of its line-up, away from the station's label
-  const queueTags = Object.entries(eng.queues).filter(([, q]) => q.length).map(([stn, q]) => {
-    const tk = q[0], dir = atDirOf(tk), b = atPos(tk.line, stn) ?? 0, p = atPoint(tk.line, b - dir * AT_HEAD), r = p.a * Math.PI / 180
-    const lab = AT_ST.find(x => x[0] === stn), nx = -Math.sin(r), ny = Math.cos(r), sd = lab && nx * lab[3] + ny * lab[4] > 0 ? -1 : 1
-    return { stn, n: q.length, x: p.x + nx * sd * 24, y: p.y + ny * sd * 24 }
-  })
-  // approvals: grouped by station (a countdown ring on the station, cards anchored beside it)
-  const waitBy = new Map<string, WorkflowToken[]>()
-  eng.waiting.forEach(tk => { const k = narrow ? '*' : `${tk.line}|${machines[tk.job.type].states[tk.state].at[1]}`; waitBy.set(k, [...(waitBy.get(k) ?? []), tk]) })
-  const rings = atRings(eng, machines)
-  const maxCards = narrow ? 1 : AT_CARDS // phones: one card in a strip above the map, the rest counted
-  const stageH = stageW * (AT_H / AT_W), cardW = narrow ? stageW : AT_CARD_W
-  const fs = narrow ? 1.2 : 1 // phones: the map is drawn at ~0.8 scale, so labels grow to stay ≥ 11px on screen
-  const anchorOf = (k: string) => {
-    if (k === '*') return { left: 0, top: 0 }
-    const [line, stn] = k.split('|'), p = stationXY(line, stn), lab = AT_ST.find(x => x[0] === stn)
-    const past = lab && lab[3] > 0 ? lab[3] + stn.length * 8 + 14 : 30 // clear of the station's label when it sits to the right
-    return { left: Math.max(4, Math.min(((p.x + past) / AT_W) * stageW, stageW - cardW - 4)), top: Math.max(4, (p.y / AT_H) * stageH - 26) }
-  }
-  // trace: follow-up jobs link to the job whose finish triggered them; the followed job's chain lights up
-  const rowOf = new Map(eng.jobs.map((j, i) => [j.id, i]))
-  const chain = new Set<number>()
-  if (hover !== null) {
-    for (let id: number | undefined = hover; id !== undefined && !chain.has(id); id = eng.jobs.find(j => j.id === id)?.parent) chain.add(id)
-    const down = (id: number) => eng.jobs.forEach(j => { if (j.parent === id && !chain.has(j.id)) { chain.add(j.id); down(j.id) } }); down(hover)
-  }
-  const tx = (t: number) => `${(t / AT_WIN) * 100}%`
-  const queueShown = eng.queue.slice(0, AT_EQ_ROWS), running = tokens.filter(t => !t.parent).length, active = eng.jobs.filter(j => !j.done).length
-
-  const cardDone = useCallback(() => { setHover(null); setPin(null); rerender() }, [rerender])
-  /** The approval cards waiting at one station (or, on phones, all of them): fixed-size, stacked by transform. */
-  const atCards = (k: string, q: WorkflowToken[]) => (
-    <div key={k} className={cn(k === '*' && 'pointer-events-none absolute inset-x-0 top-0')}>
-      <AnimatePresence initial={false}>
-        {q.slice(0, maxCards).map((tk, i) => <AtCard key={tk.uid} sig={`${i}|${hover === tk.job.id}|${tk.state}`} tk={tk} i={i} hover={hover === tk.job.id}
-          machines={machines} eng={eng} clock={clockStore} done={cardDone} setHover={setHover} setPin={setPin} />)}
-        {q.length > maxCards && <motion.div key="more" initial={{ opacity: 0, y: maxCards * (AT_CARD_H + AT_CARD_GAP) }} animate={{ opacity: 1, y: maxCards * (AT_CARD_H + AT_CARD_GAP) }} exit={{ opacity: 0 }}
-          className="absolute top-0 start-0"><Badge className="border border-[var(--line)] !bg-[var(--card)] font-normal">{`+${q.length - maxCards} more waiting`}</Badge></motion.div>}
-      </AnimatePresence>
-    </div>
-  )
-
-  return (
-    <div ref={host} className={cn('flex flex-col', className)}>
-      <div ref={stageRef} className="relative">
-      {/* phones: approvals get their own fixed-height strip above the map, so they never cover stations or shift anything */}
-      {narrow && <div className="relative mb-2" style={{ height: AT_CARD_H + 26 }}>
-        {!eng.waiting.length && <div className="grid h-[80px] place-items-center rounded-[var(--r-md)] border border-dashed border-[var(--line2)] text-xs text-[var(--fg3)]">{'No approvals waiting'}</div>}
-        {stageW > 0 && waitBy.has('*') && atCards('*', waitBy.get('*')!)}
-      </div>}
-      <div ref={mapScrollRef} className={cn(narrow && '-mx-1 overflow-x-auto overscroll-x-contain rounded-[var(--r-md)] px-1 [contain:inline-size] [scrollbar-width:thin]')} tabIndex={narrow ? 0 : undefined} aria-label={narrow ? 'Transit map, scrolls sideways' : undefined}>
-      <div className={cn('relative', narrow && 'min-w-[820px]')}>
-        <AtMapBase lit={litKey} fs={fs} regHeat={heatTw.reg} />
-        {/* the train (under the Index station) and the waiting stations' pulses (under their rings) */}
-        <div aria-hidden className={AT_HTML_LAYER}>
-          <div ref={trainEl} className={cn('absolute', atDim(lit('index')))} style={{ ...atCentred(AT_LC[0], AT_LC[1], AT_TRAIN_BOX), transform: trainBorn.current }}>
-            <div className="absolute rotate-90" style={{ left: `${(2 * AT_LR / AT_TRAIN_BOX) * 100}%`, top: `${(AT_LR / AT_TRAIN_BOX) * 100}%`, width: `${(AT_TRAIN / AT_TRAIN_BOX) * 100}%`, height: `${(AT_TRAIN / AT_TRAIN_BOX) * 100}%` }}>
-              <svg viewBox={`${-AT_TRAIN / 2} ${-AT_TRAIN / 2} ${AT_TRAIN} ${AT_TRAIN}`} className="block h-full w-full overflow-visible"><rect x={-12} y={-4} width={24} height={8} rx={4} fill="var(--card)" stroke={AT_C('index')} strokeWidth={2} /></svg>
-            </div>
-          </div>
-          {!reduce && rings.map(r => <AtPulse key={r.k} x={r.x} y={r.y} active={visible} />)}
-        </div>
-        <svg viewBox={AT_VIEWBOX} aria-hidden className={AT_SVG_LAYER}>
-          {/* the global event queue, waiting for a job slot */}
-          <AtQueuePanel sig={`${queueShown.map(q => q.id).join(',')}|${eng.queue.length}|${eng.queueMax}|${eng.maxJobs}|${running}|${active}|${eng.dropped}|${narrow}`}
-            queue={queueShown} qlen={eng.queue.length} qmax={eng.queueMax} maxJobs={eng.maxJobs} running={running} active={active} dropped={eng.dropped} narrow={narrow} />
-          <AtSparks sig={F.sparks.map(s => s.id).join(',')} sparks={F.sparks} reg={marks.reg} />
-          <AtHubs />
-          {/* stations waiting for a human: a countdown ring (and how many are waiting) */}
-          <AtRings eng={eng} machines={machines} clock={clockStore} />
-        </svg>
-        {/* routing flashes on the hubs, then the tokens: composited boxes the frame loop moves */}
-        <div aria-hidden className={AT_HTML_LAYER}>
-          {AT_HUBS.map(([n, [x, y]], i) => F.hubFlash[i] > 0 && <AtFlash key={n + F.hubFlash[i]} x={x} y={y} />)}
-          <AtTokens sig={`${tokens.map(tk => `${tk.uid}:${tk.phase === 'queue'}:${!!tk.parent}:${tk.line}`).join(',')}|${hj?.id}`} tokens={tokens} hj={hj} reg={regToken} place={placeOf} />
-          {F.fading.map(f => <motion.div key={'f' + f.id} className="absolute top-0 left-0" style={{ ...atBox(AT_TOK), transform: atAt(f, AT_TOK) }} initial={{ opacity: 1 }} animate={{ opacity: 0 }} transition={{ duration: 0.8 }}>
-            <svg viewBox={`${-AT_TOK / 2} ${-AT_TOK / 2} ${AT_TOK} ${AT_TOK}`} className="block h-full w-full overflow-visible">
-              <circle r={f.small ? 8 : 10} fill={AT_C(f.line)} stroke="var(--card)" strokeWidth={2.5} /><text y={3.6} textAnchor="middle" fill="#fff" style={{ font: '700 10px var(--font)' }}>{f.jid}</text>
-            </svg>
-          </motion.div>)}
-        </div>
-        <svg viewBox={AT_VIEWBOX} aria-hidden className={AT_SVG_LAYER}>
-          <g style={{ font: `${13 * fs}px var(--font)` }} fill="var(--fg2)">
-            <AtLabels fs={fs} />
-            {F.evLabel.text && <text key={F.evLabel.n} ref={marks.reg} data-mark="ev" x={AT_LC[0]} y={AT_LC[1] + 5} textAnchor="middle" style={{ font: '600 11px var(--mono)', opacity: 0 }}>{F.evLabel.text}</text>}
-          </g>
-          {/* queue counters beside each agent's line-up */}
-          <g>
-            {queueTags.map(t => { const w = (26 + String(t.n).length * 8) * fs; return (
-              <g key={t.stn} transform={svgTranslate(t.x, t.y)}>
-                <rect x={-w / 2} y={-11 * fs} width={w} height={22 * fs} rx={11 * fs} fill="var(--card)" stroke="var(--warn)" strokeWidth={1.5} />
-                <text y={5 * fs} textAnchor="middle" fill="var(--fg)" style={{ font: `600 ${13 * fs}px var(--font)` }}>+{t.n}</text>
-              </g>) })}
-          </g>
-        </svg>
-      </div>
-      </div>
-      {narrow && <ScrollEdges {...mapEdges} hint={'Swipe the map'} className="!top-[114px]" />}
-      {/* approvals float over the map beside the waiting station (pinned top-left on phones); fixed-size cards stacked
-          by transform, so neither the page nor the other cards ever shift */}
-      <span className="sr-only" aria-live="polite">{eng.waiting.length ? plural(eng.waiting.length, 'waiting for your approval', 'waiting for your approval') : ''}</span>
-      {stageW > 0 && [...waitBy].filter(([k]) => k !== '*').map(([k, q]) => { const a = anchorOf(k); return (
-        <div key={k} className="pointer-events-none absolute z-[2]" style={{ left: a.left, top: a.top, width: cardW }}>{atCards(k, q)}</div>) })}
-      </div>
-
-      <AtLegend />
-
-      <AtControls sig={`${eng.paused}|${eng.speed}|${eng.hitl}|${eng.maxJobs}|${chips.join(',')}`} eng={eng} machines={machines} chips={chips} rerender={rerender} />
-
-      <div className="relative border-t border-[var(--line)]">
-      <div ref={traceScrollRef} className="overflow-x-auto overscroll-x-contain [contain:inline-size]" tabIndex={narrow ? 0 : undefined} aria-label={narrow ? 'Trace table, scrolls sideways' : undefined}>
-        <div className="min-w-[640px]">
-          <div className={cn('grid h-9 items-center border-b border-[var(--line)] text-xs text-[var(--fg3)]', AT_TRACE_COLS)}>
-            <span className="sticky start-0 z-[1] bg-[var(--card)] text-sm font-semibold text-[var(--fg)]">{'Trace'}</span>
-            {/* time runs left to right in every locale */}
-            <span className="relative h-full font-[family-name:var(--mono)] text-[11px]"><span className="absolute top-2.5 start-0">{`−${AT_WIN}s`}</span><span className="absolute top-2.5 left-1/2 -translate-x-1/2">{`−${AT_WIN / 2}s`}</span><span className="absolute top-2.5 end-0">{'now'}</span></span>
-            <span className="text-end font-[family-name:var(--mono)]">{'time'}</span><span className="text-end font-[family-name:var(--mono)]">{'tokens'}</span><span className="text-end font-[family-name:var(--mono)]">{'USD'}</span>
-          </div>
-          {/* a fixed-height list: rows sit at translateY(index), the window slides by transform, numbers keep a fixed width */}
-          <div className="relative overflow-y-auto overscroll-y-contain" style={{ height: AT_ROWS * AT_ROW_H }}>
-            <div className="relative" style={{ height: Math.max(AT_ROWS, eng.jobs.length) * AT_ROW_H }}>
-              {!eng.jobs.length && <span className="absolute top-3 start-0 text-xs text-[var(--fg3)]">{'Jobs appear here as they start.'}</span>}
-              {/* follow-up connectors: from the triggering job at the moment it emitted, to the follow-up job's start */}
-              <div aria-hidden className={cn('pointer-events-none absolute inset-0 grid', AT_TRACE_COLS)}>
-                <span />
-                <div className="relative overflow-x-clip">
-                  <div ref={regStrip} className="absolute inset-0">
-                    {eng.jobs.map(j => {
-                      const pi = j.parent === undefined ? undefined : rowOf.get(j.parent), ci = rowOf.get(j.id)!
-                      if (pi === undefined) return null
-                      const te = j.queuedAt ?? j.t0, up = ci < pi, yp = pi * AT_ROW_H + AT_ROW_H / 2 + (up ? -7 : 7), yc = ci * AT_ROW_H + AT_ROW_H / 2
-                      const on = chain.has(j.id) && chain.has(j.parent!), col = on ? 'border-[var(--fg2)]' : 'border-[color-mix(in_srgb,var(--fg3)_55%,transparent)]'
-                      return <Fragment key={j.id}>
-                        <span className={cn('absolute w-0 border-s transition-colors duration-200', col)} style={{ left: tx(te), top: 0, height: Math.abs(yc - yp), transform: `translateY(${Math.min(yp, yc)}px)` }} />
-                        <span className={cn('absolute h-0 border-t transition-colors duration-200', col, j.t0 - te > 0.3 && 'border-dashed')} style={{ left: tx(te), top: 0, width: `calc(${tx(Math.max(0, j.t0 - te))} + 3px)`, transform: `translateY(${yc}px)` }} />
-                      </Fragment>
-                    })}
-                  </div>
-                </div>
-              </div>
-              <AnimatePresence initial={false}>
-                {eng.jobs.map((j, i) => {
-                  const cur = j.done ? (j.rejected ? 'rejected' : 'done') : j.tokens.length > 1 ? `${j.tokens.length - 1} in review` : j.tokens[0]?.phase === 'queue' ? `waiting for ${nm(machines[j.type].states[j.tokens[0].next!]?.at[1] ?? '')}` : (machines[j.type].states[j.state]?.label ?? j.state)
-                  return <AtTraceRow key={j.id} sig={`${i}|${cur}|${j.done}|${j.tokens[0]?.line}|${hover === j.id}|${pin === j.id}`}
-                    j={j} i={i} cur={cur} clock={clockStore} hover={hover === j.id} pinned={pin === j.id} strip={regStrip} setHover={setHover} setPin={setPin} />
-                })}
-              </AnimatePresence>
-            </div>
-          </div>
-        </div>
-      </div>
-      {narrow && <ScrollEdges left={false} right={traceEdges.right} touched={traceEdges.touched} hint={'Swipe the trace'} />}
-      </div>
-    </div>
-  )
+  return run ? <AtRunMap run={run} stations={stations} className={className} /> : <AtStaticMap className={className} />
 }
 
 /** Where a run's span stops on the transit map: a line and one of its stations or hubs (e.g. ['payments', 'Search']). */
@@ -1222,9 +723,7 @@ export function transitRunStation(span: AgentSpan, run: AgentRun): TransitStatio
     case 'llm': return ['research', 'Analyst']
     case 'chain': return null
     case 'agent': {
-      const byId = new Map(run.spans.map(s => [s.id, s]))
-      let sub = false
-      for (let p = span.parentId ? byId.get(span.parentId) : undefined, n = 0; p && n < 64; p = p.parentId ? byId.get(p.parentId) : undefined, n++) if (p.kind === 'agent') { sub = true; break }
+      const sub = !!nearestAgent(span, new Map(run.spans.map(s => [s.id, s])))
       if (!sub && !run.spans.some(s => s.kind === 'agent' && s !== span && s.startMs < span.startMs)) return ['research', 'Intake']
       const others = run.spans.filter(s => s.kind === 'agent' && s.startMs <= span.startMs && s !== span).length
       return AT_RUN_HUBS[(others - 1 + AT_RUN_HUBS.length) % AT_RUN_HUBS.length]
@@ -1248,18 +747,20 @@ function atRunModel(run: AgentRun, stations: TransitRunStations | undefined) {
   const byId = new Map(run.spans.map(s => [s.id, s]))
   const agents = run.spans.filter(s => s.kind === 'agent').sort((a, b) => a.startMs - b.startMs)
   const num = new Map(agents.map((a, i) => [a.id, i + 1]))
-  const agentOf = (s: AgentSpan) => { if (s.kind === 'agent') return s.id; for (let p = s.parentId ? byId.get(s.parentId) : undefined, n = 0; p && n < 64; p = p.parentId ? byId.get(p.parentId) : undefined, n++) if (p.kind === 'agent') return p.id; return agents[0]?.id ?? '' }
+  const agentOf = (s: AgentSpan) => s.kind === 'agent' ? s.id : nearestAgent(s, byId)?.id ?? agents[0]?.id ?? ''
   const rows: AtRunRowData[] = [...run.spans].sort((a, b) => a.startMs - b.startMs).map(span => ({ span, stop: atRunStop(span, run, stations), agent: num.get(agentOf(span)) ?? 1 }))
-  const marks = new Map<string, AtRunStopMark>(), lines = new Set<string>()
+  // stops by line, then station (ids may contain any character, so no joined keys)
+  const marks = new Map<string, Map<string, AtRunStopMark>>(), lines = new Set<string>()
   for (const r of rows) {
     if (!r.stop) continue
-    const [line, station] = r.stop, key = `${line}|${station}`, p = atPoint(line, atPos(line, station) ?? 0)
+    const [line, station] = r.stop, p = atPoint(line, atPos(line, station) ?? 0)
     lines.add(line)
-    const m = marks.get(key) ?? { key, line, station, x: p.x, y: p.y, visits: 0, running: 0, errors: 0, human: false, ids: [] }
+    const onLine = marks.get(line) ?? new Map<string, AtRunStopMark>(); marks.set(line, onLine)
+    const m = onLine.get(station) ?? { key: atSig(line, station), line, station, x: p.x, y: p.y, visits: 0, running: 0, errors: 0, human: false, ids: [] }
     m.visits++; m.ids.push(r.span.id)
     if (r.span.status === 'running') { m.running++; if (r.span.kind === 'human') m.human = true }
     if (r.span.status === 'error') m.errors++
-    marks.set(key, m)
+    onLine.set(station, m)
   }
   // a token per running agent (or one for the run, when it has no agent span), at its latest step's stop
   const tokens: AtRunTok[] = []
@@ -1270,17 +771,17 @@ function atRunModel(run: AgentRun, stations: TransitRunStations | undefined) {
     if (!cur?.stop) continue
     tokens.push({ id: a?.id ?? 'run', n: a ? num.get(a.id)! : 1, line: cur.stop[0], s: atPos(cur.stop[0], cur.stop[1]) ?? 0, error: cur.span.status === 'error' })
   }
-  return { rows: rows.filter(r => r.span.kind !== 'agent' && r.span.kind !== 'chain'), marks: [...marks.values()], tokens, lines }
+  return { rows: rows.filter(r => r.span.kind !== 'agent' && r.span.kind !== 'chain'), marks: [...marks.values()].flatMap(m => [...m.values()]), tokens, lines }
 }
-const AT_RUN_COLS = 'grid-cols-[minmax(160px,30%)_1fr_64px_64px_72px] gap-3'
-const AT_RUN_TONE = { running: 'accent', ok: 'ok', error: 'bad', cancelled: 'neutral' } as const
+/** Map units a run's token glides per second. */
+const AT_RUN_GLIDE = 340
 
 /** The stations' visit marks: a ring in the line's colour with the count, red with "!" where a step failed, thicker while one runs there. */
 const AtRunMarks = memo(function AtRunMarks({ marks, lit }: { sig: string; marks: AtRunStopMark[]; lit: string | null }) {
   return <g>
     {marks.map(m => { const on = !lit || m.ids.includes(lit); return (
       <g key={m.key} transform={svgTranslate(m.x, m.y)} className={atDim(on)}>
-        <circle r={m.running ? 15 : 13} fill="var(--card)" stroke={m.errors ? 'var(--bad)' : AT_C(m.line)} strokeWidth={m.running ? 4.5 : 3} />
+        <circle r={m.running ? 15 : 13} fill="var(--card)" stroke={m.errors ? 'var(--bad)' : atColor(m.line)} strokeWidth={m.running ? 4.5 : 3} />
         <text y={4} textAnchor="middle" fill={m.errors ? 'var(--bad)' : 'var(--fg)'} style={{ font: '700 11px var(--font)' }}>{m.errors ? '!' : m.visits}</text>
       </g>) })}
   </g>
@@ -1288,12 +789,9 @@ const AtRunMarks = memo(function AtRunMarks({ marks, lit }: { sig: string; marks
 
 /** The run view of AgentTransitMap: stops, marks and tokens for a real run, with its steps in a table. */
 function AtRunMap({ run, stations, className }: { run: AgentRun; stations?: TransitRunStations; className?: string }) {
-  const nm = atName
   const reduce = !!useReducedMotion()
   const narrow = useMediaQuery('(max-width: 639px)')
   const { ref: host, visible } = useViewport<HTMLDivElement>(null, { amount: 0 })
-  const [mapScrollRef, mapEdges] = useScrollEdges<HTMLDivElement>()
-  const [traceScrollRef, traceEdges] = useScrollEdges<HTMLDivElement>()
   const listRef = useRef<HTMLDivElement>(null)
   const [hovered, setHovered] = useState<string | null>(null), [pin, setPin] = useState<string | null>(null)
   const lit = hovered ?? pin
@@ -1303,123 +801,78 @@ function AtRunMap({ run, stations, className }: { run: AgentRun; stations?: Tran
   const litRow = lit ? model.rows.find(r => r.span.id === lit) : undefined
   const litKey = litRow?.stop ? litRow.stop[0] : lit ? '' : [...model.lines].join(',') || null
   // tokens glide along the lines to their agent's latest stop (the frame loop writes their transforms; React keeps the first)
-  const disp = useRef(new Map<string, { line: string; s: number }>()), els = useRef(new Map<string, HTMLDivElement>()), born = useRef(new Map<string, string>())
+  const toks = useAtTokenEls(), disp = useRef(new Map<string, AtGlide>())
   const [moving, setMoving] = useState(false)
   const want = useRef(model.tokens); want.current = model.tokens
   const step = (dt: number) => {
     let busy = false
     for (const tk of want.current) {
       let d = disp.current.get(tk.id)
-      if (!d || reduce) d = { line: tk.line, s: tk.s }
-      else {
-        if (d.line !== tk.line) { const p = atPoint(d.line, d.s); d.line = tk.line; d.s = atNear(tk.line, [p.x, p.y]) }
-        const diff = tk.s - d.s, v = 340 * dt
-        d.s = Math.abs(diff) <= v ? tk.s : d.s + Math.sign(diff) * v
-        if (d.s !== tk.s) busy = true
-      }
-      disp.current.set(tk.id, d)
-      const el = els.current.get(tk.id); if (el) el.style.transform = atAt(atPoint(d.line, d.s), AT_TOK)
+      if (!d || reduce) { d = { line: tk.line, s: tk.s }; disp.current.set(tk.id, d) }
+      else if (!atGlide(d, tk.line, tk.s, AT_RUN_GLIDE * dt)) busy = true
+      toks.write(tk.id, atAt(atPoint(d.line, d.s), AT_TOK))
     }
     for (const id of disp.current.keys()) if (!want.current.some(tk => tk.id === id)) disp.current.delete(id)
     return busy
   }
-  const tokSig = model.tokens.map(tk => `${tk.id}:${tk.line}:${tk.s.toFixed(1)}`).join(',')
-  useLayoutEffect(() => { if (!step(0)) setMoving(false); else setMoving(true) }, [tokSig, reduce]) // eslint-disable-line react-hooks/exhaustive-deps
+  const tokSig = atSigs(model.tokens.map(tk => atSig(tk.id, tk.line, svgN(tk.s))))
+  useLayoutEffect(() => { setMoving(step(0)) }, [tokSig, reduce]) // eslint-disable-line react-hooks/exhaustive-deps
   useFrameLoop(moving && visible, dt => { if (!step(dt)) setMoving(false) }, { coarseFps: 30 })
-  const placeOf = (tk: AtRunTok) => { let b = born.current.get(tk.id); if (b === undefined) { const d = disp.current.get(tk.id); born.current.set(tk.id, b = atAt(atPoint(d?.line ?? tk.line, d?.s ?? tk.s), AT_TOK)) } return b }
-  const regTok = useCallback((el: HTMLDivElement | null) => {
-    if (!el) return
-    const id = el.dataset.id!
-    els.current.set(id, el)
-    return () => { els.current.delete(id); born.current.delete(id) }
-  }, [])
+  const placeOf = (tk: AtRunTok) => toks.placeOf(tk.id, () => { const d = disp.current.get(tk.id); return atAt(atPoint(d?.line ?? tk.line, d?.s ?? tk.s), AT_TOK) })
   // a live run's table follows its newest step unless the reader scrolled up
   const rowCount = model.rows.length
   useLayoutEffect(() => {
     const el = listRef.current
     if (el && run.status === 'running' && el.scrollHeight - el.scrollTop - el.clientHeight < AT_ROW_H * 1.5 + 4) el.scrollTop = el.scrollHeight
   }, [rowCount, run.status])
-  const status = run.status === 'running' ? 'Live' : run.status === 'error' ? 'Failed' : run.status === 'cancelled' ? 'Cancelled' : 'Complete'
-  const secs = (ms: number) => `${fmt.number(ms / 1000, { minimumFractionDigits: 1, maximumFractionDigits: 1 })}s`
-  const waiting = model.marks.filter(m => m.human)
+  const status = RUN_STATUS[run.status]
+  const waiting = model.marks.filter(m => m.human), waitingN = waiting.reduce((n, m) => n + m.running, 0)
   const tx = (ms: number) => `${(Math.max(0, ms - run.startedAt) / span0) * 100}%`
 
   return (
     <div ref={host} className={cn('flex flex-col', className)}>
       <div className="mb-2 flex flex-wrap items-center gap-x-2.5 gap-y-1 text-[13px]">
         <b className="min-w-0 truncate font-semibold">{run.name}</b>
-        <Badge tone={AT_RUN_TONE[run.status]} size="sm"><span className={cn('me-1 h-1.5 w-1.5 rounded-full bg-current', run.status === 'running' && 'animate-pulse motion-reduce:animate-none')} />{status}</Badge>
-        <span className="ui-num text-xs text-[var(--fg2)]">{`${plural(rowCount, 'step')} · ${secs(totals.durationMs)} · ${fmt.compact(totals.tokens.input + totals.tokens.output)} tokens · ${fmt.usd(totals.costUsd)}`}</span>
+        <Badge tone={status.tone} size="sm"><span className={cn('me-1 h-1.5 w-1.5 rounded-full bg-current', run.status === 'running' && 'animate-pulse motion-reduce:animate-none')} />{status.label}</Badge>
+        <span className="ui-num text-xs text-[var(--fg2)]">{`${plural(rowCount, 'step')} · ${fmt.seconds(totals.durationMs / 1000)} · ${fmt.compact(totals.tokens.input + totals.tokens.output)} tokens · ${fmt.usd(totals.costUsd)}`}</span>
       </div>
       <div className="relative">
-        <div ref={mapScrollRef} className={cn(narrow && '-mx-1 overflow-x-auto overscroll-x-contain rounded-[var(--r-md)] px-1 [contain:inline-size] [scrollbar-width:thin]')} tabIndex={narrow ? 0 : undefined} aria-label={narrow ? 'Transit map, scrolls sideways' : undefined}>
-          <div className={cn('relative', narrow && 'min-w-[820px]')}>
-            <AtMapBase lit={litKey} fs={fs} regHeat={atRunNoHeat} />
-            <div aria-hidden className={AT_HTML_LAYER}>{!reduce && waiting.map(m => <AtPulse key={m.key} x={m.x} y={m.y} active={visible} />)}</div>
-            <svg viewBox={AT_VIEWBOX} aria-hidden className={AT_SVG_LAYER}>
-              <AtHubs />
-              <AtRunMarks sig={`${model.marks.map(m => `${m.key}${m.visits}${m.running}${m.errors}`).join(',')}|${lit}`} marks={model.marks} lit={lit} />
-            </svg>
-            <div aria-hidden className={AT_HTML_LAYER}>
-              {model.tokens.map(tk => (
-                <div key={tk.id} data-id={tk.id} ref={regTok} className="absolute top-0 left-0 will-change-transform" style={{ ...atBox(AT_TOK), transform: placeOf(tk) }}>
-                  <svg viewBox={`${-AT_TOK / 2} ${-AT_TOK / 2} ${AT_TOK} ${AT_TOK}`} className="block h-full w-full overflow-visible">
-                    <circle r={10} fill={tk.error ? 'var(--bad)' : AT_C(tk.line)} stroke="var(--card)" strokeWidth={2.5} />
-                    <text y={3.6} textAnchor="middle" fill="#fff" style={{ font: '700 10px var(--font)' }}>{tk.n}</text>
-                  </svg>
-                </div>))}
-            </div>
-            <svg viewBox={AT_VIEWBOX} aria-hidden className={AT_SVG_LAYER}>
-              <g style={{ font: `${13 * fs}px var(--font)` }} fill="var(--fg2)"><AtLabels fs={fs} /></g>
-            </svg>
+        <AtMapScroll narrow={narrow}>
+          <AtMapBase lit={litKey} fs={fs} regHeat={atNoHeat} />
+          <div aria-hidden className={AT_HTML_LAYER}>{!reduce && waiting.map(m => <AtPulse key={m.key} x={m.x} y={m.y} active={visible} />)}</div>
+          <svg viewBox={AT_VIEWBOX} aria-hidden className={AT_SVG_LAYER}>
+            <AtHubs />
+            <AtRunMarks sig={atSig(lit, atSigs(model.marks.map(m => atSig(m.key, m.visits, m.running, m.errors))))} marks={model.marks} lit={lit} />
+          </svg>
+          <div aria-hidden className={AT_HTML_LAYER}>
+            {model.tokens.map(tk => (
+              <div key={tk.id} data-id={tk.id} ref={toks.reg} className="absolute top-0 left-0 will-change-transform" style={{ ...atBox(AT_TOK), transform: placeOf(tk) }}>
+                <AtTokenGlyph n={tk.n} color={tk.error ? 'var(--bad)' : atColor(tk.line)} />
+              </div>))}
           </div>
+          <AtLabelLayer fs={fs} />
+        </AtMapScroll>
+      </div>
+      <span className="sr-only" aria-live="polite">{waitingN ? `${fmt.number(waitingN)} waiting for your approval` : ''}</span>
+      <AtLegend lines={Object.keys(AT_LINES).filter(k => model.lines.has(k))} extras={AT_LEGEND_RUN} />
+      <AtTraceFrame narrow={narrow} axis={<><span className="absolute top-2.5 start-0">0</span><span className="absolute top-2.5 end-0">{fmt.seconds(span0 / 1000)}</span></>}>
+        <div ref={listRef} className="relative overflow-y-auto overscroll-y-contain" style={{ height: AT_ROWS * AT_ROW_H }}>
+          {!rowCount && <span className="absolute top-3 start-0 text-xs text-[var(--fg3)]">Steps appear here as the run reports them.</span>}
+          {model.rows.map(({ span: s, stop, agent }) => {
+            const col = stop ? atColor(stop[0]) : 'var(--c-neutral)', end = s.endMs ?? latest, failed = s.status === 'error'
+            return (
+              <div key={s.id} {...atFollow(s.id, setHovered, setPin)}
+                className={cn('grid cursor-pointer items-center border-b border-[var(--line)] text-[13px] hover:bg-[color-mix(in_srgb,var(--muted)_60%,transparent)]', AT_TRACE_GRID, lit === s.id && 'bg-[color-mix(in_srgb,var(--muted)_60%,transparent)]')} style={{ height: AT_ROW_H }}>
+                <AtRowName n={agent} color={col} name={s.name} bad={failed} title={s.error} status={failed && s.error ? s.error : stop ? stop[1] : 'off the map'} />
+                <div className="relative h-3.5 overflow-x-clip">
+                  <span className="absolute top-0 h-3.5 rounded-[var(--r-sm)]" style={{ left: tx(s.startMs), width: `max(2px, ${(Math.max(0, end - s.startMs) / span0) * 100}%)`, background: failed ? 'var(--bad)' : atSegFill({ kind: s.status === 'running' ? 'wait' : 'work', sub: false }, col) }} />
+                </div>
+                <AtNums seconds={(end - s.startMs) / 1000} tokens={s.tokens ? s.tokens.input + s.tokens.output : null} usd={s.costUsd} />
+              </div>
+            )
+          })}
         </div>
-        {narrow && <ScrollEdges {...mapEdges} hint={'Swipe the map'} />}
-      </div>
-      <span className="sr-only" aria-live="polite">{waiting.length ? plural(waiting.reduce((n, m) => n + m.running, 0), 'waiting for your approval', 'waiting for your approval') : ''}</span>
-      <div className="mt-1.5 mb-3 flex flex-wrap justify-center gap-x-5 gap-y-2 text-[13px] text-[var(--fg2)] max-sm:justify-start max-sm:gap-x-4">
-        {Object.entries(AT_LINES).filter(([k]) => model.lines.has(k)).map(([k, [, c]]) => <span key={k} className="inline-flex items-center gap-2"><i className="inline-block h-[7px] w-5 rounded-[var(--r-sm)]" style={{ background: c }} />{nm(k)}</span>)}
-        <span className="inline-flex items-center gap-2"><i className="inline-block h-3.5 w-3.5 rounded-full bg-[var(--fg2)]" />{'Agent (numbered, matches the trace)'}</span>
-        <span className="inline-flex items-center gap-2"><i className="inline-block h-3.5 w-3.5 rounded-full bg-[var(--card)] shadow-[inset_0_0_0_2.5px_var(--fg2)]" />{'Stop (visits)'}</span>
-        <span className="inline-flex items-center gap-2"><i className="inline-block h-3.5 w-3.5 rounded-full bg-[var(--card)] shadow-[inset_0_0_0_2.5px_var(--bad)]" />{'Failed here'}</span>
-        <span className="inline-flex items-center gap-2"><i className="inline-block h-3.5 w-3.5 rounded-full shadow-[inset_0_0_0_3px_var(--warn)]" />{'Waiting for approval'}</span>
-      </div>
-      <div className="relative border-t border-[var(--line)]">
-        <div ref={traceScrollRef} className="overflow-x-auto overscroll-x-contain [contain:inline-size]" tabIndex={narrow ? 0 : undefined} aria-label={narrow ? 'Trace table, scrolls sideways' : undefined}>
-          <div className="min-w-[640px]">
-            <div className={cn('grid h-9 items-center border-b border-[var(--line)] text-xs text-[var(--fg3)]', AT_RUN_COLS)}>
-              <span className="sticky start-0 z-[1] bg-[var(--card)] text-sm font-semibold text-[var(--fg)]">{'Trace'}</span>
-              <span className="relative h-full font-[family-name:var(--mono)] text-[11px]"><span className="absolute top-2.5 start-0">0</span><span className="absolute top-2.5 end-0">{secs(span0)}</span></span>
-              <span className="text-end font-[family-name:var(--mono)]">{'time'}</span><span className="text-end font-[family-name:var(--mono)]">{'tokens'}</span><span className="text-end font-[family-name:var(--mono)]">{'USD'}</span>
-            </div>
-            <div ref={listRef} className="relative overflow-y-auto overscroll-y-contain" style={{ height: AT_ROWS * AT_ROW_H }} onPointerLeave={() => setHovered(null)}>
-              {!rowCount && <span className="absolute top-3 start-0 text-xs text-[var(--fg3)]">{'Steps appear here as the run reports them.'}</span>}
-              {model.rows.map(({ span: s, stop, agent }) => {
-                const col = stop ? AT_C(stop[0]) : 'var(--c-neutral)', end = s.endMs ?? latest, tok = s.tokens ? s.tokens.input + s.tokens.output : 0
-                return (
-                  <div key={s.id} onPointerEnter={e => { if (e.pointerType === 'mouse') setHovered(s.id) }} onClick={() => setPin(p => p === s.id ? null : s.id)}
-                    className={cn('grid cursor-pointer items-center border-b border-[var(--line)] text-[13px] hover:bg-[color-mix(in_srgb,var(--muted)_60%,transparent)]', AT_RUN_COLS, lit === s.id && 'bg-[color-mix(in_srgb,var(--muted)_60%,transparent)]')} style={{ height: AT_ROW_H }}>
-                    <div className="sticky start-0 z-[1] flex min-w-0 items-center gap-2 bg-[var(--card)] whitespace-nowrap max-sm:shadow-[6px_0_6px_-6px_rgba(0,0,0,.25)]">
-                      <span className={AT_JOB_DOT} style={{ background: `color-mix(in srgb, ${col} 70%, #000)` }}>{agent}</span>
-                      <span className={cn('max-w-[58%] flex-none truncate', s.status === 'error' && 'text-[var(--bad)]')}>{s.name}</span>
-                      <span className={cn('min-w-0 flex-1 truncate text-[11px]', s.status === 'error' ? 'text-[var(--bad)]' : 'text-[var(--fg3)]')} title={s.error}>{s.status === 'error' && s.error ? s.error : stop ? nm(stop[1]) : 'off the map'}</span>
-                    </div>
-                    <div className="relative h-3.5 overflow-x-clip">
-                      <span className="absolute top-0 h-3.5 rounded-[var(--r-sm)]" style={{ left: tx(s.startMs), width: `max(2px, ${(Math.max(0, end - s.startMs) / span0) * 100}%)`, background: s.status === 'error' ? 'var(--bad)' : atSegFill({ kind: s.status === 'running' ? 'wait' : 'work', sub: false }, col) }} />
-                    </div>
-                    <span className="text-end font-[family-name:var(--mono)] text-xs whitespace-pre">{atPad(secs(end - s.startMs), 6)}</span>
-                    <span className="text-end font-[family-name:var(--mono)] text-xs whitespace-pre">{tok ? atPad(fmt.compact(tok), 6) : atPad('—', 6)}</span>
-                    <span className="text-end font-[family-name:var(--mono)] text-xs whitespace-pre">{s.costUsd != null ? atPad(fmt.usd(s.costUsd), 8) : atPad('—', 8)}</span>
-                  </div>
-                )
-              })}
-            </div>
-          </div>
-        </div>
-        {narrow && <ScrollEdges left={false} right={traceEdges.right} touched={traceEdges.touched} hint={'Swipe the trace'} />}
-      </div>
+      </AtTraceFrame>
     </div>
   )
 }
-/** The run view paints no congestion: its heat paths stay unstyled. */
-const atRunNoHeat = () => {}

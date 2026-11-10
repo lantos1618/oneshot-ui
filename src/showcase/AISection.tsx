@@ -6,7 +6,9 @@ import { AI_RICH_RENDERERS, AgentComposer, Conversation, Message, MessageActions
 import { type AiChunk, type AiMessage, type AiToolPart, aiMessageText, useAiChat } from '../lib/aistream'
 import { Chart } from '../lib/charts'
 import { CodeBlock } from '../lib/code'
-import { AGENT_WORKFLOWS, AGENT_WORKFLOW_ORDER, AI_CANVAS_SAMPLE, AGENT_RUN_FIXTURES, AgentRunLanes, type AgentRunFixture } from '../examples'
+import { AGENT_WORKFLOWS, AGENT_WORKFLOW_ORDER, AGENT_RUN_FIXTURES, AgentRunLanes, type AgentRunFixture } from '../examples'
+import { canvasDemoProps } from '../examples/canvas-demo'
+import { TransitSimMap } from '../examples/transit-sim'
 import { Button, Icon, SegmentedControl, TabsContent, TabsList, TabsRoot, TabsTrigger } from '../lib'
 import { replayRun, useAgentRun, type AgentRunSource } from '../lib/agentrun'
 import { TraceWaterfall } from '../lib/trace'
@@ -296,6 +298,12 @@ function useLiveRunHeight(key: string) {
 }
 
 const LIVE_RUN_SPEED = 2
+/** AICanvas on the scripted demo model (one per mount, so its suggestions start over). */
+function CanvasDemo() {
+  const props = useMemo(() => canvasDemoProps(), [])
+  return <AICanvas {...props} />
+}
+
 /** One run model, three recorded sources, three views; Replay as stream feeds the run back through useAgentRun. */
 function LiveAgentRunDemo() {
   const [srcKey, setSrcKey] = useState<AgentRunFixture['key']>('otel')
@@ -399,10 +407,10 @@ export function AISection() {
         ]} />
       </Spec>
       <Spec title="AI canvas" desc="Chat on the left, a living document on the right (stacked on phones). Edits stream in with changes highlighted. Click or tap a code line to ask about it." span={3}>
-        <AICanvas {...AI_CANVAS_SAMPLE} />
+        <CanvasDemo />
       </Spec>
       <Spec title="Agent transit map" desc="A live state machine. The Indexing loop and the Intake endpoint fire events into a queue, and jobs start as slots free up. Endpoints emit follow-up triggers: Deploy starts a smoke test, Ledger starts an audit, and a failed smoke test starts a regression fix. Human and Risk stations wait for your approval (human in the loop). Hover or tap a trace row to follow a job." span={3}>
-        <AgentTransitMap machines={AGENT_WORKFLOWS} order={AGENT_WORKFLOW_ORDER} />
+        <TransitSimMap machines={AGENT_WORKFLOWS} order={AGENT_WORKFLOW_ORDER} />
       </Spec>
       <Spec title="Live agent run" desc="One run model (AgentRun) from three real sources: an OpenTelemetry GenAI trace export (OTLP/JSON), a Vercel AI SDK generateText result and LangGraph astream_events. Pick a source and a view: the waterfall, the transit map or lanes. “Replay as stream” feeds the recorded run back through useAgentRun at 2×, so every view grows live as spans start and end." span={3}
         notes={{ good: 'Showing a real run from the tracing or SDK you already have, without glue code; watching a run live; comparing the same run as a timeline, a map and a step graph.', breaks: 'AI SDK results carry no per-tool timings (they are inferred; pass stepEnds or use its telemetry spans); LangGraph events have no times unless your server stamps them; the transit map has fixed lines, so a run with many tools piles onto a few stations.' }}>
