@@ -281,7 +281,7 @@ function Toast({ t, lift, top, align, paused, onSize, onClose: closeById, announ
   )
 }
 
-const ALERT_ICON: Record<Tone, IconName> = { neutral: 'info', accent: 'info', ok: 'check', warn: 'alert', bad: 'alert' }
+const ALERT_ICON: Record<Tone, IconName> = { neutral: 'info', accent: 'info', ok: 'check', warn: 'alert', bad: 'alert', danger: 'alert' }
 /** Tinted message: icon + bold title + text. */
 export function Alert({ tone = 'accent', title, children, action, className }:
   { tone?: Tone; title: ReactNode; children?: ReactNode; action?: ReactNode; className?: string }) {

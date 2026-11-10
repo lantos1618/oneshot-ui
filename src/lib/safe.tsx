@@ -1,15 +1,17 @@
 /** Security helpers for model or user supplied values: safeUrl, safeMediaUrl, cssUrl, safeCssValue, safeColor. Pure; part of @lyndon/ui/core. */
 
-/*
- * Use these wherever a URL, colour or CSS value comes from props, data, storage or model output. */
+/* Use these wherever a URL, colour or CSS value comes from props, data, storage or model output. */
 
 const SAFE_URL_SCHEMES = ['http:', 'https:', 'mailto:', 'tel:']
+
+/** The schemes a link written in user text (markdown, the rich text editor) may use; relative URLs are always allowed. */
+export const TEXT_LINK_SCHEMES: readonly string[] = ['https:', 'http:', 'mailto:', 'tel:']
 
 /**
  * Returns `url` when it's relative (`/x`, `x`, `?q`, `#id`) or uses an allowed scheme (default http, https, mailto, tel);
  * otherwise `fallback` ('#'). Blocks `javascript:`, `data:`, `vbscript:`, `file:` and OS protocol handlers.
  */
-export function safeUrl(url: string | null | undefined, { allow = SAFE_URL_SCHEMES, fallback = '#' }: { allow?: string[]; fallback?: string } = {}): string {
+export function safeUrl(url: string | null | undefined, { allow = SAFE_URL_SCHEMES, fallback = '#' }: { allow?: readonly string[]; fallback?: string } = {}): string {
   if (url == null) return fallback
   const u = String(url).trim()
   if (!u) return fallback

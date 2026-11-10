@@ -1,16 +1,22 @@
 /** Slot / asChild: merge props onto a single child element, compose refs. Part of @lyndon/ui/core. */
 import { type ButtonHTMLAttributes, type HTMLAttributes, type ReactNode, cloneElement as slotClone, type ReactElement as SlotElement, Fragment as SlotFragment, isValidElement as slotIsElement, type Ref as SlotRef, type RefCallback as SlotRefCallback, useMemo } from 'react'
-import { cn } from './helpers'
+import { cn, joinIds } from './helpers'
 
 /** `asChild` for parts that support it: render your element (merged with the part's props) instead of the part's own. */
 export type AsChildProps = { /** render the single child element instead of the default one, merging props onto it */ asChild?: boolean }
+
+/** Point a ref (callback or object) at `node`. */
+export function setRef<T>(ref: SlotRef<T> | undefined | null, node: T | null): void {
+  if (typeof ref === 'function') ref(node)
+  else if (ref) (ref as { current: T | null }).current = node
+}
 
 /** One ref callback that feeds every given ref (callback or object). Returns a React 19 cleanup that detaches them all. */
 export function composeRefs<T>(...refs: (SlotRef<T> | undefined | null)[]): SlotRefCallback<T> {
   return node => {
     const cleanups = refs.map(r => {
       if (typeof r === 'function') { const c = r(node); return typeof c === 'function' ? c : () => r(null) }
-      if (r) { (r as { current: T | null }).current = node; return () => { (r as { current: T | null }).current = null } }
+      if (r) { setRef(r, node); return () => setRef(r, null) }
       return undefined
     })
     return () => cleanups.forEach(c => c?.())
@@ -29,7 +35,7 @@ const slotChain: SlotMerge = (s, c) => (...args: unknown[]) => {
   if (!(args[0] as { defaultPrevented?: boolean } | undefined)?.defaultPrevented) (s as (...a: unknown[]) => unknown)(...args)
   return r
 }
-const slotIds: SlotMerge = (s, c) => cn(c as string, s as string)
+const slotIds: SlotMerge = (s, c) => joinIds(c as string, s as string)
 /** How a prop set on both the part and the child merges; any other prop: the child wins. */
 const SLOT_MERGE: Record<string, SlotMerge> = {
   className: (s, c) => cn(s as string, c as string), style: (s, c) => ({ ...(s as object), ...(c as object) }),

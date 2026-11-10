@@ -11,8 +11,6 @@ export const dgSafeId = (s: string) => s.replace(/[^a-zA-Z0-9_-]/g, '')
 /** Dotted canvas background used by the statecharts and the process flow. */
 export const DG_DOTS = 'bg-[var(--bg)] [background-image:radial-gradient(circle,var(--line2)_1px,transparent_1.2px)] [background-size:18px_18px]'
 
-/** Strings shared by the diagram modules. */
-
 /**
  * Expand / collapse toggle for a group row (Gantt phases, trace spans): a chevron that turns, with a 36px touch hit area.
  * Closed, it points right.
@@ -56,6 +54,24 @@ export function DgDot({ path, ms, ease, onDone }: { path: () => SVGPathElement |
   }, { coarseFps: 30 })
   return <circle ref={ref} r={5.5} fill="var(--accent)" stroke="var(--card)" strokeWidth={1.5} opacity={0} />
 }
+
+/**
+ * Open-chevron arrowheads for diagram edges, one `<marker>` per colour: render inside `<defs>`, then point an edge at
+ * `url(#${uid}${key})`. `size` is the marker's width/height in stroke units; `refX` where the tip meets the line end.
+ */
+export function DgArrowMarkers({ uid, colors, size = 6, refX = 8 }: { uid: string; colors: Record<string, string>; size?: number; refX?: number }) {
+  return <>{Object.entries(colors).map(([k, c]) => (
+    <marker key={k} id={`${uid}${k}`} viewBox="0 0 10 10" refX={refX} refY="5" markerWidth={size} markerHeight={size} orient="auto">
+      <path d="M1 1L9 5L1 9" fill="none" stroke={c} strokeWidth="1.7" strokeLinecap="round" strokeLinejoin="round" />
+    </marker>
+  ))}</>
+}
+
+/** The SVG path of a cubic Bézier given as [x0,y0,x1,y1,x2,y2,x3,y3] (the shape dgBez samples). */
+export const dgCubicPath = (P: readonly number[]) => `M${P[0]},${P[1]} C${P[2]},${P[3]} ${P[4]},${P[5]} ${P[6]},${P[7]}`
+
+/** An edge or node label drawn over lines: a background-coloured stroke behind the glyphs (set the fill yourself). */
+export const DG_HALO_LABEL = 'stroke-[var(--bg)] [font:500_11px_var(--font)] [paint-order:stroke] [stroke-linejoin:round] [stroke-width:4px]'
 
 /** A point on a cubic Bézier [x0,y0,x1,y1,x2,y2,x3,y3] at t. */
 export const dgBez = (p: number[], t: number) => { const u = 1 - t; return [0, 1].map(k => u * u * u * p[k] + 3 * u * u * t * p[2 + k] + 3 * u * t * t * p[4 + k] + t * t * t * p[6 + k]) }

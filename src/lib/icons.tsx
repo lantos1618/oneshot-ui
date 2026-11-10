@@ -68,14 +68,25 @@ export const ICONS = {
 
 export type IconName = keyof typeof ICONS
 
+/** The icon size scale (px): xs 11, sm 13, md 15, lg 16 (the default, and IconButton's `icon` size). */
+export const ICON_SIZE = { xs: 11, sm: 13, md: 15, lg: 16 } as const
+
 /**
  * Add icon paths page-wide (24×24 viewBox, stroke `d` strings): `registerIcons({ logo: 'M4 4h16v16H4z' })`, then
- * `<Icon name={'logo' as IconName} />` or `<IconButton icon="logo" label="Home" />`. Existing names are kept.
+ * `<Icon name="logo" />` or `<IconButton icon="logo" label="Home" />`. Existing names are kept.
  */
 export function registerIcons(paths: Record<string, string>) {
   for (const k of Object.keys(paths)) if (!(k in iconRegistry) && typeof paths[k] === 'string') iconRegistry[k] = paths[k]
 }
 registerIcons(ICONS)
+
+const iconWarned = new Set<string>()
+/** In development, say once per name that an icon is unknown (it renders as an empty box). */
+function iconWarn(name: string) {
+  if (iconWarned.has(name) || (globalThis as { process?: { env?: { NODE_ENV?: string } } }).process?.env?.NODE_ENV === 'production') return
+  iconWarned.add(name)
+  console.warn(`@lyndon/ui: unknown icon "${name}". Use a name from ICONS or add it with registerIcons().`)
+}
 
 /** The path of an icon by name (ICONS, then the page-wide registry), or undefined. */
 export const iconPath = (name: string): string | undefined => (ICONS as Record<string, string | undefined>)[name] ?? iconRegistry[name]
@@ -84,12 +95,14 @@ export const iconPath = (name: string): string | undefined => (ICONS as Record<s
  * An icon from ICONS (24×24 stroke paths). `filled` draws it solid in the text colour (play, pause, star); `fill` paints the
  * inside of a stroked one. Decorative: always aria-hidden, so label the control around it.
  */
-export function Icon({ name, size = 16, strokeWidth = 2, className, fill = 'none', filled, style }:
-  { name: IconName; size?: number; strokeWidth?: number; className?: string; fill?: string; filled?: boolean; style?: CSSProperties }) {
+export function Icon({ name, size = ICON_SIZE.lg, strokeWidth = 2, className, fill = 'none', filled, style }:
+  { /** an ICONS name, or one added with registerIcons */ name: IconName | (string & {}); size?: number; strokeWidth?: number; className?: string; fill?: string; filled?: boolean; style?: CSSProperties }) {
+  const d = iconPath(name)
+  if (d === undefined) iconWarn(name)
   return (
     <svg width={size} height={size} viewBox="0 0 24 24" fill={filled ? 'currentColor' : fill} stroke={filled ? 'none' : 'currentColor'} strokeWidth={strokeWidth}
       strokeLinecap="round" strokeLinejoin="round" className={cn('flex-none', className)} style={style} aria-hidden="true">
-      <path d={iconPath(name)} />
+      <path d={d} />
     </svg>
   )
 }

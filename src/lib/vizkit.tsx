@@ -21,11 +21,14 @@ export function svgWedge(cx: number, cy: number, r: number, a0: number, a1: numb
  * Mid-grey series colour for "everything else" / baseline series (last year's bars, totals, other). It reads on cards in
  * light and dark, where `--fg`/`--c1` would glare white. Falls back to the muted text colour on themes without the token.
  */
-export const CHART_NEUTRAL = 'var(--c-neutral, var(--muted-fg, var(--fg3)))'
+export const CHART_NEUTRAL = 'var(--c-neutral, var(--fg3))'
 /** Series colours, in order. Point these at your brand tokens. */
 export const PALETTE = ['var(--c2)', 'var(--c3)', 'var(--c4)', CHART_NEUTRAL, 'var(--bad)', 'var(--warn)']
 /** The colour of series `i`: its own `custom` colour, else the palette's, wrapping around. */
 export const seriesColor = (i: number, custom?: string) => custom ?? PALETTE[i % PALETTE.length]
+
+/** [mantissa from, nice step]: a raw step's mantissa (1–10) rounds to 1, 2, 5 or 10. */
+const NICE_STEPS: readonly [number, number][] = [[7.5, 10], [3.5, 5], [1.5, 2]]
 
 /**
  * A tick step that puts about `max` ticks (at most `max` with `steps`) on `span`: the smallest of `steps` that fits
@@ -34,7 +37,7 @@ export const seriesColor = (i: number, custom?: string) => custom ?? PALETTE[i %
 export function niceStep(span: number, max: number, steps?: readonly number[]): number {
   if (steps) { const last = steps[steps.length - 1]; return steps.find(s => span / s <= max) ?? Math.ceil(span / max / last) * last }
   const raw = (span || 1) / max, mag = 10 ** Math.floor(Math.log10(raw)), f = raw / mag
-  return (f >= 7.5 ? 10 : f >= 3.5 ? 5 : f >= 1.5 ? 2 : 1) * mag
+  return (NICE_STEPS.find(([from]) => f >= from)?.[1] ?? 1) * mag
 }
 
 /** Round axis ticks: niceTicks(0, 87) → [0, 20, 40, 60, 80, 100] */

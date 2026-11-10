@@ -23,6 +23,12 @@ export function uiShared<T>(name: string, init: () => T): T {
   return store.get(key) as T
 }
 
+/** Marks an element that stays usable while a modal is open (the toast region): the modal leaves it out of `inert`. */
+export const MODAL_KEEP_ATTR = 'data-modal-keep'
+
+/** Names the hidden validation input of a custom control (its field name), so a Form maps native validity messages to that field. */
+export const UI_FIELD_ATTR = 'data-ui-field'
+
 type UIHost = { key: string; Component: ComponentType }
 const uiHostState = uiShared('hosts', () => ({ hosts: [] as UIHost[], owners: [] as object[], listeners: new Set<() => void>() }))
 const uiHostNone: UIHost[] = []

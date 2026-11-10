@@ -1,4 +1,5 @@
-/** Formatting: one fixed English (en-GB) Intl formatter set (`fmt`), cached Intl constructors, date helpers, and the `plural` / `rangeStr` text helpers. Part of @lyndon/ui/core. */
+/** Formatting and collation: one fixed English (en-GB) Intl formatter set (`fmt`), cached Intl constructors, date helpers, the `plural` / `rangeStr` text helpers and the table sort model. Part of @lyndon/ui/core. */
+import { extent } from './helpers'
 
 /** The locale every formatter uses. */
 export const LOCALE = 'en-GB'
@@ -9,11 +10,20 @@ export type WeekDay = 0 | 1 | 2 | 3 | 4 | 5 | 6
 /** Intl hour cycle: h12/h11 show am/pm, h23/h24 don't. */
 export type HourCycle = 'h11' | 'h12' | 'h23' | 'h24'
 
-/** A value made once per `key` and kept for the page's life (Intl formatters, parsed date templates): building them is the slow part. */
-const memoCache = new Map<string, unknown>()
+const memoAll = new Map<string, unknown>()
+/**
+ * A value made once per `key` and kept for the page's life (Intl formatters, parsed date templates): building them is
+ * the slow part. Prefer memoCache, which gives each caller its own typed map.
+ */
 export function memoOnce<T>(key: string, make: () => T): T {
-  if (!memoCache.has(key)) memoCache.set(key, make())
-  return memoCache.get(key) as T
+  if (!memoAll.has(key)) memoAll.set(key, make())
+  return memoAll.get(key) as T
+}
+
+/** A typed cache of its own: `const tpl = memoCache<Template>(); tpl(key, () => parse(key))` builds each value once. */
+export function memoCache<T>(): (key: string, make: () => T) => T {
+  const m = new Map<string, T>()
+  return (key, make) => { if (!m.has(key)) m.set(key, make()); return m.get(key) as T }
 }
 const intlCached = <T,>(kind: string, locale: string, opts: object | undefined, make: () => T) => memoOnce(kind + '|' + locale + '|' + (opts ? JSON.stringify(opts) : ''), make)
 
@@ -23,12 +33,18 @@ export const numberFormat = (locale: string, o?: Intl.NumberFormatOptions) => in
 /** A cached Intl.DateTimeFormat. */
 export const dateFormat = (locale: string, o?: Intl.DateTimeFormatOptions) => intlCached('d', locale, o, () => new Intl.DateTimeFormat(locale, o))
 
+/** A cached Intl.Collator for LOCALE (numeric, so "item 10" sorts after "item 9"). */
+export const collator = (o: Intl.CollatorOptions = { numeric: true }) => intlCached('c', LOCALE, o, () => new Intl.Collator(LOCALE, o))
+
+/** The default date shape: "8 Nov 2026". */
+export const DATE_MEDIUM: Intl.DateTimeFormatOptions = Object.freeze({ day: 'numeric', month: 'short', year: 'numeric' })
+
 const nf = (o?: Intl.NumberFormatOptions) => numberFormat(LOCALE, o)
 const fixed = (n: number, digits: number) => nf({ minimumFractionDigits: digits, maximumFractionDigits: digits, useGrouping: false }).format(n)
 const pad2 = (n: number) => nf({ minimumIntegerDigits: 2, useGrouping: false }).format(n)
-const toDate = (d: Date | number) => (typeof d === 'number' ? new Date(d) : d)
-const df = (d: Date | number | null | undefined, o: Intl.DateTimeFormatOptions) =>
-  d === null || d === undefined || (typeof d !== 'number' && isNaN(d.getTime())) ? '' : dateFormat(LOCALE, o).format(toDate(d))
+/** Milliseconds of a date or timestamp; NaN for anything that isn't a valid one. */
+const msOf = (d: unknown) => (d instanceof Date ? d.getTime() : typeof d === 'number' ? d : NaN)
+const df = (d: Date | number | null | undefined, o: Intl.DateTimeFormatOptions) => Number.isFinite(msOf(d)) ? dateFormat(LOCALE, o).format(msOf(d)) : ''
 const rtf = () => intlCached('rt', LOCALE, undefined, () => new Intl.RelativeTimeFormat(LOCALE, { numeric: 'auto' }))
 /** [seconds per unit up to, unit, seconds per unit] for `fmt.relative`. */
 const RELATIVE_UNITS: [number, Intl.RelativeTimeFormatUnit, number][] = [
@@ -60,18 +76,22 @@ export const fmt = {
   },
   /** Plain number with Intl options. */
   number: (n: number, o?: Intl.NumberFormatOptions) => nf(o).format(n),
+  /** Exactly `digits` decimals, grouped: (1234.5, 2) → "1,234.50". */
+  fixed: (n: number, digits: number) => nf({ minimumFractionDigits: digits, maximumFractionDigits: digits }).format(n),
+  /** Seconds with `digits` decimals and no space: 3.24 → "3.2s", (4, 0) → "4s". Empty for non-finite input. */
+  seconds: (s: number, digits = 1) => Number.isFinite(s) ? `${fmt.fixed(s, digits)}s` : '',
   /** A fraction as a percentage: 0.125 → "12.5%". */
   percent: (fraction: number, maxDigits = 1) => nf({ style: 'percent', maximumFractionDigits: maxDigits }).format(fraction),
   /** A date, by default "8 Nov 2026". Empty string for null. */
-  date: (d?: Date | number | null, o: Intl.DateTimeFormatOptions = { day: 'numeric', month: 'short', year: 'numeric' }) => df(d, o),
+  date: (d?: Date | number | null, o: Intl.DateTimeFormatOptions = DATE_MEDIUM) => df(d, o),
   /** A time of day: "14:05". */
   time: (d?: Date | number | null, o: Intl.DateTimeFormatOptions = { hour: 'numeric', minute: '2-digit' }) => df(d, o),
   /** Date and time: "8 Nov 2026, 14:05". */
   dateTime: (d?: Date | number | null, o: Intl.DateTimeFormatOptions = { day: 'numeric', month: 'short', year: 'numeric', hour: 'numeric', minute: '2-digit' }) => df(d, o),
-  /** "3 days ago", "in 2 hours", "yesterday": the unit is picked from the distance to `now`. */
+  /** "3 days ago", "in 2 hours", "yesterday": the unit is picked from the distance to `now`. Empty for an invalid date. */
   relative: (when: Date | number, now: Date | number = Date.now()) => {
-    const s = (+toDate(when) - +toDate(now)) / 1000, [, unit, per] = RELATIVE_UNITS.find(([upTo]) => Math.abs(s) < upTo)!
-    return rtf().format(Math.round(s / per) || 0, unit)
+    const s = (msOf(when) - msOf(now)) / 1000, row = Number.isFinite(s) ? RELATIVE_UNITS.find(([upTo]) => Math.abs(s) < upTo) : undefined
+    return row ? rtf().format(Math.round(s / row[2]) || 0, row[1]) : ''
   },
   /** Intl.RelativeTimeFormat with numeric 'auto': (-1, 'day') → "yesterday". */
   relativeTime: (value: number, unit: Intl.RelativeTimeFormatUnit) => rtf().format(value, unit),
@@ -105,16 +125,49 @@ export const sameDay = (a?: Date | null, b?: Date | null) => !!a && !!b && a.get
 /** Stable key for a day, "2026-11-08", for maps and React keys. */
 export const dayKey = (d: Date) => `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`
 
-/** Format a date: fmtDate(d) → "8 Nov 2026"; pass Intl options for other shapes. Empty string for null. */
-export const fmtDate = (d?: Date | null, opts: Intl.DateTimeFormatOptions = { day: 'numeric', month: 'short', year: 'numeric' }) => fmt.date(d, opts)
+/** @deprecated Use `fmt.date`. */
+export const fmtDate = (d?: Date | number | null, opts: Intl.DateTimeFormatOptions = DATE_MEDIUM) => fmt.date(d, opts)
 
-/** "1 file" / "3 files": the count and the word for it. `plural(n, 'person', 'people')`. */
-export const plural = (n: number, one: string, many = one + 's') => `${fmt.number(n)} ${n === 1 ? one : many}`
+/** @deprecated Use `fmt.date`. */
+export const formatDate = fmtDate
 
-/** "a to b" for the extent of `vals` (NaN skipped), "a" when they're all equal, "no values" when there are none. */
+/**
+ * "1 file" / "3 files": the count and the word for it. `plural(n, 'person', 'people')`; `{ zero: 'No results' }` replaces
+ * the whole phrase when n is 0.
+ */
+export const plural = (n: number, one: string, many = one + 's', { zero }: { zero?: string } = {}) =>
+  n === 0 && zero !== undefined ? zero : `${fmt.number(n)} ${n === 1 ? one : many}`
+
+/** "a to b" for the extent of `vals` (NaN skipped), "a" when they're all equal, "no values" when there are none. Any length. */
 export function rangeStr(vals: readonly number[], f: (n: number) => string = fmt.number): string {
-  const ok = vals.filter(v => Number.isFinite(v))
-  if (!ok.length) return 'no values'
-  const lo = Math.min(...ok), hi = Math.max(...ok)
+  const [lo, hi] = extent(vals.filter(v => Number.isFinite(v)))
+  if (lo > hi) return 'no values'
   return lo === hi ? f(lo) : `${f(lo)} to ${f(hi)}`
 }
+
+/** A table's sort: the column key and 1 (ascending) or -1 (descending). */
+export type TableSort<K extends string = string> = { key: K; dir: 1 | -1 }
+
+const sortEmpty = (v: unknown) => v === null || v === undefined || v === '' || (typeof v === 'number' && Number.isNaN(v)) || (v instanceof Date && Number.isNaN(v.getTime()))
+
+/**
+ * Compare two cell values for sorting in direction `dir`: numbers and Dates by value, booleans false first, everything
+ * else as text with `coll` (numeric-aware). Empty cells (null, undefined, '', NaN, invalid Date) sort last in both directions.
+ */
+export function compareCells(a: unknown, b: unknown, dir: 1 | -1 = 1, coll: Intl.Collator = collator()): number {
+  const ea = sortEmpty(a), eb = sortEmpty(b)
+  if (ea || eb) return ea === eb ? 0 : ea ? 1 : -1
+  const num = (v: unknown) => typeof v === 'number' || typeof v === 'bigint' || typeof v === 'boolean' || v instanceof Date
+  const c = num(a) && num(b) ? Math.sign(Number(a) - Number(b)) : coll.compare(String(a), String(b))
+  return c * dir
+}
+
+/** The sort after a click on `key`'s header: ascending first, then flipping; with `clearable`, a third click clears it. */
+export function nextSort<K extends string>(sort: TableSort<K> | null | undefined, key: K, { clearable = false }: { clearable?: boolean } = {}): TableSort<K> | null {
+  if (sort?.key !== key) return { key, dir: 1 }
+  return clearable && sort.dir === -1 ? null : { key, dir: sort.dir === 1 ? -1 : 1 }
+}
+
+/** The `aria-sort` of `key`'s header: 'ascending' / 'descending' when the table is sorted by it, otherwise undefined. */
+export const ariaSort = (sort: TableSort | null | undefined, key: string): 'ascending' | 'descending' | undefined =>
+  sort?.key === key ? (sort.dir === 1 ? 'ascending' : 'descending') : undefined

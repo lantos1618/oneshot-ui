@@ -1,6 +1,6 @@
 import { useEffect, useId, useLayoutEffect, useMemo, useRef, useState, useSyncExternalStore, type ReactNode, type Ref, type KeyboardEvent as RKeyboardEvent } from 'react'
 import { AnimatePresence, motion } from 'motion/react'
-import { FormFieldContext, LOCALE, type FormControlProps, formDate, formDisabledClass, formReadOnlyClass, useFormControl, Badge, Button, type HourCycle, type WeekDay, dateFormat, inputClass, numberFormat, addDays, addMonths, cn, fmtDate, isTouch, menuItemClass, sameDay, spring, startOfDay, useControllable, useDisclosure, usePointerDrag, useListbox, plural, composeRefs, memoOnce } from './core'
+import { FormFieldContext, LOCALE, type FormControlProps, formDate, formDisabledClass, formReadOnlyClass, useFormControl, Badge, Button, type HourCycle, type WeekDay, dateFormat, inputClass, numberFormat, addDays, addMonths, cn, isTouch, menuItemClass, sameDay, spring, startOfDay, useControllable, useDisclosure, usePointerDrag, useListbox, plural, composeRefs, memoOnce } from './core'
 import { play } from './motion'
 import { FloatingPanel, Popover, PopoverContent, usePopover } from './overlay'
 import { formsScrollIntoList, formsTriggerClass } from './formkit'
@@ -17,8 +17,6 @@ import { Combobox, OptionList } from './select'
 //   MonthPicker "2026-11" · YearPicker "2026" · TimeZonePicker "Europe/Zurich"
 // Formats are en-GB with weeks starting on Monday; `hourCycle` and `timeZone` props set the clock and zone.
 
-/** Format a date ("8 Nov 2026"); same as core `fmtDate`. */
-export const formatDate = (d?: Date | null, opts?: Intl.DateTimeFormatOptions) => fmtDate(d, opts)
 
 /** A date range [start, end]; either side may be null while it is being picked. */
 export type DateRange = [Date | null, Date | null]

@@ -1,9 +1,9 @@
-/** Primitives: surface classes, Button, IconButton, Spinner, Badge, StatusIcon, Chip, Kbd, Card, Avatar, AnimatedNumber, ScrollEdges, sparklines. Part of @lyndon/ui/core. */
+/** Primitives: surface, layer, focus and tone classes, Button, IconButton, Spinner, Badge, StatusIcon, run statuses, Chip, Kbd, Card, Avatar, Chevron, AnimatedNumber, ScrollEdges, sparklines. Part of @lyndon/ui/core. */
 import { type ButtonHTMLAttributes, type CSSProperties, type HTMLAttributes, type ReactNode, cloneElement as slotClone, type ReactElement as SlotElement, useMemo, useRef, useState } from 'react'
 import { AnimatePresence, motion, useInView } from 'motion/react'
-import { cn, maxOf, minOf, spring, variants } from './helpers'
+import { EASE_OUT_CSS, MOTION, cn, extent, variants } from './helpers'
 import { useWidth } from './hooks'
-import { Icon, type IconName, isIconName } from './icons'
+import { ICON_SIZE, Icon, type IconName, isIconName } from './icons'
 import { LOCALE, fmt, numberFormat, plural } from './locale'
 import { safeColor, safeMediaUrl } from './safe'
 import { Slot, slotOnlyChild } from './slot'
@@ -15,19 +15,19 @@ const SCROLL_FADE = {
 
 /**
  * Edge fades for a horizontal scroller, plus (on touch screens, until the first scroll) a small "swipe for
- * more" pill on the end side. Render it as a sibling of the scroller inside a `relative`
- * wrapper; feed it `useScrollEdges`. `hint` defaults to the locale's "Swipe for more"; pass `null` to hide it.
+ * more" pill on the right. Render it as a sibling of the scroller inside a `relative`
+ * wrapper; feed it `useScrollEdges`. `hint` defaults to "Swipe for more"; pass `null` to hide it.
  */
 export function ScrollEdges({ left, right, touched, hint, fade = 'card', at = 'bottom', className }:
   { left: boolean; right: boolean; touched?: boolean; hint?: ReactNode; fade?: keyof typeof SCROLL_FADE; /** where the hint pill sits */ at?: 'top' | 'bottom'; className?: string }) {
   const [from, toR, toL] = SCROLL_FADE[fade]
-  const more = right, label = hint === undefined ? 'Swipe for more' : hint
+  const label = hint === undefined ? 'Swipe for more' : hint
   return (
     <>
       <span aria-hidden className={cn('pointer-events-none absolute inset-y-0 left-0 z-[6] w-5 to-transparent transition-opacity duration-200', from, toR, left ? 'opacity-100' : 'opacity-0', className)} />
       <span aria-hidden className={cn('pointer-events-none absolute inset-y-0 right-0 z-[6] w-5 to-transparent transition-opacity duration-200', from, toL, right ? 'opacity-100' : 'opacity-0', className)} />
       <AnimatePresence>
-        {more && !touched && label && (
+        {right && !touched && label && (
           <motion.span key="hint" aria-hidden initial={{ opacity: 0, x: 6 }} animate={{ opacity: 1, x: 0 }} exit={{ opacity: 0, transition: { duration: 0.15 } }}
             className={cn('pointer-events-none absolute end-2 z-[7] hidden items-center gap-1 rounded-full bg-[color-mix(in_srgb,var(--fg)_86%,transparent)] px-2.5 py-1 text-[11px] font-medium text-[var(--card)] shadow-[var(--shadow)] [@media(pointer:coarse)]:flex', at === 'top' ? 'top-2' : 'bottom-2')}>
             {label}<Icon name="chevronRight" size={12} strokeWidth={2.6} />
@@ -48,7 +48,34 @@ export const surface = {
   muted: 'rounded-[var(--r-md)] bg-[var(--muted)]',
   floating: 'rounded-[var(--r-lg)] border border-[var(--line)] bg-[var(--card)] shadow-[var(--shadow)]',
   dashed: 'rounded-[var(--r-md)] border-[1.5px] border-dashed border-[var(--line2)]',
+  /** small floating label: tooltips, value bubbles */
+  tip: 'rounded-[var(--r-md)] border border-[var(--line)] bg-[var(--card)] px-2 py-1 text-xs shadow-[var(--shadow)]',
 } as const
+
+/**
+ * The stacking order, lowest first: anchored popovers (z-50), floating buttons (60), the modal scrim (70), dialogs and
+ * sheets (71), the command palette (72), toasts (80, above dialogs so a confirmation stays visible), context menus (85),
+ * tooltips (90), full-screen viewers (95), drag ghosts (200). Class strings; use Z_DRAG for an inline zIndex.
+ */
+export const Z = {
+  popover: 'z-50', float: 'z-[60]', scrim: 'z-[70]', modal: 'z-[71]', palette: 'z-[72]', toast: 'z-[80]', menu: 'z-[85]', tooltip: 'z-[90]', viewer: 'z-[95]', drag: 'z-[200]',
+} as const
+
+/** Z.drag as a number, for a drag ghost positioned with an inline style. */
+export const Z_DRAG = 200
+
+/**
+ * Keyboard focus rings: `ring` (a 2px accent shadow), `inset` (inside the box, for items in clipped scrollers),
+ * `outline` (an outline, for elements whose shadow is taken).
+ */
+export const FOCUS = {
+  ring: 'focus-visible:shadow-[0_0_0_2px_var(--accent)]',
+  inset: 'focus-visible:shadow-[inset_0_0_0_2px_var(--accent)]',
+  outline: 'focus-visible:outline-2 focus-visible:outline-[var(--accent)]',
+} as const
+
+/** Dense or regular, for components that come in two sizes. */
+export type Density = 'sm' | 'md'
 
 
 /** Row look shared by menus, listboxes and the palette. Rows are at least 40px tall on touch screens. */
@@ -65,11 +92,17 @@ export const fieldHoverClass = 'hover:border-[var(--line2)]'
 /** Row hover for accordions, list rows and menu-like triggers: a muted background (hover-capable pointers only). */
 export const rowHoverClass = 'hover:bg-[var(--muted)]'
 
-/** Shared field look: every text-like control uses this (with the shared hover border). */
+/**
+ * Shared field look: every text-like control uses this (with the shared hover border). Disabled and read-only fields
+ * get a muted fill instead of fading with opacity, so their text keeps 4.5:1.
+ */
 export const inputClass =
   'h-9 w-full rounded-[var(--r-md)] border border-[var(--line)] bg-[var(--card)] px-3 text-[13px] outline-none transition-[border-color,box-shadow] ' + fieldHoverClass + ' ' +
   'placeholder:text-[var(--fg3)] focus:border-[var(--fg3)] focus:shadow-[0_0_0_3px_var(--muted)] ' +
-  'aria-[invalid=true]:border-[var(--bad)] aria-[invalid=true]:shadow-[0_0_0_3px_var(--bad-soft)] disabled:opacity-60'
+  'aria-[invalid=true]:border-[var(--bad)] aria-[invalid=true]:shadow-[0_0_0_3px_var(--bad-soft)] ' +
+  'disabled:cursor-not-allowed disabled:bg-[var(--muted)] disabled:text-[var(--fg3)] disabled:hover:border-[var(--line)] ' +
+  'aria-disabled:cursor-not-allowed aria-disabled:bg-[var(--muted)] aria-disabled:text-[var(--fg3)] aria-disabled:hover:border-[var(--line)] ' +
+  'aria-readonly:bg-[var(--muted)] read-only:bg-[var(--muted)]'
 
 /**
  * Touch-only sizing (desktop look unchanged): `tap` ≥32px, `tap36` ≥36px, `row` ≥40px rows, `hit` an invisible 36px hit
@@ -130,7 +163,9 @@ export function Button({ variant, size, loading, className, children, disabled, 
     return (
       <Slot<HTMLButtonElement> {...p} aria-disabled={off || undefined} aria-busy={loading || undefined} data-disabled={off ? '' : undefined}
         className={buttonVariants({ variant, size, className: cn('no-underline aria-disabled:pointer-events-none aria-disabled:opacity-60', className) })}
-        onClick={off ? e => e.preventDefault() : p.onClick}>{children}</Slot>
+        // capture phase: the child's own onClick (chained before ours) must not run on keyboard activation either
+        onClickCapture={off ? e => { e.preventDefault(); e.stopPropagation() } : p.onClickCapture}
+        onClick={off ? undefined : p.onClick}>{children}</Slot>
     )
   }
   return (
@@ -156,7 +191,7 @@ const ICON_BUTTON_TONE = {
 export function IconButton({ icon, label, className, size = 'icon-sm', variant = 'ghost', tone = 'muted', asChild, children, ...p }:
   Omit<ButtonProps, 'children'> & { icon: IconName | ReactNode; label: string; tone?: keyof typeof ICON_BUTTON_TONE
     /** with `asChild`: the element to render (e.g. `<a href="/settings" />`); the icon goes inside it */ children?: SlotElement }) {
-  const glyph = isIconName(icon) ? <Icon name={icon} size={size === 'icon-xs' ? 13 : size === 'icon-sm' ? 15 : 16} /> : icon
+  const glyph = isIconName(icon) ? <Icon name={icon} size={size === 'icon-xs' ? ICON_SIZE.sm : size === 'icon-sm' ? ICON_SIZE.md : ICON_SIZE.lg} /> : icon
   return (
     <Button aria-label={label} title={label} size={size} variant={variant} asChild={asChild}
       className={cn(ICON_BUTTON_TONE[tone], className)} {...p}>
@@ -187,16 +222,40 @@ export function Spinner({ size = 14, tone = 'current', label, className }: { siz
     className={cn('inline-block flex-none animate-spin rounded-full border-2 border-e-transparent', SPINNER_TONE[tone], className)} />
 }
 
-export const TONE_SOFT = {
-  neutral: 'bg-[var(--muted)] text-[var(--fg2)]',
-  // text is the tone nudged toward --fg so it clears 4.5:1 on its own tint in light and dark
-  ok: 'bg-[var(--ok-soft)] text-[color-mix(in_srgb,var(--ok)_78%,var(--fg))]',
-  warn: 'bg-[var(--warn-soft)] text-[color-mix(in_srgb,var(--warn)_78%,var(--fg))]',
-  bad: 'bg-[var(--bad-soft)] text-[color-mix(in_srgb,var(--bad)_78%,var(--fg))]',
-  accent: 'bg-[var(--accent-soft)] text-[color-mix(in_srgb,var(--accent)_78%,var(--fg))]',
+/**
+ * Tone-coloured text that clears 4.5:1 on its own soft tint and on cards: the tone mixed 78% with --fg. Use it for text
+ * in a tone; TONE_SOFT pairs it with the tint. `danger` is an alias of `bad`.
+ */
+export const TONE_TEXT = {
+  neutral: 'text-[var(--fg2)]',
+  ok: 'text-[color-mix(in_srgb,var(--ok)_78%,var(--fg))]',
+  warn: 'text-[color-mix(in_srgb,var(--warn)_78%,var(--fg))]',
+  bad: 'text-[color-mix(in_srgb,var(--bad)_78%,var(--fg))]',
+  danger: 'text-[color-mix(in_srgb,var(--bad)_78%,var(--fg))]',
+  accent: 'text-[color-mix(in_srgb,var(--accent)_78%,var(--fg))]',
 } as const
 
+/** A tone's soft tint with readable tone text (TONE_TEXT) on it, for pills, tags and notes. `danger` is an alias of `bad`. */
+export const TONE_SOFT = {
+  neutral: 'bg-[var(--muted)] ' + TONE_TEXT.neutral,
+  ok: 'bg-[var(--ok-soft)] ' + TONE_TEXT.ok,
+  warn: 'bg-[var(--warn-soft)] ' + TONE_TEXT.warn,
+  bad: 'bg-[var(--bad-soft)] ' + TONE_TEXT.bad,
+  danger: 'bg-[var(--bad-soft)] ' + TONE_TEXT.bad,
+  accent: 'bg-[var(--accent-soft)] ' + TONE_TEXT.accent,
+} as const
+
+/** A semantic tone. `danger` means the same as `bad` (Button calls it danger). */
 export type Tone = keyof typeof TONE_SOFT
+
+/** The share of the colour onColorLabel keeps when it darkens it (the rest is black): low enough that white text reads 4.5:1 on any colour, white included. */
+const ON_COLOR_SHADE = 45
+
+/**
+ * Inline style for white text on an arbitrary colour (a theme token, a series colour, a user colour): the colour
+ * darkened with black until white text reads at least 4.5:1, whatever the theme. For tags and blocks drawn in a data colour.
+ */
+export const onColorLabel = (color: string): CSSProperties => ({ background: `color-mix(in srgb, ${safeColor(color)} ${ON_COLOR_SHADE}%, #000)`, color: '#fff' })
 
 /** The two badge geometries every pill, tag and count on the page uses: sm 18px / 11px text, md 20px / 12px text. */
 export const BADGE_SIZE = { sm: 'h-[18px] gap-1 px-1.5 text-[11px]', md: 'h-5 gap-1 px-2 text-xs' } as const
@@ -222,28 +281,28 @@ export function DeltaBadge({ value, lowerIsBetter, digits = 1, suffix = '%', tit
   if (!Number.isFinite(value)) return null
   const good = lowerIsBetter ? value < 0 : value >= 0
   return (
-    <motion.span key={`${value >= 0}${good}`} initial={{ scale: 0.85 }} animate={{ scale: 1 }} transition={spring(0.5, 0.35)}
+    <motion.span key={`${value >= 0}${good}`} initial={{ scale: 0.85 }} animate={{ scale: 1 }} transition={MOTION.pop}
       title={title ?? `${(good ? 'Better' : 'Worse')} than the previous period`}
-      className={cn('ui-num inline-flex items-center rounded-full leading-none font-medium whitespace-nowrap', BADGE_SIZE.sm,
-        good ? 'bg-[var(--ok-soft)] text-[color-mix(in_srgb,var(--ok)_72%,var(--fg))]' : 'bg-[var(--bad-soft)] text-[color-mix(in_srgb,var(--bad)_78%,var(--fg))]', className)}>
+      className={cn('ui-num inline-flex items-center rounded-full leading-none font-medium whitespace-nowrap', BADGE_SIZE.sm, good ? TONE_SOFT.ok : TONE_SOFT.bad, className)}>
       {value >= 0 ? '▲' : '▼'} {numberFormat(LOCALE, { minimumFractionDigits: digits, maximumFractionDigits: digits }).format(Math.abs(value))}{suffix}<span className="sr-only">{' ' + (good ? '(better)' : '(worse)')}</span>
     </motion.span>
   )
 }
 
 /** The states StatusIcon draws. */
-export type StatusIconStatus = 'done' | 'active' | 'pending' | 'failed'
+export type StatusIconStatus = 'done' | 'active' | 'pending' | 'failed' | 'warn' | 'cancelled'
 
 const STATUS_ICON_CLASS: Record<StatusIconStatus, string> = {
   done: 'border-[var(--primary)] bg-[var(--primary)] text-[var(--on-primary)]', failed: 'border-[var(--bad)] bg-[var(--bad)] text-[var(--card)]',
   active: 'border-[var(--fg)] bg-[var(--card)] text-[var(--fg)]', pending: 'border-[var(--line2)] bg-[var(--card)] text-[var(--fg3)]',
+  warn: 'border-[var(--warn)] bg-[var(--warn)] text-[var(--card)]', cancelled: 'border-[var(--line2)] bg-[var(--muted)] text-[var(--fg3)]',
 }
 const STATUS_ICON_DONE_OK = 'border-[var(--ok)] bg-[var(--ok)] text-[var(--card)]'
 const STATUS_ICON_SPIN = 'animate-spin border-[var(--accent)] border-e-transparent bg-[var(--card)]'
 /**
- * Round step/status marker for steppers, checks and task lists: done (filled tick, pops in), failed (filled ✕), active
- * (spinning ring, or the step `number` in a bold ring), pending (grey ring, with `number` if given). `tone="ok"` paints done
- * green. Decorative unless you pass `label`.
+ * Round step/status marker for steppers, checks and task lists: done (filled tick, pops in), failed (filled ✕), warn
+ * (filled !), cancelled (muted −), active (spinning ring, or the step `number` in a bold ring), pending (grey ring, with
+ * `number` if given). `tone="ok"` paints done green. Decorative unless you pass `label`.
  */
 export function StatusIcon({ status, size = 18, number, tone = 'primary', label, className }:
   { status: StatusIconStatus; size?: number; number?: number; tone?: 'primary' | 'ok'; label?: string; className?: string }) {
@@ -254,13 +313,29 @@ export function StatusIcon({ status, size = 18, number, tone = 'primary', label,
       className={cn('relative z-[1] grid flex-none place-items-center rounded-full border-[1.5px] font-semibold leading-none not-italic transition-colors',
         spin ? STATUS_ICON_SPIN : status === 'done' && tone === 'ok' ? STATUS_ICON_DONE_OK : STATUS_ICON_CLASS[status], className)}>
       <AnimatePresence initial={false}>
-        {status === 'done' && <motion.span key="d" className="grid" initial={{ scale: 0.5 }} animate={{ scale: 1 }} transition={spring(0.5, 0.35)}><Icon name="check" size={Math.round(size * 0.55)} strokeWidth={3.5} /></motion.span>}
+        {status === 'done' && <motion.span key="d" className="grid" initial={{ scale: 0.5 }} animate={{ scale: 1 }} transition={MOTION.pop}><Icon name="check" size={Math.round(size * 0.55)} strokeWidth={3.5} /></motion.span>}
       </AnimatePresence>
       {status === 'failed' && <Icon name="x" size={Math.round(size * 0.55)} strokeWidth={3.5} />}
+      {status === 'cancelled' && <Icon name="minus" size={Math.round(size * 0.55)} strokeWidth={3} />}
+      {status === 'warn' && <span aria-hidden>!</span>}
       {(status === 'pending' || status === 'active') && number !== undefined && number}
     </span>
   )
 }
+
+/** A step's status from its index and the current step: earlier ones done, the current one active, later ones pending. */
+export const stepStatusAt = (i: number, current: number): StatusIconStatus => (i < current ? 'done' : i === current ? 'active' : 'pending')
+
+/** The state of a run, a span or a tool call. */
+export type RunStatus = 'running' | 'ok' | 'error' | 'cancelled'
+
+/** How each RunStatus looks and reads: its StatusIcon state, Badge tone and label. One table for traces, agent runs and tool calls. */
+export const RUN_STATUS = {
+  running: { icon: 'active', tone: 'accent', label: 'Running' },
+  ok: { icon: 'done', tone: 'ok', label: 'Complete' },
+  error: { icon: 'failed', tone: 'bad', label: 'Failed' },
+  cancelled: { icon: 'cancelled', tone: 'neutral', label: 'Cancelled' },
+} as const satisfies Record<RunStatus, { icon: StatusIconStatus; tone: Tone; label: string }>
 
 /**
  * Pill button for filters, toggles and suggestions. With `pressed` it is a toggle (aria-pressed, filled when on); without,
@@ -287,7 +362,16 @@ export function Card({ className, ...p }: HTMLAttributes<HTMLDivElement>) {
 }
 
 export function Separator({ vertical, className }: { vertical?: boolean; className?: string }) {
-  return <div role="separator" className={cn(vertical ? 'w-px self-stretch' : 'h-px w-full', 'bg-[var(--line)]', className)} />
+  return <div role="separator" aria-orientation={vertical ? 'vertical' : undefined} className={cn(vertical ? 'w-px self-stretch' : 'h-px w-full', 'bg-[var(--line)]', className)} />
+}
+
+/**
+ * The disclosure chevron: points down and turns with `open`. `turn` 'half' flips it (down → up); 'quarter' points it
+ * right while closed and down when open. Decorative.
+ */
+export function Chevron({ open, turn = 'half', size = 14, className }: { open: boolean; turn?: 'half' | 'quarter'; size?: number; className?: string }) {
+  const deg = turn === 'half' ? (open ? 180 : 0) : (open ? 0 : -90)
+  return <Icon name="chevronDown" size={size} className={cn('text-[var(--fg3)] transition-transform duration-200 motion-reduce:transition-none', className)} style={{ transform: `rotate(${deg}deg)` }} />
 }
 
 /** Loading placeholder with a shimmer sweep (paused while off screen; off for reduced motion). */
@@ -301,18 +385,29 @@ export function Skeleton({ className }: { className?: string }) {
 const AV_TYPE = [11, 12, 13, 14, 16, 18, 20, 24, 28, 32, 36, 40]
 const avFont = (size: number) => size < 28 ? Math.round(size * 0.36)
   : AV_TYPE.reduce((a, b) => Math.abs(b - size * 0.36) < Math.abs(a - size * 0.36) ? b : a)
-const AV_COLORS = ['#DBEAFE:#1E40AF', '#FCE7F3:#9D174D', '#DCFCE7:#166534', '#FEF3C7:#92400E', '#EDE9FE:#5B21B6', '#E0F2FE:#075985']
+/** Avatar [background, initials] pairs from the theme: a tone's soft tint with its readable text, so they follow light and dark. */
+const AV_COLORS: [bg: string, fg: string][] = [
+  ['var(--accent-soft)', 'color-mix(in srgb,var(--accent) 78%,var(--fg))'], ['var(--ok-soft)', 'color-mix(in srgb,var(--ok) 78%,var(--fg))'],
+  ['var(--warn-soft)', 'color-mix(in srgb,var(--warn) 78%,var(--fg))'], ['var(--bad-soft)', 'color-mix(in srgb,var(--bad) 78%,var(--fg))'],
+  ['color-mix(in srgb,var(--c3) 14%,var(--card))', 'color-mix(in srgb,var(--c3) 60%,var(--fg))'], ['var(--muted)', 'var(--fg2)'],
+]
+
+/** Presence dot colour and its spoken label. */
+export const STATUS_DOT = {
+  online: { className: 'bg-[var(--ok)]', label: 'online' },
+  away: { className: 'bg-[var(--warn)]', label: 'away' },
+  offline: { className: 'bg-[var(--line2)]', label: 'offline' },
+} as const
 
 export function Avatar({ name, src, size = 32, status, className }:
-  { name: string; src?: string; size?: number; status?: 'online' | 'away' | 'offline'; className?: string }) {
+  { name: string; src?: string; size?: number; status?: keyof typeof STATUS_DOT; className?: string }) {
   const initials = name.split(' ').map(s => s[0]).slice(0, 2).join('').toUpperCase(), img = safeMediaUrl(src)
-  const [bg, fg] = AV_COLORS[[...name].reduce((a, c) => a + c.charCodeAt(0), 0) % AV_COLORS.length].split(':')
+  const [bg, fg] = AV_COLORS[[...name].reduce((a, c) => a + c.charCodeAt(0), 0) % AV_COLORS.length]
   return (
     <span className={cn('relative inline-grid flex-none place-items-center rounded-full border-2 border-[var(--card)] font-semibold', className)}
       style={{ width: size, height: size, fontSize: avFont(size), background: bg, color: fg }} title={name}>
       {img ? <img src={img} alt={name} className="h-full w-full rounded-full object-cover" /> : initials}
-      {status && <span className={cn('absolute -end-0.5 -bottom-0.5 h-2.5 w-2.5 rounded-full border-2 border-[var(--card)]',
-        status === 'online' ? 'bg-[var(--ok)]' : status === 'away' ? 'bg-[var(--warn)]' : 'bg-[var(--line2)]')} />}
+      {status && <span role="img" aria-label={STATUS_DOT[status].label} className={cn('absolute -end-0.5 -bottom-0.5 h-2.5 w-2.5 rounded-full border-2 border-[var(--card)]', STATUS_DOT[status].className)} />}
     </span>
   )
 }
@@ -332,7 +427,7 @@ export function AvatarStack({ names, max = 4, size = 32, caption, spread: canSpr
         onPointerEnter={e => e.pointerType === 'mouse' && setSpread(true)} onPointerLeave={e => e.pointerType === 'mouse' && setSpread(false)}
         onFocus={() => setSpread(true)} onBlur={() => setSpread(false)}>
         {[...shown, ...(extra > 0 ? [null] : [])].map((n, i) => (
-          <motion.span key={n ?? '+'} initial={false} animate={{ x: fan ? (i * 6) : 0 }} transition={spring(0.3, 0.35)} className={cn(i > 0 && '-ms-2')} style={{ zIndex: 10 - i }}>
+          <motion.span key={n ?? '+'} initial={false} animate={{ x: fan ? (i * 6) : 0 }} transition={MOTION.layout} className={cn(i > 0 && '-ms-2')} style={{ zIndex: 10 - i }}>
             {n ? <Avatar name={n} size={size} />
               : <span className="grid place-items-center rounded-full border-2 border-[var(--card)] bg-[var(--muted)] text-xs font-semibold text-[var(--fg2)]" style={{ width: size, height: size }}>+{fmt.number(extra)}</span>}
           </motion.span>
@@ -343,12 +438,9 @@ export function AvatarStack({ names, max = 4, size = 32, caption, spread: canSpr
   )
 }
 
-/** The CSS transition AnimatedNumber's digit columns and SparkChart's marks use (off for reduced motion). */
-const ROLL_EASE = 'cubic-bezier(.22,1,.36,1)'
-
 const AN_DIGITS = [...'0123456789']
 /**
- * Rolling number (replaces the NumberFlow web component): each digit rolls to its new value.
+ * Rolling number: each digit rolls to its new value.
  * format: Intl.NumberFormatOptions, e.g. { style: 'currency', currency: 'EUR' }.
  * Screen readers get the formatted value as visually hidden text (the rolling columns are aria-hidden). Digits are
  * tabular and each takes one fixed column, so the number never shifts the layout around it while it rolls.
@@ -358,25 +450,24 @@ const AN_DIGITS = [...'0123456789']
  */
 export function AnimatedNumber({ value, format, className }: { value: number; format?: Intl.NumberFormatOptions; className?: string }) {
   const str = useMemo(() => numberFormat(LOCALE, format).format(value), [value, format])
-  const glyphs = AN_DIGITS
   const ref = useRef<HTMLSpanElement>(null)
   const visible = useInView(ref, { margin: '64px' })
   // digits and their separators form runs that roll; text around them (currency, %) is static
   const chars = [...str], runs: { num: boolean; chars: [string, number][] }[] = []
   chars.forEach((c, i) => {
-    const num = glyphs.includes(c) || (/[.,'’\u00a0\u202f\s]/.test(c) && glyphs.includes(chars[i - 1] ?? '') && glyphs.includes(chars[i + 1] ?? ''))
+    const num = AN_DIGITS.includes(c) || (/[.,'’\u00a0\u202f\s]/.test(c) && AN_DIGITS.includes(chars[i - 1] ?? '') && AN_DIGITS.includes(chars[i + 1] ?? ''))
     const last = runs[runs.length - 1]
     if (last && last.num === num) last.chars.push([c, i]); else runs.push({ num, chars: [[c, i]] })
   })
   const cell = ([c, i]: [string, number]) => {
     const key = chars.length - i // key from the end so digits keep their column as the number grows
-    const d = glyphs.indexOf(c)
+    const d = AN_DIGITS.indexOf(c)
     if (d < 0) return <span key={`s${key}`}>{c}</span>
     return (
       <span key={key} className="relative inline-block h-[1em] overflow-hidden text-center" style={{ width: '1ch' }}>
         <span className={cn('absolute inset-x-0 top-0 flex flex-col motion-reduce:!transition-none', !visible && '!transition-none')}
-          style={{ transform: `translateY(${-d}em)`, transition: `transform .6s ${ROLL_EASE}` }}>
-          {glyphs.map(g => <span key={g} className="h-[1em] leading-none">{g}</span>)}
+          style={{ transform: `translateY(${-d}em)`, transition: `transform .6s ${EASE_OUT_CSS}` }}>
+          {AN_DIGITS.map(g => <span key={g} className="h-[1em] leading-none">{g}</span>)}
         </span>
       </span>
     )
@@ -449,18 +540,26 @@ export type SparkVariant = 'line' | 'bars' | 'winloss' | 'area'
 export function SparkChart({ data, variant = 'line', width, height = 36, color = 'var(--accent)', curve = 'linear', endDot, minMax, target, className }:
   { data: number[]; variant?: SparkVariant; width?: number; height?: number; color?: string; curve?: Curve; endDot?: boolean; minMax?: boolean; target?: number; className?: string }) {
   const [ref, mw, seen] = useSparkFrame(0.1)
-  // fewer than two points has no shape to draw (and Math.min() of nothing is Infinity): keep the box, draw nothing
-  if (data.length < 2) return <div ref={ref} className={cn('min-w-0', className)} style={{ width: width ?? '100%', height }} />
+  // Non-finite values (a missing metric) are gaps: they get no mark and break the line, and the rest still draws.
+  let mi = -1, ma = -1, count = 0
+  data.forEach((v, i) => { if (!Number.isFinite(v)) return; count++; if (mi < 0 || v < data[mi]) mi = i; if (ma < 0 || v > data[ma]) ma = i })
+  // fewer than two points has no shape to draw: keep the box, draw nothing
+  if (count < 2) return <div ref={ref} className={cn('min-w-0', className)} style={{ width: width ?? '100%', height }} />
+  const tgt = target !== undefined && Number.isFinite(target) ? target : undefined
+  const [lo, hi] = extent(tgt === undefined ? [data[mi], data[ma]] : [data[mi], data[ma], tgt])
   const W = width ?? mw, H = height, pad = variant === 'line' || variant === 'area' ? 4 : 0
-  const lo = minOf(data, target ?? Infinity), hi = maxOf(data, target ?? -Infinity)
   const n = data.length, Y = (v: number) => H - pad - ((v - lo) / (hi - lo || 1)) * (H - pad * 2)
-  const pts = data.map((v, i) => [(i / Math.max(1, n - 1)) * W, Y(v)] as [number, number])
-  const flat = pts.map(p => [p[0], H - pad] as [number, number])
-  const P = seen ? pts : flat, line = chartPath(P, curve)
-  const bw = W / n, mi = data.indexOf(minOf(data)), ma = data.indexOf(maxOf(data))
+  const pts = data.map((v, i) => Number.isFinite(v) ? [(i / Math.max(1, n - 1)) * W, Y(v)] as [number, number] : null)
+  const P = seen ? pts : pts.map(p => p && [p[0], H - pad] as [number, number])
+  const runs: [number, number][][] = []
+  P.forEach((p, i) => { if (!p) return; if (i && P[i - 1]) runs[runs.length - 1].push(p); else runs.push([p]) })
+  const line = runs.map(r => chartPath(r, curve)).join('')
+  const area = runs.map(r => `${chartPath(r, curve)}L${svgN(r[r.length - 1][0])},${H}L${svgN(r[0][0])},${H}Z`).join('')
+  const last = P.findLast(p => p !== null)!
+  const bw = W / n
   // Every mark moves by CSS transitions (paths through the CSS `d` property, dots and bars by transform), so a live
   // update is one style write per mark and the browser interpolates: no per-frame attribute writes. Reduced motion jumps.
-  const ease = `.45s ${ROLL_EASE}`
+  const ease = `.45s ${EASE_OUT_CSS}`
   const path = (d: string): CSSProperties => ({ d: `path("${d}")`, transition: `d ${ease}` } as CSSProperties)
   const dot = (x: number, y: number): CSSProperties => ({ transform: `translate(${svgN(x)}px,${svgN(y)}px)`, transition: `transform ${ease}, fill ${ease}` })
   const bar = (k: number, originY: number): CSSProperties => ({ transform: `scaleY(${k})`, transformOrigin: `0 ${originY}px`, transition: `transform ${ease}` })
@@ -469,15 +568,16 @@ export function SparkChart({ data, variant = 'line', width, height = 36, color =
     <div ref={ref} className={cn('min-w-0', className)} style={{ width: width ?? '100%', height: H }}>
       {W > 0 && (
         <svg width={W} height={H} className="block overflow-visible" aria-hidden>
-          {variant === 'area' && <path className={still} d={`${line}L${svgN(W)},${H}L0,${H}Z`} style={path(`${line}L${svgN(W)},${H}L0,${H}Z`)} fill={color} fillOpacity={0.15} />}
-          {variant === 'area' && target !== undefined && <line x1={0} x2={W} y1={Y(target)} y2={Y(target)} stroke="var(--fg3)" strokeDasharray="3 3" />}
+          {variant === 'area' && <path className={still} d={area} style={path(area)} fill={color} fillOpacity={0.15} />}
+          {variant === 'area' && tgt !== undefined && <line x1={0} x2={W} y1={Y(tgt)} y2={Y(tgt)} stroke="var(--fg3)" strokeDasharray="3 3" />}
           {(variant === 'line' || variant === 'area') && <path className={still} d={line} style={path(line)} fill="none" stroke={color} strokeWidth={1.6} strokeLinejoin="round" strokeLinecap="round" />}
           {variant === 'line' && minMax && seen && <>
-            <circle className={still} r={2.6} fill="var(--bad)" style={dot(pts[mi][0], pts[mi][1])} />
-            <circle className={still} r={2.6} fill="var(--ok)" style={dot(pts[ma][0], pts[ma][1])} />
+            <circle className={still} r={2.6} fill="var(--bad)" style={dot(pts[mi]![0], pts[mi]![1])} />
+            <circle className={still} r={2.6} fill="var(--ok)" style={dot(pts[ma]![0], pts[ma]![1])} />
           </>}
-          {(variant === 'line' || variant === 'area') && (endDot || minMax) && <circle className={still} r={2.6} fill={minMax ? 'var(--accent)' : color} style={dot(P[n - 1][0], P[n - 1][1])} />}
+          {(variant === 'line' || variant === 'area') && (endDot || minMax) && <circle className={still} r={2.6} fill={minMax ? 'var(--accent)' : color} style={dot(last[0], last[1])} />}
           {variant === 'bars' && data.map((v, i) => {
+            if (!Number.isFinite(v)) return null
             // a full-height bar scaled from the bottom edge: its attributes never change, only its transform
             const k = seen ? (4 + ((v - lo) / (hi - lo || 1)) * (H - 6)) / (H - 2) : 0
             return <rect key={i} className={still} x={i * bw + 0.6} y={2} width={Math.max(0.5, bw - 1.2)} height={H - 2} fill={i === n - 1 ? color : 'var(--line2)'} style={bar(k, H)} />
@@ -485,7 +585,7 @@ export function SparkChart({ data, variant = 'line', width, height = 36, color =
           {variant === 'winloss' && <>
             <line x1={0} x2={W} y1={H / 2} y2={H / 2} stroke="var(--line2)" />
             {data.map((v, i) => {
-              if (!i) return null
+              if (!i || !Number.isFinite(v) || !Number.isFinite(data[i - 1])) return null
               // drawn above the baseline and mirrored below it with scaleY(-1): a change of direction flips through 0
               const up = v >= data[i - 1], h = H * 0.3
               return <rect key={i} className={still} x={i * bw + 0.6} y={H / 2 - 1 - h} width={Math.max(0.5, bw - 1.2)} height={h} fill={up ? 'var(--ok)' : 'var(--bad)'} opacity={0.85}

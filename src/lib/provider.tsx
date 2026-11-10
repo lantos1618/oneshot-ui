@@ -1,6 +1,6 @@
 import { type ReactNode } from 'react'
 import { AnimatePresence, MotionConfig, motion } from 'motion/react'
-import { DEFAULT_THEME, FONT_CSS, THEME_LEGACY_KEY, THEME_STORAGE_KEY, THEME_TOKEN_NAMES, THEME_VALUE_SOURCE, TOKENS, ThemeProvider, type ThemeSettings, UIHosts, Button, Icon, type Palette, THEMES, type Theme, cn, spring, themeStyle, themeTokens, useTheme } from './core'
+import { DEFAULT_THEME, FONT_CSS, FONT_HREF, THEME_MODES, THEME_LEGACY_KEY, THEME_STORAGE_KEY, THEME_TOKEN_NAMES, THEME_VALUE_SOURCE, TOKENS, ThemeProvider, type ThemeSettings, UIHosts, Button, Icon, type Palette, THEMES, type Theme, cn, spring, themeStyle, themeTokens, useTheme } from './core'
 
 export type UIProviderProps = {
   children: ReactNode
@@ -41,9 +41,6 @@ export type UIProviderProps = {
 /** The page background and text colour, on `html` and `body` (so a host page's own body background can't show through): added with target="html" (dist/tokens.css carries the same rule). */
 const PROVIDER_PAGE_CSS = 'html,html body{background:var(--bg);color:var(--fg)}'
 
-/** The Google Fonts stylesheet behind FONT_CSS, for a `<link>` when inline styles are off. */
-const PROVIDER_FONT_HREF = 'https://fonts.googleapis.com/css2?family=Geist:wght@400;500;600&family=Geist+Mono:wght@400;500&display=swap'
-
 /**
  * Wrap your app once. Injects the tokens (and, with `fonts`, the Geist import), applies the theme, hosts page-level UI
  * (the toast region, mounted on the first `useToast()` toast) inside the themed `.ui-root` wrapper, and turns motion off
@@ -52,7 +49,7 @@ const PROVIDER_FONT_HREF = 'https://fonts.googleapis.com/css2?family=Geist:wght@
 export function UIProvider({ children, className, defaultTheme, storageKey, persist, fonts = false, target = 'html', nonce, injectStyles = true, themeFromUrl = false }: UIProviderProps) {
   return (
     <MotionConfig reducedMotion="user" nonce={nonce}>
-      {fonts && (injectStyles ? <style nonce={nonce}>{FONT_CSS}</style> : <link rel="stylesheet" href={PROVIDER_FONT_HREF} nonce={nonce} />)}
+      {fonts && (injectStyles ? <style nonce={nonce}>{FONT_CSS}</style> : <link rel="stylesheet" href={FONT_HREF} nonce={nonce} />)}
       {injectStyles && <style nonce={nonce}>{(target === 'html' ? TOKENS + '\n' + PROVIDER_PAGE_CSS : TOKENS)}</style>}
       <ThemeProvider defaultSettings={defaultTheme} storageKey={storageKey} persist={persist} fonts={fonts} target={target} fromUrl={themeFromUrl}>
         <UIProviderRoot className={className}>
@@ -84,12 +81,12 @@ export function themeScriptSource({ storageKey = THEME_STORAGE_KEY, defaultTheme
   const d = { ...DEFAULT_THEME, ...defaultTheme }
   const fallback = { theme: d.theme, mode: d.mode, useCustom: d.useCustom, custom: d.custom ? { dark: !!d.custom.dark } : null, css: { light: themeTokens(d, false), dark: themeTokens(d, true) } }
   const legacy = storageKey === THEME_STORAGE_KEY ? THEME_LEGACY_KEY : null
-  return `(function(k,l,d,N,V){try{var e=document.documentElement,s=null,R=new RegExp(V);if(k)try{var r=localStorage.getItem(k);if(r==null&&l)r=localStorage.getItem(l);s=JSON.parse(r)}catch(x){}
+  return `(function(k,l,d,N,V,M){try{var e=document.documentElement,s=null,R=new RegExp(V);if(k)try{var r=localStorage.getItem(k);if(r==null&&l)r=localStorage.getItem(l);s=JSON.parse(r)}catch(x){}
 if(!s||typeof s!=="object"||Array.isArray(s))s=d;var ok=function(t){if(!t||typeof t!=="object")return null;for(var n in t)if(!Object.prototype.hasOwnProperty.call(t,n)||N.indexOf(n)<0||typeof t[n]!=="string"||!R.test(t[n]))return null;return t},
-m=s.mode==="light"||s.mode==="dark"||s.mode==="system"?s.mode:d.mode,u=s.useCustom===true&&s.custom&&typeof s.custom==="object",
+m=M.indexOf(s.mode)>=0?s.mode:d.mode,u=s.useCustom===true&&s.custom&&typeof s.custom==="object",
 dk=u?s.custom.dark===true:m==="dark"||(m!=="light"&&matchMedia("(prefers-color-scheme: dark)").matches),
 c=s.css&&typeof s.css==="object"?s.css:((s.theme||d.theme)===d.theme&&!u?d.css:null),t=c&&ok(c[dk?"dark":"light"]);
-if(t)for(var n in t)e.style.setProperty("--"+n,t[n]);e.setAttribute("data-theme",dk?"dark":"light");e.style.colorScheme=dk?"dark":"light"}catch(x){}})(${persist ? themeScriptJSON(storageKey) : 'null'},${persist ? themeScriptJSON(legacy) : 'null'},${themeScriptJSON(fallback)},${themeScriptJSON(THEME_TOKEN_NAMES)},${themeScriptJSON(THEME_VALUE_SOURCE)})`
+if(t)for(var n in t)e.style.setProperty("--"+n,t[n]);e.setAttribute("data-theme",dk?"dark":"light");e.style.colorScheme=dk?"dark":"light"}catch(x){}})(${persist ? themeScriptJSON(storageKey) : 'null'},${persist ? themeScriptJSON(legacy) : 'null'},${themeScriptJSON(fallback)},${themeScriptJSON(THEME_TOKEN_NAMES)},${themeScriptJSON(THEME_VALUE_SOURCE)},${themeScriptJSON(THEME_MODES)})`
 }
 
 /**

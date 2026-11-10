@@ -3,6 +3,32 @@
 All notable changes to `@lyndon/ui`, newest first. While on 0.x, a minor release may break APIs; each breaking
 change is listed with how to migrate.
 
+## Unreleased (0.12.0)
+
+### Added
+- **A (foundation):** shared helpers for the other modules. `helpers`: `EASE_OUT` / `EASE_OUT_CSS` (moved from motion so core can use them), `MOTION` spring presets, `popIn()` / `POP_IN`, `slideVariants`, `clampIndex`, `snapToStep`, `tryJson`, `joinIds`, `idPart` (hash-suffixed so "a b" and "a_b" differ), `uid`, `moveById`, `scrollParent`, `revealInScroller`, `listKeyMove`, `sliderKeyValue`, `typeaheadIndex`. `locale`: `DATE_MEDIUM`, `fmt.fixed`, `fmt.seconds`, a `{ zero }` form for `plural`, `collator`, `memoCache`, and the table sort model `compareCells` / `nextSort` / `ariaSort` / `TableSort` (dates by value, empty cells last). `hooks`: `useElementSize`, `contentSize`, `FLASH_MS`, `useFlash`, `isEditableTarget`, `formatHotkey`, `AUTOFOCUS_ATTR`, `REDUCED_MOTION_Q`, `HOLD_MS`, `MOVE_SLOP`, `haptic`, `capturePointer`, `trackFraction`, `useTouchScrollLock`, `useLatest`, `useLatestState`, `useDebounced`, `useNow`, `useValueSet`, `useTypeahead`, `blurLeaves`, `useObjectUrls`, `useCanvasSize`, `useFrameCommit`, `useStableArray`. `theme`: `THEME_MODES` / `ThemeMode`, `THEME_DERIVED_KEYS`, `MONO_STACK`, `themeRadii`, `googleFontsHref`, `FONT_HREF`, `parseRgba` / `parseColor` / `isHex6` / `hslToRgb` / `srgbToLinear`, `colorResolver` / `resolveColor` (canvas colours through the computed style, so `var()` and `color-mix()` resolve), `useThemeVersion` (also sees `UIProvider target="self"` and OS scheme changes; works without a provider), `useOptionalTheme`, `THEME_CHANGE_ATTRS`. `primitives`: `Z` / `Z_DRAG` (the stacking order), `FOCUS` rings, `surface.tip`, `TONE_TEXT`, `onColorLabel` (white text that reads 4.5:1 on any colour), `RUN_STATUS` / `RunStatus`, `stepStatusAt`, `STATUS_DOT`, `Chevron`, `Density`; StatusIcon gains `warn` and `cancelled`; `Tone` accepts `danger` (same as `bad`). `icons`: `ICON_SIZE`. `shared`: `MODAL_KEEP_ATTR`, `UI_FIELD_ATTR`. `safe`: `TEXT_LINK_SCHEMES`. `slot`: `setRef`. `diagramkit`: `DgArrowMarkers`, `dgCubicPath`, `DG_HALO_LABEL`. `@lyndon/ui/utils` also exports `fmt`, the colour parsers and the sort model.
+
+### Changed
+- **A (foundation):** `TOKENS` (and so `dist/tokens.css`) is generated from the default palette through `themeTokens`, so the static tokens match what UIProvider applies (soft tints, `--c1`, `--c4` and `--band` no longer repaint at hydration).
+- **A (foundation):** `useWidth` / `useSize` report the content box from the first value on (no jump from the padding box) and follow a remounted element; `useResizeObserver` follows a remounted element too.
+- **A (foundation):** `useLive` re-announces a repeated message and takes `{ politeness, debounce }`.
+- **A (foundation):** `inputClass` shows disabled and read-only fields with a muted fill instead of 60% opacity (4.5:1 text).
+- **A (foundation):** Avatar colours come from the theme tokens (dark mode no longer shows light pastels), and the presence dot is announced. DeltaBadge uses the shared tone text.
+- **A (foundation):** `rgb()` reads `#rgb` and `rgb()` colours instead of treating them as black; WCAG luminance uses the 0.04045 sRGB threshold (no 8-bit colour changes).
+- **A (foundation):** `<Icon>` takes registered names without a cast and warns once in development for an unknown name.
+- **A (foundation):** `fmtDate` and `formatDate` are deprecated aliases of `fmt.date` (both now from `locale`; `@lyndon/ui/utils` no longer imports the forms module for it).
+
+### Fixed
+- **A (foundation):** `rangeStr` no longer throws RangeError above ~125k values (it took down every chart's screen-reader summary).
+- **A (foundation):** `fmt.relative` returns '' for an invalid date or NaN instead of throwing (GitGraph crashed on one bad commit date); `fmt.date` / `time` / `dateTime` also return '' for a NaN timestamp.
+- **A (foundation):** `<Button asChild disabled>` (or `loading`) no longer runs the child's own `onClick` on keyboard activation.
+- **A (foundation):** SparkChart draws around NaN / Infinity values (a gap) instead of blanking the whole sparkline.
+- **A (foundation):** `revealTheme` no longer calls `matchMedia` directly (it threw without it, e.g. on the server).
+
+### Removed
+- **A (foundation):** `MOTION_PRESETS` and the `MotionPreset` type leave `@lyndon/ui/motion` (playground-only; now in the showcase).
+- **A (foundation):** `EASE_OUT` is no longer exported from `@lyndon/ui/motion`; import it from `@lyndon/ui` (or `@lyndon/ui/helpers`).
+
 ## 0.11.0
 
 The library splits into a core tier and extras families. `@lyndon/ui` is now core only (foundation, motion, overlays,

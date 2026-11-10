@@ -1,40 +1,27 @@
-/** Theme engine: tokens (TOKENS, FONT_CSS), palettes (THEMES), derive(), validated storage, the circular reveal, ThemeProvider and useTheme. Part of @lyndon/ui/core. */
-import { createContext, type CSSProperties, type ReactNode, useEffect, useLayoutEffect, useMemo, useState } from 'react'
+/** Theme engine: tokens (TOKENS, FONT_CSS), palettes (THEMES), derive(), colour parsing, validated storage, the circular reveal, ThemeProvider, useTheme and the canvas colour resolver. Part of @lyndon/ui/core. */
+import { createContext, type CSSProperties, type ReactNode, type RefObject, useContext, useEffect, useLayoutEffect, useMemo, useState } from 'react'
 import { flushSync } from 'react-dom'
-import { clamp } from './helpers'
+import { EASE_OUT_CSS, clamp, tryJson } from './helpers'
 import { uiShared } from './shared'
-import { useMediaQuery, useRequiredContext } from './hooks'
+import { prefersReducedMotion, useMediaQuery, useRequiredContext } from './hooks'
 import { safeCssValue } from './safe'
 
-const LIGHT = `--bg:#FAFAFA;--card:#FFFFFF;--muted:#F4F4F5;--line:#E4E4E7;--line2:#D4D4D8;--fg:#09090B;--fg2:#52525B;--fg3:#68686F;
---primary:#18181B;--on-primary:#FAFAFA;--accent:#2563EB;--accent-soft:#EFF4FF;--ok:#15803D;--ok-soft:#ECFDF3;--warn:#B45309;--warn-soft:#FFF7E6;
---bad:#DC2626;--bad-soft:#FEF2F2;--c1:#18181B;--c2:#2563EB;--c3:#F97316;--c4:#16A34A;--c-neutral:#6B6B6D;--band:rgba(37,99,235,.12);
---shadow:0 1px 2px rgba(0,0,0,.04),0 10px 30px rgba(0,0,0,.08);color-scheme:light;`
+/** How long the colour cross-fade of a theme change runs where View Transitions are missing (ms). */
+const THEME_FADE_MS = 350
 
-const DARK = `--bg:#09090B;--card:#111113;--muted:#1A1A1D;--line:#27272A;--line2:#3F3F46;--fg:#FAFAFA;--fg2:#A1A1AA;--fg3:#8E8E98;
---primary:#FAFAFA;--on-primary:#09090B;--accent:#60A5FA;--accent-soft:#132036;--ok:#4ADE80;--ok-soft:#0F2417;--warn:#FBBF24;--warn-soft:#2A1F08;
---bad:#F87171;--bad-soft:#2A1111;--c1:#FAFAFA;--c2:#60A5FA;--c3:#FB923C;--c4:#4ADE80;--c-neutral:#9D9D9E;--band:rgba(96,165,250,.16);
---shadow:0 1px 2px rgba(0,0,0,.3),0 10px 30px rgba(0,0,0,.5);color-scheme:dark;`
+/** The --mono font stack (the same in every theme). */
+export const MONO_STACK = '"Geist Mono",ui-monospace,"SF Mono",Menlo,monospace'
 
-/**
- * The whole theme. Edit these values to re-skin every component. Also holds the touch rules: on coarse pointers text
- * fields are 16px (no iOS zoom on focus), and `.ui-hit` gives any element an invisible hit area of at least 36px
- * (set `--hit` to change it) without changing how it looks. `.ui-target` does the same on every pointer: at least 24×24px
- * with a mouse (WCAG 2.5.8) and 36px on touch, for tiny controls such as a chip's remove ×.
- * Scales (see CONVENTIONS.md): radius --r-sm/md/lg/full (from the theme radius), type --t-xs…--t-2xl
- * (11/12/13/14/16/22/28px) and control heights --h-xs/sm/md/lg (24/30/36/40px). Nothing here styles `html` or `body`: text styles are
- * scoped to `.ui-root` (UIProvider themes the page background with target="html"; FONT_CSS is the Google Fonts import).
- */
-export const TOKENS = `:root{${LIGHT}--font:"Geist",ui-sans-serif,system-ui,-apple-system,"Segoe UI",sans-serif;--mono:"Geist Mono",ui-monospace,"SF Mono",Menlo,monospace;--r-sm:4px;--r-md:8px;--r-lg:14px;--r-full:9999px;
---t-xs:11px;--t-sm:12px;--t-md:13px;--t-base:14px;--t-lg:16px;--t-xl:22px;--t-2xl:28px;--h-xs:24px;--h-sm:30px;--h-md:36px;--h-lg:40px}
-@media (prefers-color-scheme:dark){:root:not([data-theme="light"]){${DARK}}}
-:root[data-theme="dark"]{${DARK}}
-@layer base{.ui-root{font:14px/1.5 var(--font);color:var(--fg);-webkit-font-smoothing:antialiased;-webkit-text-size-adjust:100%;text-size-adjust:100%}
+/** Scales that don't depend on the theme: full radius, type and control heights. */
+const THEME_SCALES = '--r-full:9999px;--t-xs:11px;--t-sm:12px;--t-md:13px;--t-base:14px;--t-lg:16px;--t-xl:22px;--t-2xl:28px;--h-xs:24px;--h-sm:30px;--h-md:36px;--h-lg:40px'
+
+/** The rest of TOKENS after the variables: text styles scoped to .ui-root, shimmer, caret, the theme cross-fade and the touch rules. */
+const TOKEN_RULES = `@layer base{.ui-root{font:14px/1.5 var(--font);color:var(--fg);-webkit-font-smoothing:antialiased;-webkit-text-size-adjust:100%;text-size-adjust:100%}
 .ui-root button,.ui-root input,.ui-root select,.ui-root textarea{font:inherit;color:inherit}
 .ui-root :focus-visible{outline:2px solid var(--accent);outline-offset:2px}}
 @layer components{.ui-num{font-family:var(--mono);font-variant-numeric:tabular-nums}}
 ::view-transition-old(root),::view-transition-new(root){animation:none;mix-blend-mode:normal}
-html.ui-theming *,html.ui-theming *::before,html.ui-theming *::after{transition:background-color .35s ease,color .35s ease,border-color .35s ease,fill .35s ease,stroke .35s ease!important}
+html.ui-theming *,html.ui-theming *::before,html.ui-theming *::after{transition:${['background-color', 'color', 'border-color', 'fill', 'stroke'].map(p => `${p} ${THEME_FADE_MS}ms ease`).join(',')}!important}
 .ui-shimmer{position:relative;overflow:hidden}
 .ui-shimmer::after{content:"";position:absolute;inset:0;transform:translateX(-100%);background:linear-gradient(90deg,transparent,color-mix(in srgb,var(--card) 70%,transparent),transparent);animation:ui-shim 1.3s infinite;animation-play-state:var(--ui-play,running)}
 @keyframes ui-shim{to{transform:translateX(100%)}}
@@ -48,8 +35,14 @@ html.ui-theming *,html.ui-theming *::before,html.ui-theming *::after{transition:
 .ui-target{position:relative}.ui-target::after{content:"";position:absolute;left:50%;top:50%;width:max(100%,24px);height:max(100%,24px);transform:translate(-50%,-50%)}
 @media (pointer:coarse){.ui-target::after{width:max(100%,var(--hit,36px));height:max(100%,var(--hit,36px))}}}`
 
-/** The Google Fonts import for Geist and Geist Mono. UIProvider adds it unless `fonts={false}`. */
-export const FONT_CSS = "@import url('https://fonts.googleapis.com/css2?family=Geist:wght@400;500;600&family=Geist+Mono:wght@400;500&display=swap');"
+/** The Google Fonts stylesheet URL for one or more family queries ('Inter:wght@400;500;600', spaces as `+`). */
+export const googleFontsHref = (...families: string[]) => `https://fonts.googleapis.com/css2?${families.map(f => `family=${f}`).join('&')}&display=swap`
+
+/** The Google Fonts stylesheet for Geist and Geist Mono (UIProvider links it with `fonts` when inline styles are off). */
+export const FONT_HREF = googleFontsHref('Geist:wght@400;500;600', 'Geist+Mono:wght@400;500')
+
+/** The Google Fonts import for Geist and Geist Mono. UIProvider adds it with `fonts`. */
+export const FONT_CSS = `@import url('${FONT_HREF}');`
 
 /*
  * A theme is two palettes of 15 base colours (light and dark). derive() fills in the rest:
@@ -91,15 +84,57 @@ const loadedFonts = uiShared('fonts', () => new Set(['Geist']))
 export function loadFont(family: string) {
   const q = FONTS.find(f => f[0] === family)?.[1]
   if (!q || loadedFonts.has(family) || typeof document === 'undefined') return
-  const l = document.createElement('link'); l.rel = 'stylesheet'; l.href = `https://fonts.googleapis.com/css2?family=${q}&display=swap`
+  const l = document.createElement('link'); l.rel = 'stylesheet'; l.href = googleFontsHref(q)
   document.head.appendChild(l); loadedFonts.add(family)
 }
 
-/** '#RRGGBB' → [r, g, b] (0–255). Anything else (a non-string, '#FFF', junk) reads as black instead of throwing. */
-export const rgb = (h: string) => {
-  const x = typeof h === 'string' ? h.trim().replace(/^#/, '') : ''
-  return [0, 2, 4].map(i => { const n = parseInt(x.slice(i, i + 2), 16); return Number.isFinite(n) ? n : 0 })
+/** A colour as [r, g, b, a]: channels 0–255, alpha 0–1. */
+export type RGBA = [r: number, g: number, b: number, a: number]
+
+/** True for a '#RRGGBB' string, the form every palette colour is stored in. */
+export const isHex6 = (v: unknown): v is string => typeof v === 'string' && /^#[0-9a-f]{6}$/i.test(v)
+
+const cssNum = (v: string, scale: number) => v.endsWith('%') ? (parseFloat(v) / 100) * scale : parseFloat(v)
+
+/**
+ * Parse a CSS colour into [r, g, b, a] (0–255, alpha 0–1): '#rgb', '#rgba', '#rrggbb', '#rrggbbaa', rgb()/rgba() in
+ * comma or space syntax, and color(srgb …), the form browsers compute color-mix() to. Null for anything else
+ * (named colours, var(), other colour spaces): resolve those with resolveColor.
+ */
+export function parseRgba(css: unknown): RGBA | null {
+  if (typeof css !== 'string') return null
+  const c = css.trim().toLowerCase()
+  const h = /^#([0-9a-f]{3,4}|[0-9a-f]{6}|[0-9a-f]{8})$/.exec(c)?.[1]
+  if (h) {
+    const full = h.length <= 4 ? [...h].map(x => x + x).join('') : h
+    const n = [0, 2, 4, 6].map(i => parseInt(full.slice(i, i + 2), 16))
+    return [n[0], n[1], n[2], full.length === 8 ? n[3] / 255 : 1]
+  }
+  const fn = /^(rgba?|color)\(\s*(srgb\s+)?([^)]*)\)$/.exec(c)
+  if (!fn || (fn[1] === 'color') !== !!fn[2]) return null
+  const [main, alpha] = fn[3].split('/').map(x => x.trim())
+  const parts = main.split(/[\s,]+/).filter(Boolean)
+  const a = alpha ?? (fn[1] !== 'color' && parts.length === 4 ? parts.pop() : undefined)
+  if (parts.length !== 3) return null
+  const ch = parts.map(v => fn[1] === 'color' ? cssNum(v, 1) * 255 : cssNum(v, 255))
+  const out = [...ch.map(v => clamp(Math.round(v), 0, 255)), a === undefined ? 1 : clamp(cssNum(a, 1), 0, 1)] as RGBA
+  return out.every(Number.isFinite) ? out : null
 }
+
+/** parseRgba without alpha: [r, g, b] (0–255), or null when `css` isn't a colour it reads. */
+export const parseColor = (css: unknown): [number, number, number] | null => { const c = parseRgba(css); return c ? [c[0], c[1], c[2]] : null }
+
+/** A colour → [r, g, b] (0–255). Anything parseColor can't read (a non-string, junk) reads as black instead of throwing. */
+export const rgb = (h: string): number[] => parseColor(h) ?? [0, 0, 0]
+
+/** HSL (h in degrees, s and l 0–1) → [r, g, b] (0–255, unrounded). */
+export function hslToRgb(h: number, s: number, l: number): [number, number, number] {
+  const k = (n: number) => (n + h / 30) % 12, a = s * Math.min(l, 1 - l), f = (n: number) => (l - a * Math.max(-1, Math.min(k(n) - 3, 9 - k(n), 1))) * 255
+  return [f(0), f(8), f(4)]
+}
+
+/** An sRGB channel (0–1) to linear light, the step WCAG luminance and OKLCH conversion share. */
+export const srgbToLinear = (v: number) => (v <= 0.04045 ? v / 12.92 : ((v + 0.055) / 1.055) ** 2.4)
 
 /** [r, g, b] (0–255, clamped) → '#RRGGBB'. */
 export const hex = (a: number[]) => '#' + a.map(v => Math.round(Math.max(0, Math.min(255, Number.isFinite(v) ? v : 0))).toString(16).padStart(2, '0')).join('').toUpperCase()
@@ -108,7 +143,7 @@ export const hex = (a: number[]) => '#' + a.map(v => Math.round(Math.max(0, Math
 export const mix = (a: string, b: string, t: number) => { const A = rgb(a), B = rgb(b); return hex(A.map((v, i) => v + (B[i] - v) * t)) }
 
 /** WCAG relative luminance of a '#RRGGBB' colour (0 black … 1 white). */
-export const luminance = (h: string) => { const [r, g, b] = rgb(h).map(v => { v /= 255; return v <= 0.03928 ? v / 12.92 : ((v + 0.055) / 1.055) ** 2.4 }); return 0.2126 * r + 0.7152 * g + 0.0722 * b }
+export const luminance = (h: string) => { const [r, g, b] = rgb(h).map(v => srgbToLinear(v / 255)); return 0.2126 * r + 0.7152 * g + 0.0722 * b }
 
 /** WCAG contrast ratio between two hex colours (1–21). */
 export const contrast = (a: string, b: string) => { const x = luminance(a), y = luminance(b); return (Math.max(x, y) + 0.05) / (Math.min(x, y) + 0.05) }
@@ -120,6 +155,12 @@ const THEME_SHADOW_LIGHT = '0 1px 2px rgba(0,0,0,.04),0 10px 30px rgba(0,0,0,.08
 const THEME_SHADOW_DARK = '0 1px 2px rgba(0,0,0,.3),0 10px 30px rgba(0,0,0,.5)'
 
 const THEME_FONT_TAIL = ',ui-sans-serif,system-ui,-apple-system,"Segoe UI",sans-serif'
+
+/** The tokens derive() adds to the 15 base colours of a palette. */
+export const THEME_DERIVED_KEYS = ['accent-soft', 'ok-soft', 'warn-soft', 'bad-soft', 'c1', 'c2', 'c4', 'c-neutral', 'band', 'shadow'] as const
+
+/** Every token derive() returns. */
+export type ThemeColorKey = keyof Palette | (typeof THEME_DERIVED_KEYS)[number]
 
 /**
  * Text on a filled background (primary buttons): the pair that reaches 4.5:1 while changing the look least. In order:
@@ -151,7 +192,7 @@ const themeReadableOn = (c: string, card: string, bg: string) => {
  * text (links, errors) and as fills under card-coloured text (accent and danger buttons, done ticks). Palettes that
  * already pass are returned unchanged.
  */
-export function derive(p: Palette, dark: boolean): Record<string, string> {
+export function derive(p: Palette, dark: boolean): Record<ThemeColorKey, string> & Record<string, string> {
   const soft = (c: string) => mix(c, p.card, dark ? 0.82 : 0.88)
   const [lightInk, darkInk] = luminance(p.fg) > luminance(p.card) ? [p.fg, p.card] : [p.card, p.fg]
   const onP = themeOnFill(p.primary, p['on-primary'], lightInk, darkInk)
@@ -168,6 +209,11 @@ export function derive(p: Palette, dark: boolean): Record<string, string> {
   }
 }
 
+/** The colour modes: follow the OS, or force light or dark. */
+export const THEME_MODES = ['system', 'light', 'dark'] as const
+
+export type ThemeMode = (typeof THEME_MODES)[number]
+
 /** A palette the user made in the Customise grid. `dark` says which way it leans. */
 export type CustomTheme = { dark: boolean; v: Palette }
 
@@ -176,7 +222,7 @@ export type CustomTheme = { dark: boolean; v: Palette }
  * light or dark list), and `custom` the user's own palette, used while `useCustom` is on.
  */
 export type ThemeSettings = {
-  theme: string; mode: 'system' | 'light' | 'dark'; radius: number; font: string
+  theme: string; mode: ThemeMode; radius: number; font: string
   variant: Record<string, number>; custom: CustomTheme | null; useCustom: boolean
 }
 
@@ -192,11 +238,10 @@ export const THEME_LEGACY_KEY = 'ui-theme'
  * Saved settings are same-origin state that anything on the origin (another app, an extension, an old version) can
  * write. Every field is checked against what the library itself produces; anything else falls back to the default. */
 
-const THEME_HEX = /^#[0-9a-f]{6}$/i
-
 const THEME_RADIUS_MAX = 32
 
-const themeIsHex = (v: unknown): v is string => typeof v === 'string' && THEME_HEX.test(v)
+/** The palette a Custom theme falls back to for colours it lacks. */
+const DEFAULT_LIGHT_PALETTE = THEMES[0].light[0][1]
 
 const themeOwn = (o: object, k: string): unknown => (Object.hasOwn(o, k) ? (o as Record<string, unknown>)[k] : undefined)
 
@@ -209,7 +254,7 @@ const themeFontName = (v: unknown): v is string => typeof v === 'string' && /^[A
 function themeCleanPalette(v: unknown, fallback: Palette): Palette {
   const src = v && typeof v === 'object' ? v : {}
   const out = {} as Palette
-  for (const k of BASE) { const c = themeOwn(src, k); out[k] = themeIsHex(c) ? c.toUpperCase() : fallback[k] }
+  for (const k of BASE) { const c = themeOwn(src, k); out[k] = isHex6(c) ? c.toUpperCase() : fallback[k] }
   return out
 }
 
@@ -236,11 +281,11 @@ export function themeLoad(raw: unknown, base: ThemeSettings = DEFAULT_THEME): Th
     const r = raw as object
     const theme = themeOwn(r, 'theme'), mode = themeOwn(r, 'mode'), font = themeOwn(r, 'font'), rc = themeOwn(r, 'custom')
     const cv = rc && typeof rc === 'object' ? themeOwn(rc, 'v') : undefined
-    const custom: CustomTheme | null = cv && typeof cv === 'object' && themeIsHex(themeOwn(cv, 'bg'))
-      ? { dark: themeOwn(rc as object, 'dark') === true, v: themeCleanPalette(cv, THEMES[0].light[0][1]) } : fallback.custom
+    const custom: CustomTheme | null = cv && typeof cv === 'object' && isHex6(themeOwn(cv, 'bg'))
+      ? { dark: themeOwn(rc as object, 'dark') === true, v: themeCleanPalette(cv, DEFAULT_LIGHT_PALETTE) } : fallback.custom
     return {
       theme: typeof theme === 'string' && THEMES.some(t => t.id === theme) ? theme : fallback.theme,
-      mode: mode === 'light' || mode === 'dark' || mode === 'system' ? mode : fallback.mode,
+      mode: THEME_MODES.includes(mode as ThemeMode) ? mode as ThemeMode : fallback.mode,
       radius: themeRadius(themeOwn(r, 'radius'), fallback.radius),
       font: typeof font === 'string' && FONTS.some(f => f[0] === font) ? font : fallback.font,
       variant: Object.hasOwn(r, 'variant') ? themeCleanVariant(themeOwn(r, 'variant')) : fallback.variant,
@@ -251,22 +296,47 @@ export function themeLoad(raw: unknown, base: ThemeSettings = DEFAULT_THEME): Th
 
 /** The palette a set of settings resolves to, with its display name ("Ayu Mirage", "Custom"). Never throws. */
 export function themePalette(s: ThemeSettings, dark: boolean): { v: Palette; dark: boolean; label: string } {
-
-  if (s?.useCustom && s.custom && typeof s.custom === 'object') return { v: themeCleanPalette(s.custom.v, THEMES[0].light[0][1]), dark: s.custom.dark === true, label: 'Custom' }
+  if (s?.useCustom && s.custom && typeof s.custom === 'object') return { v: themeCleanPalette(s.custom.v, DEFAULT_LIGHT_PALETTE), dark: s.custom.dark === true, label: 'Custom' }
   const t = THEMES.find(x => x.id === s?.theme) ?? THEMES[0], list = dark ? t.dark : t.light
   const i = s?.variant && typeof s.variant === 'object' ? s.variant[t.id] : 0
   const [name, v] = list[Number.isInteger(i) ? clamp(i, 0, list.length - 1) : 0]
   return { v, dark, label: `${t.name} ${name}` }
 }
 
+/** The radius scale for a theme radius in px: r-sm half of it, r-md the radius, r-lg about 1.6×. */
+export const themeRadii = (radius: number) => ({ 'r-sm': `${Math.round(radius / 2)}px`, 'r-md': `${radius}px`, 'r-lg': `${Math.round(radius * 1.6 + 1)}px` })
+
 /** Every CSS variable for a set of theme settings. Never throws; a radius or font it can't use falls back to the default. */
 export function themeTokens(s: ThemeSettings, dark: boolean): Record<string, string> {
   const p = themePalette(s, dark), radius = themeRadius(s?.radius, DEFAULT_THEME.radius), font = themeFontName(s?.font) ? s.font : DEFAULT_THEME.font
-  return { ...derive(p.v, p.dark), 'r-sm': `${Math.round(radius / 2)}px`, 'r-md': `${radius}px`, 'r-lg': `${Math.round(radius * 1.6 + 1)}px`, font: `"${font}"${THEME_FONT_TAIL}` }
+  return { ...derive(p.v, p.dark), ...themeRadii(radius), font: `"${font}"${THEME_FONT_TAIL}` }
 }
 
 /** Every token name themeTokens produces. ThemeScript and themeCSS accept no others. */
-export const THEME_TOKEN_NAMES: readonly string[] = [...BASE, 'accent-soft', 'ok-soft', 'warn-soft', 'bad-soft', 'c1', 'c2', 'c4', 'c-neutral', 'band', 'shadow', 'r-sm', 'r-md', 'r-lg', 'font']
+export const THEME_TOKEN_NAMES: readonly string[] = [...BASE, ...THEME_DERIVED_KEYS, 'r-sm', 'r-md', 'r-lg', 'font']
+
+/** Tokens as `--name:value;` declarations. */
+const themeDecls = (t: Record<string, string>, keys: readonly string[] = Object.keys(t)) => keys.map(k => `--${k}:${t[k]};`).join('')
+
+const THEME_COLOR_NAMES: readonly string[] = [...BASE, ...THEME_DERIVED_KEYS]
+
+/**
+ * The whole default theme as CSS, generated from the default palette (themeTokens(DEFAULT_THEME)), so the static
+ * stylesheet (dist/tokens.css), the first paint and ThemeProvider all agree. Also holds the touch rules: on coarse
+ * pointers text fields are 16px (no iOS zoom on focus), and `.ui-hit` gives any element an invisible hit area of at
+ * least 36px (set `--hit` to change it) without changing how it looks. `.ui-target` does the same on every pointer: at
+ * least 24×24px with a mouse (WCAG 2.5.8) and 36px on touch, for tiny controls such as a chip's remove ×.
+ * Scales (see CONVENTIONS.md): radius --r-sm/md/lg/full (from the theme radius), type --t-xs…--t-2xl
+ * (11/12/13/14/16/22/28px) and control heights --h-xs/sm/md/lg (24/30/36/40px). Nothing here styles `html` or `body`: text
+ * styles are scoped to `.ui-root` (UIProvider themes the page background with target="html"; FONT_CSS is the Google Fonts import).
+ */
+export const TOKENS = /* @__PURE__ */ (() => {
+  const dark = `${themeDecls(themeTokens(DEFAULT_THEME, true), THEME_COLOR_NAMES)}color-scheme:dark;`
+  return `:root{${themeDecls(themeTokens(DEFAULT_THEME, false))}color-scheme:light;--mono:${MONO_STACK};${THEME_SCALES}}
+@media (prefers-color-scheme:dark){:root:not([data-theme="light"]){${dark}}}
+:root[data-theme="dark"]{${dark}}
+${TOKEN_RULES}`
+})()
 
 /**
  * The values themeTokens can produce: hex colours, rgba() with plain numbers, numbers and px lengths, the two
@@ -331,7 +401,7 @@ export const THEME_SHARE_PARAM = 'theme'
 
 const THEME_SHARE_VERSION = 1
 
-const THEME_SHARE_MODES = ['system', 'light', 'dark'] as const
+const THEME_SHARE_MODES = THEME_MODES
 
 /** Bytes → base64url (no padding). */
 const themeB64 = (bytes: number[]) => btoa(String.fromCharCode(...bytes)).replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '')
@@ -401,22 +471,26 @@ export function themeFromUrl(url?: string | URL | { href: string }, base: ThemeS
 export function themeShareUrl(s: ThemeSettings, href?: string, { param = 'hash' }: { param?: 'hash' | 'query' } = {}): string {
   const code = themeShareEncode(s), u = themeUrlOf(href)
   if (!u) return `#${THEME_SHARE_PARAM}=${code}`
-  const h = new URLSearchParams(u.hash.replace(/^#/, ''))
-  h.delete(THEME_SHARE_PARAM); u.searchParams.delete(THEME_SHARE_PARAM)
-  if (param === 'query') u.searchParams.set(THEME_SHARE_PARAM, code); else h.set(THEME_SHARE_PARAM, code)
-  u.hash = h.toString()
+  themeUrlWithout(u)
+  if (param === 'query') u.searchParams.set(THEME_SHARE_PARAM, code)
+  else { const h = new URLSearchParams(u.hash.replace(/^#/, '')); h.set(THEME_SHARE_PARAM, code); u.hash = h.toString() }
   const out = u.toString()
   return href !== undefined && !/^[a-z][a-z\d+.-]*:/i.test(href) ? out.replace(/^http:\/\/localhost/, '') : out // keep a relative href relative
+}
+
+/** `u` without the share parameter, in the hash and the query (changed in place). */
+function themeUrlWithout(u: URL) {
+  const h = new URLSearchParams(u.hash.replace(/^#/, ''))
+  h.delete(THEME_SHARE_PARAM); u.searchParams.delete(THEME_SHARE_PARAM)
+  u.hash = h.toString()
+  return u
 }
 
 /** Remove the share parameter from the address bar (after applying it), without a navigation or a history entry. */
 function themeUrlStrip() {
   const u = themeUrlOf()
   if (!u || !themeUrlCode(u)) return
-  const h = new URLSearchParams(u.hash.replace(/^#/, ''))
-  h.delete(THEME_SHARE_PARAM); u.searchParams.delete(THEME_SHARE_PARAM)
-  u.hash = h.toString()
-  history.replaceState(history.state, '', u.toString())
+  history.replaceState(history.state, '', themeUrlWithout(u).toString())
 }
 
 /** Where a theme reveal starts: an element (its centre), a point, or by default the last place the user pressed. */
@@ -431,11 +505,11 @@ const lastPress = uiShared('last-press', () => ({ x: 0, y: 0, at: 0 }))
  * missing, and to an instant change for reduced-motion users.
  */
 export function revealTheme(update: () => void, from?: RevealOrigin) {
+  if (typeof document === 'undefined' || prefersReducedMotion()) return update()
   const root = document.documentElement
-  if (matchMedia('(prefers-reduced-motion: reduce)').matches) return update()
   const doc = document as Document & { startViewTransition?: (cb: () => void) => { ready: Promise<void> } }
   if (!doc.startViewTransition) {
-    root.classList.add('ui-theming'); update(); setTimeout(() => root.classList.remove('ui-theming'), 420); return
+    root.classList.add('ui-theming'); update(); setTimeout(() => root.classList.remove('ui-theming'), THEME_FADE_MS + 70); return
   }
   const box = from instanceof Element ? from.getBoundingClientRect() : null
   const recent = Date.now() - lastPress.at < 1500
@@ -445,7 +519,7 @@ export function revealTheme(update: () => void, from?: RevealOrigin) {
   const r = Math.hypot(Math.max(x, innerWidth - x), Math.max(y, innerHeight - y))
   const vt = doc.startViewTransition(() => flushSync(update))
   vt.ready.then(() => root.animate({ clipPath: [`circle(0px at ${x}px ${y}px)`, `circle(${r}px at ${x}px ${y}px)`] },
-    { duration: 550, easing: 'cubic-bezier(.22,1,.36,1)', pseudoElement: '::view-transition-new(root)' })).catch(() => {})
+    { duration: 550, easing: EASE_OUT_CSS, pseudoElement: '::view-transition-new(root)' })).catch(() => {})
 }
 
 type ThemeContext = {
@@ -473,8 +547,11 @@ type ThemeContext = {
 
 const ThemeCtx = createContext<ThemeContext | null>(null)
 
-/** const { settings, set, toggle, dark, tokens } = useTheme(); set({ theme: 'nord', mode: 'dark' }) */
+/** const { settings, set, toggle, dark, tokens } = useTheme(); set({ theme: 'nord', mode: 'dark' }). Throws outside a provider. */
 export const useTheme = () => useRequiredContext(ThemeCtx, 'useTheme', '<UIProvider>')
+
+/** useTheme for parts that also work without a provider: the theme context, or null outside UIProvider / ThemeProvider. */
+export const useOptionalTheme = () => useContext(ThemeCtx)
 
 /** Tokens as inline-style CSS variables, to theme one element and its subtree: <div style={themeStyle(tokens, dark)}>. Unsafe values are dropped. */
 export function themeStyle(tokens: Record<string, string>, dark: boolean): CSSProperties {
@@ -491,8 +568,8 @@ export const themeStored = (s: ThemeSettings) => JSON.stringify({ ...s, css: { l
 
 /** JSON.parse that returns a plain object or null, never throws. */
 const themeParse = (raw: string | null): object | null => {
-  if (raw === null) return null
-  try { const v: unknown = JSON.parse(raw); return v && typeof v === 'object' && !Array.isArray(v) ? v : null } catch { return null }
+  const r = raw === null ? null : tryJson(raw)
+  return r?.ok && r.v && typeof r.v === 'object' && !Array.isArray(r.v) ? r.v : null
 }
 
 /**
@@ -598,11 +675,7 @@ export function ThemeProvider({ children, defaultSettings, storageKey = THEME_ST
 }
 
 /** HSL (h 0–360, s and l 0–100) to '#RRGGBB'. */
-export function hsl2hex(h: number, s: number, l: number) {
-  s /= 100; l /= 100
-  const k = (n: number) => (n + h / 30) % 12, a = s * Math.min(l, 1 - l), f = (n: number) => l - a * Math.max(-1, Math.min(k(n) - 3, 9 - k(n), 1))
-  return '#' + [f(0), f(8), f(4)].map(x => Math.round(x * 255).toString(16).padStart(2, '0')).join('').toUpperCase()
-}
+export const hsl2hex = (h: number, s: number, l: number) => hex(hslToRgb(h, s / 100, l / 100))
 
 /** Hue (0–359) of a '#RRGGBB' colour; 0 for greys. */
 export function hex2hue(hex: string) {
@@ -610,4 +683,73 @@ export function hex2hue(hex: string) {
   if (!d) return 0
   const h = mx === r ? ((g - b) / d) % 6 : mx === g ? (b - r) / d + 2 : (r - g) / d + 4
   return Math.round((h * 60 + 360) % 360)
+}
+
+/** The attributes whose change can recolour a subtree: a theme switch sets data-theme, a class or the inline variables. */
+export const THEME_CHANGE_ATTRS = ['data-theme', 'class', 'style']
+
+/** A 1×1 canvas for colours the computed style leaves in a space parseRgba doesn't read (oklch, lab…). */
+const colorCanvas = uiShared('color-canvas', () => ({ ctx: undefined as CanvasRenderingContext2D | null | undefined }))
+function canvasRgba(css: string): RGBA | null {
+  try {
+    if (colorCanvas.ctx === undefined) { const c = document.createElement('canvas'); c.width = c.height = 1; colorCanvas.ctx = c.getContext('2d', { willReadFrequently: true }) }
+    const x = colorCanvas.ctx
+    if (!x) return null
+    x.clearRect(0, 0, 1, 1); x.fillStyle = '#000'; x.fillStyle = css; x.fillRect(0, 0, 1, 1)
+    const d = x.getImageData(0, 0, 1, 1).data
+    return [d[0], d[1], d[2], d[3] / 255]
+  } catch { return null }
+}
+
+/**
+ * A cached resolver for colours drawn on a canvas: `(css) => [r, g, b, a]` for any CSS colour as it computes inside `el`
+ * (so var(), nested var() fallbacks and color-mix() resolve in its theme scope). Unreadable values give `fallback`
+ * (mid-grey). Make one per draw (the cache never sees a later theme change); never throws, also on the server.
+ */
+export function colorResolver(el: Element | null | undefined, fallback: RGBA = [128, 128, 128, 1]): (css: string) => RGBA {
+  const cache = new Map<string, RGBA>()
+  let host: Element | null | undefined = el
+  while (host && !(host instanceof HTMLElement)) host = host.parentElement
+  return css => {
+    const hit = cache.get(css)
+    if (hit) return hit
+    let out = parseRgba(css)
+    if (!out && host && typeof getComputedStyle !== 'undefined') {
+      try {
+        const probe = host.ownerDocument.createElement('i')
+        probe.style.display = 'none'; probe.style.color = css
+        host.appendChild(probe)
+        const v = probe.style.color ? getComputedStyle(probe).color : ''
+        probe.remove()
+        out = parseRgba(v) ?? (v ? canvasRgba(v) : null)
+      } catch { out = null }
+    }
+    out ??= fallback
+    cache.set(css, out)
+    return out
+  }
+}
+
+/** One colour through colorResolver: resolveColor(canvas, 'var(--accent)') → [37, 99, 235, 1]. */
+export const resolveColor = (el: Element | null | undefined, css: string, fallback?: RGBA) => colorResolver(el, fallback)(css)
+
+/**
+ * A number that changes whenever the theme around `ref` may have changed: data-theme, class or inline variables on
+ * `<html>` or on the closest `.ui-root` (UIProvider target="self"), or the OS colour scheme. Use it as an effect
+ * dependency to re-resolve canvas colours. Works without a provider and never throws.
+ */
+export function useThemeVersion(ref?: RefObject<Element | null>): number {
+  const [v, setV] = useState(0)
+  useEffect(() => {
+    if (typeof document === 'undefined') return
+    const bump = () => setV(n => n + 1)
+    const mo = typeof MutationObserver === 'undefined' ? null : new MutationObserver(bump), opts = { attributes: true, attributeFilter: THEME_CHANGE_ATTRS }
+    const html = document.documentElement, root = ref?.current?.closest('.ui-root')
+    mo?.observe(html, opts)
+    if (root && root !== html) mo?.observe(root, opts)
+    const mq = typeof matchMedia === 'undefined' ? null : matchMedia('(prefers-color-scheme: dark)')
+    mq?.addEventListener?.('change', bump)
+    return () => { mo?.disconnect(); mq?.removeEventListener?.('change', bump) }
+  }, [ref])
+  return v
 }

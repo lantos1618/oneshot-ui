@@ -1,4 +1,10 @@
-import { MOTION_PRESETS, type MotionPreset, motionTransition, useViewport } from '../lib/motion'
+import { motionTransition, useViewport } from '../lib/motion'
+import { spring } from '../lib/helpers'
+
+export type MotionPreset = [name: string, bounce: number, duration: number]
+const springDefault = spring()
+/** Playground presets; 'Default' is the library's spring(). */
+export const MOTION_PRESETS: MotionPreset[] = [['Snappy', 0.1, 0.3], ['Default', springDefault.bounce, springDefault.duration], ['Bouncy', 0.55, 0.6], ['Gentle', 0, 0.9]]
 import { useState, useRef, useLayoutEffect, useEffect } from 'react'
 import { useAnimate, useReducedMotion, motion, type Transition } from 'motion/react'
 import { cn, Badge, Button, Chip, fmt, isCoarsePointer } from '../lib/core'
