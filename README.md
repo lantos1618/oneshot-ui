@@ -1413,7 +1413,8 @@ What the components do with untrusted input, and what stays your job. Report vul
     tool card's Approve/Deny, armed after 500 ms). Run the tool in `onApprovalRequest(tool, approved)` only when
     `approved` is true, or on your server once the next request shows `approval.approved === true`. A denied call
     never shows a result, even if one arrives.
-  On their own they are UI. The text-matching `needsApproval` fallback is a demo aid and gates nothing.
+  On their own they are UI. `AgentComposer` shows an approval card only when `onSend` returns `{ needsApproval }` or
+  you pass your own `needsApproval`; by default it never guesses from the message text.
 - **Files**: `FileUpload` filters picked and dropped files by `accept` and `maxSize` (skipped ones go to `onReject`), but
   the name and type it checks are under the user's control. Validate type, size and content on the server.
 - **URLs and colours from data**: `safeUrl`, `safeMediaUrl`, `cssUrl`, `safeCssValue` and `safeColor` (from

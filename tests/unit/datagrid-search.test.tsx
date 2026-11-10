@@ -20,7 +20,7 @@ const ALL = rows.map(r => r.name)
 const names = () => within(screen.getByRole('grid')).getAllByRole('row').slice(1).flatMap(r => ALL.filter(n => r.textContent!.includes(n)))
 const searchBox = () => screen.getByRole('textbox', { name: /Search rows/ })
 
-async function search(q: string, props: Partial<Parameters<typeof DataGrid<Row>>[0]> = {}) {
+async function search(q: string, props: Partial<Omit<Parameters<typeof DataGrid<Row>>[0], "onLoadMore" | "hasMore" | "page" | "defaultPage" | "onPageChange" | "pageSize" | "defaultPageSize" | "pageSizes">> = {}) {
   const user = userEvent.setup()
   render(<DataGrid aria-label="Customers" columns={columns} defaultRows={rows} rowKey={r => r.id} {...props} />)
   await user.click(searchBox())

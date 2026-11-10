@@ -3,31 +3,190 @@
 All notable changes to `@lyndon/ui`, newest first. While on 0.x, a minor release may break APIs; each breaking
 change is listed with how to migrate.
 
-## Unreleased (0.12.0)
+## 0.12.0
 
-### Added
-- **A (foundation):** shared helpers for the other modules. `helpers`: `EASE_OUT` / `EASE_OUT_CSS` (moved from motion so core can use them), `MOTION` spring presets, `popIn()` / `POP_IN`, `slideVariants`, `clampIndex`, `snapToStep`, `tryJson`, `joinIds`, `idPart` (hash-suffixed so "a b" and "a_b" differ), `uid`, `moveById`, `scrollParent`, `revealInScroller`, `listKeyMove`, `sliderKeyValue`, `typeaheadIndex`. `locale`: `DATE_MEDIUM`, `fmt.fixed`, `fmt.seconds`, a `{ zero }` form for `plural`, `collator`, `memoCache`, and the table sort model `compareCells` / `nextSort` / `ariaSort` / `TableSort` (dates by value, empty cells last). `hooks`: `useElementSize`, `contentSize`, `FLASH_MS`, `useFlash`, `isEditableTarget`, `formatHotkey`, `AUTOFOCUS_ATTR`, `REDUCED_MOTION_Q`, `HOLD_MS`, `MOVE_SLOP`, `haptic`, `capturePointer`, `trackFraction`, `useTouchScrollLock`, `useLatest`, `useLatestState`, `useDebounced`, `useNow`, `useValueSet`, `useTypeahead`, `blurLeaves`, `useObjectUrls`, `useCanvasSize`, `useFrameCommit`, `useStableArray`. `theme`: `THEME_MODES` / `ThemeMode`, `THEME_DERIVED_KEYS`, `MONO_STACK`, `themeRadii`, `googleFontsHref`, `FONT_HREF`, `parseRgba` / `parseColor` / `isHex6` / `hslToRgb` / `srgbToLinear`, `colorResolver` / `resolveColor` (canvas colours through the computed style, so `var()` and `color-mix()` resolve), `useThemeVersion` (also sees `UIProvider target="self"` and OS scheme changes; works without a provider), `useOptionalTheme`, `THEME_CHANGE_ATTRS`. `primitives`: `Z` / `Z_DRAG` (the stacking order), `FOCUS` rings, `surface.tip`, `TONE_TEXT`, `onColorLabel` (white text that reads 4.5:1 on any colour), `RUN_STATUS` / `RunStatus`, `stepStatusAt`, `STATUS_DOT`, `Chevron`, `Density`; StatusIcon gains `warn` and `cancelled`; `Tone` accepts `danger` (same as `bad`). `icons`: `ICON_SIZE`. `shared`: `MODAL_KEEP_ATTR`, `UI_FIELD_ATTR`. `safe`: `TEXT_LINK_SCHEMES`. `slot`: `setRef`. `diagramkit`: `DgArrowMarkers`, `dgCubicPath`, `DG_HALO_LABEL`. `@lyndon/ui/utils` also exports `fmt`, the colour parsers and the sort model.
+A code audit fixed 67 high-priority bugs, each with a regression test. Components no longer fake success: uploads,
+saves, payments, votes, approvals and agent runs report only what your code confirms, and failures show with a way to
+retry. Demo behaviour (simulated uploads, canned replies, random collaborators, workflow simulations) moved to the showcase.
 
-### Changed
-- **A (foundation):** `TOKENS` (and so `dist/tokens.css`) is generated from the default palette through `themeTokens`, so the static tokens match what UIProvider applies (soft tints, `--c1`, `--c4` and `--band` no longer repaint at hydration).
-- **A (foundation):** `useWidth` / `useSize` report the content box from the first value on (no jump from the padding box) and follow a remounted element; `useResizeObserver` follows a remounted element too.
-- **A (foundation):** `useLive` re-announces a repeated message and takes `{ politeness, debounce }`.
-- **A (foundation):** `inputClass` shows disabled and read-only fields with a muted fill instead of 60% opacity (4.5:1 text).
-- **A (foundation):** Avatar colours come from the theme tokens (dark mode no longer shows light pastels), and the presence dot is announced. DeltaBadge uses the shared tone text.
-- **A (foundation):** `rgb()` reads `#rgb` and `rgb()` colours instead of treating them as black; WCAG luminance uses the 0.04045 sRGB threshold (no 8-bit colour changes).
-- **A (foundation):** `<Icon>` takes registered names without a cast and warns once in development for an unknown name.
-- **A (foundation):** `fmtDate` and `formatDate` are deprecated aliases of `fmt.date` (both now from `locale`; `@lyndon/ui/utils` no longer imports the forms module for it).
+### Breaking changes
+
+| Before | After |
+|---|---|
+| `MOTION_PRESETS`, `MotionPreset` from `@lyndon/ui/motion` | Removed (showcase only) |
+| `EASE_OUT` from `@lyndon/ui/motion` | Import it from `@lyndon/ui` or `@lyndon/ui/helpers` |
+| `useHoverIntent(ref, 300, 150)` | `useHoverIntent(ref, { openDelay: 300, closeDelay: 150 })`; the default `closeDelay` is 150 ms (was 100) |
+| `inset` on `MenuCheckboxItem` / `MenuRadioItem` | Removed (it had no effect) |
+| FileUpload simulates progress and "Uploaded" | Pass `upload(file, onProgress, { signal })`; without it a file shows "Ready". The default hint follows `accept` and `maxSize` |
+| FileUpload `onReject` reports wrong types only | `onReject(files, reason)` also reports `'size'` and `'count'` |
+| RadioGroup preselects the first enabled option | Nothing is chosen; pass `defaultValue` to keep the old behaviour |
+| RangeSlider defaults to `[20, 80]` | Defaults to `[min, max]` |
+| OTPInput `onChange(code)` | `onChange(code, { complete })`; a space marks an empty box before the last digit ("1 3456") |
+| OTPInput submits the digits with a gap closed up | The form value is `''` while there is a gap |
+| CurrencyInput regroups while you type | Shows your text as typed and groups it when you leave the field |
+| Date controls read pasted Arabic-Indic and full-width digits | Only ASCII digits are read |
+| Date control docs list `locale` and `weekStartsOn` | Gone from the docs; the props never existed (dates are en-GB, weeks start on Monday, `hourCycle` sets the clock) |
+| CollapsibleSidebar shows a brand title and a placeholder page | `title` defaults to `''` and the main pane shows only `children`; pass both (the placeholder is `SidebarPage` in the showcase) |
+| SplitPane Home resets the split | Home closes the first pane and End opens it to `max`; reset with Enter or double-click |
+| TreeView renames on F2 or double-click | Only when `onRename` is passed |
+| `ChartTable.formats` entries of any shape | Typed `(v: number) => string`; use a `{ value, text }` cell for custom text |
+| `timeTicks(start, end, width, format, minPx?)` with `format(ms)` | `format` is optional and receives `(ms, unit)`; each tick carries `unit: 'time' \| 'day'` |
+| `timeTagBadge` | `countChipPx(n)` |
+| `WorkflowEngineOptions.intake` defaults to `'request.received'` | No default; pass `intake: 'request.received'` (StateMachine: `options={{ intake: 'request.received' }}`) |
+| StateMachine treats a station named `Index` as special | Mark that state `WorkflowState.trigger: true` |
+| `TraceRun.status` and span `status` are `string` | `RunStatus`: `'running' \| 'ok' \| 'error' \| 'cancelled'` |
+| TraceWaterfall `failure` prop and "Simulate failure" button | Removed; pass the failed span with `error: '…'` and its retry as its own span |
+| DataFlow invents a p95 latency and jitter | The p95 tile shows only with `stats.p95`; pass `simulate` for the old demo behaviour |
+| `DataGridProps` allows `onLoadMore` / `hasMore` with `page` / `pageSize` | Types require one paging mode; at runtime `onLoadMore` wins |
+| `parseByteOffset('10')` is 10 | Bare digits are hex (`'10'` is 16); decimal needs `#` (`'#10'`) |
+| HexEditor `offsets` sets the starting mode | `offsets` is controlled (`onOffsetsChange`); pass `defaultOffsets` for a starting mode the header can toggle |
+| RichTextEditor always shows "Saved" | No indicator by default; return a Promise from `onChange` or pass `saveState` |
+| `codeLanguageOf` returns `'ts'` for an unknown or missing name | Returns `undefined`; `codeLanguageOf(name) ?? 'ts'` gives the old result |
+| `EMOJI_CATEGORIES` third field is a space-separated string | A `readonly string[]`; drop the `.split(' ')` |
+| `GitFileChange` with optional `oldPath` | A discriminated union; `status: 'renamed'` requires `oldPath` |
+| `GitGraphLayout.rowOf` is a `Map` | A `ReadonlyMap` |
+| A denied tool call is `state: 'error'` with `approval.approved === false` | `state: 'denied'`; `AiToolState` also gains `'approved'` |
+| `toAiChunk({ type: 'abort' })` returns `{ type: 'finish' }` | Returns `{ type: 'abort' }`; the reply is kept and marked `stopped` |
+| A byte stream or Response may end without a terminator | It must end with `finish`, `abort` or `[DONE]`, or the reply is marked `truncated` |
+| AgentComposer guesses `needsApproval` from the message text | Off by default; return `{ needsApproval }` from `onSend` or pass your own `needsApproval` |
+| Model names "Fast", "Priority" and "Ultra fast" change the scripted word delay | Set `ComposerModel.wordDelay` (default 45 ms) |
+| PromptInput `uploadProgress: boolean` plays a fake bar | `uploadProgress(attachment) => number \| undefined`, real 0–1 progress |
+| AttachmentChip `uploading` is a seed number | A 0–1 fraction |
+| SuggestedEdit fakes "Rewriting…" for 800 ms | Shows the diff at once with `after`; pass `onRequest: () => Promise<string>` to fetch it on request |
+| AgentPlan runs itself (Run button, `onDone`) | Both removed; drive the step statuses from your agent (see the showcase's `AiPlanDemo`) |
+| `ChatApproval` | Removed; build the card from `ChatCard` and your own send callback, or use `PermissionRequest` |
+| `useAgentRun` treats a stream that closes before `run-end` as a successful run | The run is `cancelled`, `status` is `'error'`, `closedEarly` is true and `onError` gets an `AgentRunClosedEarlyError` |
+| `<ChatInbox conversations={x} />` with `replies` / `simulateIncoming` | `<ChatInbox defaultConversations={x} onSend={send} />`, or control `conversations` with `onConversationsChange` |
+| `InboxMessage` without `id` | `id` is required |
+| LivePresence with built-in people, `people` and `title` | Pass `cursors` (0–1 positions), the document as `children` and a `label`; `me` and `onCursorMove` for your own cursor |
+| AnchoredComments signs replies "Alex Lee" | `me` is required |
+| MasonryGallery always shows Save and flips to Saved at once | Save renders only with `onSave(item, saved)` and flips once it resolves |
+| AICanvas `edits` and the `CanvasEdit` export | Removed; answer through `respond(prompt, code, context)` or `explain` (the scripted demo is in the showcase) |
+| AgentTransitMap simulates a run from `machines` / `order` | It draws `run` only; `machines` and `order` are ignored (the simulation is `TransitSimMap` in the showcase) |
+| `AudioTrackHandle.play()` / `toggle()` resolve to a boolean | They resolve to `MediaPlayResult`: `{ ok: true } \| { ok: false, error }` |
+| `AudioTrackHandle.view()` | `load()` and `sync()`; new `release()` |
+| Checkout completes payment on a timer | `onPay(order, card): Promise<void>` is required; reject with an `Error` to show its message. `onComplete` gets the same `CheckoutOrder` |
+| Checkout `promoCodes={{ SAVE10: 0.1 }}` | `validatePromo={c => ({ SAVE10: 0.1 })[c] ?? null}`; without it there is no promo field |
+| Checkout prefills a sample name, email and address | `defaultDetails` starts empty |
 
 ### Fixed
-- **A (foundation):** `rangeStr` no longer throws RangeError above ~125k values (it took down every chart's screen-reader summary).
-- **A (foundation):** `fmt.relative` returns '' for an invalid date or NaN instead of throwing (GitGraph crashed on one bad commit date); `fmt.date` / `time` / `dateTime` also return '' for a NaN timestamp.
-- **A (foundation):** `<Button asChild disabled>` (or `loading`) no longer runs the child's own `onClick` on keyboard activation.
-- **A (foundation):** SparkChart draws around NaN / Infinity values (a gap) instead of blanking the whole sparkline.
-- **A (foundation):** `revealTheme` no longer calls `matchMedia` directly (it threw without it, e.g. on the server).
+- **Core:** `rangeStr` no longer throws above about 125k values, which broke every chart's screen-reader summary.
+- **Core:** `fmt.relative`, `fmt.date`, `fmt.time` and `fmt.dateTime` return '' for an invalid date instead of throwing.
+- **Core:** `<Button asChild disabled>` (or `loading`) no longer runs the child's own `onClick` on keyboard activation.
+- **Core:** `rgb()` reads `#rgb` and `rgb()` colours instead of treating them as black; `revealTheme` works without `matchMedia`, e.g. on the server.
+- **Forms:** Combobox text always matches the value: unpicked text reverts on blur, emptying the field clears the value, and a value whose options arrive later shows its label.
+- **Forms:** async Combobox filters static `options` by the query, and a cancelled request in Combobox or MultiSelect no longer leaves the spinner running.
+- **Forms:** DateField and DateTimeField mark an impossible date (31/02/2025) invalid instead of turning it into another date; unreadable pasted text shakes the field.
+- **Forms:** CurrencyInput accepts either separator as the decimal point (amounts were multiplied by 100), marks text it can't read for certain as invalid, and shows 0 in the readout.
+- **Forms:** FileUpload `multiple={false}` holds one file; `defaultFiles` no longer replay an upload; removing a row aborts its upload; failed uploads offer Retry and are not submitted.
+- **Forms:** PhoneInput's country picker is announced as a combobox and its type-ahead cycles matches; `onChange` fires only for user edits; `e164` is '' with no digits.
+- **Forms:** controlled CurrencyInput, PhoneInput and OTPInput show and submit the parent's `value`; OTPInput digits keep their boxes when one is cleared.
+- **Forms:** Select and Combobox submit '' for a value that is not an option; RadioGroup `required` can fail; MonthPicker and YearPicker block the submit for an out-of-range value.
+- **Forms:** NumberStepper and RangeSlider have no float drift; Slider and RangeSlider snap values to `step` and keep them in range; ColorPicker reads "#abc" and rejects non-hex text; TagInput no longer throws on a duplicate.
+- **Overlays:** a Sheet keeps its text, scroll position and focus when the viewport crosses 640px.
+- **Overlays:** CommandPalette shows recents from the current `commands` and runs the chosen command as it closes; a reopened palette could fire the previous one.
+- **Overlays:** Tooltip flips, stays in the viewport, honours `align`, follows its trigger when portalled and wraps at 20rem; FloatingPanel counts `sideOffset` when flipping and clamps to the layout viewport.
+- **Overlays:** Escape closes a hover-shown Tooltip or HoverCard wherever focus is; HoverCard sets `aria-describedby` (and `aria-expanded` with `pinOnClick`) and is valid inside a `<p>`.
+- **Overlays:** DropdownMenu focuses its first enabled item and skips `aria-disabled` links; Popover and DropdownMenu set `aria-controls` only while the panel exists; a part used outside its Root is named in the error.
+- **Overlays:** `AlertDialog.Content` takes `aria-label`; ContextMenu long-press no longer vibrates before a user gesture; Tour's arrow keys ignore typing in fields; NotificationBell's "Mark all read" covers every item.
+- **Overlays:** `VirtualList window` re-measures its position on scroll and resize, so content growing above it no longer leaves gaps.
+- **Navigation & data:** Tabs, ToggleGroup and Toolbar skip disabled `asChild` items and aria-disabled links; they and MegaMenu leave Alt/Ctrl/⌘ + arrow keys to the browser.
+- **Navigation & data:** AsyncButton shows "Couldn't save" and calls `onError` when `onClick` rejects, instead of an unhandled rejection.
+- **Navigation & data:** DataTable sorts dates and numbers by value and text naturally ("item 2" before "item 10"), with empty cells last.
+- **Navigation & data:** MegaMenu respects a controlled `open`; TreeView keeps a Tab stop when the selected node is gone; MobileTabBar accepts empty `items`.
+- **Navigation & data:** HoldToConfirm announces `doneLabel` (it always said "Deleted"); LikeButton counts the same way controlled or not and no longer throws; Progress and ProgressRing clamp their value.
+- **Navigation & data:** JsonViewer keeps keys containing `.` or `[` apart from nested keys, and its filter says "No matching keys" when nothing matches.
+- **Navigation & data:** Kanban and TaskList ids no longer collide; dismissed toasts no longer leave their heights behind; `confetti()` runs at the same speed on 120 Hz screens.
+- **Charts:** all-negative data or a `domain` ending at 0 no longer squeezes the value axis; DensityHistogram counts the maximum in the last bin; RadarChart leaves a gap for a missing value instead of 0.
+- **Charts:** FunnelChart keeps steps past the fifth visible; BoxViolinChart's table and CSV count every outlier; ForestPlot's default domain covers every interval and marks clipped ones with an arrow.
+- **Charts:** fractional axes and readouts show the decimals they need; time axes show the date at midnight and follow DST; charts with no data say "No data."; DonutChart with all zeros totals 0; SparkChart leaves a gap for NaN.
+- **Charts:** tooltips clear when the pointer leaves and follow data changes; a tag kind with no `color` gets the same colour in every view; Home and End reach the first and last point; TickerTable is a valid table on phones.
+- **Charts:** Swimlanes under a Chart line up with that chart's real axis gutter.
+- **Diagrams:** Gantt, NetworkGraph, ProcessFlow, DataFlow and Globe accept data added or removed after mount, keeping your drags for ids that still exist.
+- **Diagrams:** Gantt no longer hangs on a dependency cycle or throws on an unknown task id (it lists ignored dependencies), and shades weekends whatever weekday `start` is.
+- **Diagrams:** WorkflowEngine rejects machines that name unknown states, reports throwing guards and subscribers without stopping `tick()`, and counts unhandled events.
+- **Diagrams:** TraceWaterfall shows "Failed" or "Cancelled" for a run that didn't succeed, draws cancelled spans muted, and picks a fitting tick step.
+- **Diagrams:** Globe no longer invents latencies and works without UIProvider; WorldMap and Globe show a Retry message when their data fails to load; DataFlow and Globe repaint on theme changes.
+- **Diagrams:** StateMachine no longer rebuilds its engine on every render; Reset no longer leaves a ProcessFlow run suspended; a cancelled pointer ends NetworkGraph drags and Globe spins.
+- **DataGrid & binary:** the cell editor saves what was typed (no rounding, no 0 for bad input) and stays open with a message for an invalid number.
+- **DataGrid & binary:** Export without `onExport` downloads a real CSV instead of reporting a fake "CSV ready".
+- **DataGrid & binary:** `onLoadMore` always virtualises; number filters reject non-numbers and skip empty cells; the Text tab follows outside filter changes; `rowHeight` sizes the header; filter pills meet 4.5:1 contrast.
+- **DataGrid & binary:** Scheduler no longer adds the attendee "Alex Lee" to new events, and "Today" matches the highlighted day.
+- **DataGrid & binary:** HexEditor "Go to" reads hex like the displayed offsets, search jumps to a match of the new query, and copy results show in the status bar.
+- **DataGrid & binary:** ByteMap zooms smoothly with a trackpad pinch; OrgChart is a labelled group with `aria-expanded` on its fold buttons.
+- **Code & editor:** Diff, CodeBlock and GitGraph no longer show a phantom empty line for a new or deleted file or a trailing newline.
+- **Code & editor:** GitGraph shows "Unknown date" instead of crashing, keeps its search position and count right, announces only new commits, offers Clear filters when nothing matches, and colours branch chips like their lanes.
+- **Code & editor:** Markdown no longer turns `arr[0]` or `[1]: url` into citations; emoji have distinct accessible names (👍 and 👎 were both "thumbs").
+- **Code & editor:** RichTextEditor keeps `/docs`, `#top` and `tel:` links as typed, and shows "Saved" only for a confirmed save.
+- **Code & editor:** EmojiPicker arrow keys treat Recent and the main grid separately; MentionsInput and AddressAutocomplete close as focus leaves; SignaturePad follows theme changes; CodeTabs with no tabs renders nothing.
+- **AI:** a failing reply stream no longer ends as a silent success: unreadable responses are errors, cut-off streams keep their text and are marked `truncated`, and a server abort marks the reply `stopped`.
+- **AI:** `aiChunksOf` reads NDJSON as well as SSE and reports malformed lines; an approved tool call without `onApprovalRequest` reads "Approved" instead of spinning.
+- **AI:** AgentComposer shows `onSend` errors with Retry, keeps refused follow-ups queued, names files it can't take, follows streaming replies, and no longer waits on guessed delays.
+- **AI:** ModelComparison toasts "Vote recorded" only when the vote was recorded, and no longer throws on a vote; PermissionRequest's Deny waits for `onDecide`.
+- **AI:** VoiceInput fires `onResult` when the parent stops listening; AssistantChat `/` commands keep their argument and ignore case; SourcesPanel shows an out-of-range `[n]` as text; GhostTextInput announces a suggestion once.
+- **Agents/media/collab:** AICanvas sends line questions to your `respond` or `explain` instead of a canned answer, and shows a failed reply with Retry.
+- **Agents/media/collab:** audio players play the new file when `src` changes and say why playback failed; VideoPlayer with no `src` says "No video".
+- **Agents/media/collab:** ChatInbox no longer invents replies, AnchoredComments no longer signs as "Alex Lee", and MasonryGallery no longer claims "Saved" when nothing was saved.
+- **Agents/media/collab:** AgentTransitMap station counts update; AvatarCropper no longer leaks an object URL on unmount; `usePinchPan` recovers from a lost pointer capture.
+- **Blocks & showcase:** Checkout no longer fakes payment, prefills personal details, offers a built-in promo code or claims a receipt was sent.
+- **Blocks & showcase:** SettingsPage shows a failed save and reverts the row, shows "Saved" only after `onSave` resolves, and follows its `sections` prop.
+- **Blocks & showcase:** ⌘K "Open modal" and "Open drawer" open at once, and demo toggles that do nothing no longer say "Saved".
+- **Build & docs:** nine docs pages showed the wrong live example or none; the docs build now checks every card.
+- **Build & docs:** shadcn and DTCG theme exports read every colour form the CSS export accepts and keep alpha; `themeExport` throws for an unknown format.
+- **Build & docs:** the showcase and docs use the current pre-paint theme script, and the docs "Source" link points at the item's real file and commit.
+- **Build & docs:** build scripts work from paths with spaces and on Windows; missing steps, unresolved bundle imports and broken registry items fail the build instead of being skipped.
+- **Tests:** several tests could pass without checking anything (Globe reduced motion, the DataGrid search guard, daylight saving, the 50k-commit scroll); they now test what they claim.
+
+### Changed
+- **Core:** the static `TOKENS` and `dist/tokens.css` match what UIProvider applies, so colours no longer shift at hydration.
+- **Core:** `useWidth`, `useSize` and `useResizeObserver` follow a remounted element and report the content box from the first value; `useLive` re-announces a repeated message and takes `{ politeness, debounce }`.
+- **Core:** disabled and read-only fields use a muted fill instead of 60% opacity; Avatar colours follow the theme; `<Icon>` takes registered names without a cast and warns about unknown names in development.
+- **Core:** `fmtDate` and `formatDate` are deprecated aliases of `fmt.date`.
+- **Forms:** Combobox and MultiSelect handle "Create" the same way and keep created options in later searches; a read-only date control no longer blocks the submit.
+- **Forms:** date controls draw their icons with `Icon`, so `registerIcons` reaches them; fields built on `inputClass` no longer need `formDisabledClass` or `formReadOnlyClass`.
+- **Overlays:** `HoverCard.Trigger` renders an inline `<span>`; FloatingPanel has a `data-side` attribute; overlay layers use the shared `Z` scale; `Sheet.Header` no longer starts a drag from its buttons, links or fields.
+- **Overlays:** the one-line Tooltip, HoverCard, Sheet and ContextMenu take their defaults from their parts; `useVirtual`'s `scrollMargin` accepts a function.
+- **Navigation & data:** DataTable and DataGrid headers cycle ascending → descending → unsorted, using the shared `SortHeader`.
+- **Navigation & data:** `Column.align` values 'left' and 'right' are deprecated (use 'start' and 'end'); `DataSort<T>` and `GridSort<T>` are aliases of `TableSort`.
+- **Navigation & data:** HoldToConfirm's idle line is empty and its cancelled line reads "Cancelled"; a renamed TreeView label shows until `nodes` changes it.
+- **Charts:** chart, timeline and tag tooltips are portalled and stay on their mark while the page scrolls; DensityHistogram's table has From, To and Count columns.
+- **Charts:** `timeTagLook` and `TagTooltip` accept the `kinds` array or the resolved map; the fallback colour is `CHART_NEUTRAL`.
+- **Diagrams:** a fork's waiting segment reads "Waiting for branches to join" (set `WorkflowState.joinLabel` to change it); DataFlow throughput comes from the sources' rates or `stats.throughput`.
+- **DataGrid & binary:** DataGrid sorting is numeric-aware with empty cells last; EntropyMap `selection` can be controlled.
+- **Code & editor:** `<Markdown>` parses `[n]` citations only when you pass `renderCitation`; `parseMarkdown` takes a `citations` option.
+- **Code & editor:** unknown files render as plain text with a "Text" badge, `.cjs` and `.jsonc` are recognised, and Markdown fences share CodeBlock's frame.
+- **AI:** `parseAiStream`, `fromAiSdkUIMessageStream` and `aiChunksOf` return an `AiStreamEnd` from their generator; `for await` loops are unaffected.
+- **AI:** PermissionRequest takes `copy` to word it for actions other than email; after a denial its button reads "Review again".
+- **Agents/media/collab:** `Comment` and `ThreadMessage` take `createdAt`, shown relative to now; `time` is optional.
+- **Agents/media/collab:** AgentTransitMap's running badge reads "Running" (was "Live"); AICanvas streams its replies.
+- **Blocks & showcase:** the showcase's demo data uses one seeded generator and shared sample names, which changes some sample charts and rows.
+- **Build & docs:** `pnpm check` runs lint, types, build, docs types, registry, SSR, unit tests and the pack check; CI and the release workflow both run it.
+- **Tests:** unit tests run in Europe/London, and the date suites again in America/Santiago, so a local `TZ` no longer changes results; timing tests no longer depend on machine speed.
+- **Tests:** the e2e baseline update flag is `E2E_BASELINE=update` (was `AXE_BASELINE`); `pnpm test:e2e:update-baseline` sets it.
+
+### Added
+- **Core:** the table sort model `compareCells`, `nextSort`, `ariaSort` and `TableSort`; colour helpers `parseRgba`, `parseColor`, `hslToRgb`, `srgbToLinear` and `resolveColor`; `onColorLabel` (white text at 4.5:1 on any colour); `RUN_STATUS`; `uid`.
+- **Core:** hooks `useElementSize`, `useFlash`, `useDebounced`, `useNow`, `useLatest`, `useTypeahead`, `useObjectUrls` and `useThemeVersion`; `fmt.fixed`, `fmt.seconds` and a `{ zero }` form for `plural`; StatusIcon `warn` and `cancelled`; `Tone` accepts `danger`.
+- **Forms:** `useFormControl({ validity })`, `markEdited()`, FileUpload `maxSize`, `filterFiles`, `useFileDrop`, Combobox and MultiSelect `onLoadError`, `MatchText` and `useRadioGroup`.
+- **Overlays:** `fitPanel` (pure placement that flips and clamps), `fitInside`, `viewportSize`; `useMenuList` and `Menu.List`; `FloatingPanel inline`; `onExitComplete` on CommandPalette and ModalLayer.
+- **Navigation & data:** `SortHeader`, `Ring` and `ProgressTone`; `empty` on DataTable and TreeView; AsyncButton `onError` and `errorLabel`.
+- **Charts:** vizkit `tickDecimals`, `tickStep`, `textPx` and `VizTip`; annotate `resolveTagKinds`, `TAG_LAYOUT`, `timeTickText` and `timeSpanText`; `useChartShell({ tipAt })`.
+- **Diagrams:** WorkflowEngine `error` and `unmatched` events and `engine.unmatched`; `WorkflowState.trigger` and `joinLabel`; StateMachine `options`; DataFlow `stats` and `simulate`; `TraceSpan.cancelled`.
+- **DataGrid & binary:** `GridColumn.parse(text)`; Scheduler `newEvent(draft)`; HexEditor `defaultOffsets` and `onOffsetsChange`.
+- **Code & editor:** `codeLines`, `diffStat`, `diffHunks`, `CodeFrame` and `CodeCopy` in `@lyndon/ui/code`; LaneGraph `onFresh`; `richTextHref`; RichTextEditor `saveState`.
+- **AI:** ModelComparison `onVote`; AgentComposer `onError`; `useAiChat` `onMalformed`; `AiMessage.truncated`; `parseJsonLines`, `streamItems`, `valueText` and `attachmentRejectNote` in `@lyndon/ui/ai`.
+- **Agents/media/collab:** `AgentRunState.closedEarly`, `spanAncestors` and `nearestAgent`; ChatInbox `onSend`, `typing`, `selected`, `onCall` and `onProfile`; AICanvas `suggestions` and `onError`; VideoPlayer `emptyLabel`.
+- **Blocks & showcase:** `CheckoutOrder` and `CheckoutCard` types.
 
 ### Removed
-- **A (foundation):** `MOTION_PRESETS` and the `MotionPreset` type leave `@lyndon/ui/motion` (playground-only; now in the showcase).
-- **A (foundation):** `EASE_OUT` is no longer exported from `@lyndon/ui/motion`; import it from `@lyndon/ui` (or `@lyndon/ui/helpers`).
+- **Core:** `MOTION_PRESETS`, `MotionPreset` and the `EASE_OUT` export from `@lyndon/ui/motion`.
+- **Forms:** FileUpload's simulated uploads.
+- **Overlays:** `inset` on `MenuCheckboxItem` and `MenuRadioItem`.
+- **Charts:** `timeTagBadge` (use `countChipPx`).
+- **Diagrams:** TraceWaterfall's `failure` prop and "Simulate failure" button.
+- **AI:** `ChatApproval`, AgentPlan's Run button and `onDone`, and ChatChecklist's "All clear" emoji.
+- **Agents/media/collab:** ChatInbox `replies` and `simulateIncoming`, LivePresence `people` and `title`, AICanvas `edits` and `CanvasEdit`, and AgentTransitMap's built-in simulation.
+- **Blocks & showcase:** Checkout `promoCodes`.
 
 ## 0.11.0
 

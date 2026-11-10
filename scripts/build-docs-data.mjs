@@ -23,9 +23,9 @@ import { EXTRAS } from './tiers.mjs'
 
 /** Items with no showcase card yet: their pages say so. Every other item must resolve to a demo. */
 const NO_DEMO = new Set([
-  'ai-renderers-provider', 'appearance-menu', 'appearance-panel', 'approval-card', 'card', 'chat-approval', 'chat-card', 'chat-checklist',
-  'chevron', 'chip', 'collapse', 'date-time-field', 'hooks', 'part-button', 'scroll-edges', 'shimmer-text', 'streaming-text',
-  'theme-export-panel', 'theme-preview', 'theme-toggle', 'tool-call', 'tool-card', 'track-grid', 'typing-dots', 'ui-hosts', 'ui-provider', 'virtual-list',
+  'ai-renderers-provider', 'appearance-menu', 'appearance-panel', 'approval-card', 'card', 'chat-card', 'chat-checklist',
+  'chevron', 'chip', 'code-copy', 'code-frame', 'collapse', 'date-time-field', 'hooks', 'match-text', 'menu-list', 'part-button', 'ring', 'scroll-edges', 'shimmer-text', 'sort-header', 'streaming-text',
+  'theme-export-panel', 'theme-preview', 'theme-toggle', 'tool-call', 'tool-card', 'track-grid', 'typing-dots', 'ui-hosts', 'ui-provider', 'virtual-list', 'viz-tip',
 ])
 
 const outDir = join(root, 'docs/generated')
