@@ -1,6 +1,6 @@
 // Checks dist-registry/ (run after scripts/build-registry.mjs):
-//   1. index.json matches the files (bytes, sha256), every r/*.json has its content, and every drop-in imports only
-//      react, react-dom and motion (the .package.tsx block variants import @lyndon/ui instead)
+//   1. index.json matches the files (bytes, sha256), every r/*.json has its content, every drop-in imports only
+//      react, react-dom and motion (the .package.tsx block variants import @lyndon/ui instead), and no core item needs motion
 //   2. every drop-in type-checks on its own: tsconfig.registry.json compiles each file as a separate module with the
 //      app's strict settings (noUnusedLocals included, so an embedded helper nothing uses fails the check)
 //   3. every drop-in loads on the server (Vite SSR), and a sample renders with react-dom/server inside the UIProvider
@@ -41,6 +41,9 @@ for (const f of readdirSync(join(dir, 'r')).filter(f => f.endsWith('.json') && f
   if (!item.files && !item.css) problems.push(`r/${f}: neither files nor css`)
 }
 console.log(`index: ${index.items.length} items checked`)
+// Core drop-ins never need motion; only extras (and the blocks built on them) do. Report-only until core is migrated.
+const coreMotion = index.items.filter(e => e.tier === 'core' && e.dependencies?.includes('motion')).map(e => e.name)
+if (coreMotion.length) console.warn(`core items that still need motion (${coreMotion.length}): ${coreMotion.join(' ')}`)
 
 // 2. standalone type-check
 if (!args.has('--no-tsc')) {

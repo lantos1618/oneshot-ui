@@ -15,6 +15,12 @@ const sourceOf = (m: string) => readFileSync(join(libDir, files.find(f => nameOf
 /** Violations that are allowed for now, as 'from -> to'. Empty once the split is done. */
 const KNOWN = new Set<string>([])
 
+/** Core modules that still import motion while they move to the CSS animations in motion.tsx. Empty once that is done. */
+const MOTION_KNOWN = new Set<string>([
+  'primitives', 'motion', 'magnet', 'overlay', 'formkit', 'fields', 'select', 'inputs', 'pickers', 'upload',
+  'navigation', 'feedback', 'data', 'layout', 'provider',
+])
+
 type Edge = { to: string; typeOnly: boolean; dynamic: boolean; reexport: boolean }
 const STATEMENT = /^(import|export)\s+(type\s+)?([\s\S]*?)\s*from\s*'\.\/([\w-]+)'/gm
 function edgesOf(m: string): Edge[] {
@@ -50,6 +56,12 @@ describe('module tiers', () => {
   it('core never imports extras, not even types', () => {
     const bad = CORE.flatMap(m => (graph.get(m) ?? []).filter(e => tierOf(e.to) !== 'core').map(e => `${m} -> ${e.to}`))
     expect(bad.filter(v => !KNOWN.has(v))).toEqual([])
+  })
+
+  it('core never imports motion (it is an optional peer for extras)', () => {
+    const bad = CORE.filter(m => /^(?:import|export)\s[^']*?from\s*'motion(?:\/[\w-]+)?'/m.test(sourceOf(m)))
+    expect(bad.filter(m => !MOTION_KNOWN.has(m))).toEqual([])
+    expect([...MOTION_KNOWN].filter(m => !bad.includes(m)), 'modules that no longer import motion: drop them from MOTION_KNOWN').toEqual([])
   })
 
   it('extras import only core, their own family and its declared deps', () => {
