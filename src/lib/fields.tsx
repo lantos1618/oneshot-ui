@@ -178,12 +178,13 @@ export function CheckMark({ checked = true, size = 12, strokeWidth = 3.5, draw =
 
 /** The square box of a checkbox (filled with a drawn tick when checked; pops on change). For custom rows, lists and tables; the row carries the role. */
 export function CheckboxBox({ checked, size = 18, pop = true, className }: { checked: boolean; size?: number; pop?: boolean; className?: string }) {
+  const small = size < 18
   return (
     <motion.span key={pop ? String(checked) : undefined} initial={false} animate={pop ? { scale: [1, 0.85, 1] } : undefined} transition={spring(0.5, 0.3)} aria-hidden
       style={{ width: size, height: size }}
-      className={cn('grid flex-none place-items-center border-[1.5px] text-[var(--on-primary)] transition-colors', size < 18 ? 'rounded-[var(--r-sm)]' : 'rounded-[var(--r-sm)]',
+      className={cn('grid flex-none place-items-center rounded-[var(--r-sm)] border-[1.5px] text-[var(--on-primary)] transition-colors',
         checked ? 'border-[var(--primary)] bg-[var(--primary)]' : 'border-[var(--line2)]', className)}>
-      <CheckMark checked={checked} size={Math.round(size * 0.66)} strokeWidth={size < 18 ? 4 : 3.5} duration={checked ? (size < 18 ? 0.25 : 0.3) : (size < 18 ? 0.12 : 0.15)} />
+      <CheckMark checked={checked} size={Math.round(size * 0.66)} strokeWidth={small ? 4 : 3.5} duration={checked ? (small ? 0.25 : 0.3) : (small ? 0.12 : 0.15)} />
     </motion.span>
   )
 }
@@ -215,21 +216,35 @@ export type Option = {
 }
 
 /**
- * Radio group with arrow-key navigation. Form-native: `name` submits the chosen value ('' when none), `required`,
+ * Roving radios (RadioGroup, SegmentedControl, Rating): one Tab stop (the checked radio, else the first enabled one, which
+ * also takes your `ref`), and arrows that move to the next enabled radio and select it. `focus()` focuses the Tab stop.
+ */
+export function useRadioGroup({ count, checked, isDisabled = () => false, onSelect, ref, loop = true, homeEnd = true }: {
+  count: number; /** index of the checked radio, -1 for none */ checked: number; isDisabled?: (i: number) => boolean; onSelect: (i: number) => void
+  ref?: Ref<HTMLButtonElement>; loop?: boolean; homeEnd?: boolean }) {
+  const refs = useRef<(HTMLButtonElement | null)[]>([])
+  let tabStop = checked >= 0 && checked < count && !isDisabled(checked) ? checked : 0
+  if (isDisabled(tabStop)) for (let i = 0; i < count; i++) if (!isDisabled(i)) { tabStop = i; break }
+  const { onKeyDown } = useRoving(count, () => {}, { orientation: 'both', isDisabled, index: tabStop, loop, homeEnd, onMove: n => { onSelect(n); refs.current[n]?.focus() } })
+  return {
+    tabStop, onKeyDown, focus: () => refs.current[tabStop]?.focus(),
+    item: (i: number) => ({ tabIndex: i === tabStop ? 0 : -1, ref: (el: HTMLButtonElement | null) => { refs.current[i] = el; if (i === tabStop) composeRefs(ref)(el) } }),
+  }
+}
+
+/**
+ * Radio group with arrow-key navigation. Nothing is chosen until the user picks (or `defaultValue` says), like native
+ * radios; the first enabled option takes the Tab stop meanwhile. Form-native: `name` submits the chosen value (nothing when none), `required`,
  * `disabled` (every option), `readOnly` (arrows move focus only), `invalid`, `onBlur`, `form`, and `ref` on the radio that
  * holds the Tab stop. Inside a FormField the group is labelled by the field's label.
  */
 export function RadioGroup({ options, value, defaultValue, onChange, label, className, ref, ...fp }: FormControlProps &
   { options: Option[]; value?: string; defaultValue?: string; onChange?: (v: string) => void; label?: string; className?: string; ref?: Ref<HTMLButtonElement> }) {
-  const refs = useRef<(HTMLButtonElement | null)[]>([])
-  const fc = useFormControl<string>({ ...fp, value, defaultValue: defaultValue ?? options.find(o => !o.disabled)?.value ?? '', onChange, serialize: v => v, focus: () => refs.current[tabStopRef.current]?.focus() })
+  const fc = useFormControl<string>({ ...fp, value, defaultValue: defaultValue ?? '', onChange, serialize: v => v || null, focus: () => rg.focus() })
   const v = fc.value, set = fc.set
-  const sel = options.findIndex(o => o.value === v && !o.disabled)
-  const tabStop = sel >= 0 ? sel : options.findIndex(o => !o.disabled) // value missing or disabled: the first enabled option takes Tab
-  const tabStopRef = useRef(tabStop); tabStopRef.current = tabStop
   const off = (i: number) => fc.disabled || !!options[i].disabled
-  const { onKeyDown } = useRoving(options.length, () => {}, { orientation: 'both', isDisabled: off, index: Math.max(0, tabStop), homeEnd: false,
-    onMove: n => { set(options[n].value); refs.current[n]?.focus() } })
+  const rg = useRadioGroup({ count: options.length, checked: options.findIndex(o => o.value === v), isDisabled: off, onSelect: n => set(options[n].value), ref, homeEnd: false })
+  const onKeyDown = rg.onKeyDown
   return (
     <div role="radiogroup" aria-label={label} aria-labelledby={label ? undefined : fc.labelledBy} aria-required={fc.required || undefined} aria-readonly={fc.readOnly || undefined}
       aria-disabled={fc.disabled || undefined} aria-invalid={fc.control['aria-invalid']} aria-describedby={fc.control['aria-describedby']} id={fc.control.id}
@@ -237,7 +252,7 @@ export function RadioGroup({ options, value, defaultValue, onChange, label, clas
       {options.map((o, i) => {
         const on = o.value === v
         return (
-          <button type="button" key={o.value} ref={el => { refs.current[i] = el; if (i === tabStop) composeRefs(ref)(el) }} role="radio" aria-checked={on} disabled={off(i)} tabIndex={i === tabStop ? 0 : -1} onClick={() => set(o.value)}
+          <button type="button" key={o.value} {...rg.item(i)} role="radio" aria-checked={on} disabled={off(i)} onClick={() => set(o.value)}
             className="group/rd flex cursor-pointer items-center gap-2.5 border-0 bg-transparent p-0 text-start text-[13px] disabled:cursor-not-allowed disabled:text-[var(--fg3)] [@media(pointer:coarse)]:min-h-9">
             <span className={cn('grid h-[18px] w-[18px] flex-none place-items-center rounded-full border-[1.5px] group-disabled/rd:opacity-50', on ? 'border-[var(--primary)]' : fc.invalid ? 'border-[var(--bad)]' : 'border-[var(--line2)]')}>
               <motion.i className="block h-2 w-2 rounded-full bg-[var(--primary)]" initial={false} animate={{ scale: on ? 1 : 0 }} transition={on ? spring(0.5, 0.35) : { duration: 0.1 }} />
@@ -267,22 +282,18 @@ export function ActiveIndicator({ group, className }: { group: string; className
 export function SegmentedControl({ options, value, defaultValue, onChange, className, size = 'md', 'aria-label': ariaLabel, ref, ...fp }: FormControlProps &
   { options: (Option | string)[]; value?: string; defaultValue?: string; onChange?: (v: string) => void; className?: string; size?: 'sm' | 'md'; 'aria-label'?: string; ref?: Ref<HTMLButtonElement> }) {
   const opts = options.map(o => typeof o === 'string' ? { value: o, label: o } as Option : o)
-  const refs = useRef<(HTMLButtonElement | null)[]>([])
-  const fc = useFormControl<string>({ ...fp, value, defaultValue: defaultValue ?? opts[0].value, onChange, serialize: v => v, focus: () => refs.current[tabStopRef.current]?.focus() })
+  const fc = useFormControl<string>({ ...fp, value, defaultValue: defaultValue ?? opts[0].value, onChange, serialize: v => v, focus: () => rg.focus() })
   const v = fc.value, set = fc.set
   const group = useId()
-  const sel = opts.findIndex(o => o.value === v && !o.disabled)
-  const tabStop = sel >= 0 ? sel : Math.max(0, opts.findIndex(o => !o.disabled))
-  const tabStopRef = useRef(tabStop); tabStopRef.current = tabStop
   const off = (i: number) => fc.disabled || !!opts[i].disabled
-  const { onKeyDown } = useRoving(opts.length, () => {}, { orientation: 'both', isDisabled: off, index: tabStop,
-    onMove: n => { set(opts[n].value); refs.current[n]?.focus() } })
+  const rg = useRadioGroup({ count: opts.length, checked: opts.findIndex(o => o.value === v), isDisabled: off, onSelect: n => set(opts[n].value), ref })
+  const onKeyDown = rg.onKeyDown
   return (
     <div role="radiogroup" aria-label={ariaLabel} aria-labelledby={ariaLabel ? undefined : fc.labelledBy} aria-readonly={fc.readOnly || undefined} aria-disabled={fc.disabled || undefined}
       aria-invalid={fc.control['aria-invalid']} aria-describedby={fc.control['aria-describedby']} id={fc.control.id} onKeyDown={onKeyDown} onBlur={fc.onBlur}
       className={cn('relative inline-flex rounded-[calc(var(--r-md)+1px)] bg-[var(--muted)] p-1', fc.invalid && 'shadow-[0_0_0_1px_var(--bad)]', className)}>
       {opts.map((o, i) => (
-        <button type="button" key={o.value} ref={el => { refs.current[i] = el; if (i === tabStop) composeRefs(ref)(el) }} role="radio" aria-checked={o.value === v} tabIndex={i === tabStop ? 0 : -1} disabled={off(i)}
+        <button type="button" key={o.value} {...rg.item(i)} role="radio" aria-checked={o.value === v} disabled={off(i)}
           aria-label={o.label ? undefined : o.value} onClick={() => set(o.value)}
           className={cn('relative flex-1 cursor-pointer rounded-[calc(var(--r-md)-2px)] border-0 bg-transparent px-3 font-medium whitespace-nowrap transition-colors disabled:cursor-not-allowed',
             size === 'sm' ? 'h-[22px] text-xs [@media(pointer:coarse)]:h-8' : 'h-7 text-[13px] [@media(pointer:coarse)]:h-9',

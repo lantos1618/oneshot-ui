@@ -1,26 +1,17 @@
 import { useEffect, useLayoutEffect, useRef, useState, type CSSProperties, type ReactNode, type Ref, type KeyboardEvent as RKeyboardEvent } from 'react'
 import { AnimatePresence, motion } from 'motion/react'
-import { type FormControlProps, Spinner, formDisabledClass, formReadOnlyClass, useFormControl, Button, Icon, type IconName, cn, inputClass, menuItemClass, spring, useCoarsePointer, useDisclosure, useListbox, composeRefs } from './core'
+import { type FormControlProps, Spinner, useFormControl, Button, Icon, type IconName, cn, inputClass, menuItemClass, spring, useCoarsePointer, useDisclosure, useListbox, composeRefs, plural, revealInScroller, scrollParent, typeaheadIndex } from './core'
 import { play } from './motion'
 import { FloatingPanel } from './overlay'
 import { useVirtual } from './virtual'
-import { formsScrollIntoList, formsTriggerClass } from './formkit'
+import { FormsChip, formsTriggerClass } from './formkit'
 import { inputShellClass, CheckboxBox, type Option } from './fields'
 
-/** Bold the first case-insensitive match of `query` inside `text` (for option lists and autocomplete). */
-function formsHighlight(text: string, query?: string): ReactNode {
-  const q = query?.trim()
-  if (!q) return text
-  const i = text.toLowerCase().indexOf(q.toLowerCase())
-  if (i < 0) return text
-  return <>{text.slice(0, i)}<mark className="bg-transparent font-semibold text-[var(--fg)]">{text.slice(i, i + q.length)}</mark>{text.slice(i + q.length)}</>
-}
-
-/** The nearest scrollable ancestor of `el` (the list's panel), or null. */
-function formsScrollParent(el: HTMLElement | null): HTMLElement | null {
-  let p = el?.parentElement ?? null
-  while (p && p !== document.body && !/(auto|scroll)/.test(getComputedStyle(p).overflowY)) p = p.parentElement
-  return p && p !== document.body ? p : null
+/** `text` with the first case-insensitive match of `query` in a <mark> (bold by default): option lists, autocomplete, search results. */
+export function MatchText({ text, query, markClassName = 'bg-transparent font-semibold text-[var(--fg)]' }: { text: string; query?: string; markClassName?: string }) {
+  const q = query?.trim(), i = q ? text.toLowerCase().indexOf(q.toLowerCase()) : -1
+  if (!q || i < 0) return <>{text}</>
+  return <>{text.slice(0, i)}<mark className={markClassName}>{text.slice(i, i + q.length)}</mark>{text.slice(i + q.length)}</>
 }
 
 /**
@@ -39,16 +30,17 @@ export function OptionList({ options, active, isSelected, onPick, onHover, id, m
   const root = useRef<HTMLDivElement>(null), scroller = useRef<HTMLElement | null>(null)
   const virtual = virtualize !== false && options.length > virtualize
   useLayoutEffect(() => { // before useVirtual subscribes; looked up again only if the list moved
-    if (!scroller.current?.contains(root.current)) scroller.current = formsScrollParent(root.current)
+    if (!scroller.current?.contains(root.current)) scroller.current = scrollParent(root.current)
   })
   const coarse = useCoarsePointer()
   const v = useVirtual({ count: options.length, estimateSize: coarse ? 40 : 34, scrollRef: scroller, enabled: virtual, keep: active >= 0 && active < options.length ? [active] : undefined, overscan: 8 })
   useEffect(() => {
     if (virtual) { if (active >= 0 && active < options.length) v.scrollToIndex(active, { align: first.current ? 'center' : 'auto' }) }
-    else { const el = document.getElementById(`${id}-${active}`); if (el) formsScrollIntoList(el, first.current) }
+    else revealInScroller(document.getElementById(`${id}-${active}`), { center: first.current })
     first.current = false
   }, [active, id, options.length, virtual]) // eslint-disable-line react-hooks/exhaustive-deps
-  if (!options.length) return <div ref={root} role="status" className={cn('p-3 text-center text-[13px] text-[var(--fg3)]', className)}>{empty ?? 'No matches'}</div>
+  // the empty listbox stays, so the combobox's aria-controls still points at something
+  if (!options.length) return <><div role="listbox" id={id} aria-label={label} /><div ref={root} role="status" className={cn('p-3 text-center text-[13px] text-[var(--fg3)]', className)}>{empty ?? 'No matches'}</div></>
   const row = (o: Option, i: number, style?: CSSProperties, animated = true) => {
     const sel = isSelected(o)
     const props = {
@@ -63,7 +55,7 @@ export function OptionList({ options, active, isSelected, onPick, onHover, id, m
           {o.leading && <span className="flex-none leading-none">{o.leading}</span>}
           {o.dot && <span className="h-2 w-2 flex-none rounded-full" style={{ background: o.dot }} />}
           {o.icon && <Icon name={o.icon} size={15} className="text-[var(--fg3)]" />}
-          <span className="truncate">{formsHighlight(o.label, query)}{o.hint && <span className="ms-2 text-xs text-[var(--fg3)]">{o.hint}</span>}</span>
+          <span className="truncate"><MatchText text={o.label} query={query} />{o.hint && <span className="ms-2 text-xs text-[var(--fg3)]">{o.hint}</span>}</span>
         </span>
         {!multi && sel && <Icon name="check" size={14} />}
       </>
@@ -101,29 +93,24 @@ export function OptionList({ options, active, isSelected, onPick, onHover, id, m
 /**
  * Custom select: arrows, Enter/Space, type-ahead that cycles through options starting with the typed letter
  * (works closed too), springs open, flips upward near the bottom of the viewport, checkmark on the current option.
- * Form-native: `name` submits the value ('' when none), `required`, `disabled`, `readOnly` (doesn't open), `invalid`,
- * `onBlur`, `form`, and `ref` on the trigger button. Long lists are virtualised.
+ * Form-native: `name` submits the value ('' when none, and when the value isn't one of `options`), `required`,
+ * `disabled`, `readOnly` (doesn't open), `invalid`, `onBlur`, `form`, and `ref` on the trigger button. Long lists are virtualised.
  */
-export function Select({ options, value, defaultValue, onChange, placeholder: placeholderProp, className, 'aria-label': ariaLabel, icon, mono, ref, ...fp }: FormControlProps &
+export function Select({ options, value, defaultValue = '', onChange, placeholder = 'Select…', className, 'aria-label': ariaLabel, icon, mono, ref, ...fp }: FormControlProps &
   { options: Option[]; value?: string; defaultValue?: string; onChange?: (v: string) => void; placeholder?: string; className?: string; 'aria-label'?: string
     /** leading icon in the trigger (TimePicker uses 'clock') */ icon?: IconName; mono?: boolean; ref?: Ref<HTMLButtonElement> }) {
   const btn = useRef<HTMLButtonElement>(null)
-  const placeholder = placeholderProp ?? 'Select…'
-  const fc = useFormControl<string>({ ...fp, value, defaultValue: defaultValue ?? '', onChange, serialize: x => x, focus: () => btn.current?.focus() })
+  const fc = useFormControl<string>({ ...fp, value, defaultValue, onChange, serialize: x => (options.some(o => o.value === x) ? x : ''), focus: () => btn.current?.focus() })
   const v = fc.value, set = fc.set, locked = fc.disabled || fc.readOnly
   const sel = options.findIndex(o => o.value === v)
   const { open, setOpen, ref: wrap } = useDisclosure()
   const pick = (i: number) => { if (!options[i] || options[i].disabled) return; set(options[i].value); setOpen(false) }
   const lb = useListbox(options, pick, { open, setOpen, selected: sel, locked }), active = lb.active
-  const nextMatch = (ch: string, from: number) => {
-    for (let s = 1; s <= options.length; s++) { const k = (from + s + options.length) % options.length; if (!options[k].disabled && options[k].label.toLowerCase().startsWith(ch)) return k }
-    return -1
-  }
   const onKey = (e: RKeyboardEvent) => {
-    const typed = e.key.length === 1 && e.key !== ' ' && !e.metaKey && !e.ctrlKey ? e.key.toLowerCase() : ''
+    const typed = e.key.length === 1 && e.key !== ' ' && !e.metaKey && !e.ctrlKey ? e.key : ''
     if (!typed) return lb.onKeyDown(e)
-    const k = nextMatch(typed, open ? active : sel)
-    if (k >= 0) { if (open) lb.setActive(k); else set(options[k].value) }
+    const k = typeaheadIndex(options.map(o => o.label), typed, open ? active : sel, i => !!options[i].disabled)
+    if (k >= 0) { if (open) lb.setActive(k); else if (!locked) set(options[k].value) }
   }
   return (
     <div ref={wrap} className={cn('relative', className)} onBlur={fc.onBlur}>
@@ -149,81 +136,119 @@ export function Select({ options, value, defaultValue, onChange, placeholder: pl
 
 /** What an async Combobox's `loadOptions` gets besides the query: abort it when the signal fires (a newer query or unmount). */
 export type LoadOptionsContext = { signal: AbortSignal }
-type FormsLoad = { q: string; status: 'idle' | 'loading' | 'done' | 'error'; items: Option[] }
+type FormsLoader = (query: string, ctx: LoadOptionsContext) => Promise<Option[]>
+type FormsLoad = { q: string; status: 'idle' | 'loading' | 'done' | 'error'; items: Option[]; error?: unknown }
 
 /** The async list's message (too short, failed with Retry, loading, or no matches) and what the live region says. */
-function useSelectStatus({ short, failed, loading, done, count, minChars, query, empty, retry }: { short: boolean; failed: boolean; loading: boolean; done: boolean; count: number
+function selectStatus({ short, failed, loading, done, count, minChars, query, empty, retry }: { short: boolean; failed: boolean; loading: boolean; done: boolean; count: number
   minChars: number; query: string; empty?: (q: string) => ReactNode; retry: () => void }) {
-  const message = short ? (minChars === 1 ? `Type at least ${minChars} character` : `Type at least ${minChars} characters`)
+  const message = short ? `Type at least ${plural(minChars, 'character')}`
     : failed ? <span className="flex flex-col items-center gap-2"><span className="text-[var(--bad)]">{'Couldn’t load results'}</span>
       <Button size="xs" onPointerDown={e => e.preventDefault()} onClick={retry}>{'Retry'}</Button></span>
     : loading ? <span className="inline-flex items-center gap-2"><span aria-hidden className="grid"><Spinner size={13} /></span>{'Loading…'}</span>
     : empty ? empty(query) : `No matches for “${query}”`
-  const live = loading ? 'Loading results' : failed ? 'Couldn’t load results. Press Enter to retry.' : done ? (count === 0 ? 'No results' : count === 1 ? `${count} result` : `${count} results`) : ''
+  const live = loading ? 'Loading results' : failed ? 'Couldn’t load results. Press Enter to retry.' : done ? plural(count, 'result', undefined, { zero: 'No results' }) : ''
   return { message, live }
+}
+
+/** Every option Combobox or MultiSelect has seen (static, default, loaded, created), to label values whose options come and go. */
+function useOptionIndex(options: Option[], defaultOptions?: Option[]) {
+  const known = useRef(new Map<string, Option>())
+  const indexed = useRef<unknown[]>([])
+  if (indexed.current[0] !== options || indexed.current[1] !== defaultOptions) { // index once per options array, not per render
+    indexed.current = [options, defaultOptions]
+    for (const o of [...(defaultOptions ?? []), ...options]) if (!known.current.has(o.value)) known.current.set(o.value, o)
+  }
+  return { optionOf: (v: string) => known.current.get(v), remember: (o: Option) => { known.current.set(o.value, o) } }
+}
+type FormsOptionIndex = ReturnType<typeof useOptionIndex>
+
+/**
+ * The list Combobox and MultiSelect show for a query: loaded results (or `defaultOptions` before the first load), then
+ * the matching static options and the ones created earlier, without duplicates, plus “Create “x”” when creatable and
+ * nothing (listed or already chosen) has that label. `resolve(i)` is the option to choose at `i`; for “Create” it makes
+ * it (`onCreate` may return the Option to use) and remembers it.
+ */
+function useOptionSource(index: FormsOptionIndex, { options, defaultOptions, loadOptions, query, open, minChars, debounce, creatable, createLabel, onCreate, chosen, empty, onLoadError, focus }: {
+  options: Option[]; defaultOptions?: Option[]; loadOptions?: FormsLoader; query: string; open: boolean; minChars: number; debounce: number
+  creatable?: boolean; createLabel?: (query: string) => string; onCreate?: (text: string) => Option | void; chosen: string[]
+  empty?: (query: string) => ReactNode; onLoadError?: (error: unknown) => void; focus: () => void }) {
+  const [created, setCreated] = useState<Option[]>([])
+  const { load, short, loading, failed, retry: reload } = useFormsLoader(loadOptions, { query, open, minChars, debounce, defaultOptions, onLoadError, onItems: items => items.forEach(index.remember) })
+  const hit = (o: Option) => o.label.toLowerCase().includes(query.toLowerCase())
+  const remote = !loadOptions ? [] : load.status === 'idle' && !query ? defaultOptions ?? [] : load.items
+  const seen = new Set<string>()
+  const matches = [...remote, ...options.filter(hit), ...created.filter(hit)].filter(o => !seen.has(o.value) && !!seen.add(o.value))
+  const same = (o?: Option) => !!o && o.label.toLowerCase() === query.toLowerCase()
+  const canCreate = !!creatable && !!query && !matches.some(same) && !chosen.some(x => same(index.optionOf(x)))
+  const createOpt: Option | null = canCreate ? { value: FORMS_CREATE, label: createLabel ? createLabel(query) : `Create “${query}”`, icon: 'plus' } : null
+  const list = short ? [] : createOpt ? [...matches, createOpt] : matches
+  const retry = () => { reload(); focus() }
+  const { message, live } = selectStatus({ short, failed, loading, done: !!loadOptions && load.status === 'done', count: list.length, minChars, query, empty, retry })
+  const resolve = (i: number): Option | null => {
+    const o = list[i]
+    if (!o || o.disabled) return null
+    if (o !== createOpt) return o
+    const made = onCreate?.(query) || { value: query, label: query }
+    index.remember(made); setCreated(c => [...c.filter(x => x.value !== made.value), made])
+    return made
+  }
+  return { list, matches, resolve, isCreate: (o: Option) => o === createOpt, message, live, loading, failed, retry }
+}
+/** The value of the “Create” row: never a real option's value (the row itself is told apart by identity). */
+const FORMS_CREATE = '\u0000create'
+
+/** The async options props Combobox and MultiSelect share. */
+type FormsAsyncProps = {
+  /** fetch options for the typed query (pass `signal` to fetch) */ loadOptions?: FormsLoader
+  /** ms after typing stops (200) */ debounce?: number; /** characters before the first load (0) */ minChars?: number; /** shown before the first load */ defaultOptions?: Option[]
+  /** a load failed (the list shows Retry) */ onLoadError?: (error: unknown) => void
+  /** offer “Create “x”” when nothing matches */ creatable?: boolean; createLabel?: (query: string) => string; onCreate?: (text: string) => Option | void
+  onInputChange?: (query: string) => void; /** the no-match message for a query */ empty?: (query: string) => ReactNode
 }
 
 /**
  * Type to filter (the match is bolded), arrows to move, Enter to choose. Options can carry a `leading` flag or emoji,
  * shown in the field once chosen, and a `group` heading. `empty` renders the no-match message for the current query.
+ * The field always shows the chosen option's label once you leave it: typed text that wasn't picked goes back to the
+ * label, and a field emptied by hand clears the value. Escape does the same while the list is closed.
  *
  * Async: give `loadOptions(query, { signal })` instead of (or as well as) `options`. It runs `debounce` ms (200) after
  * typing stops, once the query has `minChars`; a newer query aborts the older request (its signal fires and late results
- * are dropped). The list shows loading, empty and error states (Retry, or Enter in the field); `defaultOptions` are shown
- * before the first load and help label a `defaultValue`. `creatable` adds “Create “x”” when nothing matches exactly;
+ * are dropped). The list shows loading, empty and error states (Retry, or Enter in the field; `onLoadError` gets the
+ * reason); `defaultOptions` are shown before the first load and help label a `defaultValue`; static `options` are
+ * filtered by the query and listed after the results. `creatable` adds “Create “x”” when nothing matches exactly;
  * picking it calls `onCreate(text)` (return an Option to use its value) and selects it. `onInputChange` reports typing.
  * Lists past 100 options are virtualised. Never flips above the field (on phones it scrolls the page instead).
- * Form-native: `name` submits the chosen value (not the typed text; '' when none), `required`, `disabled`, `readOnly`,
- * `invalid`, `onBlur`, `form`, and `ref` on the text input.
+ * Form-native: `name` submits the chosen value (not the typed text; '' when none, and when a static list doesn't have
+ * it), `required`, `disabled`, `readOnly`, `invalid`, `onBlur`, `form`, and `ref` on the text input.
  */
-export function Combobox({ options = [], loadOptions, debounce = 200, minChars = 0, defaultOptions, creatable, createLabel, onCreate, onInputChange,
-  value, defaultValue, onChange, placeholder, empty, 'aria-label': ariaLabel, className, ref, ...fp }: FormControlProps & {
-    options?: Option[]; value?: string; defaultValue?: string; onChange?: (v: string) => void; placeholder?: string; empty?: (query: string) => ReactNode; 'aria-label'?: string; className?: string
-    loadOptions?: (query: string, ctx: LoadOptionsContext) => Promise<Option[]>; debounce?: number; minChars?: number; defaultOptions?: Option[]
-    creatable?: boolean; createLabel?: (query: string) => string; onCreate?: (text: string) => Option | void; onInputChange?: (query: string) => void
+export function Combobox({ options = [], loadOptions, debounce = 200, minChars = 0, defaultOptions, creatable, createLabel, onCreate, onInputChange, onLoadError,
+  value, defaultValue = '', onChange, placeholder = 'Search…', empty, 'aria-label': ariaLabel, className, ref, ...fp }: FormControlProps & FormsAsyncProps & {
+    options?: Option[]; value?: string; defaultValue?: string; onChange?: (v: string) => void; placeholder?: string; 'aria-label'?: string; className?: string
     ref?: Ref<HTMLInputElement> }) {
   const input = useRef<HTMLInputElement>(null)
-  const known = useRef(new Map<string, Option>()) // every option seen (static, loaded, created), to label the value
-  const indexed = useRef<unknown[]>([])
-  if (indexed.current[0] !== options || indexed.current[1] !== defaultOptions) { // index once per options array, not per render
-    indexed.current = [options, defaultOptions]
-    for (const o of defaultOptions ?? []) if (!known.current.has(o.value)) known.current.set(o.value, o)
-    for (const o of options) if (!known.current.has(o.value)) known.current.set(o.value, o)
-  }
-  const [created, setCreated] = useState<Option[]>([])
-  const labelOf = (x: string) => known.current.get(x)?.label ?? (x && (loadOptions || creatable) ? x : '')
-  const fc = useFormControl<string>({ ...fp, value, defaultValue: defaultValue ?? '', onChange, serialize: x => x, focus: () => input.current?.focus(),
-    onReset: () => { const d = defaultValue ?? ''; shownFor.current = d; setQ(labelOf(d)) } })
+  const index = useOptionIndex(options, defaultOptions)
+  const free = !!loadOptions || !!creatable // values outside the known options are allowed (and shown as typed)
+  const labelOf = (x: string) => index.optionOf(x)?.label ?? (free ? x : '')
+  const [q, setQ] = useState<string | null>(null) // typed text; null: the field shows the value's label
+  const fc = useFormControl<string>({ ...fp, value, defaultValue, onChange, serialize: x => (!x || free || index.optionOf(x) ? x : ''), focus: () => input.current?.focus(), onReset: () => setQ(null) })
   const v = fc.value, set = fc.set, locked = fc.disabled || fc.readOnly
-  const [q, setQ] = useState(() => labelOf(v))
-  const shownFor = useRef(v) // when the value changes from outside, show its label
-  useEffect(() => { if (shownFor.current === v) return; shownFor.current = v; setQ(labelOf(v)) }, [v, options]) // eslint-disable-line react-hooks/exhaustive-deps
+  const [shownFor, setShownFor] = useState(v)
+  if (shownFor !== v) { setShownFor(v); setQ(null) } // a new value from outside replaces what was typed
   const { open: isOpen, setOpen, ref: wrap } = useDisclosure()
   const open = isOpen && !locked
-  const chosenLabel = v ? labelOf(v) : ''
-  const chosen = !!v && chosenLabel === q
-  const filter = chosen ? '' : q // show the full list again when the field holds the chosen label
-  const query = filter.trim()
-
-  // async: debounced, aborted when superseded
-  const { load, short, loading, failed, retry: reload } = useFormsLoader(loadOptions, { query, open, minChars, debounce, defaultOptions, onItems: items => items.forEach(o => known.current.set(o.value, o)) })
-
-  const source = loadOptions ? [...(load.status === 'idle' && !query ? defaultOptions ?? [] : load.items), ...options] : options
-  const hit = (o: Option) => o.label.toLowerCase().includes(query.toLowerCase())
-  const seen = new Set<string>()
-  const matches = [...(loadOptions ? source : source.filter(hit)), ...created.filter(hit)].filter(o => !seen.has(o.value) && !!seen.add(o.value))
-  const canCreate = !!creatable && !!query && !chosen && !matches.some(o => o.label.toLowerCase() === query.toLowerCase())
-  const retry = () => { reload(); input.current?.focus() }
-  const { message, live } = useSelectStatus({ short, failed, loading, done: !!loadOptions && load.status === 'done', count: matches.length + (canCreate ? 1 : 0), minChars, query: q, empty, retry })
-  const createOpt: Option | null = canCreate ? { value: query, label: createLabel ? createLabel(query) : `Create “${query}”`, icon: 'plus' } : null
-  const list = short ? [] : createOpt ? [...matches, createOpt] : matches
+  const filter = q ?? '' // the field showing the chosen label lists everything again
+  const src = useOptionSource(index, { options, defaultOptions, loadOptions, query: filter.trim(), open, minChars, debounce, creatable, createLabel, onCreate, chosen: v ? [v] : [], empty, onLoadError, focus: () => input.current?.focus() })
+  const { list, loading, failed } = src
   const pick = (i: number) => {
-    let o = list[i]; if (!o || o.disabled) return
-    if (o === createOpt) { o = onCreate?.(query) || { value: query, label: query }; known.current.set(o.value, o); const made = o; setCreated(c => [...c.filter(x => x.value !== made.value), made]) }
-    shownFor.current = o.value; set(o.value); setQ(o.label); setOpen(false); play(input.current, { scale: [0.98, 1] }, spring(0.4, 0.3))
+    const o = src.resolve(i); if (!o) return
+    set(o.value); setShownFor(o.value); setQ(null); setOpen(false); play(input.current, { scale: [0.98, 1] }, spring(0.4, 0.3))
   }
+  // what's left in the field must be the value: unpicked text goes back to the label, and emptied text clears the value
+  const commit = () => { if (q === null) return; if (!q.trim()) set(''); setQ(null) }
   const lb = useListbox(list, pick, { open, setOpen, input: true }), { active, setActive } = lb
-  const leading = chosen ? known.current.get(v)?.leading : undefined
+  const leading = q === null ? index.optionOf(v)?.leading : undefined
   return (
     <div ref={wrap} className={cn('relative', className)} onBlur={fc.onBlur}>
       <span className="pointer-events-none absolute top-1/2 start-3 grid -translate-y-1/2 place-items-center text-[var(--fg3)]">
@@ -231,16 +256,20 @@ export function Combobox({ options = [], loadOptions, debounce = 200, minChars =
       </span>
       <input ref={composeRefs(input, ref)} {...fc.control} {...lb.comboProps} aria-label={ariaLabel}
         aria-required={fc.required || undefined} disabled={fc.disabled} readOnly={fc.readOnly}
-        value={q} placeholder={placeholder ?? 'Search…'} autoComplete="off" className={cn(inputClass, formDisabledClass, formReadOnlyClass, '!ps-8', loading && '!pe-8')}
+        value={q ?? labelOf(v)} placeholder={placeholder} autoComplete="off" className={cn(inputClass, '!ps-8', loading && open && '!pe-8')}
         onChange={e => { setQ(e.target.value); onInputChange?.(e.target.value); setOpen(true); setActive(0) }} onFocus={() => setOpen(true)}
-        onBlur={e => { if (!wrap.current?.contains(e.relatedTarget as Node)) setOpen(false) }}
-        onKeyDown={e => { if (e.key === 'Enter' && failed) { e.preventDefault(); retry() } else lb.onKeyDown(e) }} />
-      {loading && <span aria-hidden className="pointer-events-none absolute top-1/2 end-3 grid -translate-y-1/2 text-[var(--fg3)]"><Spinner size={13} /></span>}
-      <span className="sr-only" aria-live="polite">{open ? live : ''}</span>
+        onBlur={e => { if (!wrap.current?.contains(e.relatedTarget as Node)) { setOpen(false); commit() } }}
+        onKeyDown={e => {
+          if (e.key === 'Enter' && failed) { e.preventDefault(); src.retry() }
+          else if (e.key === 'Escape' && !open && q !== null) { e.stopPropagation(); commit() }
+          else lb.onKeyDown(e)
+        }} />
+      {loading && open && <span aria-hidden className="pointer-events-none absolute top-1/2 end-3 grid -translate-y-1/2 text-[var(--fg3)]"><Spinner size={13} /></span>}
+      <span className="sr-only" aria-live="polite">{open ? src.live : ''}</span>
       {/* never flips above the field: the list shrinks as you type, and above it would jump and cover the label */}
       <FloatingPanel open={open} matchWidth flip="scroll" className="max-h-[220px] overflow-auto" role="presentation">
-        {list.length > 0 && (failed || (loading && !matches.length)) && <div className="p-3 pb-1 text-center text-[13px] text-[var(--fg3)]">{message}</div>}
-        <OptionList id={lb.id} options={list} query={filter} active={active} isSelected={o => o !== createOpt && o.value === v} onPick={pick} onHover={setActive} empty={message} busy={loading} />
+        {list.length > 0 && (failed || (loading && !src.matches.length)) && <div className="p-3 pb-1 text-center text-[13px] text-[var(--fg3)]">{src.message}</div>}
+        <OptionList id={lb.id} options={list} query={filter} active={active} isSelected={o => !src.isCreate(o) && o.value === v} onPick={pick} onHover={setActive} empty={src.message} busy={loading} />
       </FloatingPanel>
       {fc.inputs}
     </div>
@@ -248,21 +277,18 @@ export function Combobox({ options = [], loadOptions, debounce = 200, minChars =
 }
 
 /** Props of MultiSelect. With `loadOptions` it searches as you type, like an async Combobox. */
-export type MultiSelectProps = FormControlProps & {
+export type MultiSelectProps = FormControlProps & FormsAsyncProps & {
   options?: Option[]; value?: string[]; defaultValue?: string[]; onChange?: (v: string[]) => void; placeholder?: string; 'aria-label'?: string; className?: string; ref?: Ref<HTMLElement>
-  /** fetch options for the typed query (pass `signal` to fetch); turns the field into a search box */ loadOptions?: (query: string, ctx: LoadOptionsContext) => Promise<Option[]>
-  /** ms after typing stops (200) */ debounce?: number; /** characters before the first load (0) */ minChars?: number; /** shown before the first load */ defaultOptions?: Option[]
-  /** offer “Create “x”” when nothing matches */ creatable?: boolean; createLabel?: (query: string) => string; onCreate?: (text: string) => Option | void
-  onInputChange?: (query: string) => void; /** the no-match message for a query */ empty?: (query: string) => ReactNode
 }
 
 /**
  * Pick several: ticks draw in the list, chosen items become chips (with their colour dot) in the field. Backspace removes
  * the last chip. With `loadOptions(query, { signal })` the field becomes a search box: loads run `debounce` ms (200) after
  * typing stops, once the query has `minChars`; a newer query aborts the older request; the list shows loading, empty and
- * error states (Retry, or Enter); `defaultOptions` show before the first load, options can carry a `group`, and
- * `creatable` adds “Create “x”” (`onCreate(text)` may return the Option to use). Picking keeps the list open and the query,
- * so several results can be ticked in a row. Chosen values keep their labels across searches.
+ * error states (Retry, or Enter; `onLoadError` gets the reason); `defaultOptions` show before the first load, static
+ * `options` are filtered by the query, options can carry a `group`, and `creatable` adds “Create “x”” (`onCreate(text)`
+ * may return the Option to use). Picking keeps the list open and the query, so several results can be ticked in a row.
+ * Chosen values keep their labels across searches.
  * Form-native: `name` submits each value as its own field (name=a&name=b; read with formData.getAll), `required` (at
  * least one), `disabled`, `readOnly` (chips only), `invalid`, `onBlur`, `form`, and `ref` on the field (the search input
  * when async). Long lists are virtualised.
@@ -272,28 +298,17 @@ export function MultiSelect(props: MultiSelectProps) {
 }
 
 /** MultiSelect's chips: each value's label and colour dot, with a × while it can be edited. */
-function FormsChips({ values, optionOf, locked, onRemove }: { values: string[]; optionOf: (v: string) => Option | undefined; locked: boolean; onRemove: (v: string) => void }) {
+function FormsChips({ values, optionOf, locked, onRemove, tabbable }: { values: string[]; optionOf: (v: string) => Option | undefined; locked: boolean; onRemove: (v: string) => void; tabbable: boolean }) {
   return (
     <AnimatePresence initial={false} mode="popLayout">
-      {values.map(x => {
-        const o = optionOf(x), label = o?.label ?? x
-        return (
-          <motion.span key={x} layout initial={{ scale: 0.6, opacity: 0 }} animate={{ scale: 1, opacity: 1 }} exit={{ scale: 0.6, opacity: 0, transition: { duration: 0.12 } }} transition={spring(0.4, 0.35)}
-            className={cn('inline-flex items-center gap-1.5 rounded-[var(--r-md)] py-0.5 ps-2 text-xs', locked ? 'bg-[var(--card)] pe-2 shadow-[inset_0_0_0_1px_var(--line)]' : 'bg-[var(--muted)] pe-1')}>
-            {o?.dot && <span className="h-2 w-2 flex-none rounded-full" style={{ background: o.dot }} />}
-            {label}
-            {!locked && <button type="button" tabIndex={-1} aria-label={`Remove ${label}`} className="ui-target cursor-pointer rounded-[var(--r-sm)] border-0 bg-transparent px-0.5 leading-none hover:bg-[var(--line)] text-[var(--fg3)] hover:text-[var(--fg)] [@media(pointer:coarse)]:-my-2 [@media(pointer:coarse)]:-me-1 [@media(pointer:coarse)]:min-h-8 [@media(pointer:coarse)]:min-w-8 [@media(pointer:coarse)]:text-base"
-              onPointerDown={e => e.preventDefault()} onClick={e => { e.stopPropagation(); onRemove(x) }}>×</button>}
-          </motion.span>
-        )
-      })}
+      {values.map(x => { const o = optionOf(x); return <FormsChip key={x} label={o?.label ?? x} dot={o?.dot} locked={locked} tabbable={tabbable} onRemove={() => onRemove(x)} /> })}
     </AnimatePresence>
   )
 }
 
 /** MultiSelect over a fixed `options` list: the field itself is the combobox. */
-function FormsMultiStatic({ options = [], value, defaultValue = [], onChange, placeholder, 'aria-label': ariaLabel, className, ref, ...rest }: MultiSelectProps) {
-  const { loadOptions: _l, debounce: _d, minChars: _m, defaultOptions: _o, creatable: _c, createLabel: _cl, onCreate: _oc, onInputChange: _oi, empty: _e, ...fp } = rest
+function FormsMultiStatic({ options = [], value, defaultValue = [], onChange, placeholder = 'Select…', 'aria-label': ariaLabel, className, ref, ...rest }: MultiSelectProps) {
+  const { loadOptions: _l, debounce: _d, minChars: _m, defaultOptions: _o, creatable: _c, createLabel: _cl, onCreate: _oc, onInputChange: _oi, onLoadError: _le, empty: _e, ...fp } = rest
   const box = useRef<HTMLDivElement>(null)
   const fc = useFormControl<string[]>({ ...fp, value, defaultValue, onChange, serialize: x => x, filled: x => x.length > 0, focus: () => box.current?.focus() })
   const v = fc.value, set = fc.set, locked = fc.disabled || fc.readOnly
@@ -309,9 +324,9 @@ function FormsMultiStatic({ options = [], value, defaultValue = [], onChange, pl
           if (e.key === 'Backspace' && v.length) set(v.slice(0, -1))
           else lb.onKeyDown(e)
         }}
-        className={cn(inputClass, formDisabledClass, 'relative flex !h-auto min-h-9 flex-wrap items-center gap-1 py-1 !pe-8 focus-visible:border-[var(--fg3)] aria-readonly:bg-[var(--muted)]', locked ? fc.disabled ? 'cursor-not-allowed' : 'cursor-default' : 'cursor-pointer')}>
-        {v.length === 0 && <span className="text-[var(--fg3)]">{placeholder ?? 'Select…'}</span>}
-        <FormsChips values={v} optionOf={x => options.find(p => p.value === x)} locked={locked} onRemove={x => set(v.filter(y => y !== x))} />
+        className={cn(inputClass, 'relative flex !h-auto min-h-9 flex-wrap items-center gap-1 py-1 !pe-8 focus-visible:border-[var(--fg3)]', locked ? fc.disabled ? 'cursor-not-allowed' : 'cursor-default' : 'cursor-pointer')}>
+        {v.length === 0 && <span className="text-[var(--fg3)]">{placeholder}</span>}
+        <FormsChips values={v} optionOf={x => options.find(p => p.value === x)} locked={locked} tabbable={false} onRemove={x => set(v.filter(y => y !== x))} />
         {!fc.readOnly && <motion.span animate={{ rotate: open ? 180 : 0 }} className="absolute end-3 top-[11px] text-[var(--fg3)]"><Icon name="chevronDown" size={14} /></motion.span>}
       </div>
       <FloatingPanel open={open} matchWidth className="max-h-64 overflow-auto" role="presentation">
@@ -323,41 +338,22 @@ function FormsMultiStatic({ options = [], value, defaultValue = [], onChange, pl
 }
 
 /** MultiSelect with `loadOptions`: a search input after the chips is the combobox; results load as you type. */
-function FormsMultiAsync({ options = [], loadOptions, debounce = 200, minChars = 0, defaultOptions, creatable, createLabel, onCreate, onInputChange,
-  empty, value, defaultValue = [], onChange, placeholder, 'aria-label': ariaLabel, className, ref, ...fp }: MultiSelectProps & { loadOptions: NonNullable<MultiSelectProps['loadOptions']> }) {
+function FormsMultiAsync({ options = [], loadOptions, debounce = 200, minChars = 0, defaultOptions, creatable, createLabel, onCreate, onInputChange, onLoadError,
+  empty, value, defaultValue = [], onChange, placeholder = 'Search…', 'aria-label': ariaLabel, className, ref, ...fp }: MultiSelectProps & { loadOptions: FormsLoader }) {
   const input = useRef<HTMLInputElement>(null)
-  const known = useRef(new Map<string, Option>()) // every option seen (static, loaded, created), to label the chips
-  const indexed = useRef<unknown[]>([])
-  if (indexed.current[0] !== options || indexed.current[1] !== defaultOptions) {
-    indexed.current = [options, defaultOptions]
-    for (const o of [...(defaultOptions ?? []), ...options]) if (!known.current.has(o.value)) known.current.set(o.value, o)
-  }
+  const index = useOptionIndex(options, defaultOptions)
   const [q, setQ] = useState('')
   const fc = useFormControl<string[]>({ ...fp, value, defaultValue, onChange, serialize: x => x, filled: x => x.length > 0, focus: () => input.current?.focus(), onReset: () => setQ('') })
   const v = fc.value, set = fc.set, locked = fc.disabled || fc.readOnly
   const { open: isOpen, setOpen, ref: wrap } = useDisclosure()
   const open = isOpen && !locked
   const query = q.trim()
-  const { load, short, loading, failed, retry: reload } = useFormsLoader(loadOptions, { query, open, minChars, debounce, defaultOptions, onItems: items => items.forEach(o => known.current.set(o.value, o)) })
-  const hit = (o: Option) => o.label.toLowerCase().includes(query.toLowerCase())
-  const seen = new Set<string>()
-  const matches = [...(load.status === 'idle' && !query ? defaultOptions ?? [] : load.items), ...options.filter(hit)].filter(o => !seen.has(o.value) && !!seen.add(o.value))
-  const same = (o?: Option) => !!o && o.label.toLowerCase() === query.toLowerCase()
-  const canCreate = !!creatable && !!query && !matches.some(same) && !v.some(x => same(known.current.get(x)))
-  const retry = () => { reload(); input.current?.focus() }
-  const { message, live } = useSelectStatus({ short, failed, loading, done: load.status === 'done', count: matches.length + (canCreate ? 1 : 0), minChars, query: q, empty, retry })
-  const createOpt: Option | null = canCreate ? { value: '\u0000create', label: createLabel ? createLabel(query) : `Create “${query}”`, icon: 'plus' } : null
-  const list = short ? [] : createOpt ? [...matches, createOpt] : matches
+  const src = useOptionSource(index, { options, defaultOptions, loadOptions, query, open, minChars, debounce, creatable, createLabel, onCreate, chosen: v, empty, onLoadError, focus: () => input.current?.focus() })
+  const { list, loading, failed } = src
   const toggle = (i: number) => {
-    const o = list[i]
-    if (!o || o.disabled) return
-    if (o === createOpt) {
-      const made = onCreate?.(query) || { value: query, label: query }
-      known.current.set(made.value, made)
-      if (!v.includes(made.value)) set([...v, made.value])
-      setQ(''); onInputChange?.('')
-      return
-    }
+    const creating = !!list[i] && src.isCreate(list[i]), o = src.resolve(i)
+    if (!o) return
+    if (creating) { if (!v.includes(o.value)) set([...v, o.value]); setQ(''); onInputChange?.(''); return }
     set(v.includes(o.value) ? v.filter(x => x !== o.value) : [...v, o.value])
   }
   const lb = useListbox(list, toggle, { open, setOpen, input: true }), { active, setActive } = lb
@@ -366,24 +362,24 @@ function FormsMultiAsync({ options = [], loadOptions, debounce = 200, minChars =
       <div onPointerDown={e => { if (e.target !== input.current && !(e.target as HTMLElement).closest('button')) { e.preventDefault(); input.current?.focus() } }}
         className={cn(inputShellClass(fc.invalid), 'relative flex min-h-9 w-full flex-wrap items-center gap-1 py-1 ps-1.5 pe-8 text-[13px]',
           fc.disabled ? 'cursor-not-allowed bg-[var(--muted)] text-[var(--fg3)]' : fc.readOnly ? 'bg-[var(--muted)]' : 'cursor-text')}>
-        <FormsChips values={v} optionOf={x => known.current.get(x)} locked={locked} onRemove={x => set(v.filter(y => y !== x))} />
+        <FormsChips values={v} optionOf={index.optionOf} locked={locked} tabbable onRemove={x => set(v.filter(y => y !== x))} />
         <input ref={composeRefs<HTMLInputElement>(input, ref as Ref<HTMLInputElement>)} {...fc.control} {...lb.comboProps} aria-label={ariaLabel} aria-required={fc.required || undefined} disabled={fc.disabled} readOnly={fc.readOnly}
-          value={q} placeholder={v.length ? '' : placeholder ?? 'Search…'} autoComplete="off"
+          value={q} placeholder={v.length ? '' : placeholder} autoComplete="off"
           className="h-7 min-w-[8ch] flex-1 border-0 bg-transparent px-1 text-[13px] [color:inherit] outline-none placeholder:text-[var(--fg3)] disabled:cursor-not-allowed [@media(pointer:coarse)]:text-base"
           onChange={e => { setQ(e.target.value); onInputChange?.(e.target.value); setOpen(true); setActive(0) }} onFocus={() => setOpen(true)}
           onBlur={e => { if (!wrap.current?.contains(e.relatedTarget as Node)) setOpen(false) }}
           onKeyDown={e => {
             if (locked) return
             if (e.key === 'Backspace' && !q && v.length) { e.preventDefault(); set(v.slice(0, -1)) }
-            else if (e.key === 'Enter' && failed) { e.preventDefault(); retry() }
+            else if (e.key === 'Enter' && failed) { e.preventDefault(); src.retry() }
             else lb.onKeyDown(e)
           }} />
-        <span aria-hidden className="pointer-events-none absolute end-3 top-1/2 grid -translate-y-1/2 text-[var(--fg3)]">{loading ? <Spinner size={13} /> : <Icon name="search" size={14} />}</span>
+        <span aria-hidden className="pointer-events-none absolute end-3 top-1/2 grid -translate-y-1/2 text-[var(--fg3)]">{loading && open ? <Spinner size={13} /> : <Icon name="search" size={14} />}</span>
       </div>
-      <span className="sr-only" aria-live="polite">{open ? live : ''}</span>
+      <span className="sr-only" aria-live="polite">{open ? src.live : ''}</span>
       <FloatingPanel open={open} matchWidth flip="scroll" className="max-h-64 overflow-auto" role="presentation">
-        {list.length > 0 && (failed || (loading && !matches.length)) && <div className="p-3 pb-1 text-center text-[13px] text-[var(--fg3)]">{message}</div>}
-        <OptionList id={lb.id} multi options={list} query={query} active={active} isSelected={o => o !== createOpt && v.includes(o.value)} onPick={toggle} onHover={setActive} empty={message} busy={loading} />
+        {list.length > 0 && (failed || (loading && !src.matches.length)) && <div className="p-3 pb-1 text-center text-[13px] text-[var(--fg3)]">{src.message}</div>}
+        <OptionList id={lb.id} multi options={list} query={query} active={active} isSelected={o => !src.isCreate(o) && v.includes(o.value)} onPick={toggle} onHover={setActive} empty={src.message} busy={loading} />
       </FloatingPanel>
       {fc.inputs}
     </div>
@@ -393,14 +389,15 @@ function FormsMultiAsync({ options = [], loadOptions, debounce = 200, minChars =
 /**
  * The async half of Combobox and MultiSelect: runs `loadOptions` `debounce` ms after the query settles (while the list is
  * open and the query has `minChars`), aborts a superseded request and drops its late result, and reports loading and
- * errors. `retry()` loads the same query again.
+ * errors (`onLoadError` gets the reason). A cancelled request leaves no spinner behind. `retry()` loads the same query again.
  */
-function useFormsLoader(loadOptions: ((q: string, ctx: LoadOptionsContext) => Promise<Option[]>) | undefined,
-  { query, open, minChars, debounce, defaultOptions, onItems }: { query: string; open: boolean; minChars: number; debounce: number; defaultOptions?: Option[]; onItems: (items: Option[]) => void }) {
+function useFormsLoader(loadOptions: FormsLoader | undefined,
+  { query, open, minChars, debounce, defaultOptions, onItems, onLoadError }: { query: string; open: boolean; minChars: number; debounce: number; defaultOptions?: Option[]
+    onItems: (items: Option[]) => void; onLoadError?: (error: unknown) => void }) {
   const [load, setLoad] = useState<FormsLoad>({ q: '', status: 'idle', items: defaultOptions ?? [] })
   const [attempt, setAttempt] = useState(0)
-  const fns = useRef({ loadOptions, onItems })
-  useLayoutEffect(() => { fns.current = { loadOptions, onItems } })
+  const fns = useRef({ loadOptions, onItems, onLoadError })
+  useLayoutEffect(() => { fns.current = { loadOptions, onItems, onLoadError } })
   const short = !!loadOptions && query.length < minChars
   useEffect(() => {
     if (!fns.current.loadOptions || !open || short) return
@@ -409,9 +406,9 @@ function useFormsLoader(loadOptions: ((q: string, ctx: LoadOptionsContext) => Pr
     const t = setTimeout(() => {
       fns.current.loadOptions?.(query, { signal: ac.signal }).then(
         items => { if (ac.signal.aborted) return; fns.current.onItems(items); setLoad({ q: query, status: 'done', items }) },
-        () => { if (!ac.signal.aborted) setLoad({ q: query, status: 'error', items: [] }) })
+        error => { if (ac.signal.aborted) return; setLoad({ q: query, status: 'error', items: [], error }); fns.current.onLoadError?.(error) })
     }, debounce)
-    return () => { clearTimeout(t); ac.abort() }
+    return () => { clearTimeout(t); ac.abort(); setLoad(l => (l.status === 'loading' ? { ...l, status: 'idle' } : l)) }
   }, [query, open, attempt, short, debounce])
   return { load, short, loading: !!loadOptions && load.status === 'loading', failed: !!loadOptions && load.status === 'error', retry: () => setAttempt(a => a + 1) }
 }

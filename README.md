@@ -1068,10 +1068,11 @@ User edits fire bubbling `input` and `change` events on the form, like native fi
 
 | Control | Submitted as |
 |---|---|
-| Select, Combobox, SegmentedControl, RadioGroup | the option `value`; `''` when nothing is chosen (Combobox sends the value, not the typed text) |
+| Select, Combobox, SegmentedControl | the option `value`; `''` when nothing is chosen or the value isn't one of the options (Combobox sends the value, not the typed text) |
+| RadioGroup | the option `value`; nothing until one is chosen, like native radios |
 | TimePicker, TimeField | `"09:30"` (24-hour wall time, like `<input type="time">`; `"09:30:15"` with `granularity="second"`); `''` while empty or half-typed |
 | MultiSelect, TagInput | one field per item: `labels=bug&labels=docs` (never comma-joined; read with `formData.getAll`); nothing when empty |
-| DatePicker, DateField | local date `"2026-11-08"` (like `<input type="date">`); `''` when empty or half-typed |
+| DatePicker, DateField | local date `"2026-11-08"` (like `<input type="date">`); `''` when empty, half-typed or impossible (31/02) |
 | DateTimeField, DateTimePicker | ISO 8601 with the offset of `timeZone` at that instant: `"2026-11-08T09:30:00+01:00"`; `''` when empty. `timeZoneName="tz"` adds the zone (`"Europe/Zurich"`) |
 | MonthPicker, YearPicker | `"2026-11"` (like `<input type="month">`), `"2026"`; `''` when empty |
 | TimeZonePicker | the IANA name, `"Europe/Zurich"` |
@@ -1080,14 +1081,14 @@ User edits fire bubbling `input` and `change` events on the form, like native fi
 | RangeSlider | two fields, low then high: `price=200&price=750` |
 | CurrencyInput | plain number `"1234.5"` (no separators or symbol); `currencyName` adds the code (`"CHF"`) |
 | PhoneInput | E.164 `"+41791234567"`; `''` while empty |
-| OTPInput | the digits typed so far: `"123456"` |
-| ColorPicker | `"#2563EB"` (upper case) |
+| OTPInput | the digits typed so far from the first box: `"123456"`; `''` while a box before the last digit is empty |
+| ColorPicker | `"#2563EB"` (upper case; `"#abc"` reads as `"#AABBCC"`) |
 | Switch, Checkbox | `value` (default `"on"`) while on; nothing while off, like a native checkbox |
-| FileUpload | a native file field with the picked or dropped files (use `multipart/form-data`) |
+| FileUpload | a native file field with the picked or dropped files, minus failed uploads (use `multipart/form-data`) |
 
 `required` means something is chosen (MultiSelect and TagInput: at least one item; DateRangePicker: both ends; OTPInput:
 every box; Checkbox and Switch: ticked). The date controls also stop a submit, with a message, when a date is half-typed,
-outside `min`/`max` or `isDateUnavailable`. The browser validates it like a native field and, when it focuses the field,
+impossible, outside `min`/`max` or `isDateUnavailable`; so does CurrencyInput text it can't read. The browser validates it like a native field and, when it focuses the field,
 focus lands on the real control. Disabled controls submit nothing; read-only ones submit but can't be changed.
 
 **Form and FormField** need no form library. `FormField` wires a label (`htmlFor`, or `aria-labelledby` for controls
@@ -1413,8 +1414,8 @@ What the components do with untrusted input, and what stays your job. Report vul
     `approved` is true, or on your server once the next request shows `approval.approved === true`. A denied call
     never shows a result, even if one arrives.
   On their own they are UI. The text-matching `needsApproval` fallback is a demo aid and gates nothing.
-- **Files**: `FileUpload` filters picked and dropped files by `accept` (skipped ones go to `onReject`), but the name
-  and type it checks are under the user's control. Validate type, size and content on the server.
+- **Files**: `FileUpload` filters picked and dropped files by `accept` and `maxSize` (skipped ones go to `onReject`), but
+  the name and type it checks are under the user's control. Validate type, size and content on the server.
 - **URLs and colours from data**: `safeUrl`, `safeMediaUrl`, `cssUrl`, `safeCssValue` and `safeColor` (from
   `@lyndon/ui` or `@lyndon/ui/utils`) are applied to hrefs, image sources and colours the components take from
   props (MegaMenu, Breadcrumbs, Avatar, chart and diagram colours…). Use them in your own code for anything that

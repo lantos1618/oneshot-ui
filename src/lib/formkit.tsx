@@ -1,7 +1,8 @@
 /* Shared pieces of the form modules (fields, inputs, select, pickers, upload): not part of the public API. */
 
 import { useEffect, useLayoutEffect, useRef } from 'react'
-import { formDisabledClass, cn, inputClass } from './core'
+import { motion } from 'motion/react'
+import { cn, inputClass, spring } from './core'
 
 /** Run `cb` after the form around `ref` has been reset (native fields hold their reset values by then). */
 export function useFormsAfterReset(ref: { current: HTMLInputElement | HTMLTextAreaElement | null }, cb: (el: HTMLInputElement | HTMLTextAreaElement) => void) {
@@ -16,17 +17,24 @@ export function useFormsAfterReset(ref: { current: HTMLInputElement | HTMLTextAr
   }, [ref])
 }
 
-/** Field triggers (Select, pickers): the shared field look plus the disabled, read-only and pointer states. */
-export const formsTriggerClass = cn(inputClass, formDisabledClass, 'flex items-center gap-2 text-start aria-readonly:cursor-default aria-readonly:bg-[var(--muted)] aria-readonly:hover:border-[var(--line)]')
+/** Field triggers (Select, pickers): the shared field look (with its disabled and read-only states) plus the pointer states. */
+export const formsTriggerClass = cn(inputClass, 'flex items-center gap-2 text-start aria-readonly:cursor-default aria-readonly:hover:border-[var(--line)]')
 
-/** Scroll `el` into view inside its nearest scrollable ancestor only (never the page). */
-export function formsScrollIntoList(el: HTMLElement, center = false) {
-  let p = el.parentElement
-  while (p && p !== document.body && !/(auto|scroll)/.test(getComputedStyle(p).overflowY)) p = p.parentElement
-  if (!p || p === document.body) return
-  const er = el.getBoundingClientRect(), pr = p.getBoundingClientRect()
-  if (center) p.scrollTop += er.top - pr.top - (pr.height - er.height) / 2
-  else if (er.top < pr.top) p.scrollTop -= pr.top - er.top + 4
-  else if (er.bottom > pr.bottom) p.scrollTop += er.bottom - pr.bottom + 4
+/** A removable chip (MultiSelect's choices, TagInput's tags): the label, an optional colour dot, and a × while editable. */
+export function FormsChip({ label, dot, locked, onRemove, shake, tabbable = true }: {
+  label: string; dot?: string; locked: boolean; onRemove: () => void
+  /** wiggle once (a duplicate was typed) */ shake?: boolean
+  /** false inside a combobox, whose own keys remove chips */ tabbable?: boolean }) {
+  return (
+    <motion.span layout initial={{ scale: 0.6, opacity: 0 }} animate={{ scale: 1, opacity: 1, x: shake ? [0, -4, 4, 0] : 0 }}
+      exit={{ scale: 0.6, opacity: 0, transition: { duration: 0.12 } }} transition={{ ...spring(0.4, 0.35), x: { duration: 0.3 } }}
+      className={cn('inline-flex items-center gap-1.5 rounded-[var(--r-md)] py-0.5 ps-2 text-xs', locked ? 'bg-[var(--card)] pe-2 shadow-[inset_0_0_0_1px_var(--line)]' : 'bg-[var(--muted)] pe-1')}>
+      {dot && <span className="h-2 w-2 flex-none rounded-full" style={{ background: dot }} />}
+      {label}
+      {!locked && (
+        <button type="button" tabIndex={tabbable ? undefined : -1} aria-label={`Remove ${label}`} onPointerDown={e => e.preventDefault()} onClick={e => { e.stopPropagation(); onRemove() }}
+          className="ui-target cursor-pointer rounded-[var(--r-sm)] border-0 bg-transparent px-1 leading-none text-[var(--fg3)] hover:bg-[var(--line)] hover:text-[var(--fg)] [@media(pointer:coarse)]:-my-2 [@media(pointer:coarse)]:-me-1 [@media(pointer:coarse)]:min-h-8 [@media(pointer:coarse)]:min-w-8 [@media(pointer:coarse)]:text-base">×</button>
+      )}
+    </motion.span>
+  )
 }
-
