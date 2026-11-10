@@ -71,7 +71,7 @@ function FormsFileRow({ f, present, upload, onStatus, onRetry, onRemove, ref, ..
   return (
     // leaving: slides out, then the row closes
     <div ref={ref} {...presence} className="ui-grow [--ui-xo:20px] [&[data-ui-exit]]:[animation:ui-out_.15s_ease-in_forwards,ui-shrink_.18s_ease-out_.12s_forwards]">
-      <div className="flex items-center gap-2.5 border-b border-[var(--line)] py-2 text-[13px]">
+      <div><div className="flex items-center gap-2.5 border-b border-[var(--line)] py-2 text-[13px]">
         <span className="grid h-8 w-8 flex-none place-items-center rounded-[var(--r-md)] bg-[var(--muted)] font-[family-name:var(--mono)] text-[11px] font-semibold text-[var(--fg2)] uppercase">{(f.name.split('.').pop() || 'file').slice(0, 4)}</span>
         <span className="min-w-0 flex-1">
           <span className="block truncate font-medium">{f.name}</span>
@@ -80,7 +80,7 @@ function FormsFileRow({ f, present, upload, onStatus, onRetry, onRemove, ref, ..
         </span>
         {failed && <Button size="xs" variant="ghost" onClick={onRetry}>Retry</Button>}
         <IconButton icon="x" label={`Remove ${f.name}`} onClick={onRemove} />
-      </div>
+      </div></div>
     </div>
   )
 }

@@ -1,7 +1,6 @@
 import { createContext, useContext, useId, useLayoutEffect, useMemo, useRef, useState, type MouseEvent as ReactMouseEvent, type ReactNode } from 'react'
-import { AnimatePresence, motion } from 'motion/react'
-import { AnimatedNumber, type AsChildProps, Button, DeltaBadge, Icon, IconButton, Kbd, TOUCH, cn, inputClass, spring, surface, useControllable, useHotkey, SparkChart, rowHoverClass, plural, writeClipboard, useRequiredContext, PartButton, useResizeObserver, type TableSort, ariaSort, collator, compareCells, idPart, nextSort, revealInScroller, uid } from './core'
-import { shake } from './motion'
+import { AnimatedNumber, type AsChildProps, Button, Chevron, DeltaBadge, Icon, IconButton, Kbd, TOUCH, cn, inputClass, spring, surface, useControllable, useHotkey, SparkChart, rowHoverClass, plural, writeClipboard, useRequiredContext, PartButton, useResizeObserver, type TableSort, ariaSort, collator, compareCells, idPart, nextSort, revealInScroller, uid } from './core'
+import { PresenceList, shake, useFlip } from './motion'
 import { Collapse, EmptyState, useToast } from './feedback'
 import { CheckboxBox } from './fields'
 import { Dialog } from './overlay'
@@ -81,6 +80,8 @@ export function DataTable<T extends object>({ columns, rows, rowKey, initialSort
     const coll = collator()
     return [...rows].sort((a, b) => compareCells(a[sort.key], b[sort.key], sort.dir, coll))
   }, [rows, sort])
+  const body = useRef<HTMLTableSectionElement>(null)
+  useFlip(body, { transition: spring(0.15, 0.4) }) // rows slide to their place when the sort changes
   const end = (c: Column<T>) => c.align === 'right' || c.align === 'end'
   const cell = (r: T, c: Column<T>) => c.render ? c.render(r) : String(r[c.key] ?? '')
   return (
@@ -95,10 +96,10 @@ export function DataTable<T extends object>({ columns, rows, rowKey, initialSort
             </th>
           ))}</tr>
         </thead>
-        <tbody>
+        <tbody ref={body}>
           {!sorted.length && <tr><td colSpan={columns.length} className="border-b border-[var(--line)] p-0">{empty ?? <EmptyState size="sm" title="No rows" />}</td></tr>}
           {sorted.map(r => (
-            <motion.tr key={rowKey(r)} layout="position" transition={spring(0.15, 0.4)}
+            <tr key={rowKey(r)} data-flip={rowKey(r)}
               // mouse and touch: the whole row; controls inside cells keep their own clicks
               onClick={onRowClick && (e => { if (!(e.target as Element).closest('button,a,input,select,textarea,label')) onRowClick(r) })}
               className={cn(onRowClick && 'cursor-pointer hover:bg-[var(--muted)] has-[[data-row-open]:focus-visible]:bg-[var(--muted)]')}>
@@ -110,7 +111,7 @@ export function DataTable<T extends object>({ columns, rows, rowKey, initialSort
                     : cell(r, c)}
                 </td>
               ))}
-            </motion.tr>
+            </tr>
           ))}
         </tbody>
       </table>
@@ -163,7 +164,7 @@ export function AccordionTrigger({ className, children, asChild }: { className?:
     onClick: () => { if (!it.disabled) acc?.toggle(it.value) },
     className: cn('flex w-full cursor-pointer items-center justify-between gap-3 rounded-[var(--r-md)] border-0 bg-transparent px-1.5 py-3 text-start text-[13px] font-medium transition-colors disabled:cursor-default disabled:opacity-50 [@media(pointer:coarse)]:min-h-11 [@media(pointer:coarse)]:text-sm', rowHoverClass, className),
   }
-  const chevron = <motion.span animate={{ rotate: it.on ? 180 : 0 }} transition={spring(0.2, 0.3)} className="text-[var(--fg3)]"><Icon name="chevronDown" size={14} /></motion.span>
+  const chevron = <Chevron open={it.on} />
   return <PartButton asChild={asChild} disabled={it.disabled} after={chevron} {...props}>{children}</PartButton>
 }
 /**
@@ -175,8 +176,7 @@ export function AccordionContent({ className, children, forceMount }: { classNam
   const panel = <div id={it.panelId} role="region" aria-labelledby={it.triggerId} className={cn('pb-3 text-[13px] text-[var(--fg2)]', className)}>{children}</div>
   if (!forceMount) return <Collapse open={it.on}>{panel}</Collapse>
   return (
-    <motion.div initial={false} className="overflow-hidden" transition={spring(0.1, 0.32)}
-      animate={it.on ? { height: 'auto', opacity: 1, visibility: 'visible' } : { height: 0, opacity: 0, transitionEnd: { visibility: 'hidden' } }}>{panel}</motion.div>
+    <div className="ui-collapse" data-open={it.on ? '' : undefined} style={{ visibility: it.on ? 'visible' : 'hidden' }}><div>{panel}</div></div>
   )
 }
 
@@ -206,14 +206,13 @@ export const Accordion = Object.assign(AccordionConfig, { Root: AccordionRoot, I
 
 /** Any list whose items animate in, out and into new positions. */
 export function AnimatedList<T>({ items, keyOf, render, className }: { items: T[]; keyOf: (t: T) => string; render: (t: T) => ReactNode; className?: string }) {
+  const list = useRef<HTMLUListElement>(null)
+  useFlip(list, { transition: spring(0.25, 0.4) })
   return (
-    <ul className={cn('m-0 flex list-none flex-col gap-1.5 p-0', className)}>
-      <AnimatePresence initial={false}>
-        {items.map(t => (
-          <motion.li key={keyOf(t)} layout initial={{ opacity: 0, y: -8, scale: 0.98 }} animate={{ opacity: 1, y: 0, scale: 1 }}
-            exit={{ opacity: 0, x: 24, transition: { duration: 0.15 } }} transition={spring(0.25, 0.4)}>{render(t)}</motion.li>
-        ))}
-      </AnimatePresence>
+    <ul ref={list} className={cn('m-0 flex list-none flex-col gap-1.5 p-0', className)}>
+      <PresenceList items={items} keyOf={keyOf}>
+        {t => <li data-flip={keyOf(t)} className="ui-in [--ui-d:.4s] [--ui-s:.98] [--ui-so:1] [--ui-xo:24px] [--ui-y:-8px] [--ui-yo:0]">{render(t)}</li>}
+      </PresenceList>
     </ul>
   )
 }
@@ -321,7 +320,7 @@ function JsonNode({ k, v, path, last, ctx }: { k: string | number | null; v: unk
       <div className={row}>
         <button onClick={() => ctx.toggle(path)} aria-expanded={open} aria-label={(open ? `Collapse ${path || 'root'}` : `Expand ${path || 'root'}`)}
           className="-ms-1.5 grid h-6 w-6 flex-none cursor-pointer place-items-center self-center border-0 bg-transparent p-0 text-[var(--fg3)] [@media(pointer:coarse)]:-ms-2 [@media(pointer:coarse)]:me-1 [@media(pointer:coarse)]:h-8 [@media(pointer:coarse)]:w-8">
-          <motion.span initial={false} animate={{ rotate: open ? 0 : -90 }} transition={{ duration: 0.15 }} className="grid"><Icon name="chevronDown" size={10} strokeWidth={2.5} /></motion.span>
+          <span className={cn('grid transition-transform duration-150 motion-reduce:transition-none', !open && '-rotate-90')}><Icon name="chevronDown" size={10} strokeWidth={2.5} /></span>
         </button>
         {key}<span className="text-[var(--fg2)]">{arr ? '[' : '{'}</span>
         <span className="ms-1.5 text-[11px] text-[var(--fg3)]">{(arr ? plural(entries.length, 'item') : plural(entries.length, 'key'))}</span>

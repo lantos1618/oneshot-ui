@@ -41,8 +41,8 @@ html.ui-theming *,html.ui-theming *::before,html.ui-theming *::after{transition:
  * `[--ui-y:4px]`), over `--ui-d` with `--ui-e` after `--ui-delay`. Exit: `data-ui-exit` (usePresence, Presence, Swap)
  * plays the reverse, with `--ui-xo`/`--ui-yo`/`--ui-so`/`--ui-ro` overriding the end and `--ui-do` the duration. One-shots
  * (`ui-pop`, `ui-pulse`) replay when the element's key changes. `ui-grow` opens to its height (grid rows), `ui-collapse`
- * does the same while staying mounted (`data-open`). Springs are `linear()` easings sampled from spring(). Reduced
- * motion keeps the fades and drops the movement.
+ * does the same while staying mounted (`data-open`; set `visibility` inline, the class delays it until the panel has
+ * closed); both need one child without vertical padding or border, which would keep the row from closing fully. Springs are `linear()` easings sampled from spring(). Reduced motion keeps the fades and drops the movement.
  */
 const MOTION_CSS = /* @__PURE__ */ (() => {
   const springs = [['', 0.25], ['-pop', 0.5], ['-soft', 0.1]] as const
@@ -69,8 +69,8 @@ const MOTION_CSS = /* @__PURE__ */ (() => {
 .ui-pulse{animation:ui-pulse var(--ui-d,.35s) var(--ui-e,ease-out) var(--ui-delay,0s)}
 .ui-grow{display:grid;grid-template-rows:1fr;animation:ui-grow var(--ui-d,.3s) var(--ui-e,var(--ui-ease-out)) var(--ui-delay,0s) backwards}
 .ui-grow>*,.ui-collapse>*{min-height:0;overflow:hidden}
-.ui-collapse{display:grid;grid-template-rows:0fr;opacity:0;visibility:hidden;transition:grid-template-rows .3s var(--ui-ease-out),opacity .3s,visibility 0s .3s}
-.ui-collapse[data-open]{grid-template-rows:1fr;opacity:1;visibility:visible;transition:grid-template-rows .3s var(--ui-ease-out),opacity .3s}
+.ui-collapse{display:grid;grid-template-rows:0fr;opacity:0;transition:grid-template-rows .3s var(--ui-ease-out),opacity .3s,visibility 0s .3s}
+.ui-collapse[data-open]{grid-template-rows:1fr;opacity:1;transition:grid-template-rows .3s var(--ui-ease-out),opacity .3s}
 .ui-bob{animation:ui-bob 2.4s ease-in-out infinite;animation-play-state:var(--ui-play,running)}
 .ui-dot{animation:ui-dot 1s ease-in-out var(--ui-delay,0s) infinite;animation-play-state:var(--ui-play,running)}
 ${stagger}

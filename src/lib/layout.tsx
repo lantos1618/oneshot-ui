@@ -1,6 +1,6 @@
 import { Fragment, useEffect, useId, useLayoutEffect, useMemo, useRef, useState, type CSSProperties, type ReactNode, type KeyboardEvent as RKeyboardEvent, type PointerEvent as RPointerEvent } from 'react'
-import { AnimatePresence, motion } from 'motion/react'
 import { Icon, type IconName, TOUCH, clamp, cn, prefersReducedMotion, safeColor, spring, surface, useCoarsePointer, useRefocus, useLongPress, usePointerDrag, useWidth, fmt, moveById } from './core'
+import { PresenceList, useFlip } from './motion'
 import { Collapse, EmptyState } from './feedback'
 import { useVirtual } from './virtual'
 import { type Magnet, MagnetBubble, magnetKeyDirection, useMagnet } from './magnet'
@@ -215,13 +215,15 @@ export function SortableList<T extends { id: string; color?: string }>({ items, 
     if (next !== ref.current) { ref.current = next; onChange(next) }
   }
   const sort = useDragSort({ onMove: (id, _, i) => moveTo(id, i) })
+  const list = useRef<HTMLDivElement>(null)
+  useFlip(list, { transition: spring(0.18, 0.4) })
   return (
     <div ref={root} className={cn('flex flex-col gap-1.5', className)}>
       <span id={hint} hidden>{'Alt and arrow keys to move.'}</span>
       <span role="status" className="sr-only">{said}</span>
-      <div {...sort.listProps('list')} role="list" aria-label={label ?? 'Sortable list'} className="flex flex-col gap-1.5">
+      <div ref={list} {...sort.listProps('list')} role="list" aria-label={label ?? 'Sortable list'} className="flex flex-col gap-1.5">
         {items.map((it, i) => (
-          <motion.div key={it.id} layout="position" transition={spring(0.18, 0.4)} {...sort.itemProps(it.id)} data-sl-item={it.id} role="listitem" tabIndex={0}
+          <div key={it.id} data-flip={it.id} {...sort.itemProps(it.id)} data-sl-item={it.id} role="listitem" tabIndex={0}
             aria-describedby={hint}
             onKeyDown={e => {
               if (!e.altKey || (e.key !== 'ArrowUp' && e.key !== 'ArrowDown')) return
@@ -238,7 +240,7 @@ export function SortableList<T extends { id: string; color?: string }>({ items, 
             {it.color && <span className="h-2 w-2 flex-none rounded-full" style={{ background: safeColor(it.color) }} />}
             <span className="min-w-0 flex-1 truncate">{render(it)}</span>
             {ranked && <span className="ui-num text-[11px] font-medium text-[var(--fg3)]">#{fmt.number(i + 1)}</span>}
-          </motion.div>
+          </div>
         ))}
       </div>
     </div>
@@ -390,7 +392,7 @@ export function TreeView({ nodes, defaultExpanded = [], onSelect, onOpen, onRena
         {lines && threads(f)}
         {/* above the thread lines' widened hit areas, so a click on the chevron toggles this row */}
         <span className="relative z-[1] grid w-3.5 flex-none place-items-center text-[var(--fg3)]">
-          {dir && <motion.span initial={false} animate={{ rotate: isOpen ? 90 : 0 }} transition={spring(0.2, 0.25)} className="grid"><Icon name="chevronRight" size={11} strokeWidth={3} /></motion.span>}
+          {dir && <span className={cn('grid transition-transform duration-[250ms] ease-[var(--ui-spring)] motion-reduce:transition-none', isOpen && 'rotate-90')}><Icon name="chevronRight" size={11} strokeWidth={3} /></span>}
         </span>
         {n.icon ? <Icon name={n.icon} size={15} className="text-[var(--fg3)]" /> : <TreeIcon name={name(n)} dir={dir} open={isOpen} />}
         {editing === n.id
@@ -408,7 +410,7 @@ export function TreeView({ nodes, defaultExpanded = [], onSelect, onOpen, onRena
               if (val && val !== prev) { setNames(m => ({ ...m, [n.id]: { from: n.label, to: val } })); onRename?.(n, val, prev) }
             }}
             className={cn('w-[140px] min-w-0 rounded-[var(--r-sm)] border border-[var(--accent)] bg-[var(--card)] px-1 py-px text-[13px] text-[var(--fg)] outline-none [@media(pointer:coarse)]:flex-1', TOUCH.input)} />
-          : <motion.span key={name(n)} id={`${idl}l`} initial={{ opacity: name(n) !== n.label ? 0.3 : 1 }} animate={{ opacity: 1 }} className="truncate">{name(n)}</motion.span>}
+          : <span key={name(n)} id={`${idl}l`} className={cn('truncate', name(n) !== n.label && 'ui-in [--ui-e:ease-out] [--ui-o:.3]')}>{name(n)}</span>}
         {/* the space keeps label and count apart in the accessible name (flex drops it visually) */}
         {!compact && <>{' '}<span id={`${idl}c`} className="ms-auto ps-2 text-[11px] tabular-nums text-[var(--fg2)]">{dir ? n.children!.length : n.size}</span></>}
       </div>
@@ -464,18 +466,16 @@ export function Timeline({ items, className }: { items: TimelineItem[]; classNam
         <section key={g.key} aria-label={g.day || undefined}>
           {g.day && <div className="mt-1 mb-2 text-[11px] font-semibold tracking-[.05em] text-[var(--fg3)] uppercase">{g.day}</div>}
           <ol className="m-0 list-none p-0">
-            <AnimatePresence initial={false}>
-              {g.items.map((it, i) => {
+            <PresenceList items={g.items} keyOf={it => it.id}>
+              {(it, { enter }) => {
                 const [glyph, color] = TL_KIND[it.kind ?? 'commit']
                 return (
-                  <motion.li key={it.id} layout="position" initial={{ height: 0, opacity: 0 }} animate={{ height: 'auto', opacity: 1 }} exit={{ height: 0, opacity: 0 }}
-                    transition={spring(0.15, 0.4)} className="relative overflow-hidden">
-                    <div className="relative grid grid-cols-[28px_1fr] gap-2.5 pb-3">
-                      {i < g.items.length - 1 && <span className="absolute top-[30px] bottom-0.5 start-[13.5px] w-px bg-[var(--line)]" />}
-                      <motion.span initial={{ scale: 0 }} animate={{ scale: 1 }} transition={{ ...spring(0.5, 0.45), delay: 0.1 }}
-                        className="grid h-7 w-7 place-items-center rounded-full border border-[var(--line)] bg-[var(--card)]" style={{ color }}>
+                  <li className="ui-grow relative [--ui-d:.4s] [--ui-do:.3s]">
+                    <div><div className="relative grid grid-cols-[28px_1fr] gap-2.5 pb-3">
+                      {it !== g.items[g.items.length - 1] && <span className="absolute top-[30px] bottom-0.5 start-[13.5px] w-px bg-[var(--line)]" />}
+                      <span className={cn('grid h-7 w-7 place-items-center rounded-full border border-[var(--line)] bg-[var(--card)]', enter && 'ui-pop [--ui-d:.45s] [--ui-delay:.1s] [--ui-s:0]')} style={{ color }}>
                         <Icon name={glyph} size={13} strokeWidth={2.2} />
-                      </motion.span>
+                      </span>
                       <div className="min-w-0">
                         <div className="pt-1 text-[13px] leading-[1.45] [&_b]:font-semibold">{it.title}</div>
                         {it.description && <div className="mt-0.5 text-[13px] text-[var(--fg2)]">{it.description}</div>}
@@ -488,11 +488,11 @@ export function Timeline({ items, className }: { items: TimelineItem[]; classNam
                         )}
                         <div className="mt-0.5 text-[11px] text-[var(--fg3)]">{it.time}</div>
                       </div>
-                    </div>
-                  </motion.li>
+                    </div></div>
+                  </li>
                 )
-              })}
-            </AnimatePresence>
+              }}
+            </PresenceList>
           </ol>
         </section>
       ))}
@@ -549,8 +549,8 @@ export function SplitPane({ first, second, direction = 'horizontal', defaultSize
   const pos = (v: number) => `${clamp(v, 0, 100)}%`
   return (
     <div ref={box} className={cn('relative flex min-h-0 min-w-0 overflow-hidden', h ? 'flex-row' : 'h-full flex-col', className)} style={style}>
-      <motion.div className="flex min-h-0 min-w-0 flex-none flex-col overflow-hidden" initial={false} animate={{ flexBasis: `${state.size}%` }}
-        transition={state.spring === 'reset' ? spring(0.15, 0.4) : state.spring === 'snap' && !prefersReducedMotion() ? spring(0.2, 0.25) : { duration: 0 }}>{first}</motion.div>
+      <div className="flex min-h-0 min-w-0 flex-none flex-col overflow-hidden"
+        style={{ flexBasis: `${state.size}%`, transition: state.spring === 'reset' ? 'flex-basis .4s var(--ui-spring-soft)' : state.spring === 'snap' && !prefersReducedMotion() ? 'flex-basis .25s var(--ui-spring)' : undefined }}>{first}</div>
       <div role="separator" aria-orientation={h ? 'vertical' : 'horizontal'} aria-label={label ?? 'Resize panes'}
  aria-valuemin={0} aria-valuemax={max} aria-valuenow={Math.round(state.size)} aria-valuetext={mg.enabled ? mg.valueText(state.size, pctText(state.size)) : undefined}
         aria-keyshortcuts={mg.enabled ? 'PageUp PageDown' : undefined} tabIndex={0}
