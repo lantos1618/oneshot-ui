@@ -1,6 +1,5 @@
-import { useEffect, useMemo, useState, useSyncExternalStore } from 'react'
-import { motion, useDragControls } from 'motion/react'
-import { IconButton, ModalLayer, SegmentedControl, cn, spring, useMediaQuery } from '../lib'
+import { useEffect, useMemo, useRef, useState, useSyncExternalStore } from 'react'
+import { IconButton, ModalLayer, SegmentedControl, cn, useMediaQuery, useSwipe } from '../lib'
 import { CodeBlock } from '../lib/code'
 
 /* View code: the `</>` button on every card opens this drawer with a copy-pasteable usage example built from the
@@ -90,18 +89,15 @@ export function CodeDrawer() {
   useEffect(() => { if (title) setTab('usage') }, [title])
   const close = () => codeDrawerSet('')
   const sheet = useMediaQuery('(max-width: 639px)') // same breakpoint as Sheet's bottom-sheet switch
-  const drag = useDragControls()
-  const off = sheet ? { y: '100%' } : { x: '100%' }
-  const grab = sheet ? (e: React.PointerEvent) => drag.start(e) : undefined
+  const panel = useRef<HTMLDivElement>(null)
+  const swipe = useSwipe(panel, { axis: 'y', elastic: [0, 0.9], slop: 0, onRelease: ({ offset, velocity }) => { if (offset <= 90 && velocity <= 500) return false; close(); return true } })
+  const grab = sheet ? swipe : undefined
   return (
     <ModalLayer open={!!title} onClose={close}>
-      <motion.div key={sheet ? 'sheet' : 'drawer'} role="dialog" aria-modal="true" aria-label={`${title} usage`}
-        initial={off} animate={{ x: 0, y: 0 }} exit={{ ...off, transition: { duration: 0.2 } }} transition={spring(0.12, 0.4)}
-        drag={sheet ? 'y' : false} dragListener={false} dragControls={drag} dragConstraints={{ top: 0, bottom: 0 }} dragElastic={{ top: 0, bottom: 0.9 }}
-        onDragEnd={(_, i) => { if (i.offset.y > 90 || i.velocity.y > 500) close() }}
-        className={cn('fixed z-[71] flex flex-col bg-[var(--card)] shadow-[var(--shadow)]', sheet
-          ? 'inset-x-0 bottom-0 max-h-[88dvh] rounded-t-[var(--r-lg)] pb-[env(safe-area-inset-bottom,0px)]'
-          : 'top-0 right-0 bottom-0 w-[min(620px,94vw)] pt-[env(safe-area-inset-top,0px)]')}>
+      <div ref={panel} key={sheet ? 'sheet' : 'drawer'} role="dialog" aria-modal="true" aria-label={`${title} usage`}
+        className={cn('ui-in fixed z-[71] flex flex-col bg-[var(--card)] shadow-[var(--shadow)] [--ui-d:.4s] [--ui-do:.2s] [--ui-e:var(--ui-spring-soft)] [--ui-o:1]', sheet
+          ? 'inset-x-0 bottom-0 max-h-[88dvh] rounded-t-[var(--r-lg)] pb-[env(safe-area-inset-bottom,0px)] [--ui-y:100%]'
+          : 'top-0 right-0 bottom-0 w-[min(620px,94vw)] pt-[env(safe-area-inset-top,0px)] [--ui-x:100%]')}>
         {sheet && <div aria-hidden onPointerDown={grab} className="flex flex-none cursor-grab touch-none justify-center pt-2 pb-1"><span className="h-1 w-9 rounded-full bg-[var(--line2)]" /></div>}
         <div onPointerDown={grab} className={cn('flex flex-none items-center gap-2 border-b border-[var(--line)] py-3 pr-3 pl-4', sheet && 'touch-none !pt-1')}>
           <h4 className="m-0 min-w-0 truncate text-base font-semibold">{title}</h4>
@@ -122,7 +118,7 @@ export function CodeDrawer() {
             </p>
           )}
         </div>
-      </motion.div>
+      </div>
     </ModalLayer>
   )
 }

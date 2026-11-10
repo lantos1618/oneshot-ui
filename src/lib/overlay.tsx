@@ -1,9 +1,8 @@
-import { Fragment, createContext, isValidElement, useCallback, useContext, useEffect, useId, useLayoutEffect, useMemo, useRef, useState, type CSSProperties, type HTMLAttributes, type ReactNode, type Ref, type RefObject, type KeyboardEvent as RKeyboardEvent, type MouseEvent as ReactMouseEvent, type PointerEvent as ReactPointerEvent } from 'react'
+import { Fragment, createContext, isValidElement, useCallback, useContext, useEffect, useId, useLayoutEffect, useMemo, useRef, useState, type ButtonHTMLAttributes, type CSSProperties, type HTMLAttributes, type ReactNode, type Ref, type RefObject, type KeyboardEvent as RKeyboardEvent, type MouseEvent as ReactMouseEvent, type PointerEvent as ReactPointerEvent } from 'react'
 import { createPortal } from 'react-dom'
-import { AnimatePresence, motion, useDragControls, type HTMLMotionProps, type Variants } from 'motion/react'
-import { type AsChildProps, Button, type ButtonProps, Icon, IconButton, type IconName, Kbd, Slot, cn, isTouch, menuItemClass, prefersReducedMotion, spring, useControllable, useFocusTrap, useLongPress, useMediaQuery, useOutside, useRoving, AnimatedNumber, Spinner, TOUCH, uiShared, surface, focusStep, useRequiredContext, PartButton, FOCUSABLE, Z, haptic, isEditableTarget, plural, useCoarsePointer, useLatest, useTypeahead, typeaheadIndex } from './core'
+import { type AsChildProps, Button, type ButtonProps, Icon, IconButton, type IconName, Kbd, Slot, cn, isTouch, menuItemClass, prefersReducedMotion, presenceProps, composeRefs, spring, useControllable, usePresence, useFocusTrap, useLongPress, useMediaQuery, useOutside, useRoving, AnimatedNumber, Spinner, TOUCH, uiShared, surface, focusStep, useRequiredContext, PartButton, FOCUSABLE, Z, haptic, isEditableTarget, plural, useCoarsePointer, useLatest, useTypeahead, typeaheadIndex } from './core'
 import { EmptyState } from './feedback'
-import { shake } from './motion'
+import { ActiveIndicator, Presence, PresenceList, Swap, play, shake, useSwipe } from './motion'
 import { useVirtual, virtualSetAria } from './virtual'
 
 type PopCtx = { open: boolean; setOpen: (v: boolean) => void; triggerRef: RefObject<HTMLButtonElement | null>; id: string }
@@ -157,7 +156,7 @@ const floatArrowClass = (p: Placement, kind: keyof typeof FLOAT_ARROW = 'panel')
  * `inline` renders spans instead of divs, so the panel is valid inside a `<p>` (hover cards on links in text).
  */
 export function FloatingPanel({ open, placement = 'bottom-start', flip = true, matchWidth, offset, arrow, inline, className, children, role = 'dialog', id, ...p }:
-  { open: boolean; placement?: Placement; flip?: boolean | 'scroll'; matchWidth?: boolean; offset?: number; arrow?: boolean; inline?: boolean; className?: string; children: ReactNode; role?: string; id?: string } & Omit<HTMLAttributes<HTMLDivElement>, 'onAnimationStart' | 'onDrag' | 'onDragStart' | 'onDragEnd'>) {
+  { open: boolean; placement?: Placement; flip?: boolean | 'scroll'; matchWidth?: boolean; offset?: number; arrow?: boolean; inline?: boolean; className?: string; children: ReactNode; role?: string; id?: string } & HTMLAttributes<HTMLDivElement>) {
   const [side, setSide] = useState<Placement>(placement)
   const [shift, setShift] = useState(0)
   const ref = useRef<HTMLDivElement>(null), shiftRef = useRef(0)
@@ -196,21 +195,19 @@ export function FloatingPanel({ open, placement = 'bottom-start', flip = true, m
   const up = side.startsWith('top')
   // a right-anchored panel moves with margin-right; the others with margin-left
   const style = { ...floatGap(side, offset), ...(shift ? side.endsWith('-end') ? { marginRight: -shift } : { marginLeft: shift } : null) }
-  const Box = inline ? 'span' : 'div', Panel = (inline ? motion.span : motion.div) as typeof motion.div
+  const Box = inline ? 'span' : 'div'
   return (
-    <AnimatePresence>
+    <Presence appear>
       {open && (
-        <Box ref={ref} data-side={floatSideOf(side)} className={cn('absolute', Z.popover, SIDE[side], matchWidth && 'w-full', inline && 'block')} style={style}>
-          <Panel id={id} role={role} initial={{ opacity: 0, y: up ? 4 : -4, scale: 0.97 }} animate={{ opacity: 1, y: 0, scale: 1 }}
-            exit={{ opacity: 0, scale: 0.97, transition: { duration: 0.12 } }} transition={spring(0.25, 0.3)}
-            className={cn(surface.floating, 'max-w-[calc(100vw-16px)] min-w-[min(180px,calc(100vw-16px))] p-1', inline && 'block', className)} {...p}>
+        <Box ref={ref} data-side={floatSideOf(side)} className={cn('absolute [--ui-do:.12s] [--ui-so:.97]', Z.popover, SIDE[side], matchWidth && 'w-full', inline && 'block')} style={style}>
+          <Box id={id} role={role}
+            className={cn(surface.floating, 'ui-in max-w-[calc(100vw-16px)] min-w-[min(180px,calc(100vw-16px))] p-1 [--ui-s:.97]', up ? '[--ui-y:4px]' : '[--ui-y:-4px]', inline && 'block', className)} {...p}>
             {children}
-          </Panel>
-          {arrow && <motion.span aria-hidden initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0, transition: { duration: 0.1 } }}
-            className={cn('pointer-events-none absolute h-2.5 w-2.5 rotate-45 border-[var(--line)] bg-[var(--card)]', floatArrowClass(side))} />}
+          </Box>
+          {arrow && <span aria-hidden className={cn('ui-in pointer-events-none absolute h-2.5 w-2.5 rotate-45 border-[var(--line)] bg-[var(--card)]', floatArrowClass(side))} />}
         </Box>
       )}
-    </AnimatePresence>
+    </Presence>
   )
 }
 
@@ -278,11 +275,6 @@ function useDelayedToggle(setOpen: (open: boolean) => void) {
     return { openIn: after(true), closeIn: after(false), cancel }
   }, [set])
 }
-
-/** Variants for a menu's item list: items slide in one after another. */
-export const menuListVariants: Variants = { hidden: {}, show: { transition: { staggerChildren: 0.03 } } }
-/** Each item slides in from the left. */
-const menuItemVariants: Variants = { hidden: { opacity: 0, x: -6 }, show: { opacity: 1, x: 0, transition: { duration: 0.2 } } }
 
 /** What the items of a menu (DropdownMenu, ContextMenu or Menu.List) need from it: close it, focus back on its trigger. */
 type MenuCtxV = { close: (refocus?: boolean) => void }
@@ -375,14 +367,14 @@ const menuRowClass = (danger?: boolean, disabled?: boolean, inset?: boolean, cla
 
 /** The body every menu row shares: a button that arrows reach (not a Tab stop), with a leading slot, the label and a trailing slot. */
 function MenuRow({ leading, trailing, danger, disabled, inset, textValue, className, children, ...p }: Omit<MenuItemBase, 'children'> &
-  { leading?: ReactNode; trailing?: ReactNode; danger?: boolean; children?: ReactNode } & Omit<HTMLMotionProps<'button'>, 'children' | 'className' | 'disabled'>) {
+  { leading?: ReactNode; trailing?: ReactNode; danger?: boolean; children?: ReactNode; ref?: Ref<HTMLButtonElement> } & Omit<ButtonHTMLAttributes<HTMLButtonElement>, 'children' | 'className' | 'disabled'>) {
   const inMenu = useContext(MenuCtx) !== null
   return (
-    <motion.button type="button" variants={menuItemVariants} tabIndex={-1} disabled={disabled} data-text-value={textValue}
+    <button type="button" tabIndex={-1} disabled={disabled} data-text-value={textValue}
       className={menuRowClass(danger, disabled, inset, className)} onPointerMove={inMenu ? menuHoverFocus : undefined} {...p}>
       <span className="flex min-w-0 flex-1 items-center gap-2">{leading}{children}</span>
       {trailing}
-    </motion.button>
+    </button>
   )
 }
 
@@ -424,11 +416,11 @@ export const MenuShortcut = ({ children, className }: { children: ReactNode; cla
 function MenuIndicator({ on, kind }: { on: boolean; kind: 'check' | 'dot' }) {
   return (
     <span aria-hidden className="grid h-4 w-4 flex-none place-items-center text-[var(--fg)]">
-      <AnimatePresence initial={false}>
-        {on && <motion.span key="on" className="grid" initial={{ scale: 0.4, opacity: 0 }} animate={{ scale: 1, opacity: 1 }} exit={{ scale: 0.4, opacity: 0, transition: { duration: 0.1 } }} transition={spring(0.4, 0.3)}>
+      <Presence>
+        {on && <span className="ui-in grid [--ui-do:.1s] [--ui-e:var(--ui-spring-pop)] [--ui-s:.4]">
           {kind === 'check' ? <Icon name="check" size={14} strokeWidth={2.4} /> : <span className="h-1.5 w-1.5 rounded-full bg-current" />}
-        </motion.span>}
-      </AnimatePresence>
+        </span>}
+      </Presence>
     </span>
   )
 }
@@ -514,10 +506,8 @@ export function MenuSubTrigger({ children, icon, disabled, textValue, inset, cla
   )
 }
 
-const ctxPanelVariants: Variants = {
-  hidden: { opacity: 0, scale: 0.94 },
-  show: { opacity: 1, scale: 1, transition: { ...spring(0.25, 0.25), staggerChildren: 0.025 } },
-}
+/** A context menu or submenu panel: scales in from its corner, its rows after one another. */
+const ctxPanelClass = 'ui-in ui-stagger [--ui-d:.25s] [--ui-do:.1s] [--ui-s:.94] [--ui-so:.97]'
 
 /** The submenu's first row sits level with its trigger row: the panel's top padding plus border, in px. */
 const SUB_ROW_ALIGN = 5
@@ -548,20 +538,19 @@ export function MenuSubContent({ children, className, 'aria-label': ariaLabel }:
     setPlace({ left: left - r.left, top: top - r.top, onLeft: left < r.left })
   }, [sub.open]) // eslint-disable-line react-hooks/exhaustive-deps
   return (
-    <AnimatePresence>
+    <Presence appear>
       {sub.open && (
-        <motion.div ref={ref} id={sub.id} role="menu" aria-label={ariaLabel} aria-labelledby={ariaLabel ? undefined : `${sub.id}-t`} {...props}
-          variants={ctxPanelVariants} initial="hidden" animate="show" exit={{ opacity: 0, scale: 0.97, transition: { duration: 0.1 } }}
+        <div ref={ref} id={sub.id} role="menu" aria-label={ariaLabel} aria-labelledby={ariaLabel ? undefined : `${sub.id}-t`} {...props}
           style={place ? { left: place.left, top: place.top } : { visibility: 'hidden' }}
-          className={cn(surface.floating, 'absolute z-10 min-w-[180px] p-1', place?.onLeft ? 'origin-top-right' : 'origin-top-left', className)}
+          className={cn(surface.floating, ctxPanelClass, 'absolute z-10 min-w-[180px] p-1', place?.onLeft ? 'origin-top-right' : 'origin-top-left', className)}
           onKeyDown={e => {
             if (e.key === 'ArrowLeft' && (e.target as Element).closest('[data-menu-list]') === e.currentTarget) { e.preventDefault(); e.stopPropagation(); back(); return }
             props.onKeyDown(e)
           }}>
           {children}
-        </motion.div>
+        </div>
       )}
-    </AnimatePresence>
+    </Presence>
   )
 }
 
@@ -572,10 +561,10 @@ function DropdownList({ children }: { children: ReactNode }) {
   const { open, setOpen, triggerRef } = usePopoverPart('DropdownMenu.Content')
   const { ref, props } = useMenuList<HTMLDivElement>({ open, onTab: () => setOpen(false) })
   return (
-    <motion.div ref={ref} {...props} initial="hidden" animate="show" variants={menuListVariants}
+    <div ref={ref} {...props} className="ui-stagger"
       onBlur={e => { const to = e.relatedTarget as Node | null; if (to && !e.currentTarget.contains(to) && !triggerRef.current?.contains(to)) setOpen(false) }}>
       {children}
-    </motion.div>
+    </div>
   )
 }
 
@@ -715,19 +704,18 @@ export function ContextMenuContent({ children, className, 'aria-label': ariaLabe
   return (
     <OverlayPortal>
       <MenuCtx.Provider value={menu}>
-        <AnimatePresence>
+        <Presence appear>
           {shown && (
-            <motion.div key="menu" ref={panel} role="menu" aria-label={ariaLabel} {...props} variants={ctxPanelVariants} initial="hidden" animate="show"
-              exit={{ opacity: 0, scale: 0.97, transition: { duration: 0.1 } }}
+            <div ref={panel} role="menu" aria-label={ariaLabel} {...props}
               style={{ left: place?.left ?? at.x, top: place?.top ?? at.y, visibility: place ? 'visible' : 'hidden' }}
-              className={cn(surface.floating, 'fixed min-w-[200px] p-1', Z.menu, place?.onLeft ? 'origin-top-right' : 'origin-top-left', className)}
+              className={cn(surface.floating, ctxPanelClass, 'fixed min-w-[200px] p-1', Z.menu, place?.onLeft ? 'origin-top-right' : 'origin-top-left', className)}
               onContextMenu={e => { e.preventDefault(); e.stopPropagation() }}
               // keys stay in the menu: the portal would bubble them to the area's own key handler
               onKeyDown={e => { e.stopPropagation(); props.onKeyDown(e) }}>
               {children}
-            </motion.div>
+            </div>
           )}
-        </AnimatePresence>
+        </Presence>
       </MenuCtx.Provider>
     </OverlayPortal>
   )
@@ -884,14 +872,14 @@ export function TooltipContent({ side, align, sideOffset, placement, arrow, port
   const p = pos?.p ?? want, s = floatSideOf(p)
   const x = s === 'right' ? -4 : s === 'left' ? 4 : 0, y = x ? 0 : s === 'bottom' ? -3 : 3
   const tip = shown && (
-    <span ref={box} className={cn('pointer-events-none', portal ? cn('fixed', Z.tooltip) : cn('absolute', Z.popover))}
+    <span ref={box} className={cn('pointer-events-none [--ui-do:.12s]', portal ? cn('fixed', Z.tooltip) : cn('absolute', Z.popover))}
       style={{ left: pos?.left ?? 0, top: pos?.top ?? 0, visibility: pos ? undefined : 'hidden' }}>
-      <motion.span id={id} role="tooltip" initial={{ opacity: 0, x, y }} animate={{ opacity: 1, x: 0, y: 0 }} exit={{ opacity: 0 }} transition={{ duration: 0.12 }} className={cn(tipClass, arrow && 'relative', className)}>
+      <span id={id} role="tooltip" style={{ '--ui-x': `${x}px`, '--ui-y': `${y}px` } as CSSProperties} className={cn(tipClass, 'ui-in [--ui-d:.12s] [--ui-e:ease-out]', arrow && 'relative', className)}>
         {children}{arrow && <span aria-hidden className={cn('absolute h-2 w-2 rotate-45 bg-[var(--primary)]', floatArrowClass(p, 'tip'))} />}
-      </motion.span>
+      </span>
     </span>
   )
-  return portal ? <OverlayPortal><AnimatePresence>{tip}</AnimatePresence></OverlayPortal> : <AnimatePresence>{tip}</AnimatePresence>
+  return portal ? <OverlayPortal><Presence appear>{tip}</Presence></OverlayPortal> : <Presence appear>{tip}</Presence>
 }
 
 function TooltipConfig({ content, children, placement, delay, portal, disabled, className }:
@@ -1087,7 +1075,8 @@ function overlaySyncInert() {
 
 /**
  * Everything a modal needs except the panel itself: portal, fading backdrop, focus trap, body scroll lock,
- * Escape and outside click to close (`onOutsideClick` overrides the click), and exit animations for whatever you render inside. While open the rest of
+ * Escape and outside click to close (`onOutsideClick` overrides the click), and exit animations for the panel you render inside (give it, or an element
+ * in a positioning wrapper, the `ui-in` class with its `--ui-*` offsets: it leaves the way it came in). While open the rest of
  * the page is `inert`, and Escape and Tab are handled at document level, so they work even when focus is outside the
  * panel. Nested modals stack: only the top one closes on Escape, and closing it hands the page back to the one below.
  */
@@ -1096,6 +1085,9 @@ export function ModalLayer({ open, onClose, onOutsideClick, onExitComplete, chil
   /** after the closing animation has finished and the layer is gone */ onExitComplete?: () => void; children: ReactNode }) {
   const ref = useRef<HTMLDivElement>(null)
   const close = useRef(onClose); close.current = onClose
+  const layer = usePresence<HTMLDivElement>(open, { appear: true }), exited = useLatest(onExitComplete)
+  const was = useRef(layer.mounted)
+  useEffect(() => { if (was.current && !layer.mounted) exited.current?.(); was.current = layer.mounted }, [layer.mounted, exited])
   useFocusTrap(ref, open)
   useScrollLock(open)
   useEffect(() => {
@@ -1121,15 +1113,12 @@ export function ModalLayer({ open, onClose, onOutsideClick, onExitComplete, chil
   }, [open])
   return (
     <OverlayPortal>
-      <AnimatePresence onExitComplete={onExitComplete}>
-        {open && (
-          <div ref={ref} className="contents" onKeyDown={e => { if (e.key === 'Escape' && !e.defaultPrevented) { e.stopPropagation(); onClose() } }}>
-            <motion.div className={cn('fixed inset-0 bg-black/40', Z.scrim)} initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}
-              transition={{ duration: 0.2 }} onClick={onOutsideClick ?? onClose} aria-hidden />
-            {children}
-          </div>
-        )}
-      </AnimatePresence>
+      {layer.mounted && (
+        <div ref={composeRefs(ref, layer.ref)} {...presenceProps(layer)} className="ui-layer contents" onKeyDown={e => { if (e.key === 'Escape' && !e.defaultPrevented) { e.stopPropagation(); onClose() } }}>
+          <div className={cn('ui-in fixed inset-0 bg-black/40 [--ui-d:.2s] [--ui-do:.2s] [--ui-e:linear]', Z.scrim)} onClick={onOutsideClick ?? onClose} aria-hidden />
+          {children}
+        </div>
+      )}
     </OverlayPortal>
   )
 }
@@ -1197,12 +1186,13 @@ export function DialogFooter({ className, children, ...p }: HTMLAttributes<HTMLD
   if (kind !== 'alert') return row
   return (
     <>
-      <AnimatePresence initial={false}>
-        {alert?.err && (
-          <motion.p key="err" role="alert" initial={{ opacity: 0, height: 0 }} animate={{ opacity: 1, height: 'auto' }} exit={{ opacity: 0, height: 0 }} transition={{ duration: 0.18 }}
-            className="m-0 mt-3 flex items-start gap-1.5 overflow-hidden text-[13px] text-[var(--bad)]"><Icon name="alert" size={14} className="mt-0.5 flex-none" />{alert.err}</motion.p>
+      <Presence>
+        {!!alert?.err && (
+          <div role="alert" className="ui-grow [--ui-d:.18s] [--ui-do:.18s]">
+            <div><p className="m-0 mt-3 flex items-start gap-1.5 text-[13px] text-[var(--bad)]"><Icon name="alert" size={14} className="mt-0.5 flex-none" />{alert.err}</p></div>
+          </div>
         )}
-      </AnimatePresence>
+      </Presence>
       {row}
     </>
   )
@@ -1210,7 +1200,7 @@ export function DialogFooter({ className, children, ...p }: HTMLAttributes<HTMLD
 
 const dialogFrame = 'pointer-events-none fixed inset-0 grid place-items-center px-[max(16px,env(safe-area-inset-left),env(safe-area-inset-right))] pt-[max(16px,env(safe-area-inset-top))] pb-[max(16px,env(safe-area-inset-bottom))] ' + Z.modal
 const dialogPanel = 'pointer-events-auto max-h-full w-full max-w-[420px] overflow-auto overscroll-contain rounded-[var(--r-lg)] border border-[var(--line)] bg-[var(--card)] p-5 shadow-[var(--shadow)]'
-const dialogMotion = { initial: { opacity: 0, scale: 0.94, y: 8 }, animate: { opacity: 1, scale: 1, y: 0 }, exit: { opacity: 0, scale: 0.96, transition: { duration: 0.15 } }, transition: spring(0.3, 0.4) }
+const dialogMotion = 'ui-in [--ui-d:.4s] [--ui-s:.94] [--ui-so:.96] [--ui-y:8px] [--ui-yo:0]'
 
 /**
  * Dialog.Content: the modal panel (role=dialog, aria-modal) in a ModalLayer: springs in, backdrop fades, focus is trapped,
@@ -1221,9 +1211,9 @@ export function DialogContent({ className, children, 'aria-label': ariaLabel }: 
   return (
     <ModalLayer open={open} onClose={() => setOpen(false)}>
       <div className={dialogFrame}>
-        <motion.div {...a11y} {...dialogMotion} className={cn(dialogPanel, className)}>
+        <div {...a11y} className={cn(dialogPanel, dialogMotion, className)}>
           <DialogKindCtx.Provider value="dialog">{children}</DialogKindCtx.Provider>
-        </motion.div>
+        </div>
       </div>
     </ModalLayer>
   )
@@ -1254,11 +1244,11 @@ export const Dialog = Object.assign(DialogConfig, {
 
 /* Sheet ─ */
 
-/** The edges a Sheet can slide in from: its placement and the offset it slides from. */
+/** The edges a Sheet can slide in from: its placement and the offset it slides from (and back to). */
 const SHEET = {
-  right: { cls: 'top-0 right-0 bottom-0 w-[min(380px,92vw)] pt-[max(20px,env(safe-area-inset-top))] pb-[max(20px,env(safe-area-inset-bottom))]', off: { x: '100%' } },
-  left: { cls: 'top-0 left-0 bottom-0 w-[min(380px,92vw)] pt-[max(20px,env(safe-area-inset-top))] pb-[max(20px,env(safe-area-inset-bottom))]', off: { x: '-100%' } },
-  bottom: { cls: 'inset-x-0 bottom-0 max-h-[85dvh] rounded-t-[var(--r-lg)] !pt-2 pb-[max(20px,env(safe-area-inset-bottom))]', off: { y: '100%' } },
+  right: 'top-0 right-0 bottom-0 w-[min(380px,92vw)] pt-[max(20px,env(safe-area-inset-top))] pb-[max(20px,env(safe-area-inset-bottom))] [--ui-x:100%]',
+  left: 'top-0 left-0 bottom-0 w-[min(380px,92vw)] pt-[max(20px,env(safe-area-inset-top))] pb-[max(20px,env(safe-area-inset-bottom))] [--ui-x:-100%]',
+  bottom: 'inset-x-0 bottom-0 max-h-[85dvh] rounded-t-[var(--r-lg)] !pt-2 pb-[max(20px,env(safe-area-inset-bottom))] [--ui-y:100%]',
 }
 /** The edge a Sheet slides in from (`start` = left, `end` = right, the default); `bottom` is a bottom sheet. */
 export type SheetSide = 'start' | 'end' | 'left' | 'right' | 'bottom'
@@ -1279,19 +1269,18 @@ export function SheetContent({ side = 'end', responsive = true, className, child
   const { open, setOpen } = useDialogCtx('Sheet.Content'), a11y = useDialogA11y('dialog', ariaLabel, 'Sheet.Content')
   const narrow = useMediaQuery(`(max-width: ${SHEET_BOTTOM_BELOW - 1}px)`)
   const edge = responsive && narrow ? 'bottom' : sheetEdge(side)
-  const { cls, off } = SHEET[edge]
-  const drag = useDragControls()
   const bottom = edge === 'bottom'
-  const grab = useMemo<SheetGrab>(() => bottom ? { onPointerDown: (e: ReactPointerEvent) => drag.start(e), className: 'touch-none' } : null, [bottom, drag])
+  const panel = useRef<HTMLDivElement>(null)
+  // dragged down far or fast enough, a bottom sheet closes from where it was let go; it can't be pulled up
+  const swipe = useLatest(useSwipe(panel, { axis: 'y', elastic: [0, 0.9], slop: 0, onRelease: ({ offset, velocity }) => { if (offset <= 90 && velocity <= 500) return false; setOpen(false); return true } }))
+  const grab = useMemo<SheetGrab>(() => bottom ? { onPointerDown: (e: ReactPointerEvent) => swipe.current(e), className: 'touch-none' } : null, [bottom, swipe])
   return (
     <ModalLayer open={open} onClose={() => setOpen(false)}>
-      <motion.div data-side={edge} {...a11y} initial={off} animate={{ x: 0, y: 0 }} exit={off} transition={spring(0.15, 0.4)}
-        drag={bottom ? 'y' : false} dragListener={false} dragControls={drag} dragConstraints={{ top: 0, bottom: 0 }} dragElastic={{ top: 0, bottom: 0.9 }}
-        onDragEnd={(_, i) => { if (i.offset.y > 90 || i.velocity.y > 500) setOpen(false) }}
-        className={cn('fixed flex flex-col gap-3 overflow-auto overscroll-contain bg-[var(--card)] px-5 shadow-[var(--shadow)]', Z.modal, cls, className)}>
+      <div ref={panel} data-side={edge} {...a11y}
+        className={cn('ui-in fixed flex flex-col gap-3 overflow-auto overscroll-contain bg-[var(--card)] px-5 shadow-[var(--shadow)] [--ui-d:.4s] [--ui-do:.25s] [--ui-e:var(--ui-spring-soft)] [--ui-o:1]', Z.modal, SHEET[edge], className)}>
         {grab && <div aria-hidden {...grab} className="-mx-5 -mb-2 flex flex-none cursor-grab justify-center pt-1 pb-2 touch-none"><span className="h-1 w-9 rounded-full bg-[var(--line2)]" /></div>}
         <DialogKindCtx.Provider value="sheet"><SheetGrabCtx.Provider value={grab}>{children}</SheetGrabCtx.Provider></DialogKindCtx.Provider>
-      </motion.div>
+      </div>
     </ModalLayer>
   )
 }
@@ -1360,10 +1349,9 @@ export function AlertDialogContent({ className, children, onCancel, 'aria-label'
   return (
     <ModalLayer open={open} onClose={cancel} onOutsideClick={() => shake(panel.current)}>
       <div className={dialogFrame}>
-        <motion.div ref={panel} tabIndex={-1} {...a11y} aria-busy={pending || undefined}
-          {...dialogMotion} className={cn(dialogPanel, 'outline-none', className)}>
+        <div ref={panel} tabIndex={-1} {...a11y} aria-busy={pending || undefined} className={cn(dialogPanel, dialogMotion, 'outline-none', className)}>
           <DialogKindCtx.Provider value="alert"><AlertCtx.Provider value={{ pending, err, confirm, cancel }}>{children}</AlertCtx.Provider></DialogKindCtx.Provider>
-        </motion.div>
+        </div>
       </div>
     </ModalLayer>
   )
@@ -1570,7 +1558,7 @@ export function CommandPalette({ open, onOpenChange, commands, placeholder, sugg
         {...(virtualOn ? virtualSetAria(i, list.length) : null)} style={style}
         onPointerMove={() => i !== active && setActive(i)} onClick={() => choose(i)}
         className={cn(menuItemClass, 'relative', words.length ? 'text-[var(--fg2)]' : '', virtualOn && i === active && 'bg-[var(--muted)]')}>
-        {!virtualOn && i === active && <motion.span layoutId={`${uid}-active`} className="absolute inset-0 rounded-[var(--r-md)] bg-[var(--muted)]" transition={spring(0.15, 0.25)} />}
+        {!virtualOn && i === active && <ActiveIndicator group={`${uid}-active`} className="rounded-[var(--r-md)] bg-[var(--muted)]" transition={spring(0.15, 0.25)} />}
         <span className="relative flex min-w-0 items-center gap-2">
           {c.icon && <Icon name={c.icon} size={15} className="text-[var(--fg3)]" />}
           <span className="truncate">{cmdkMark(c.label, words)}</span>
@@ -1593,9 +1581,8 @@ export function CommandPalette({ open, onOpenChange, commands, placeholder, sugg
   )
   return (
     <ModalLayer open={open} onClose={() => onOpenChange(false)} onExitComplete={onExitComplete}>
-      <motion.div role="dialog" aria-modal="true" aria-label="Command palette"
-        initial={{ opacity: 0, scale: 0.96, y: -8 }} animate={{ opacity: 1, scale: 1, y: 0 }} exit={{ opacity: 0, scale: 0.98, transition: { duration: 0.12 } }}
-        transition={spring(0.25, 0.35)} className={cn(surface.floating, 'fixed top-[14vh] left-1/2 w-[min(540px,calc(100%-32px))] -translate-x-1/2 overflow-hidden max-[640px]:top-[max(12px,env(safe-area-inset-top))] [@media(max-height:500px)]:top-[max(8px,env(safe-area-inset-top))]', Z.palette, className)}>
+      <div role="dialog" aria-modal="true" aria-label="Command palette"
+        className={cn(surface.floating, 'ui-in [--ui-d:.35s] [--ui-do:.12s] [--ui-s:.96] [--ui-so:.98] [--ui-y:-8px] [--ui-yo:0] fixed top-[14vh] left-1/2 w-[min(540px,calc(100%-32px))] -translate-x-1/2 overflow-hidden max-[640px]:top-[max(12px,env(safe-area-inset-top))] [@media(max-height:500px)]:top-[max(8px,env(safe-area-inset-top))]', Z.palette, className)}>
         <div className="flex items-center gap-2 border-b border-[var(--line)] px-4">
           <Icon name="search" className="flex-none text-[var(--fg3)]" />
           {stack.length > 0 && (
@@ -1641,7 +1628,7 @@ export function CommandPalette({ open, onOpenChange, commands, placeholder, sugg
           {stack.length > 0 && <span><Kbd>⌫</Kbd> back</span>}<span><Kbd>esc</Kbd> close</span>
           <span className="ms-auto ui-num" aria-live="polite">{loading ? '' : plural(list.length, 'result', 'results', { zero: 'No results' })}</span>
         </div>
-      </motion.div>
+      </div>
     </ModalLayer>
   )
 }
@@ -1676,8 +1663,8 @@ export function InlineEdit({ value, onSave, className, helper, savedHelper, labe
     // the name is the visible text plus a hidden ", edit title", so speech users can say what they see
     <button ref={btn} onClick={() => { setDraft(value); setEditing(true) }}
       className={cn('group relative -mx-2 flex max-w-full cursor-text items-center gap-2 overflow-hidden rounded-[var(--r-md)] border-0 bg-transparent px-2 py-1 text-start font-semibold hover:bg-[var(--muted)]', className)}>
-      {saves > 0 && <motion.span key={`f${saves}`} aria-hidden className="absolute inset-0 rounded-[var(--r-md)] bg-[var(--ok-soft)]" initial={{ opacity: 1 }} animate={{ opacity: 0 }} transition={{ duration: 0.9, ease: 'easeOut' }} />}
-      <motion.span key={saves} className="relative truncate" initial={saves ? { opacity: 0.3, x: -3 } : false} animate={{ opacity: 1, x: 0 }} transition={spring(0.3, 0.3)}>{value}<span className="sr-only">{label ? `, edit ${label}` : ', edit'}</span></motion.span>
+      {saves > 0 && <span key={`f${saves}`} aria-hidden className="ui-in absolute inset-0 rounded-[var(--r-md)] bg-[var(--ok-soft)] opacity-0 [--ui-d:.9s] [--ui-e:ease-out] [--ui-o:1]" />}
+      <span key={saves} className={cn('relative truncate', saves > 0 && 'ui-in [--ui-o:.3] [--ui-x:-3px]')}>{value}<span className="sr-only">{label ? `, edit ${label}` : ', edit'}</span></span>
       <Icon name="edit" size={14} className="relative text-[var(--fg3)] opacity-0 transition-opacity group-hover:opacity-100 group-focus-visible:opacity-100 [@media(hover:none)]:opacity-100" />
     </button>
   )
@@ -1685,10 +1672,9 @@ export function InlineEdit({ value, onSave, className, helper, savedHelper, labe
   return (
     <div className="flex min-w-0 flex-col items-start gap-0.5">
       {field}
-      <AnimatePresence mode="wait" initial={false}>
-        <motion.span key={saves ? 'saved' : 'helper'} aria-live="polite" initial={{ opacity: 0, y: 3 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0, y: -3 }} transition={{ duration: 0.15 }}
-          className={cn('text-xs', saves ? 'text-[var(--ok)]' : 'text-[var(--fg3)]')}>{saves ? savedHelper ?? 'Saved just now' : helper}</motion.span>
-      </AnimatePresence>
+      <Swap k={saves ? 'saved' : 'helper'} mode="wait">
+        <span aria-live="polite" className={cn('ui-in text-xs [--ui-d:.15s] [--ui-e:ease-out] [--ui-y:3px] [--ui-yo:-3px]', saves ? 'text-[var(--ok)]' : 'text-[var(--fg3)]')}>{saves ? savedHelper ?? 'Saved just now' : helper}</span>
+      </Swap>
     </div>
   )
 }
@@ -1701,8 +1687,8 @@ export type Notification = { id: string; title: ReactNode; body?: ReactNode; tim
  */
 export function NotificationBell({ items, onChange, max = 5, className }: { items: Notification[]; onChange: (items: Notification[]) => void; max?: number; className?: string }) {
   const unread = items.filter(n => !n.read).length
-  const prev = useRef(unread), [shake, setShake] = useState(0)
-  useEffect(() => { if (unread > prev.current) setShake(s => s + 1); prev.current = unread }, [unread])
+  const prev = useRef(unread), bell = useRef<HTMLSpanElement>(null)
+  useEffect(() => { if (unread > prev.current) play(bell.current, { rotate: [0, -14, 12, -8, 6, 0] }, { duration: 0.5 }); prev.current = unread }, [unread])
   const cascade = useRef(false)
   const shown = items.slice(0, max)
   // the dots clear one after another (60 ms apart, each spring about 200 ms); later clicks clear at once
@@ -1710,36 +1696,36 @@ export function NotificationBell({ items, onChange, max = 5, className }: { item
   return (
     <Popover className={className}>
       <PopoverTrigger size="icon" aria-label={`Notifications, ${unread} unread`} className="!overflow-visible">
-        <motion.span key={shake} className="inline-flex origin-top" initial={false} animate={shake ? { rotate: [0, -14, 12, -8, 6, 0] } : undefined} transition={{ duration: 0.5 }}>
-          <Icon name="bell" />
-        </motion.span>
-        <AnimatePresence>
+        <span ref={bell} className="inline-flex origin-top"><Icon name="bell" /></span>
+        <Presence appear>
           {unread > 0 && (
-            <motion.span initial={{ scale: 0 }} animate={{ scale: 1 }} exit={{ scale: 0 }} transition={spring(0.5, 0.4)}
-              className="pointer-events-none absolute -top-1.5 -end-1.5 grid h-5 min-w-5 place-items-center rounded-full border-2 border-[var(--card)] bg-[var(--bad)] px-1 text-[11px] font-semibold text-[var(--card)]">
+            <span className="ui-in pointer-events-none absolute -top-1.5 -end-1.5 grid h-5 min-w-5 place-items-center rounded-full border-2 border-[var(--card)] bg-[var(--bad)] px-1 text-[11px] font-semibold text-[var(--card)] [--ui-d:.4s] [--ui-e:var(--ui-spring-pop)] [--ui-o:1] [--ui-s:0]">
               <AnimatedNumber value={unread} />
-            </motion.span>
+            </span>
           )}
-        </AnimatePresence>
+        </Presence>
       </PopoverTrigger>
       <PopoverContent className="w-[min(300px,calc(100vw-32px))] overflow-hidden !p-0">
         <div className="flex items-center justify-between border-b border-[var(--line)] px-3 py-2"><b className="text-[13px]">Notifications</b>
           <Button size="sm" variant="ghost" disabled={!unread} onClick={markAll}>Mark all read</Button></div>
         {items.length === 0 ? <EmptyState icon="bell" title="You’re all caught up" /> : (
           <div role="list">
-            <AnimatePresence initial>
-              {shown.map((n, i) => (
-                <motion.div key={n.id} role="listitem" layout initial={{ opacity: 0, x: -6 }} animate={{ opacity: 1, x: 0 }} exit={{ opacity: 0, height: 0, transition: { duration: 0.15 } }}
-                  transition={{ ...spring(0.2, 0.35), delay: i * 0.04 }} className="overflow-hidden border-b border-[var(--line)] last:border-b-0">
-                <button onClick={() => onChange(items.map(x => x.id === n.id ? { ...x, read: true } : x))}
-                  className="flex w-full cursor-pointer gap-2.5 border-0 bg-transparent px-3 py-2.5 text-start text-xs hover:bg-[var(--muted)]">
-                  <motion.span initial={false} animate={{ scale: n.read ? 0 : 1 }} transition={{ ...spring(0.4, 0.3), delay: cascade.current ? i * 0.06 : 0 }}
-                    className="mt-1 h-[7px] w-[7px] flex-none rounded-full bg-[var(--accent)]" />
-                  <span className="flex-1"><span className="block text-[13px]">{n.title}</span>{n.body && <span className="text-[var(--fg2)]">{n.body}</span>}<span className="block text-[var(--fg3)]">{n.time}</span></span>
-                </button>
-                </motion.div>
-              ))}
-            </AnimatePresence>
+            <PresenceList items={shown} keyOf={n => n.id} appear>
+              {(n, { index: i }) => (
+                // slides in after the rows above it; removed, the row closes (ui-grow's exit)
+                <div role="listitem" style={{ '--ui-delay': `${i * 0.04}s` } as CSSProperties}
+                  className="ui-grow border-b border-[var(--line)] last:border-b-0 [--ui-do:.15s] [--ui-x:-6px] [&:not([data-ui-exit])]:[animation:ui-in_.35s_var(--ui-spring)_var(--ui-delay,0s)_backwards]">
+                  <div>
+                    <button onClick={() => onChange(items.map(x => x.id === n.id ? { ...x, read: true } : x))}
+                      className="flex w-full cursor-pointer gap-2.5 border-0 bg-transparent px-3 py-2.5 text-start text-xs hover:bg-[var(--muted)]">
+                      <span className="mt-1 h-[7px] w-[7px] flex-none rounded-full bg-[var(--accent)] motion-reduce:!transition-none"
+                        style={{ scale: n.read ? '0' : '1', transition: `scale .3s var(--ui-spring) ${cascade.current ? i * 0.06 : 0}s` }} />
+                      <span className="flex-1"><span className="block text-[13px]">{n.title}</span>{n.body && <span className="text-[var(--fg2)]">{n.body}</span>}<span className="block text-[var(--fg3)]">{n.time}</span></span>
+                    </button>
+                  </div>
+                </div>
+              )}
+            </PresenceList>
           </div>
         )}
       </PopoverContent>
@@ -1789,7 +1775,7 @@ export function Tour({ steps, step, defaultStep = -1, onStepChange, children, cl
   useEffect(() => { if (geo) placed.current = true }, [geo])
 
   const s = open ? steps[i] : null
-  const move = placed.current ? spring(0.2, 0.45) : { duration: 0 }
+  const move = placed.current ? 'left .45s var(--ui-spring), top .45s var(--ui-spring)' : undefined
   return (
     <div ref={wrap} className={cn('relative overflow-hidden rounded-[var(--r-md)]', className)}
       onKeyDown={e => {
@@ -1800,26 +1786,23 @@ export function Tour({ steps, step, defaultStep = -1, onStepChange, children, cl
         else if (e.key === 'ArrowLeft' && i > 0) go(i - 1)
       }}>
       {children}
-      <AnimatePresence>
+      <Presence appear>
         {open && geo && (
-          <motion.div key="spot" aria-hidden className="pointer-events-none absolute top-0 left-0 z-[5] rounded-[var(--r-md)] shadow-[0_0_0_9999px_rgba(0,0,0,.45)]"
-            initial={{ opacity: 0, x: geo.x, y: geo.y, width: geo.w, height: geo.h }} animate={{ opacity: 1, x: geo.x, y: geo.y, width: geo.w, height: geo.h }}
-            exit={{ opacity: 0, transition: { duration: 0.2 } }} transition={{ ...spring(0.2, 0.5), opacity: { duration: 0.25 } }} />
+          <div aria-hidden style={{ translate: `${geo.x}px ${geo.y}px`, width: geo.w, height: geo.h }}
+            className="ui-in pointer-events-none absolute top-0 left-0 z-[5] rounded-[var(--r-md)] shadow-[0_0_0_9999px_rgba(0,0,0,.45)] transition-[translate,width,height] duration-500 ease-[var(--ui-spring)] [--ui-d:.25s] [--ui-do:.2s] [--ui-e:linear] motion-reduce:transition-none" />
         )}
-      </AnimatePresence>
-      <AnimatePresence>
+      </Presence>
+      <Presence appear>
         {s && (
-          <motion.div key="tip" ref={tip} role="dialog" aria-label="Product tour" aria-live="polite"
-            initial={{ opacity: 0, y: 8 }} animate={geo ? { opacity: 1, y: 0, left: geo.left, top: geo.top } : { opacity: 0 }}
-            exit={{ opacity: 0, y: 8, transition: { duration: 0.15 } }} transition={{ default: spring(0.25, 0.35), left: move, top: move }}
-            style={{ visibility: geo ? 'visible' : 'hidden' }}
-            className={cn(surface.floating, 'absolute top-0 left-0 z-[6] w-[min(250px,calc(100%-16px))] rounded-[var(--r-md)] p-3 text-[13px]')}>
+          <div ref={tip} role="dialog" aria-label="Product tour" aria-live="polite"
+            style={{ left: geo?.left, top: geo?.top, visibility: geo ? 'visible' : 'hidden', transition: move }}
+            className={cn(surface.floating, 'ui-in absolute top-0 left-0 z-[6] w-[min(250px,calc(100%-16px))] rounded-[var(--r-md)] p-3 text-[13px] [--ui-d:.35s] [--ui-y:8px]')}>
             {geo && <span aria-hidden className={cn('absolute h-2.5 w-2.5 border-[var(--line)] bg-[var(--card)]',
               geo.above ? '-bottom-[6px] rotate-[225deg] border-t border-l' : '-top-[6px] rotate-45 border-t border-l')} style={{ left: geo.ax }} />}
-            <motion.div key={i} initial={{ opacity: 0, x: 6 }} animate={{ opacity: 1, x: 0 }} transition={{ duration: 0.2 }}>
+            <div key={i} className="ui-in [--ui-d:.2s] [--ui-e:ease-out] [--ui-x:6px]">
               <b className="block font-semibold">{s.title}</b>
               {s.body && <div className="mt-1 mb-3 text-xs leading-normal text-[var(--fg3)]">{s.body}</div>}
-            </motion.div>
+            </div>
             <div className="flex items-center justify-between gap-2">
               <span className="ui-num text-xs text-[var(--fg3)]">{`${i + 1} of ${steps.length}`}</span>
               <div className="flex gap-1.5">
@@ -1827,9 +1810,9 @@ export function Tour({ steps, step, defaultStep = -1, onStepChange, children, cl
                 <Button ref={next} size="sm" variant="primary" onClick={() => go(i + 1)}>{i === steps.length - 1 ? 'Done' : 'Next'}</Button>
               </div>
             </div>
-          </motion.div>
+          </div>
         )}
-      </AnimatePresence>
+      </Presence>
     </div>
   )
 }

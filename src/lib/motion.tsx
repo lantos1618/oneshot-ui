@@ -205,8 +205,8 @@ const indicatorRects = uiShared('active-indicator', () => new Map<string, { rect
  * Render it inside the active item; when the active item changes it slides (and resizes) from the old item to the new
  * one in the same `group` (unique per widget). Positioned `absolute inset-0`; style it with `className`.
  */
-export function ActiveIndicator({ group, className }: { group: string; className?: string }) {
-  const ref = useRef<HTMLSpanElement>(null)
+export function ActiveIndicator({ group, className, transition = spring(0.2, 0.45) }: { group: string; className?: string; /** the slide: default spring(0.2, 0.45) */ transition?: SpringOptions }) {
+  const ref = useRef<HTMLSpanElement>(null), move = useLatest(transition)
   useLayoutEffect(() => {
     const el = ref.current
     if (!el) return
@@ -219,10 +219,10 @@ export function ActiveIndicator({ group, className }: { group: string; className
         motionAnimate(el, [
           { transform: `translate(${a.left - b.left}px,${a.top - b.top}px)`, width: `${a.width}px`, height: `${a.height}px` },
           { transform: 'none', width: `${b.width}px`, height: `${b.height}px` },
-        ], spring(0.2, 0.45))
+        ], move.current)
     }
     return () => { if (el.isConnected) indicatorRects.set(group, { rect: el.getBoundingClientRect(), at: performance.now() }) }
-  }, [group])
+  }, [group, move])
   return <span ref={ref} aria-hidden className={cn('absolute inset-0', className)} />
 }
 

@@ -43,14 +43,19 @@ html.ui-theming *,html.ui-theming *::before,html.ui-theming *::after{transition:
  * (`ui-pop`, `ui-pulse`) replay when the element's key changes. `ui-grow` opens to its height (grid rows), `ui-collapse`
  * does the same while staying mounted (`data-open`; set `visibility` inline, the class delays it until the panel has
  * closed); both need one child without vertical padding or border, which would keep the row from closing fully.
- * `ui-open` is Collapse's measured height (it also follows the content while open). Springs are `linear()` easings sampled from spring(). Reduced motion keeps the fades and drops the movement.
+ * `ui-open` is Collapse's measured height (it also follows the content while open). `ui-stagger` slides a menu's rows
+ * in one after another; `ui-layer` is ModalLayer's box-less wrapper, whose backdrop and panel leave when it does. Springs are `linear()` easings sampled from spring(). Reduced motion keeps the fades and drops the movement.
  */
 const MOTION_CSS = /* @__PURE__ */ (() => {
   const springs = [['', 0.25], ['-pop', 0.5], ['-soft', 0.1]] as const
   const vars = (k: 'easing' | 'fallback') => springs.map(([n, b]) => `--ui-spring${n}:${springEasing(b)[k]}`).join(';')
   const reset = ['x', 'y', 's', 'r', 'o', 'd', 'e', 'delay', 'xo', 'yo', 'so', 'ro', 'do'].map(v => `--ui-${v}:initial`).join(';')
   const t = 'translate(var(--ui-x,0),var(--ui-y,0)) scale(var(--ui-s,1)) rotate(var(--ui-r,0deg))'
-  const stagger = [2, 3, 4, 5, 6, 7, 8].map(n => `[data-menu-list]>.ui-in:nth-child(${n}){--ui-delay:${((n - 1) * 0.03).toFixed(2)}s}`).join('')
+  // menu rows slide in one after another (a group delays its rows together)
+  const row = '.ui-stagger>:not([role=group]),.ui-stagger>[role=group]>*'
+  const stagger = [2, 3, 4, 5, 6, 7, 8].map(n => `.ui-stagger>:nth-child(${n}){--ui-delay:${((n - 1) * 0.03).toFixed(2)}s}`).join('')
+  // a modal layer has no box of its own: its backdrop and panel (children or grandchildren with ui-in) leave for it
+  const layer = '.ui-layer[data-ui-exit]>.ui-in,.ui-layer[data-ui-exit]>*>.ui-in'
   return `:root{--ui-ease-out:${EASE_OUT_CSS};--ui-ease-in:cubic-bezier(.4,0,1,1);${vars('fallback')}}
 @supports (transition-timing-function:linear(0,1)){:root{${vars('easing')}}}
 @layer components{.ui-in,.ui-pop,.ui-pulse,.ui-grow,.ui-open,[data-ui-exit]{${reset}}
@@ -77,13 +82,15 @@ const MOTION_CSS = /* @__PURE__ */ (() => {
 .ui-open{overflow:hidden;animation:ui-open var(--ui-d,.32s) var(--ui-e,var(--ui-spring-soft)) backwards;transition:height var(--ui-d,.32s) var(--ui-e,var(--ui-spring-soft))}
 .ui-bob{animation:ui-bob 2.6s ease-in-out infinite;animation-play-state:var(--ui-play,running)}
 .ui-dot{animation:ui-dot .7s ease-in-out var(--ui-delay,0s) infinite;animation-play-state:var(--ui-play,running)}
+${row}{--ui-x:-6px;animation:ui-in .2s ease-out var(--ui-delay,0s) backwards}
 ${stagger}
 [data-ui-still]{animation:none}
-[data-ui-exit]{animation:ui-out var(--ui-do,.15s) var(--ui-ease-in) forwards;pointer-events:none}
+[data-ui-exit],${layer}{animation:ui-out var(--ui-do,.15s) var(--ui-ease-in) forwards;pointer-events:none}
+.ui-layer[data-ui-exit]{animation:none}
 .ui-grow[data-ui-exit]{animation:ui-shrink var(--ui-do,.2s) var(--ui-ease-out) var(--ui-delay,0s) forwards}
 .ui-open[data-ui-exit]{animation:ui-close var(--ui-d,.32s) var(--ui-e,var(--ui-spring-soft)) forwards}
-@media (prefers-reduced-motion:reduce){.ui-in{animation-name:ui-fade;animation-duration:.15s;animation-timing-function:linear}
-[data-ui-exit]{animation-name:ui-fade-out;animation-duration:.1s}
+@media (prefers-reduced-motion:reduce){.ui-in,${row}{animation-name:ui-fade;animation-duration:.15s;animation-timing-function:linear}
+[data-ui-exit],${layer}{animation-name:ui-fade-out;animation-duration:.1s}
 .ui-grow,.ui-grow[data-ui-exit],.ui-collapse,.ui-collapse[data-open]{animation-duration:1ms;transition-duration:0s}
 .ui-pop,.ui-pulse,.ui-bob,.ui-dot,[data-ui-still],[data-reveal].ui-in{animation:none}}
 @media (prefers-reduced-motion:no-preference) and (scripting:enabled){[data-reveal]:not(.ui-in){opacity:0}}}`
