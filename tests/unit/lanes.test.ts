@@ -75,6 +75,22 @@ describe('layoutLanes', () => {
     expect(reuse.laneCount).toBe(2)
   })
 
+  it('a merge never opens its extra parent in a lane that ends in the same row', () => {
+    // w (lane 0) and the tip y (lane 1) both have x as first parent, so lane 1 ends at x as a fork. x's second parent
+    // z needs a new lane: reusing lane 1 would draw the fork coming in and the merge going out on the same stroke.
+    const L = layoutLanes([n('p', [], 1), n('z', [], 2), n('x', ['p', 'z'], 3), n('y', ['x'], 4), n('w', ['x'], 5)])
+    expect(L.rows.map(r => [r.node.id, r.lane])).toEqual([['w', 0], ['y', 1], ['x', 0], ['z', 2], ['p', 0]])
+    expect(at(L, 'x').edges).toContainEqual(expect.objectContaining({ half: 'top', fromLane: 1, toLane: 0, kind: 'fork' }))
+    expect(at(L, 'x').edges).toContainEqual(expect.objectContaining({ half: 'bottom', fromLane: 0, toLane: 2, kind: 'merge' }))
+    expect(L.laneCount).toBe(3)
+    expectContinuous(L); expectTopological(L)
+    for (const G of [L, layoutLanes(SAMPLE, { pin: ['main', 'develop'] })]) for (const r of G.rows) {
+      const ending = r.edges.filter(e => e.half === 'top' && e.fromLane !== r.lane).map(e => e.fromLane)
+      const leaving = r.edges.filter(e => e.half === 'bottom' && e.toLane !== r.lane).map(e => e.toLane)
+      expect(ending.filter(k => leaving.includes(k)), `row ${r.index}`).toEqual([])
+    }
+  })
+
   it('ends parents that are not in the list with a stub', () => {
     const L = layoutLanes([n('b', ['gone'], 1), n('m', ['b', 'also-gone'], 2)])
     expect(at(L, 'b').edges).toContainEqual(expect.objectContaining({ half: 'bottom', kind: 'missing', parent: -1, firstParent: true }))
@@ -144,7 +160,6 @@ describe('layoutLanes', () => {
 
   it('gives groups stable colours: a new node on top does not reshuffle them', () => {
     expect(laneColor('main', ['main'])).toBe(0)
-    expect(laneColor('feature/x', ['main'])).toBe(laneColor('feature/x', ['main']))
     expect(laneColor('feature/x', ['main', 'develop'])).toBeGreaterThanOrEqual(2)
     const before = layoutLanes(SAMPLE, { pin: ['main', 'develop'] })
     const head = GIT_SAMPLE.find(c => c.refs?.some(r => r.type === 'head'))!
@@ -318,12 +333,36 @@ describe('LaneGraph', () => {
     expect(onHoverChange).toHaveBeenCalledTimes(1) // changes only
   })
 
-  it("renders variable-height rows with rowHeight 'auto'", () => {
-    render(h(LaneGraph<(typeof nodes)[number]>, { nodes, order: 'input', direction: 'up', rowHeight: 'auto', anchor: 'end', renderRow: row => h('p', { style: { height: 40 + row.index * 30 } }, row.node.title) }))
-    const rows = screen.getAllByRole('row')
-    expect(rows).toHaveLength(4)
-    expect(rows[0].style.height).toBe('') // sized by its content, measured
-    expect(rows[0].querySelector('svg')!.getAttribute('height')).toBe('100%')
+  it("renders variable-height rows with rowHeight 'auto': each row is placed below the measured height of the one above", () => {
+    // a ResizeObserver driven by hand (jsdom has no layout): each row reports the height its content would have
+    const observers: { cb: ResizeObserverCallback; els: Set<Element> }[] = []
+    vi.stubGlobal('ResizeObserver', class {
+      o = { cb: (() => {}) as ResizeObserverCallback, els: new Set<Element>() }
+      constructor(cb: ResizeObserverCallback) { this.o.cb = cb; observers.push(this.o) }
+      observe(el: Element) { this.o.els.add(el) }
+      unobserve(el: Element) { this.o.els.delete(el) }
+      disconnect() { this.o.els.clear() }
+    })
+    try {
+      const heights = [40, 70, 100, 130]
+      render(h(LaneGraph<(typeof nodes)[number]>, { nodes, order: 'input', direction: 'up', rowHeight: 'auto', estimateRowHeight: 72, renderRow: row => h('p', null, row.node.title) }))
+      const rows = () => screen.getAllByRole('row')
+      const tops = () => rows().map(r => Number(/translateY\(([\d.]+)px\)/.exec(r.style.transform)?.[1]))
+      expect(rows()).toHaveLength(4)
+      expect(tops()).toEqual([0, 72, 144, 216]) // the estimate, before anything is measured
+      act(() => {
+        for (const o of observers) {
+          const entries = [...o.els].filter(el => el.hasAttribute('data-index')).map(el => ({ target: el, borderBoxSize: [{ blockSize: heights[Number(el.getAttribute('data-index'))], inlineSize: 300 }] }))
+          if (entries.length) o.cb(entries as unknown as ResizeObserverEntry[], o as unknown as ResizeObserver)
+        }
+      })
+      expect(tops()).toEqual([0, 40, 110, 210])
+      expect((rows()[0].parentElement!.parentElement as HTMLElement).style.height).toBe('340px') // the scroll content
+      for (const r of rows()) {
+        expect(r.style.height).toBe('') // sized by its content
+        expect(r.querySelector('svg')!.getAttribute('height')).toBe('100%') // the gutter stretches to the row
+      }
+    } finally { vi.unstubAllGlobals() }
   })
 
 })

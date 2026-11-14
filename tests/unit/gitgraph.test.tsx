@@ -99,7 +99,6 @@ describe('layoutGitGraph', () => {
 
   it('gives branches stable colours: new commits on top do not reshuffle them', () => {
     expect(gitLaneColor('main')).toBe(0)
-    expect(gitLaneColor('feature/x')).toBe(gitLaneColor('feature/x'))
     expect(gitLaneColor('feature/x')).toBeGreaterThan(0)
     const before = layoutGitGraph(GIT_SAMPLE, { pin: ['main', 'develop'] })
     const head = GIT_SAMPLE.find(x => x.refs?.some(r => r.type === 'head'))!

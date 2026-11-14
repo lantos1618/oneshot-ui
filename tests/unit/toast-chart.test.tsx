@@ -20,7 +20,6 @@ describe('toast API', () => {
     mount()
     let id: string | number = ''
     act(() => { id = api({ title: 'Saving…', duration: Infinity }) })
-    expect(typeof id === 'string' || typeof id === 'number').toBe(true)
     const before = dismissButtons()[0]
     act(() => { expect(api.update(id, { title: 'Saved', description: '3 files' })).toBe(true) })
     expect(within(region()).getByText('Saved')).toBeTruthy()
@@ -181,12 +180,6 @@ describe('chart data table', () => {
     expect(within(table).getAllByRole('rowheader').map(h => h.textContent)).toEqual(['Germany', 'France', 'Japan'])
     expect(within(table).getAllByRole('cell').map(c => c.textContent)).toEqual(['4,210', '1,320', '870'])
     expect(screen.getByRole('group', { name: 'Top countries' })).toHaveAccessibleDescription(/^3 items, .*870/)
-  })
-
-  it('formats the table numbers', () => {
-    render(<BarList items={ITEMS} label="Countries" />)
-    const table = screen.getByRole('table', { name: /Countries/ })
-    expect(within(table).getAllByRole('cell')[0].textContent).toBe('4,210')
   })
 
   it('table="toggle" adds a Show data button that reveals it as a scrollable region; "shown" shows it at once', () => {

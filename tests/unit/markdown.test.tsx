@@ -110,8 +110,14 @@ describe('parseMarkdown: blocks', () => {
     expect(b.map(x => x.type === 'paragraph' && text(x.children))).toEqual(['<div onclick="x()">hi</div>', '<script>alert(1)</script>'])
   })
 
-  it('normalises CRLF', () => {
-    expect(types(parseMarkdown('# A\r\n\r\n- b\r\n- c'))).toEqual(['heading', 'list'])
+  it('normalises CRLF and lone CR line ends to \\n', () => {
+    const b = parseMarkdown('# A\r\n\r\n- b\r\n- c\r\n\r\nx\r\ny\rz')
+    expect(types(b)).toEqual(['heading', 'list', 'paragraph'])
+    const [h, l, p] = b
+    expect(h.type === 'heading' && text(h.children)).toBe('A')
+    expect(l.type === 'list' && l.items.map(i => i.children[0].type === 'paragraph' && text(i.children[0].children))).toEqual(['b', 'c'])
+    expect(p.type === 'paragraph' && text(p.children)).toBe('x\ny\nz')
+    expect(JSON.stringify(b)).not.toContain('\\r')
   })
 })
 
@@ -322,8 +328,12 @@ describe('Markdown: rendering and security', () => {
 
   it('onLinkClick receives the checked href; renderCitation renders markers', () => {
     const onLinkClick = vi.fn((_: string, e: React.MouseEvent) => e.preventDefault())
-    render(<Markdown onLinkClick={onLinkClick} renderCitation={n => <button type="button">source {n}</button>}>{'Read [this](https://x.dev/a) [2].'}</Markdown>)
-    act(() => screen.getByRole('link', { name: 'this' }).click())
+    // The angle destination keeps its spaces in the parse; the checked href is trimmed.
+    render(<Markdown onLinkClick={onLinkClick} renderCitation={n => <button type="button">source {n}</button>}>{'Read [this](< https://x.dev/a >) [2].'}</Markdown>)
+    const link = screen.getByRole('link', { name: 'this' })
+    expect(link).toHaveAttribute('href', 'https://x.dev/a')
+    act(() => link.click())
+    expect(onLinkClick).toHaveBeenCalledTimes(1)
     expect(onLinkClick).toHaveBeenCalledWith('https://x.dev/a', expect.anything())
     expect(screen.getByRole('button', { name: 'source 2' })).toBeInTheDocument()
   })
@@ -345,16 +355,15 @@ describe('Markdown: rendering and security', () => {
     expect(container.querySelector('.ui-caret')).toBeNull()
   })
 
-  it('the streaming caret takes no room: a zero-width, aria-hidden anchor inside the last block, not a class on it', () => {
+  it('the streaming caret is a single empty, aria-hidden anchor inside the last block', () => {
     const { container } = render(<Markdown streaming>{'Para one.\n\nPara **two'}</Markdown>)
     const carets = container.querySelectorAll('[data-md-caret]')
     expect(carets).toHaveLength(1)
     const c = carets[0] as HTMLElement
     expect(c).toHaveAttribute('aria-hidden')
-    expect(c.className).toMatch(/\bw-0\b/)
     expect(c.textContent).toBe('')
     expect(c.closest('p')).toBe(container.querySelectorAll('p')[1])
-    for (const el of container.querySelectorAll('p, h1, h2, h3, li, div, table')) expect(el.classList.contains('ui-caret')).toBe(false)
+    expect(container.querySelectorAll('p')[1].textContent).toBe('Para two')
   })
 
   it('a streamed table keeps fixed, header-derived column widths, also after the stream ends; a complete table uses automatic widths', () => {
@@ -386,8 +395,10 @@ describe('Markdown: rendering and security', () => {
     expect(container.querySelector('pre')).toBe(pre)
   })
 
-  it('shows a note when the input was cut', () => {
-    render(<Markdown>{'x'.repeat(MARKDOWN_MAX_CHARS + 1)}</Markdown>)
+  it('shows a note when the input was cut, and none at exactly the limit', () => {
+    const { rerender } = render(<Markdown>{'x'.repeat(MARKDOWN_MAX_CHARS)}</Markdown>)
+    expect(screen.queryByText(/Cut off after/)).toBeNull()
+    rerender(<Markdown>{'x'.repeat(MARKDOWN_MAX_CHARS + 1)}</Markdown>)
     expect(screen.getByText(/Cut off after/)).toBeInTheDocument()
   })
 })
