@@ -42,19 +42,31 @@ describe('F-H1: later prop changes', () => {
 
   it('ProcessFlow takes added nodes and ignores edges to missing ones', () => {
     const node = (id: string, x: number): FlowNode => ({ id, x, y: 0, icon: 'play', color: 'var(--c2)', title: `Step ${id}`, desc: '', body: '', foot: ['', ''] })
-    const { rerender } = render(<ProcessFlow nodes={[node('a', 0)]} edges={[]} steps={[]} />)
-    expect(() => rerender(<ProcessFlow nodes={[node('a', 0), node('b', 300)]} edges={[{ from: 'a', to: 'b' }, { from: 'b', to: 'gone' }]} steps={[]} />)).not.toThrow()
+    const { rerender, container } = render(<ProcessFlow nodes={[node('a', 0)]} edges={[]} steps={[]} />)
+    rerender(<ProcessFlow nodes={[node('a', 0), node('b', 300)]} edges={[{ from: 'a', to: 'b', label: 'kept' }, { from: 'b', to: 'gone', label: 'dangling' }]} steps={[]} />)
     expect(screen.getByText('Step b')).toBeTruthy()
+    // one edge is drawn (a → b, with its label); the one to a missing node is not
+    const edges = [...container.querySelectorAll('svg[aria-hidden] > g > path')]
+    expect(edges).toHaveLength(1)
+    expect(edges[0].getAttribute('d')).not.toMatch(/NaN|undefined/)
+    expect(screen.getByText('kept')).toBeTruthy()
+    expect(screen.queryByText('dangling')).toBeNull()
   })
 
   it('DataFlow takes added sources and targets without NaN', () => {
     const src = { label: 'Postgres', icon: 'database' as const, color: 'var(--c2)', rate: 10 }
     const dst = { label: 'Warehouse', icon: 'warehouse' as const, color: 'var(--c3)', share: 1 }
+    // the links are SVG cubic paths ("M x,y C …"); the particles run on a canvas
+    const links = () => [...container.querySelectorAll('svg path')].map(p => p.getAttribute('d') ?? '').filter(d => /^M\S+,\S+ C/.test(d))
     const { rerender, container } = render(<DataFlow sources={[src]} targets={[dst]} />)
+    expect(links()).toHaveLength(2) // a lone source or target (one row: no spacing to divide by)
+    expect(container.innerHTML).not.toMatch(/NaN|Infinity/)
     rerender(<DataFlow sources={[src, { ...src, label: 'Kafka' }]} targets={[dst, { ...dst, label: 'Alerts' }]} />)
     expect(screen.getByText('Kafka')).toBeTruthy()
     expect(screen.getByText('Alerts')).toBeTruthy()
-    expect(container.textContent).not.toMatch(/NaN/)
+    expect(links()).toHaveLength(4)
+    expect(new Set(links()).size, 'each link has its own path').toBe(4)
+    expect(container.innerHTML).not.toMatch(/NaN|Infinity/)
   })
 
   it('Globe takes added routes', () => {
@@ -131,8 +143,19 @@ describe('F-H4: WorkflowEngine', () => {
     expect(seen.find(e => e.kind === 'error')).toMatchObject({ message: expect.stringMatching(/"nowhere"/) })
     expect(eng.jobs[0].done).toBe(true)
   })
-  it('defaults to no intake timer', () => {
-    expect(new WorkflowEngine({}, []).intake).toBeNull()
+  it('queues intake events on its own only when `intake` is set', () => {
+    const intakes = (o: { intake?: string }) => {
+      const eng = new WorkflowEngine(M({ a: { at: ['l', 'S'], label: 'A', next: 'done' } }), ['m'], { lap: [1e9, 1e9], seed: 1, ...o })
+      const seen: WorkflowEvent[] = []
+      eng.subscribe(e => seen.push(e))
+      for (let i = 0; i < 1000; i++) eng.tick(0.1) // 100 s
+      return seen.filter(e => e.kind === 'queued' && e.cause === 'intake')
+    }
+    expect(intakes({})).toEqual([]) // the default: no timer
+    const got = intakes({ intake: 'go' })
+    expect(got.length).toBeGreaterThanOrEqual(5) // first at 6 s, then every 9–15 s
+    expect(got.length).toBeLessThanOrEqual(12)
+    expect(got.every(e => e.kind === 'queued' && e.ev === 'go')).toBe(true)
   })
 })
 
@@ -154,10 +177,6 @@ describe('F-H5: TraceWaterfall badge', () => {
     expect(within(header).getByText(label)).toBeTruthy()
     if (status !== 'ok') expect(within(header).queryByText('Complete')).toBeNull()
   })
-  it('has no Simulate failure button', () => {
-    render(<TraceWaterfall spans={[{ id: 'r', name: 'Run', kind: 'agent', start: 0, duration: 4 }]} total={4} />)
-    expect(screen.queryByRole('button', { name: 'Simulate failure' })).toBeNull()
-  })
 })
 
 describe('F-H6: Globe latencies', () => {
@@ -167,17 +186,31 @@ describe('F-H6: Globe latencies', () => {
     expect(screen.queryByText(/\bms$/)).toBeNull()
   })
   it('works without a UIProvider', () => {
-    expect(() => render(<Globe hubs={[['A', 0, 0]]} routes={[]} land={[0, 0]} />)).not.toThrow()
+    render(<Globe hubs={[['A', 0, 0], ['B', 10, 10]]} routes={[{ from: 0, to: 1, color: 'var(--c2)', ms: 42 }]} land={[0, 0]} />)
+    expect(screen.getByRole('img', { name: /globe/i })).toBeTruthy()
+    expect(screen.getByText('A → B')).toBeTruthy()
+    expect(screen.getByText('42 ms')).toBeTruthy()
   })
 })
 
 describe('F-H7: DataFlow follows a scoped theme', () => {
   it('re-resolves its canvas colours when the closest .ui-root changes theme', async () => {
-    const cs = vi.spyOn(window, 'getComputedStyle')
-    const { container } = render(<div className="ui-root" data-theme="light"><DataFlow sources={[{ label: 'S', icon: 'database', color: 'var(--c2)', rate: 1 }]} targets={[{ label: 'T', icon: 'chart', color: 'var(--c3)', share: 1 }]} /></div>)
-    const before = cs.mock.calls.length
-    act(() => { (container.firstChild as HTMLElement).setAttribute('data-theme', 'dark') })
-    await waitFor(() => expect(cs.mock.calls.length).toBeGreaterThan(before))
+    // a theme per scope, and a 2D context that records the colours painted (jsdom has no canvas)
+    const css = document.head.appendChild(document.createElement('style'))
+    css.textContent = '.ui-root[data-theme="light"] { --c2: rgb(1, 2, 3) } .ui-root[data-theme="dark"] { --c2: rgb(4, 5, 6) }'
+    const painted: string[] = []
+    const ctx = new Proxy({}, {
+      get: (_t, p) => p === 'createRadialGradient' || p === 'createLinearGradient' ? () => ({ addColorStop: () => {} }) : () => {},
+      set: (_t, p, v) => { if (p === 'fillStyle' && typeof v === 'string') painted.push(v); return true },
+    })
+    vi.spyOn(HTMLCanvasElement.prototype, 'getContext').mockReturnValue(ctx as unknown as CanvasRenderingContext2D)
+    try {
+      const { container } = render(<div className="ui-root" data-theme="light"><DataFlow sources={[{ label: 'S', icon: 'database', color: 'var(--c2)', rate: 1 }]} targets={[{ label: 'T', icon: 'chart', color: 'var(--c3)', share: 1 }]} /></div>)
+      expect(painted).toContain('rgba(1,2,3,1)')
+      expect(painted).not.toContain('rgba(4,5,6,1)')
+      act(() => { (container.firstChild as HTMLElement).setAttribute('data-theme', 'dark') })
+      await waitFor(() => expect(painted).toContain('rgba(4,5,6,1)'))
+    } finally { css.remove() }
   })
 })
 

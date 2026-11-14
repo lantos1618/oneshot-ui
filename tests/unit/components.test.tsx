@@ -1,9 +1,9 @@
 // Interaction tests for a handful of components. They query by role and accessible name only (no class names), so
 // visual polish doesn't break them.
-import { render, screen, waitFor, within } from '@testing-library/react'
+import { fireEvent, render, screen, waitFor, within } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { useState } from 'react'
-import { describe, expect, it, vi } from 'vitest'
+import { describe, expect, it, onTestFinished, vi } from 'vitest'
 import { Dialog } from '../../src/lib/overlay'
 import { Tabs } from '../../src/lib/navigation'
 import { Combobox, SegmentedControl } from '../../src/lib/forms'
@@ -249,13 +249,39 @@ describe('RichTextEditor', () => {
     const hits = vi.fn()
     ;(window as unknown as { __xss: () => void }).__xss = hits
     const { container } = render(<RichTextEditor aria-label="Notes"
-      defaultValue={'<p>Hello <b>world</b><img src=x onerror="window.__xss()"></p><script>window.__xss()</script><a href="javascript:window.__xss()">link</a><iframe src="https://evil.test"></iframe><p style="position:fixed">x</p>'} />)
+      defaultValue={'<p>Hello <b>world</b><img src=x onerror="window.__xss()"></p><script>window.__xss()</script><a href="javascript:window.__xss()">link</a><iframe src="https://evil.test">evil frame</iframe><style>.evil{color:red}</style><p style="position:fixed">x</p>'} />)
     const editor = await screen.findByRole('textbox', { name: 'Notes' })
     await waitFor(() => expect(editor).toHaveTextContent('Hello world'))
     expect(within(editor).getByText('world').tagName).toBe('B')
     expect(container.querySelector('img, script, iframe, [onerror], [style*="fixed"]')).toBeNull()
     expect(container.querySelector('a[href^="javascript"]')).toBeNull()
     expect(editor.textContent).toContain('link')
+    // Dropped elements go with their content: script, iframe and style bodies must not leak in as visible text.
+    expect(editor.textContent).not.toMatch(/__xss|evil|color:/)
+    expect(hits).not.toHaveBeenCalled()
+  })
+
+  it('sanitises dropped HTML, in the editor and in what onChange gets', async () => {
+    const hits = vi.fn(), onChange = vi.fn()
+    ;(window as unknown as { __xss: () => void }).__xss = hits
+    // jsdom's Range has no layout; the editor places its format bubble from it
+    const proto = Range.prototype as Partial<Range>
+    const own = Object.getOwnPropertyDescriptor(proto, 'getBoundingClientRect')
+    proto.getBoundingClientRect = () => new DOMRect()
+    onTestFinished(() => { if (own) Object.defineProperty(proto, 'getBoundingClientRect', own); else delete proto.getBoundingClientRect })
+    render(<RichTextEditor aria-label="Notes" defaultValue="<p>Start</p>" onChange={onChange} />)
+    const editor = await screen.findByRole('textbox', { name: 'Notes' })
+    const sel = getSelection()!; sel.selectAllChildren(editor.querySelector('p')!); sel.collapseToEnd()
+    const html = ' <b>bold</b><img src=x onerror="window.__xss()"><script>window.__xss()</script><style>.evil{}</style><a href="javascript:window.__xss()">link</a>'
+    const dataTransfer = { getData: (t: string) => (t === 'text/html' ? html : t === 'text/plain' ? ' bold link' : ''), types: ['text/html', 'text/plain'], files: [] }
+    fireEvent.drop(editor, { dataTransfer })
+    expect(within(editor).getByText('bold').tagName).toBe('B')
+    expect(editor.querySelector('img, script, style, [onerror], a[href^="javascript"]')).toBeNull()
+    expect(editor.textContent).not.toMatch(/__xss|evil/)
+    await waitFor(() => expect(onChange).toHaveBeenCalled(), { timeout: 3000 })
+    const out = onChange.mock.calls.at(-1)![0] as string
+    expect(out).toContain('<b>bold</b>')
+    expect(out).not.toMatch(/<img|<script|<style|onerror|javascript:|__xss/)
     expect(hits).not.toHaveBeenCalled()
   })
 

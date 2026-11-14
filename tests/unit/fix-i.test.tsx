@@ -4,10 +4,10 @@ import { act, fireEvent, render, renderHook, screen, waitFor, within } from '@te
 import userEvent from '@testing-library/user-event'
 import { describe, expect, it, vi } from 'vitest'
 import { aiChunksOf, applyAiChunk, useAiChat, type AiChat, type AiChunk, type AiMessage, type AiToolPart } from '../../src/lib/aistream'
-import * as aichat from '../../src/lib/aichat'
 import { AgentComposer, AssistantChat, ToolCard } from '../../src/lib/aichat'
 import { ModelComparison, PermissionRequest, VoiceInput } from '../../src/lib/ai'
 import { ToastProvider } from '../../src/lib/feedback'
+import { fakeTimers, tick, withMotion } from '../helpers'
 
 const enc = new TextEncoder()
 const bytes = (parts: string[]) => new ReadableStream<Uint8Array>({ start(c) { parts.forEach(p => c.enqueue(enc.encode(p))); c.close() } })
@@ -25,6 +25,20 @@ describe('I-H1: a stream that fails never ends as a silent success', () => {
     expect(lastMsg(result.current.messages).parts).toContainEqual({ type: 'error', message: 'The reply could not be read.' })
     expect(onError).toHaveBeenCalledTimes(1)
     expect(onMalformed).toHaveBeenCalledWith('<!doctype html>')
+  })
+
+  it('zero chunks and only malformed lines is an error even when the stream ends with its terminator', async () => {
+    const onError = vi.fn(), onMalformed = vi.fn()
+    const send = () => bytes(['data: not json\n\n', 'data: [DONE]\n\n'])
+    const { result } = renderHook(() => useAiChat({ send, onError, onMalformed }))
+    act(() => { result.current.submit('hi') })
+    await waitFor(() => expect(result.current.status).toBe('error'))
+    const m = lastMsg(result.current.messages)
+    expect(m).toMatchObject({ role: 'assistant', status: 'error' })
+    expect(m.truncated).toBeFalsy()
+    expect(m.parts).toContainEqual({ type: 'error', message: 'The reply could not be read.' })
+    expect(onError).toHaveBeenCalledTimes(1)
+    expect(onMalformed).toHaveBeenCalledWith('not json')
   })
 
   it('an NDJSON Response is parsed (not forced to SSE)', async () => {
@@ -58,12 +72,6 @@ describe('I-H1: a stream that fails never ends as a silent success', () => {
     expect(result.current.status).toBe('ready')
     expect(onError).not.toHaveBeenCalled()
     expect(applyAiChunk([], { type: 'abort' })).toEqual([])
-  })
-})
-
-describe('I-H2: ChatApproval is a showcase demo, not a library component', () => {
-  it('is not exported from aichat', () => {
-    expect('ChatApproval' in aichat).toBe(false)
   })
 })
 
@@ -123,12 +131,17 @@ describe('I-H4: AgentComposer’s log follows a streaming reply', () => {
 })
 
 describe('I-H5: VoiceInput', () => {
-  it('appending to the transcript keeps what is shown instead of restarting the reveal', () => {
-    const { rerender } = render(<VoiceInput listening transcript="move the" />)
-    expect(screen.getByText(/move the/)).toBeInTheDocument()
+  it('appending to the transcript keeps what is shown instead of restarting the reveal (motion on)', async () => {
+    withMotion(); fakeTimers()
+    const { container, rerender } = render(<VoiceInput listening transcript="move the" />)
+    const live = container.querySelector('[aria-live]')!
+    expect(live).toHaveTextContent('Listening… tap to stop') // the reveal starts from nothing
+    await tick(5000)
+    expect(live).toHaveTextContent(/^move the$/)
     rerender(<VoiceInput listening transcript="move the meeting" />)
-    expect(screen.queryByText('Listening… tap to stop')).toBeNull()
-    expect(screen.getByText(/move the/)).toBeInTheDocument()
+    expect(live).toHaveTextContent(/^move the$/) // kept, not restarted, and the new word is still to come
+    await tick(5000)
+    expect(live).toHaveTextContent(/^move the meeting$/)
   })
 
   it('fires onResult when the parent stops listening', () => {

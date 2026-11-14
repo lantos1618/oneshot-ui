@@ -4,18 +4,26 @@ import { act, fireEvent, render, renderHook, screen } from '@testing-library/rea
 import { useRef } from 'react'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import {
-  Button, DEFAULT_THEME, SparkChart, TOKENS, THEME_MODES, THEME_TOKEN_NAMES, ariaSort, clampIndex, compareCells, fmt, formatHotkey, idPart,
-  listKeyMove, moveById, nextSort, parseRgba, plural, rangeStr, resolveColor, revealTheme, sliderKeyValue, snapToStep, themeTokens,
+  Button, SparkChart, TOKENS, THEME_MODES, THEME_STORAGE_KEY, THEME_TOKEN_NAMES, ariaSort, clampIndex, compareCells, fmt, formatHotkey, idPart,
+  listKeyMove, moveById, nextSort, parseRgba, plural, rangeStr, resolveColor, revealTheme, sliderKeyValue, snapToStep,
   typeaheadIndex, useLive, useThemeVersion, useWidth,
 } from '../../src/lib/core'
 import { Chart } from '../../src/lib/charts'
 import { themeScriptSource } from '../../src/lib/provider'
+import { mockMedia } from '../helpers'
 
 afterEach(() => { vi.unstubAllGlobals() })
 
 describe('A-H1: one source for the default palette', () => {
-  it.each([false, true])('TOKENS carries every themeTokens(DEFAULT_THEME, dark=%s) value', dark => {
-    for (const [k, v] of Object.entries(themeTokens(DEFAULT_THEME, dark))) expect(TOKENS).toContain(`--${k}:${v};`)
+  it('TOKENS holds the default palette: light on :root, dark under the OS query and data-theme="dark"', () => {
+    const light = /^:root\{([^}]*)\}/.exec(TOKENS)![1]
+    const osDark = /@media \(prefers-color-scheme:dark\)\{:root:not\(\[data-theme="light"\]\)\{([^}]*)\}\}/.exec(TOKENS)![1]
+    const forced = /:root\[data-theme="dark"\]\{([^}]*)\}/.exec(TOKENS)![1]
+    // hand-checked values of the Default theme (THEMES[0]) and its 8px radius
+    for (const d of ['--bg:#FAFAFA;', '--card:#FFFFFF;', '--fg:#09090B;', '--accent:#2563EB;', '--bad:#DC2626;', '--accent-soft:#E5ECFD;', '--r-md:8px;', 'color-scheme:light;']) expect(light).toContain(d)
+    for (const d of ['--bg:#09090B;', '--card:#111113;', '--fg:#FAFAFA;', '--accent:#60A5FA;', '--bad:#F87171;', '--accent-soft:#1F2C3D;', 'color-scheme:dark;']) expect(forced).toContain(d)
+    expect(light).not.toContain('#60A5FA')
+    expect(osDark).toBe(forced)
   })
 
   it('names only tokens ThemeScript accepts, plus the fixed scales and the --ui-* animation variables', () => {
@@ -34,7 +42,9 @@ describe('A-H2: rangeStr on large series', () => {
 
   it('renders a Chart of 130k points without maxPoints', () => {
     const data = Array.from({ length: 130_000 }, (_, i) => ({ x: i, y: i % 100 }))
-    expect(() => render(<Chart data={data} x="x" series={[{ key: 'y' }]} legend={false} label="Big" />)).not.toThrow()
+    render(<Chart data={data} x="x" series={[{ key: 'y' }]} legend={false} label="Big" />)
+    // the screen-reader summary reads the whole series' range (a spread over 130k values would throw)
+    expect(screen.getByText(/0 to 99\./)).toBeInTheDocument()
   }, 60_000) // jsdom renders every point (about 9 s alone, far more beside other files)
 })
 
@@ -136,8 +146,34 @@ describe('A-M9: revealTheme without matchMedia', () => {
 })
 
 describe('A-M2: theme modes', () => {
-  it('ThemeScript takes the mode list from THEME_MODES', () => {
-    expect(themeScriptSource()).toContain(JSON.stringify(THEME_MODES))
+  /** Runs the ThemeScript source as the browser would, with `saved` in storage and the OS in `osDark`. */
+  function runThemeScript(saved: unknown, osDark: boolean, opts?: Parameters<typeof themeScriptSource>[0]) {
+    const root = document.documentElement
+    mockMedia(q => /prefers-color-scheme:\s*dark/.test(q) && osDark)
+    localStorage.setItem(THEME_STORAGE_KEY, JSON.stringify(saved))
+    root.removeAttribute('data-theme'); root.removeAttribute('style')
+    try {
+      new Function(themeScriptSource(opts))()
+      return { theme: root.getAttribute('data-theme'), accent: root.style.getPropertyValue('--accent'), scheme: root.style.colorScheme }
+    } finally { localStorage.removeItem(THEME_STORAGE_KEY); root.removeAttribute('data-theme'); root.removeAttribute('style') }
+  }
+
+  it('ThemeScript applies each of THEME_MODES and falls back to the default mode for an unknown one', () => {
+    expect([...THEME_MODES].sort()).toEqual(['dark', 'light', 'system'])
+    expect(runThemeScript({ theme: 'default', mode: 'light' }, true)).toMatchObject({ theme: 'light', scheme: 'light', accent: '#2563EB' })
+    expect(runThemeScript({ theme: 'default', mode: 'dark' }, false)).toMatchObject({ theme: 'dark', scheme: 'dark', accent: '#60A5FA' })
+    expect(runThemeScript({ theme: 'default', mode: 'system' }, true).theme).toBe('dark')
+    expect(runThemeScript({ theme: 'default', mode: 'system' }, false).theme).toBe('light')
+    // not a mode: the default mode decides
+    expect(runThemeScript({ theme: 'default', mode: 'sepia' }, true, { defaultTheme: { mode: 'light' } }).theme).toBe('light')
+    expect(runThemeScript({ theme: 'default', mode: 'sepia' }, false, { defaultTheme: { mode: 'dark' } }).theme).toBe('dark')
+    expect(runThemeScript({ theme: 'default', mode: 'dark' }, false, { defaultTheme: { mode: 'light' } }).theme).toBe('dark')
+  })
+
+  it('ThemeScript applies saved tokens it accepts and none from a set with a bad name or value', () => {
+    expect(runThemeScript({ mode: 'light', css: { light: { accent: '#123456' } } }, false).accent).toBe('#123456')
+    expect(runThemeScript({ mode: 'light', css: { light: { accent: '#123456', evil: '#000000' } } }, false).accent).toBe('')
+    expect(runThemeScript({ mode: 'light', css: { light: { accent: 'red;}</style><script>' } } }, false).accent).toBe('')
   })
 })
 

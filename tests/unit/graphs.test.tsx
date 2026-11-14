@@ -27,6 +27,16 @@ describe('parseAst', () => {
         ['ExpressionStatement', ['CallExpression', ['Identifier f'], ['StringLiteral "s"']]]]])
   })
 
+  it('binds tighter operators first and groups operators of one level left to right', () => {
+    const expr = (src: string) => (shape(parseAst(src)) as unknown[])[1] as unknown[]
+    const id = (x: string) => [`Identifier ${x}`]
+    expect(expr('a + b * c')).toEqual(['ExpressionStatement', ['BinaryExpression +', id('a'), ['BinaryExpression *', id('b'), id('c')]]])
+    expect(expr('a * b + c')).toEqual(['ExpressionStatement', ['BinaryExpression +', ['BinaryExpression *', id('a'), id('b')], id('c')]])
+    expect(expr('a - b - c')).toEqual(['ExpressionStatement', ['BinaryExpression -', ['BinaryExpression -', id('a'), id('b')], id('c')]])
+    expect(expr('a / b / c')).toEqual(['ExpressionStatement', ['BinaryExpression /', ['BinaryExpression /', id('a'), id('b')], id('c')]])
+    expect(expr('a || b && c === d')).toEqual(['ExpressionStatement', ['BinaryExpression ||', id('a'), ['BinaryExpression &&', id('b'), ['BinaryExpression ===', id('c'), id('d')]]]])
+  })
+
   it('records source spans and parses the sample', () => {
     const root = parseAst(AST_SAMPLE)
     expect(root.children.map(c => c.kind)).toEqual(['VariableDeclaration', 'VariableDeclaration', 'IfStatement'])

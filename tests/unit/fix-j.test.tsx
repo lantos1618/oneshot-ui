@@ -2,11 +2,11 @@
 // LivePresence as real components (their simulations live in the examples), MasonryGallery saves, run-map memo keys.
 import { act, fireEvent, render, screen, waitFor, within } from '@testing-library/react'
 import { afterEach, describe, expect, it, vi } from 'vitest'
-import { useState } from 'react'
 import { UIProvider } from '../../src/lib/provider'
 import { useAgentRun, type AgentRun, type AgentRunEvent, type AgentRunSource, type UseAgentRunOptions } from '../../src/lib/agentrun'
 import { AICanvas, AgentTransitMap } from '../../src/lib/aiagent'
 import { AudioPlayer, MasonryGallery, VideoPlayer, type GalleryItem } from '../../src/lib/media'
+import { fakeTimers, tick, withMotion } from '../helpers'
 import { AnchoredComments, ChatInbox, LivePresence, type AnchoredThread, type InboxConversation } from '../../src/lib/collab'
 
 afterEach(() => { vi.unstubAllGlobals() })
@@ -92,6 +92,25 @@ describe('J-H2 / J-M5: AICanvas and its model', () => {
     ask('Make it blue')
     expect(await screen.findByText('Made it blue.', undefined, { timeout: 5000 })).toBeInTheDocument()
     expect(screen.getByText(/v2 of 2/)).toBeInTheDocument()
+    // the shown version is the edited code, not a copy of v1
+    await waitFor(() => expect(screen.getByRole('button', { name: /color: blue/ })).toBeInTheDocument())
+    expect(screen.queryByRole('button', { name: /color: red/ })).toBeNull()
+    fireEvent.click(screen.getByRole('button', { name: 'Previous version' }))
+    expect(screen.getByRole('button', { name: /color: red/ })).toBeInTheDocument()
+  })
+  it('with motion on, types the edit in as a diff and lands on the edited code', async () => {
+    withMotion(); fakeTimers()
+    render(<AICanvas initial={DOC} respond={async () => ({ reply: 'Made it blue.', code: DOC.replace('red', 'blue') })} />)
+    ask('Make it blue')
+    await tick(200)
+    // mid-edit: the change is being typed in and no version is committed yet
+    expect(screen.getByRole('status', { name: 'Editing untitled.html' })).toBeInTheDocument()
+    expect(screen.getByText(/v1 of 1/)).toBeInTheDocument()
+    for (let i = 0; i < 40 && !screen.queryByText('Made it blue.'); i++) await tick(500)
+    expect(screen.getByText('Made it blue.')).toBeInTheDocument()
+    expect(screen.getByText(/v2 of 2/)).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: /color: blue/ })).toBeInTheDocument()
+    expect(screen.queryByRole('button', { name: /color: red/ })).toBeNull()
   })
 })
 
@@ -163,11 +182,19 @@ describe('J-H4 / J-M16: ChatInbox hands messages to the host and invents nothing
     await waitFor(() => expect(screen.queryByText('Not sent')).toBeNull())
     expect(onSend).toHaveBeenCalledTimes(2)
   })
-  it('controlled: reports changes and shows what it is given', () => {
-    function Host() { const [c, setC] = useState(INBOX); return <ChatInbox conversations={c} onConversationsChange={setC} /> }
-    render(<Host />)
+  it('controlled: the parent is authoritative, and onConversationsChange gets the new message', () => {
+    const onChange = vi.fn()
+    const { rerender } = render(<ChatInbox conversations={INBOX} onConversationsChange={onChange} />)
     send('Hello')
-    expect(within(screen.getByRole('log')).getByText('Hello')).toBeInTheDocument()
+    const next = onChange.mock.calls.at(-1)![0] as InboxConversation[]
+    expect(next.find(c => c.id === 'a')!.messages.at(-1)).toMatchObject({ from: 'me', text: 'Hello' })
+    expect(next.find(c => c.id === 'b')!.messages).toEqual(INBOX[1].messages)
+    // the parent ignored the change, so the log shows only what it was given
+    expect(within(screen.getByRole('log')).queryByText('Hello')).toBeNull()
+    // and a message the parent adds shows up
+    const added = INBOX.map(c => c.id === 'a' ? { ...c, messages: [...c.messages, { id: 'a2', from: 'them' as const, text: 'From the host' }] } : c)
+    rerender(<ChatInbox conversations={added} onConversationsChange={onChange} />)
+    expect(within(screen.getByRole('log')).getByText('From the host')).toBeInTheDocument()
   })
   it('shows Call and Profile only with their handlers', () => {
     const { unmount } = render(<ChatInbox defaultConversations={INBOX} />)
@@ -196,11 +223,10 @@ describe('J-H5 / J-M17: AnchoredComments signs replies with `me`', () => {
     expect(reply.id).not.toBe('m')
     expect(screen.queryByText('Alex Lee')).toBeNull()
   })
-  it('has no default author', () => {
-    // @ts-expect-error `me` is required: there is no built-in persona to sign with
-    void (() => <AnchoredComments doc={[]} />)
-  })
 })
+// Type-only check (tsc -p tsconfig.test.json reads it; nothing runs): `me` is required, there is no built-in persona.
+// @ts-expect-error `me` is required: there is no built-in persona to sign with
+void (() => <AnchoredComments doc={[]} />)
 
 describe('J-H6: LivePresence shows the cursors it is given', () => {
   it('renders exactly those people, and none of its own', () => {
