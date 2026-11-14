@@ -1541,7 +1541,10 @@ export function CommandPalette({ open, onOpenChange, commands, placeholder, sugg
   }, [list])
   const coarse = useCoarsePointer()
   const virtualOn = list.length > CMDK_VIRTUAL_AT
-  const listRef = useRef<HTMLDivElement>(null)
+  // the layer mounts a commit after the palette (its portal target is found in an effect), so the list arrives late:
+  // a new ref object per element lets useVirtual subscribe to its scrolling once it exists
+  const [listEl, setListEl] = useState<HTMLDivElement | null>(null)
+  const listRef = useMemo(() => ({ current: listEl }), [listEl])
   const est = useCallback((i: number) => rows.out[i]?.kind === 'heading' ? 29 : coarse ? 40 : 36, [rows, coarse])
   const keepActive = useMemo(() => rows.at[active] != null ? [rows.at[active]] : undefined, [rows, active])
   const v = useVirtual({ count: rows.out.length, estimateSize: est, scrollRef: listRef, enabled: virtualOn, keep: keepActive, paddingStart: 6, paddingEnd: 6, initialRect: { width: 540, height: 340 } })
@@ -1608,7 +1611,7 @@ export function CommandPalette({ open, onOpenChange, commands, placeholder, sugg
           <div role="alert" className="flex items-center gap-1.5 border-b border-[var(--line)] px-4 py-2 text-xs text-[var(--bad)]"><Icon name="alert" size={13} />{found.error}</div>
         )}
         {virtualOn ? (
-          <div ref={listRef} id={`${uid}-list`} role="listbox" aria-label="Results" className="relative h-[min(340px,50vh)] overflow-auto overscroll-contain px-1.5 max-[640px]:h-[min(420px,60dvh)]">
+          <div ref={setListEl} id={`${uid}-list`} role="listbox" aria-label="Results" className="relative h-[min(340px,50vh)] overflow-auto overscroll-contain px-1.5 max-[640px]:h-[min(420px,60dvh)]">
             <div style={{ height: v.totalSize, position: 'relative' }}>
               {v.items.map(it => (
                 <div key={rowKey(rows.out[it.index], it.index)} data-index={it.index} ref={v.measureElement}
@@ -1619,7 +1622,7 @@ export function CommandPalette({ open, onOpenChange, commands, placeholder, sugg
             </div>
           </div>
         ) : (
-          <div ref={listRef} id={`${uid}-list`} role="listbox" aria-label="Results" className="max-h-[min(340px,50vh)] overflow-auto overscroll-contain p-1.5 max-[640px]:max-h-[min(420px,60dvh)]">
+          <div ref={setListEl} id={`${uid}-list`} role="listbox" aria-label="Results" className="max-h-[min(340px,50vh)] overflow-auto overscroll-contain p-1.5 max-[640px]:max-h-[min(420px,60dvh)]">
             {empty}
             {rows.out.map((r, k) => <Fragment key={rowKey(r, k)}>{row(r)}</Fragment>)}
           </div>

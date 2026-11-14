@@ -49,17 +49,14 @@ describe('TreeView lines', () => {
   })
 
   it('does not move rows when lines are toggled (same indent either way), in normal and compact rows', () => {
+    // the rows' real boxes not moving is checked on a laid-out page in e2e r05-regressions
     for (const compact of [false, true]) {
       const { rerender, unmount } = render(<TreeView nodes={TREE} defaultExpanded={OPEN} compact={compact} />)
       const pads = () => screen.getAllByRole('treeitem').map(r => r.style.paddingInlineStart)
       const before = pads()
       rerender(<TreeView nodes={TREE} defaultExpanded={OPEN} compact={compact} lines />)
       expect(pads()).toEqual(before)
-      // each line sits under its folder's chevron: base + level × step + 7 (chevron centre), minus half the step
-      const [s, c] = lines(screen.getByRole('treeitem', { name: /^Button\.tsx/ }))
-      const step = compact ? 12 : 16, base = compact ? 4 : 8
-      expect(parseFloat(s.style.insetInlineStart)).toBe(base + 7 - step / 2)
-      expect(parseFloat(c.style.insetInlineStart)).toBe(base + step + 7 - step / 2)
+      expect(lines(screen.getByRole('treeitem', { name: /^Button\.tsx/ }))).toHaveLength(2)
       rerender(<TreeView nodes={TREE} defaultExpanded={OPEN} compact={compact} lines="hover" />)
       expect(lines(screen.getByRole('treeitem', { name: /^Button\.tsx/ }))).toHaveLength(2)
       unmount()

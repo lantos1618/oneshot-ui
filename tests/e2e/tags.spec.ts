@@ -8,6 +8,12 @@ test.describe('tag filter', () => {
   /** Titles of the cards the filter leaves visible. */
   const visible = (page: import('@playwright/test').Page) => page.evaluate(() => [...document.querySelectorAll<HTMLElement>('main [data-spec]')].filter(c => c.offsetParent).map(c => c.dataset.spec!))
   const expected = (tags: TagId[]) => Object.keys(TAG_CARDS).filter(t => tagFilterMatch(tagCardTags(TAG_CARDS[t]), tags)).sort()
+  // Written out by hand (not from tagFilterMatch), so a wrong rule fails: charts (an area) AND keyboard (a capability)...
+  const CHARTS_AND_KEYBOARD = ['Bar', 'Bar list', 'Line with forecast band', 'Tags over time']
+  // ...and (charts OR inputs, the same facet) AND keyboard
+  const CHARTS_OR_INPUTS_AND_KEYBOARD = ['Bar', 'Bar list', 'Checkbox and radio', 'Combobox', 'Date picker', 'Date picker dropdown', 'Ghost text', 'Inline edit',
+    'Line with forecast band', 'Multi-select', 'Number stepper', 'One-time code', 'Rating', 'Segmented control', 'Select', 'Slider', 'Tag input', 'Tags over time',
+    'Time picker', 'Typed dates']
 
   test('tags filter: the URL filters the page and the filter writes the URL', async ({ showcase }, info) => {
     test.skip(!['desktop-light', 'iphone-13'].includes(info.project.name), 'runs on desktop light and iPhone 13')
@@ -15,7 +21,7 @@ test.describe('tag filter', () => {
     const t0 = Date.now()
     await page.goto('/?tags=charts,keyboard', { waitUntil: 'load' })
     await page.locator('main [data-spec]').first().waitFor({ state: 'attached' })
-    await expect.poll(async () => (await visible(page)).sort()).toEqual(expected(['charts', 'keyboard']))
+    await expect.poll(async () => (await visible(page)).sort()).toEqual(CHARTS_AND_KEYBOARD)
     expect(page.url()).toContain('?tags=charts,keyboard')
 
     if (info.project.name === 'iphone-13') {
@@ -37,7 +43,7 @@ test.describe('tag filter', () => {
       await page.getByRole('button', { name: 'Filter by tag' }).click()
       await page.getByRole('group', { name: 'Area' }).getByRole('button', { name: /^Inputs \d/ }).click()
       await expect(page).toHaveURL(/\?tags=inputs,charts,keyboard$/)
-      await expect.poll(async () => (await visible(page)).sort()).toEqual(expected(['inputs', 'charts', 'keyboard']))
+      await expect.poll(async () => (await visible(page)).sort()).toEqual(CHARTS_OR_INPUTS_AND_KEYBOARD)
       expect((await showcase.axeStable(null, 300)).map(v => `${v.id}: ${v.nodes.map(n => n.target).join(', ')}`), 'axe violations in the sidebar with tags picked').toEqual([])
       // one Tab stop per facet: arrows move between its chips
       const area = page.getByRole('group', { name: 'Area' })

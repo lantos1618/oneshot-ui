@@ -2,27 +2,26 @@
 // presets without sample data, the lazily loaded map data, and the blocks and examples moved out of the stable API.
 import { act, render, screen, waitFor, within } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
-import { describe, expect, it, vi } from 'vitest'
-import * as lib from '../../src/lib'
+import { describe, expect, it, onTestFinished, vi } from 'vitest'
+import * as lib from '../../src/lib/all'
 import { UIProvider } from '../../src/lib/provider'
 import { AutoHeight, Collapse, ToastProvider } from '../../src/lib/feedback'
 import { Citation, PromptInput, SourceList, SourcesPanel, sourceDomain } from '../../src/lib/ai'
 import { AgentComposer } from '../../src/lib/aichat'
 import { StateMachine } from '../../src/lib/statechart'
 import { AgentTransitMap } from '../../src/lib/aiagent'
-import { Globe, WorldMap, loadWorldMap } from '../../src/lib/geo'
-import { AGENT_WORKFLOWS, AGENT_WORKFLOW_ORDER, AI_CANVAS_SAMPLE, describeSample } from '../../src/examples'
+import { Globe, WorldMap, loadGlobeLand, loadWorldMap } from '../../src/lib/geo'
+import * as examples from '../../src/examples'
+import * as blocks from '../../src/blocks'
+import { AGENT_WORKFLOWS, AGENT_WORKFLOW_ORDER } from '../../src/examples'
 
 describe('stable API', () => {
-  it('no longer exports sample data, demo helpers or page blocks', () => {
-    for (const name of ['AI_CANVAS_SAMPLE', 'AGENT_WORKFLOWS', 'AGENT_WORKFLOW_ORDER', 'mediaArt', 'mediaImage', 'mediaSynthTrack', 'mediaRecordVideo',
-      'describeSample', 'MotionPlayground', 'WORLD_MAP', 'GLOBE_LAND', 'PricingTable', 'Checkout', 'ProfileCard', 'OnboardingChecklist', 'CookieConsent'])
-      expect(lib, name).not.toHaveProperty(name)
-  })
-  it('examples still provide them', () => {
-    expect(Object.keys(AGENT_WORKFLOWS)).toEqual(expect.arrayContaining(AGENT_WORKFLOW_ORDER))
-    expect(AI_CANVAS_SAMPLE.edits.length).toBeGreaterThan(0)
-    expect(describeSample([1, 2, 3])).toMatchObject({ n: 3, mean: 2, sd: 1 })
+  it('exports none of the sample data, demo helpers or page blocks', () => {
+    // whatever the showcase's examples and blocks export (renamed or new), the library exports none of it
+    const leaked = [...Object.keys(examples), ...Object.keys(blocks)].filter(name => name in lib)
+    expect(leaked).toEqual([])
+    expect(Object.keys(examples)).toEqual(expect.arrayContaining(['AGENT_WORKFLOWS', 'AI_CANVAS_SAMPLE', 'describeSample'])) // the check has something to check
+    expect(Object.keys(blocks)).toEqual(expect.arrayContaining(['Checkout', 'PricingTable']))
   })
 })
 
@@ -33,9 +32,21 @@ describe('Collapse / AutoHeight', () => {
     rerender(<Collapse open><p>Details</p></Collapse>)
     expect(screen.getByText('Details')).toBeInTheDocument()
   })
-  it('AutoHeight (Collapse without open) always shows its content', () => {
+  it('AutoHeight (Collapse without open) shows its content and its height follows the content', () => {
+    let resized = () => {}
+    vi.stubGlobal('ResizeObserver', class { constructor(cb: ResizeObserverCallback) { resized = () => cb([], this as unknown as ResizeObserver) } observe() {} unobserve() {} disconnect() {} })
+    onTestFinished(() => { vi.unstubAllGlobals() })
+    let content = 40
+    vi.spyOn(HTMLElement.prototype, 'offsetHeight', 'get').mockImplementation(() => content)
     render(<AutoHeight><p>Step 2</p></AutoHeight>)
-    expect(screen.getByText('Step 2')).toBeInTheDocument()
+    const box = screen.getByText('Step 2').parentElement!.parentElement!
+    expect(box.style.height).toBe('40px')
+    content = 96 // the step's content grows
+    act(() => resized())
+    expect(box.style.height).toBe('96px')
+    content = 24
+    act(() => resized())
+    expect(box.style.height).toBe('24px')
   })
 })
 
@@ -95,8 +106,13 @@ describe('statechart presets without sample data', () => {
     expect(screen.getByRole('img', { name: 'Feature spec statechart' })).toBeInTheDocument()
     expect(screen.getByRole('button', { name: 'Fire event' })).toBeEnabled()
   })
-  it('AgentTransitMap renders without machines', () => {
-    expect(() => render(<AgentTransitMap />)).not.toThrow()
+  it('AgentTransitMap without a run draws the empty map: no queue, no trace, no traffic', () => {
+    render(<AgentTransitMap />)
+    expect(screen.getAllByRole('img')).toEqual([screen.getByRole('img', { name: 'Transit map of agent teams' })])
+    expect(screen.getByText('Intake')).toBeInTheDocument() // the stations are there
+    expect(screen.queryByText('Event queue')).toBeNull()
+    expect(screen.queryByRole('table')).toBeNull()
+    expect(screen.queryByRole('row')).toBeNull()
   })
 })
 
@@ -113,7 +129,24 @@ describe('geo data loads lazily', () => {
     render(<WorldMap map={{ w: 10, h: 5, countries: [['1', 'Box', 'M0,0L10,0L10,5Z']] }} data={{}} metrics={[{ key: 'm', label: 'M', format: String }]} />)
     expect(screen.getByRole('img', { name: 'World map by m' }).querySelectorAll('path')).toHaveLength(1)
   })
-  it('Globe renders before its land points arrive', () => {
-    expect(() => render(<UIProvider persist={false}><Globe hubs={[['A', 0, 0], ['B', 10, 10]]} routes={[{ from: 0, to: 1, color: 'var(--c2)' }]} /></UIProvider>)).not.toThrow()
+  it('Globe draws its routes before its land points arrive, and the land once they do', async () => {
+    // a 2D context that counts the calls made on the globe's own canvas (jsdom has no canvas)
+    const calls = new Map<HTMLCanvasElement, string[]>()
+    const ctx = (cv: HTMLCanvasElement): CanvasRenderingContext2D => {
+      const log = calls.get(cv) ?? (calls.set(cv, []), calls.get(cv)!)
+      const p: object = new Proxy({}, { get: (_, k) => (...args: unknown[]) => { log.push(String(k)); void args; return p }, set: () => true })
+      return p as CanvasRenderingContext2D
+    }
+    vi.spyOn(HTMLCanvasElement.prototype, 'getContext').mockImplementation(function (this: HTMLCanvasElement) { return ctx(this) } as never)
+    vi.spyOn(HTMLElement.prototype, 'clientWidth', 'get').mockReturnValue(400)
+    vi.spyOn(HTMLElement.prototype, 'clientHeight', 'get').mockReturnValue(400)
+    render(<UIProvider persist={false}><Globe hubs={[['A', 0, 0], ['B', 10, 10]]} routes={[{ from: 0, to: 1, color: 'var(--c2)' }]} /></UIProvider>)
+    const globe = screen.getByRole('img', { name: 'Rotating globe with routes between cities' }) as HTMLCanvasElement
+    expect(screen.getByText('A → B')).toBeInTheDocument()
+    const drawn = (op: string) => (calls.get(globe) ?? []).filter(c => c === op).length
+    expect(drawn('stroke')).toBeGreaterThan(0) // the route is drawn already...
+    expect(drawn('fillRect')).toBe(0) // ...with no land dots yet
+    await act(() => loadGlobeLand())
+    await waitFor(() => expect(drawn('fillRect')).toBeGreaterThan(100))
   })
 })

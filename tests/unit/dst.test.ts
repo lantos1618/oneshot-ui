@@ -19,12 +19,10 @@ function transitions2026() {
 }
 const DAYS = transitions2026()
 
-describe('the pinned time zone', () => {
-  it('has daylight saving, so the cases below cross real clock changes', () => {
-    expect(['Europe/London', 'America/Santiago']).toContain(Intl.DateTimeFormat().resolvedOptions().timeZone)
-    expect(DAYS).toHaveLength(2)
-  })
-})
+// A guard, not a test: without a zone that has daylight saving the cases below would silently not exist.
+const ZONE = Intl.DateTimeFormat().resolvedOptions().timeZone
+if (!['Europe/London', 'America/Santiago'].includes(ZONE) || DAYS.length !== 2)
+  throw new Error(`dst.test.ts needs a pinned zone with two clock changes in 2026 (got ${ZONE}, ${DAYS.length})`)
 
 describe.each(DAYS.map(([y, m, d]) => ({ y, m, d, label: utcKey(y, m, d) })))('across the clock change on $label', ({ y, m, d }) => {
   const want = (offset: number) => utcKey(y, m, d + offset)

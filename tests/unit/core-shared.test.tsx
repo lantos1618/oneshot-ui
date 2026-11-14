@@ -1,16 +1,35 @@
 // Core: page-wide shared state (uiShared, the UIProvider host outlet and the toast queue), the icon registry, and the
 // accessible names and number formatting of Spinner, DeltaBadge, AnimatedNumber and AvatarStack.
 import { fireEvent, render, screen, within } from '@testing-library/react'
-import { describe, expect, it } from 'vitest'
+import { describe, expect, it, vi } from 'vitest'
 import { AnimatedNumber, AvatarStack, DeltaBadge, Icon, IconButton, Spinner, UIProvider, iconPath, isIconName, registerIcons, uiShared, useToast } from '../../src/lib'
+import { UI_SHARED_VERSION, UI_VERSION } from '../../src/lib/shared'
 
 describe('uiShared', () => {
-  it('returns one value per name for the whole page (globalThis, versioned)', () => {
-    const a = uiShared('test-shared', () => ({ n: 1 }))
-    const b = uiShared('test-shared', () => ({ n: 2 }))
-    expect(a).toBe(b)
-    const store = (globalThis as { __lyndonUiShared?: Map<string, unknown> }).__lyndonUiShared!
-    expect([...store.keys()].some(k => /^@lyndon\/ui@\d+\.\d+:test-shared$/.test(k))).toBe(true)
+  type Store = Map<string, unknown>
+  const store = () => (globalThis as { __lyndonUiShared?: Store }).__lyndonUiShared!
+
+  it('gives every copy of the library on the page the same value per name, made once', async () => {
+    // a second, independent copy of the module, as a drop-in file would be
+    vi.resetModules()
+    const copy = await import('../../src/lib/shared?copy=2' as string) as typeof import('../../src/lib/shared')
+    expect(copy.uiShared).not.toBe(uiShared)
+    const init = vi.fn(() => ({ n: 1 }))
+    const a = uiShared('test-shared', init)
+    expect(copy.uiShared('test-shared', () => ({ n: 2 }))).toBe(a)
+    expect(uiShared('test-shared', () => ({ n: 3 }))).toBe(a)
+    expect(init).toHaveBeenCalledTimes(1)
+    expect(uiShared('test-shared-other', () => ({ n: 4 }))).not.toBe(a)
+  })
+
+  it('shares with copies of the same minor version only (the globalThis protocol other versions also follow)', () => {
+    // what a copy of 0.0.x and one of this minor version (another patch release) left on the page
+    const older = { from: 'older' }, sameMinor = { from: 'same minor' }
+    store().set('@lyndon/ui@0.0:test-versioned', older)
+    store().set(`@lyndon/ui@${UI_SHARED_VERSION}:test-same-minor`, sameMinor)
+    expect(UI_SHARED_VERSION).toBe(UI_VERSION.split('.').slice(0, 2).join('.'))
+    expect(uiShared('test-versioned', () => ({ from: 'this copy' }))).toEqual({ from: 'this copy' })
+    expect(uiShared('test-same-minor', () => ({ from: 'this copy' }))).toBe(sameMinor)
   })
 })
 
@@ -56,11 +75,16 @@ describe('core primitives', () => {
     expect(screen.getByRole('status', { name: 'Loading' })).toBeTruthy()
     expect(screen.getByTitle('Better than the previous period').textContent).toContain('3.3')
   })
-  it('AnimatedNumber rolls one column per digit', () => {
-    const { container } = render(<AnimatedNumber value={1234} />)
-    expect(container).toHaveTextContent(/^1,234/) // read once, as the number
-    const columns = container.querySelector('[aria-hidden]')!.textContent!.match(/0123456789/g)
-    expect(columns).toHaveLength(4)
+  it('AnimatedNumber is read once, as the formatted number, and follows value changes', () => {
+    /** the text assistive tech gets: everything outside aria-hidden */
+    const spoken = (el: Element) => { const c = el.cloneNode(true) as Element; c.querySelectorAll('[aria-hidden]').forEach(n => n.remove()); return c.textContent }
+    const { container, rerender } = render(<AnimatedNumber value={1234} />)
+    expect(spoken(container)).toBe('1,234')
+    expect(screen.getByText('1,234').closest('[aria-hidden]')).toBeNull()
+    rerender(<AnimatedNumber value={98765} />)
+    expect(spoken(container)).toBe('98,765')
+    rerender(<AnimatedNumber value={0.25} format={{ style: 'percent' }} />)
+    expect(spoken(container)).toBe('25%')
   })
   it('AvatarStack names the group with a count and a list', () => {
     render(<AvatarStack names={['Ada', 'Bo', 'Cy']} />)

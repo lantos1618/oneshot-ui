@@ -13,9 +13,20 @@ describe('fmt', () => {
     expect(fmt.usd(0.042)).toBe('$0.042')
     expect(fmt.usd(12)).toBe('$12.00')
     expect(fmt.usd(-1.5)).toBe('-$1.50')
+    // the decimals step at $1 and 1¢: cents from a dollar up, a tenth of a cent below, four places under a cent
+    expect(fmt.usd(1)).toBe('$1.00')
+    expect(fmt.usd(0.999)).toBe('$0.999')
+    expect(fmt.usd(0.01)).toBe('$0.010')
+    expect(fmt.usd(0.0099)).toBe('$0.0099')
+    expect(fmt.usd(0)).toBe('$0.00')
     expect(fmt.money(1234.5, 'EUR')).toBe('€1,234.50')
     expect(fmt.money(1234.5)).toBe('US$1,234.50')
     expect(fmt.bytes(512)).toBe('512 B')
+    expect(fmt.bytes(999)).toBe('999 B')
+    expect(fmt.bytes(1e3)).toBe('1 KB')
+    expect(fmt.bytes(640e3)).toBe('640 KB')
+    expect(fmt.bytes(1e6)).toBe('1.0 MB')
+    expect(fmt.bytes(1e9)).toBe('1.0 GB')
     expect(fmt.bytes(-5)).toBe('0 B')
     expect(fmt.bytes(2.4e6)).toBe('2.4 MB')
     expect(fmt.bytes(3.2e9)).toBe('3.2 GB')
@@ -39,6 +50,13 @@ describe('fmt', () => {
     expect(fmt.list(['a', 'b', 'c'])).toBe('a, b and c')
     const now = NOV8.getTime()
     expect(fmt.relative(now - 3 * 864e5, now)).toBe('3 days ago')
+    expect(fmt.relative(now + 2 * 3600e3, now)).toBe('in 2 hours') // the future
+    expect(fmt.relative(now, now)).toBe('now')
+    expect(fmt.relative(now - 44e3, now)).toBe('44 seconds ago') // seconds up to 45 s, then minutes
+    expect(fmt.relative(now - 45e3, now)).toBe('1 minute ago')
+    expect(fmt.relative(now - 864e5, now)).toBe('yesterday')
+    expect(fmt.relative(now - 8 * 864e5, now)).toBe('last week')
+    expect(fmt.relative(NaN, now)).toBe('')
     expect(fmt.relativeTime(-1, 'day')).toBe('yesterday')
   })
   it('lists weekday and month names from Monday', () => {
@@ -48,8 +66,11 @@ describe('fmt', () => {
 })
 
 describe('text helpers', () => {
-  it('plural counts and picks the word', () => {
+  it('plural counts and picks the word, with a zero phrase on request', () => {
     expect(plural(1, 'file')).toBe('1 file')
+    expect(plural(0, 'file')).toBe('0 files')
+    expect(plural(0, 'file', undefined, { zero: 'No files' })).toBe('No files')
+    expect(plural(1, 'file', undefined, { zero: 'No files' })).toBe('1 file')
     expect(plural(3, 'file')).toBe('3 files')
     expect(plural(2, 'person', 'people')).toBe('2 people')
     expect(plural(1200, 'row')).toBe('1,200 rows')
