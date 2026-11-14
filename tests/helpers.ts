@@ -91,8 +91,12 @@ export function expectLinear(make: (n: number) => () => void, n: number, label?:
   const reps = (fn: () => void, k: number) => () => { for (let i = 0; i < k; i++) fn() }
   let k = 1
   while (k < 4096 && timed(reps(small, k)) < 5) k *= 2
-  let a = Infinity, b = Infinity
-  for (let i = 0; i < 3; i++) { a = Math.min(a, timed(reps(small, k))); b = Math.min(b, timed(reps(big, k))) }
-  const ok = b < a * ratio || b / k < SLOW_RUN_MS
+  let a = Infinity, b = Infinity, ok = false
+  // a load spike can land on the 4n samples only; keep sampling (min of each) before calling it superlinear.
+  // Real quadratic growth stays ~16× however many samples are taken, so retries cannot hide it.
+  for (let i = 0; i < 12 && !(ok && i >= 3); i++) {
+    a = Math.min(a, timed(reps(small, k))); b = Math.min(b, timed(reps(big, k)))
+    ok = b < a * ratio || b / k < SLOW_RUN_MS
+  }
   expect(ok, `${label ?? ''} n=${n}: ${(a / k).toFixed(2)} ms, 4n: ${(b / k).toFixed(2)} ms a run`).toBe(true)
 }
