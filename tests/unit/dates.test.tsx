@@ -31,10 +31,32 @@ describe('Calendar constraints', () => {
     expect(weekend).toHaveFocus() // still focusable
     await user.click(ok)
     expect(onSelect).toHaveBeenCalledWith(new Date(2026, 10, 12))
+    // min and max themselves are inclusive: selectable
+    for (const [name, d] of [['Monday 9 November 2026', 9], ['Wednesday 25 November 2026', 25]] as const) {
+      expect(day(name)).not.toHaveAttribute('aria-disabled')
+      await user.click(day(name))
+      expect(onSelect).toHaveBeenLastCalledWith(new Date(2026, 10, d))
+    }
+    expect(onSelect).toHaveBeenCalledTimes(3)
     expect(day('Monday 9 November 2026')).toHaveAttribute('aria-current', 'date')
     // the month is bounded on both sides
     expect(screen.getByRole('button', { name: 'Previous month' })).toBeDisabled()
     expect(screen.getByRole('button', { name: 'Next month' })).toBeDisabled()
+  })
+
+  it('clicks choose a range start then end; an end before the start, or a click after a full range, starts again', async () => {
+    const user = userEvent.setup(), seen: (Date | null)[][] = []
+    function Ranged() {
+      const [r, setR] = useState<[Date | null, Date | null]>([null, null])
+      return <Calendar month={new Date(2026, 10, 1)} range={r} onRangeChange={x => { seen.push(x); setR(x) }} />
+    }
+    render(<Ranged />)
+    const nov = (d: number) => new Date(2026, 10, d)
+    await user.click(day('Thursday 12 November 2026'))
+    await user.click(day('Tuesday 10 November 2026')) // before the start: a new start
+    await user.click(day('Sunday 15 November 2026'))
+    await user.click(day('Friday 20 November 2026')) // the range was complete: a new start
+    expect(seen).toEqual([[nov(12), null], [nov(10), null], [nov(10), nov(15)], [nov(20), null]])
   })
 
   it('a range cannot start on an unavailable day', async () => {
@@ -147,7 +169,7 @@ describe('DateField segments', () => {
     expect(screen.getAllByRole('spinbutton')[2]).toHaveFocus() // advanced to the last segment
   })
 
-  it('advances as soon as a digit cannot be followed (3 in the day, 2 in the month)', async () => {
+  it('advances as soon as a digit cannot be followed (4 in the day, 2 in the month)', async () => {
     const user = userEvent.setup()
     render(<DateField aria-label="Due" />)
     await user.click(seg(/Day/))
@@ -212,6 +234,28 @@ describe('DateField segments', () => {
 })
 
 describe('TimeField, 24- and 12-hour', () => {
+  it('min and max: a time outside them blocks the submit with a message; the bounds themselves pass', async () => {
+    const user = userEvent.setup(), onValues = vi.fn()
+    render(<Form onValues={onValues}><FormField label="Start" name="start"><TimeField min="09:00" max="17:00" /></FormField><button>Send</button></Form>)
+    const hour = seg(/Hour/)
+    await user.click(hour); await user.keyboard('0859')
+    await user.click(screen.getByRole('button', { name: 'Send' }))
+    expect(onValues).not.toHaveBeenCalled()
+    expect(hour).toHaveAccessibleDescription(/09:00 or later/)
+    await user.click(hour); await user.keyboard('0900')
+    await user.click(screen.getByRole('button', { name: 'Send' }))
+    expect(onValues).toHaveBeenCalledTimes(1)
+    expect(onValues.mock.lastCall![0].get('start')).toBe('09:00')
+    await user.click(hour); await user.keyboard('1701')
+    await user.click(screen.getByRole('button', { name: 'Send' }))
+    expect(onValues).toHaveBeenCalledTimes(1)
+    expect(hour).toHaveAccessibleDescription(/17:00 or earlier/)
+    await user.click(hour); await user.keyboard('1700')
+    await user.click(screen.getByRole('button', { name: 'Send' }))
+    expect(onValues).toHaveBeenCalledTimes(2)
+    expect(onValues.mock.lastCall![0].get('start')).toBe('17:00')
+  })
+
   it('24-hour: type 0930, step with arrows, wrap', async () => {
     const user = userEvent.setup(), onChange = vi.fn()
     render(<TimeField aria-label="Start" onChange={onChange} />)
@@ -395,6 +439,25 @@ describe('FormData from the date controls', () => {
     await user.click(ro)
     await user.keyboard('{ArrowUp}5')
     expect(data().get('ro')).toBe('10:00')
+  })
+
+  it('DateRangePicker: two clicks in its calendar choose the range, which the form submits', async () => {
+    const user = userEvent.setup(), onValues = vi.fn()
+    render(<Form onValues={onValues}><FormField label="Stay" name="stay"><DateRangePicker presets={[]} /></FormField><button>Send</button></Form>)
+    await user.click(screen.getByRole('button', { name: /Stay/ }))
+    const dialog = await screen.findByRole('dialog')
+    const grid = within(dialog).getAllByRole('grid')[0], caption = grid.getAttribute('aria-label')! // the current month
+    const [mName, yName] = caption.split(' ')
+    const m = new Date(`${mName} 1, ${yName}`).getMonth(), y = +yName
+    const cell = (d: number) => within(grid).getByRole('button', { name: new RegExp(`(^|\\s)${d} ${mName} ${y}$`) })
+    await user.click(cell(3))
+    expect(within(dialog).getByText('Choose an end date')).toBeInTheDocument()
+    await user.click(cell(5))
+    expect(within(dialog).getByText(/^3 days · drag either end/)).toBeInTheDocument()
+    await user.click(within(dialog).getByRole('button', { name: 'Done' }))
+    await user.click(screen.getByRole('button', { name: 'Send' }))
+    const iso = (d: number) => `${y}-${String(m + 1).padStart(2, '0')}-${String(d).padStart(2, '0')}`
+    expect(onValues.mock.calls[0][0].getAll('stay')).toEqual([iso(3), iso(5)])
   })
 
   it('DateRangePicker and DatePicker show their dates', () => {

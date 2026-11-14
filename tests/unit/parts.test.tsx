@@ -5,6 +5,7 @@ import { act, fireEvent, render, screen, waitFor, within } from '@testing-librar
 import userEvent from '@testing-library/user-event'
 import { createRef, useState, type AnchorHTMLAttributes, type Ref } from 'react'
 import { describe, expect, it, vi } from 'vitest'
+import { fakeTimers, tick } from '../helpers'
 import { Button, IconButton, Slot, composeRefs, mergeSlotProps } from '../../src/lib/core'
 import { AlertDialog, ContextMenu, Dialog, DropdownMenu, HoverCard, MenuItem, Popover, Sheet, Tooltip } from '../../src/lib/overlay'
 import { Tabs, Toggle, ToggleGroup, Toolbar } from '../../src/lib/navigation'
@@ -17,8 +18,9 @@ function FakeLink({ href, navigate, onClick, ref, ...p }: AnchorHTMLAttributes<H
 
 describe('Slot and asChild', () => {
   it('merges classes, styles, id lists and props (the child wins plain props)', () => {
-    render(<Slot className="a" style={{ color: 'red', margin: 1 }} aria-describedby="tip" title="slot" data-x="1"><span className="b" style={{ margin: 2 }} aria-describedby="own" title="child">hi</span></Slot>)
+    render(<Slot className="a" style={{ color: 'red', margin: 1 }} aria-describedby="tip" aria-labelledby="lbl" title="slot" data-x="1"><span className="b" style={{ margin: 2 }} aria-describedby="own" aria-labelledby="mine" title="child">hi</span></Slot>)
     const el = screen.getByText('hi')
+    expect(el.getAttribute('aria-labelledby')).toBe('mine lbl')
     expect(el.className).toBe('a b')
     expect(el.style.color).toBe('red')
     expect(el.style.margin).toBe('2px')
@@ -150,6 +152,28 @@ describe('Tabs parts', () => {
     expect(screen.getByRole('tab', { name: 'Account' })).toHaveAttribute('aria-selected', 'true')
   })
 
+  it('horizontal Home/End select the first and last enabled tabs; onChange is an alias of onValueChange', async () => {
+    const user = userEvent.setup(), onValueChange = vi.fn(), onChange = vi.fn()
+    render(<Tabs.Root defaultValue="b" onValueChange={onValueChange} onChange={onChange}>
+      <Tabs.List aria-label="Sections">
+        <Tabs.Trigger value="z" disabled>Locked first</Tabs.Trigger>
+        <Tabs.Trigger value="a">Account</Tabs.Trigger><Tabs.Trigger value="b">Billing</Tabs.Trigger><Tabs.Trigger value="c">Team</Tabs.Trigger>
+        <Tabs.Trigger value="y" disabled>Locked last</Tabs.Trigger>
+      </Tabs.List>
+      <Tabs.Content value="a">Account panel</Tabs.Content><Tabs.Content value="b">Billing panel</Tabs.Content><Tabs.Content value="c">Team panel</Tabs.Content>
+    </Tabs.Root>)
+    await user.tab() // the selected tab is the Tab stop
+    expect(screen.getByRole('tab', { name: 'Billing' })).toHaveFocus()
+    await user.keyboard('{End}')
+    expect(screen.getByRole('tab', { name: 'Team' })).toHaveFocus()
+    expect(screen.getByRole('tab', { name: 'Team' })).toHaveAttribute('aria-selected', 'true')
+    expect(screen.getByRole('tabpanel', { name: 'Team' })).toHaveTextContent('Team panel')
+    await user.keyboard('{Home}')
+    expect(screen.getByRole('tab', { name: 'Account' })).toHaveFocus()
+    expect(onValueChange.mock.calls.map(c => c[0])).toEqual(['c', 'a'])
+    expect(onChange.mock.calls).toEqual(onValueChange.mock.calls)
+  })
+
   it('manual activation moves focus with arrows and selects with Enter', async () => {
     const user = userEvent.setup()
     render(<Parts activationMode="manual" />)
@@ -235,6 +259,48 @@ describe('Dialog parts', () => {
     await user.keyboard('{Escape}')
     expect(onOpenChange).toHaveBeenCalledWith(false)
     expect(screen.getByRole('dialog')).toBeInTheDocument()
+  })
+
+  it('focuses the first field, and traps Tab and Shift+Tab inside the open dialog', async () => {
+    // jsdom lays nothing out, so every element would count as hidden: give them a box
+    vi.spyOn(Element.prototype, 'getClientRects').mockReturnValue([{ width: 10, height: 10 }] as unknown as DOMRectList)
+    const user = userEvent.setup()
+    render(<><button>outside</button><Parts /></>)
+    await user.click(screen.getByRole('button', { name: 'Rename' }))
+    const dialog = await screen.findByRole('dialog', { name: 'Rename project' })
+    await waitFor(() => expect(within(dialog).getByRole('textbox', { name: 'Name' })).toHaveFocus())
+    const stops = [...within(dialog).queryAllByRole('textbox'), ...within(dialog).getAllByRole('button')]
+    const start = document.activeElement
+    const seen = new Set<Element | null>()
+    for (let i = 0; i < stops.length; i++) {
+      await user.tab()
+      expect(dialog.contains(document.activeElement), `Tab ${i + 1}`).toBe(true)
+      seen.add(document.activeElement)
+    }
+    expect(seen.size).toBe(stops.length) // every stop visited once, then round again
+    expect(document.activeElement).toBe(start)
+    for (let i = 0; i < stops.length; i++) {
+      await user.tab({ shift: true })
+      expect(dialog.contains(document.activeElement), `Shift+Tab ${i + 1}`).toBe(true)
+    }
+    expect(document.activeElement).toBe(start)
+    expect(screen.getByRole('button', { name: 'outside', hidden: true })).not.toHaveFocus()
+  })
+
+  it('a click on the backdrop closes a Dialog, but not an AlertDialog', async () => {
+    const user = userEvent.setup()
+    /** The layer behind the panel that takes clicks outside it. */
+    const backdrop = (panel: HTMLElement) => [...document.querySelectorAll<HTMLElement>('[aria-hidden="true"]')].find(el => !el.contains(panel) && !panel.contains(el) && el.childElementCount === 0 && el.parentElement?.contains(panel))!
+    const { unmount } = render(<Parts />)
+    await user.click(screen.getByRole('button', { name: 'Rename' }))
+    const dialog = await screen.findByRole('dialog')
+    await user.click(backdrop(dialog))
+    await waitFor(() => expect(screen.queryByRole('dialog')).toBeNull())
+    unmount()
+    render(<AlertDialog.Root defaultOpen><AlertDialog.Content><AlertDialog.Title>Sure?</AlertDialog.Title><AlertDialog.Footer><AlertDialog.Cancel /></AlertDialog.Footer></AlertDialog.Content></AlertDialog.Root>)
+    const alert = await screen.findByRole('alertdialog')
+    await user.click(backdrop(alert))
+    expect(screen.getByRole('alertdialog', { name: 'Sure?' })).toBeInTheDocument()
   })
 
   it('Trigger asChild makes your element the trigger', async () => {
@@ -324,6 +390,31 @@ describe('Popover, Tooltip and HoverCard parts', () => {
     await user.click(within(panel).getByRole('button', { name: 'Done' }))
     expect(onOpenChange).toHaveBeenLastCalledWith(false)
     await waitFor(() => expect(document.activeElement).toBe(trigger))
+    await waitFor(() => expect(screen.queryByRole('dialog')).toBeNull())
+  })
+
+  it('Popover: a controlled one shows only what open says, and only asks to change', async () => {
+    const user = userEvent.setup(), onOpenChange = vi.fn()
+    const pop = (open: boolean) => (
+      <Popover.Root open={open} onOpenChange={onOpenChange}>
+        <Popover.Trigger>Share</Popover.Trigger>
+        <Popover.Content aria-label="Share options"><Popover.Close>Done</Popover.Close></Popover.Content>
+      </Popover.Root>
+    )
+    const { rerender } = render(pop(false))
+    const trigger = screen.getByRole('button', { name: 'Share' })
+    await user.click(trigger)
+    expect(onOpenChange).toHaveBeenLastCalledWith(true)
+    expect(screen.queryByRole('dialog')).toBeNull() // the parent kept it closed
+    expect(trigger).toHaveAttribute('aria-expanded', 'false')
+    rerender(pop(true))
+    const panel = await screen.findByRole('dialog', { name: 'Share options' })
+    expect(trigger).toHaveAttribute('aria-expanded', 'true')
+    await user.click(within(panel).getByRole('button', { name: 'Done' }))
+    expect(onOpenChange).toHaveBeenLastCalledWith(false)
+    expect(screen.getByRole('dialog', { name: 'Share options' })).toBeInTheDocument() // still open until the parent says so
+    rerender(pop(false))
+    await waitFor(() => expect(screen.queryByRole('dialog')).toBeNull())
   })
 
   it('Tooltip: shows on focus, describes its trigger, Escape hides; controlled open', async () => {
@@ -340,7 +431,57 @@ describe('Popover, Tooltip and HoverCard parts', () => {
     expect(screen.getByRole('tooltip')).toHaveTextContent('Always shown')
   })
 
-  it('HoverCard: defaultOpen shows the card; a controlled one follows open', () => {
+  it('Tooltip: hover opens it after `delay` and leaving closes it at once', async () => {
+    fakeTimers()
+    render(<Tooltip.Root delay={400}><Tooltip.Trigger asChild><button>Bold</button></Tooltip.Trigger><Tooltip.Content>Bold ⌘B</Tooltip.Content></Tooltip.Root>)
+    const btn = screen.getByRole('button', { name: 'Bold' })
+    fireEvent.pointerEnter(btn, { pointerType: 'mouse' })
+    await tick(399)
+    expect(screen.queryByRole('tooltip')).toBeNull()
+    await tick(1)
+    expect(screen.getByRole('tooltip')).toHaveTextContent('Bold ⌘B')
+    fireEvent.pointerLeave(btn, { pointerType: 'mouse' })
+    await tick(1)
+    expect(screen.queryByRole('tooltip')).toBeNull()
+    // a pointer that leaves before the delay never opens it
+    fireEvent.pointerEnter(btn, { pointerType: 'mouse' })
+    await tick(200)
+    fireEvent.pointerLeave(btn, { pointerType: 'mouse' })
+    await tick(1000)
+    expect(screen.queryByRole('tooltip')).toBeNull()
+  })
+
+  it('HoverCard: hover or focus opens it after openDelay, leaving closes it after closeDelay', async () => {
+    fakeTimers()
+    const onOpenChange = vi.fn()
+    render(<HoverCard.Root openDelay={300} closeDelay={150} onOpenChange={onOpenChange}><HoverCard.Trigger asChild><a href="#u">@alex</a></HoverCard.Trigger><HoverCard.Content side="bottom">Alex Lee</HoverCard.Content></HoverCard.Root>)
+    const link = screen.getByRole('link', { name: '@alex' })
+    fireEvent.pointerEnter(link, { pointerType: 'mouse' })
+    await tick(299)
+    expect(screen.queryByRole('tooltip')).toBeNull()
+    await tick(1)
+    expect(screen.getByRole('tooltip')).toHaveTextContent('Alex Lee')
+    expect(link).toHaveAccessibleDescription('Alex Lee')
+    fireEvent.pointerLeave(link, { pointerType: 'mouse' })
+    await tick(149)
+    expect(screen.getByRole('tooltip')).toBeInTheDocument() // time to reach the card
+    await tick(1)
+    await tick(500) // and its exit
+    expect(screen.queryByRole('tooltip')).toBeNull()
+    expect(onOpenChange.mock.calls.map(c => c[0])).toEqual([true, false])
+    // keyboard focus opens it the same way
+    act(() => { link.focus() })
+    await tick(300)
+    expect(screen.getByRole('tooltip')).toHaveTextContent('Alex Lee')
+    act(() => { link.blur() })
+    await tick(650)
+    expect(screen.queryByRole('tooltip')).toBeNull()
+  })
+
+  it('HoverCard: defaultOpen starts open; a controlled one follows open', () => {
+    const { unmount } = render(<HoverCard.Root defaultOpen><HoverCard.Trigger asChild><a href="#u">@alex</a></HoverCard.Trigger><HoverCard.Content side="bottom">Alex Lee</HoverCard.Content></HoverCard.Root>)
+    expect(screen.getByRole('tooltip')).toHaveTextContent('Alex Lee')
+    unmount()
     const { rerender } = render(<HoverCard.Root open={false}><HoverCard.Trigger asChild><a href="#u">@alex</a></HoverCard.Trigger><HoverCard.Content side="bottom">Alex Lee</HoverCard.Content></HoverCard.Root>)
     expect(screen.queryByText('Alex Lee')).toBeNull()
     rerender(<HoverCard.Root open><HoverCard.Trigger asChild><a href="#u">@alex</a></HoverCard.Trigger><HoverCard.Content side="bottom">Alex Lee</HoverCard.Content></HoverCard.Root>)
@@ -663,6 +804,33 @@ describe('Toggle, ToggleGroup and Toolbar', () => {
     await user.keyboard('{ArrowLeft} ')
     expect(italic).toHaveAttribute('aria-pressed', 'true')
     expect(onValueChange).toHaveBeenLastCalledWith(['b', 'i'])
+  })
+
+  it('ToggleGroup: loop={false} stops at the ends; vertical uses ↑/↓, not ←/→', async () => {
+    const user = userEvent.setup()
+    const { unmount } = render(<ToggleGroup type="single" defaultValue="day" loop={false} aria-label="Range">
+      <ToggleGroup.Item value="day">Day</ToggleGroup.Item><ToggleGroup.Item value="week">Week</ToggleGroup.Item>
+    </ToggleGroup>)
+    await user.tab()
+    expect(screen.getByRole('radio', { name: 'Day' })).toHaveFocus()
+    await user.keyboard('{ArrowLeft}')
+    expect(screen.getByRole('radio', { name: 'Day' })).toHaveFocus() // no wrap to the end
+    await user.keyboard('{ArrowRight}{ArrowRight}')
+    expect(screen.getByRole('radio', { name: 'Week' })).toHaveFocus() // no wrap to the start
+    expect(screen.getByRole('radio', { name: 'Week' })).toHaveAttribute('aria-checked', 'true')
+    unmount()
+    render(<ToggleGroup type="single" defaultValue="top" orientation="vertical" aria-label="Edge">
+      <ToggleGroup.Item value="top">Top</ToggleGroup.Item><ToggleGroup.Item value="bottom">Bottom</ToggleGroup.Item>
+    </ToggleGroup>)
+    expect(screen.getByRole('radiogroup', { name: 'Edge' })).toHaveAttribute('aria-orientation', 'vertical')
+    await user.tab()
+    await user.keyboard('{ArrowRight}')
+    expect(screen.getByRole('radio', { name: 'Top' })).toHaveFocus()
+    await user.keyboard('{ArrowDown}')
+    expect(screen.getByRole('radio', { name: 'Bottom' })).toHaveFocus()
+    expect(screen.getByRole('radio', { name: 'Bottom' })).toHaveAttribute('aria-checked', 'true')
+    await user.keyboard('{ArrowUp}')
+    expect(screen.getByRole('radio', { name: 'Top' })).toHaveFocus()
   })
 
   it('Toolbar: one Tab stop across buttons and toggle groups; arrows skip separators and disabled items; it remembers the last item', async () => {

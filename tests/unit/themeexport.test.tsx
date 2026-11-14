@@ -19,12 +19,12 @@ const sourceOf = (label: string, light: CustomTheme | null, dark: CustomTheme | 
   },
 })
 
-describe('exporters: snapshots', () => {
-  const cases: [string, ThemeSettings][] = [['default theme', DEFAULT_THEME], ['custom light palette', LIGHT_CUSTOM], ['custom dark palette', DARK_CUSTOM]]
-  describe.each(cases)('%s', (_name, s) => {
-    it.each(THEME_EXPORT_FORMATS.map(f => f.id))('%s', format => {
-      expect(themeExport(format, s)).toMatchSnapshot()
-    })
+describe('themeExport', () => {
+  it('runs the exporter of each format, and throws for an unknown one', () => {
+    const by = { css: themeToCSS, tailwind: themeToTailwind, shadcn: themeToShadcn, dtcg: themeToDTCG, 'tokens-studio': themeToTokensStudio }
+    expect(THEME_EXPORT_FORMATS.map(f => f.id).sort()).toEqual(Object.keys(by).sort())
+    for (const s of [DEFAULT_THEME, LIGHT_CUSTOM, DARK_CUSTOM]) for (const { id } of THEME_EXPORT_FORMATS) expect(themeExport(id, s), id).toBe(by[id](s))
+    expect(() => themeExport('scss' as never, DEFAULT_THEME)).toThrow(/unknown format "scss"/)
   })
 })
 
@@ -75,6 +75,71 @@ describe('exporters: content', () => {
     expect(root).toContain('--background: oklch(0.985 0 0);')
     expect(root).toContain('--card: oklch(1 0 0);')
     expect(themeToShadcn(DEFAULT_THEME, { themeInline: true })).toContain('@theme inline {\n  --radius-sm: calc(var(--radius) - 4px);')
+  })
+
+  it("a Custom palette's own colours, radius and font reach every format", () => {
+    const [accent, primary] = ['#7C3AED', '#0F766E'] // LIGHT_CUSTOM, radius 12, Inter
+    const css = themeToCSS(LIGHT_CUSTOM)
+    expect(css).toMatch(/^\/\* Custom · @lyndon\/ui theme · CSS variables \*\/\n:root \{\n/)
+    for (const v of [`--accent: ${accent};`, `--primary: ${primary};`, `--c2: ${accent};`, '--band: rgba(124,58,237,0.13);', '--r-md: 12px;', '--font: "Inter",', 'color-scheme: light;']) expect(css).toContain(v)
+    const tw = themeToTailwind(LIGHT_CUSTOM)
+    for (const v of [`--color-accent: ${accent};`, `--color-primary: ${primary};`, '--radius-md: 12px;', '--font-sans: "Inter",']) expect(tw).toContain(v)
+    expect(tw).not.toContain('@variant dark') // one palette: no dark block
+    const cn = themeToShadcn(LIGHT_CUSTOM)
+    for (const v of ['--radius: 0.875rem;', `--primary: ${oklchString(primary)};`, `--ring: ${oklchString(accent)};`, `--chart-2: ${oklchString(accent)};`]) expect(cn).toContain(v)
+    const dt = themeToDTCGTokens(LIGHT_CUSTOM) as Record<string, Record<string, { $value: unknown; $extensions?: unknown }>>
+    expect(dt.color.accent.$value).toMatchObject({ hex: accent.toLowerCase() })
+    expect(dt.color.primary.$value).toMatchObject({ hex: primary.toLowerCase() })
+    expect(dt.radius.md.$value).toEqual({ value: 12, unit: 'px' })
+    expect((dt.font.sans.$value as string[])[0]).toBe('Inter')
+    expect(dt.color.accent.$extensions).toBeUndefined() // no dark values to carry
+    const ts = JSON.parse(themeToTokensStudio(LIGHT_CUSTOM))
+    expect(Object.keys(ts)).toEqual(['global', 'light', '$themes', '$metadata'])
+    expect(ts.light.color.accent).toEqual({ value: accent, type: 'color' })
+    expect(ts.global.radius.md).toEqual({ value: '12px', type: 'borderRadius' })
+    expect(ts.global.font.sans.value).toMatch(/^Inter, /)
+
+    // a dark Custom palette exports as dark only, with its own radius (4) and font (Manrope)
+    const dcss = themeToCSS(DARK_CUSTOM)
+    for (const v of ['--bg: #101418;', '--accent: #F472B6;', '--r-md: 4px;', '--font: "Manrope",', 'color-scheme: dark;']) expect(dcss).toContain(v)
+    expect(dcss).not.toContain('color-scheme: light')
+    expect(themeToShadcn(DARK_CUSTOM)).toContain('--radius: 0.375rem;')
+    expect(themeToTailwind(DARK_CUSTOM)).toContain('--color-bg: #101418;')
+    const dts = JSON.parse(themeToTokensStudio(DARK_CUSTOM))
+    expect(dts.$metadata.tokenSetOrder).toEqual(['global', 'dark'])
+    expect(dts.dark.color.bg.value).toBe('#101418')
+    expect(dts.light).toBeUndefined()
+  })
+
+  it('Tokens Studio: a global set (radius, fonts), a colour and shadow set per mode, and a theme per mode', () => {
+    const ts = JSON.parse(themeToTokensStudio(DEFAULT_THEME))
+    expect(Object.keys(ts)).toEqual(['global', 'light', 'dark', '$themes', '$metadata'])
+    expect(ts.global.radius.md).toEqual({ value: '8px', type: 'borderRadius' })
+    for (const k of ['sm', 'md', 'lg']) expect(ts.global.radius[k].value).toMatch(/^\d+(\.\d+)?px$/)
+    expect(parseFloat(ts.global.radius.sm.value)).toBeLessThan(8)
+    expect(parseFloat(ts.global.radius.lg.value)).toBeGreaterThan(8)
+    expect(ts.global.font.sans).toEqual({ value: 'Geist, ui-sans-serif, system-ui, -apple-system, Segoe UI, sans-serif', type: 'fontFamilies' })
+    expect(ts.global.font.mono.value).toMatch(/^Geist Mono, /)
+    expect(ts.light.color.bg).toEqual({ value: '#FAFAFA', type: 'color' })
+    expect(ts.dark.color.bg).toEqual({ value: '#09090B', type: 'color' })
+    expect(ts.light.color.band.value).toBe('rgba(37,99,235,0.13)')
+    for (const m of ['light', 'dark']) {
+      expect(Object.keys(ts[m])).toEqual(['color', 'shadow'])
+      for (const [k, t] of Object.entries(ts[m].color as Record<string, { value: string; type: string }>)) {
+        expect(t.type, k).toBe('color')
+        expect(t.value, k).toMatch(/^(#[0-9A-F]{6}|rgba\(\d+,\d+,\d+,[\d.]+\))$/)
+      }
+      expect(Object.keys(ts[m].color)).toEqual(expect.arrayContaining(['bg', 'card', 'fg', 'primary', 'on-primary', 'accent', 'accent-soft', 'ok', 'warn', 'bad', 'bad-soft', 'c1', 'c2', 'c3', 'c4', 'c-neutral', 'band']))
+      expect(ts[m].shadow.card.type).toBe('boxShadow')
+      expect(ts[m].shadow.card.value).toHaveLength(2)
+    }
+    expect(ts.light.shadow.card.value[1]).toEqual({ x: '0', y: '10', blur: '30', spread: '0', color: 'rgba(0,0,0,.08)', type: 'dropShadow' })
+    expect(ts.dark.shadow.card.value[1].color).toBe('rgba(0,0,0,.5)')
+    expect(ts.$themes).toEqual([
+      { id: 'light', name: 'Light', selectedTokenSets: { global: 'source', light: 'enabled' } },
+      { id: 'dark', name: 'Dark', selectedTokenSets: { global: 'source', dark: 'enabled' } },
+    ])
+    expect(ts.$metadata).toEqual({ tokenSetOrder: ['global', 'light', 'dark'] })
   })
 
   it('drops tokens that could break out of the CSS, and a label that could close the comment', () => {
@@ -312,6 +377,9 @@ describe('share codes', () => {
     expect(themeShareUrl(s, 'https://app.test/docs?tab=2#intro')).toBe(`https://app.test/docs?tab=2#intro=&theme=${code}`)
     expect(themeShareUrl(s, 'https://app.test/?theme=old', { param: 'query' })).toBe(`https://app.test/?theme=${code}`)
     expect(themeShareUrl(s, '/builder')).toBe(`/builder#theme=${code}`)
+    // an old code is replaced, wherever it was, and nothing else is lost
+    expect(themeShareUrl(s, 'https://app.test/#a=1&theme=old&b=2')).toBe(`https://app.test/#a=1&b=2&theme=${code}`)
+    expect(themeShareUrl(s, 'https://app.test/?theme=old#a=1')).toBe(`https://app.test/#a=1&theme=${code}`)
     expect(themeFromUrl(themeShareUrl(s, 'https://app.test/docs?tab=2'))).toEqual(s)
     expect(themeFromUrl(`https://app.test/?theme=${code}`)).toEqual(s)
     expect(themeFromUrl(new URL(`https://app.test/#a=1&theme=${code}`))).toEqual(s)
@@ -408,7 +476,22 @@ describe('AppearancePanel export and import', () => {
 })
 
 describe('derive() fills every soft tint', () => {
-  it('includes bad-soft (it was lost to a comment)', () => {
-    for (const t of THEMES) for (const dark of [false, true]) expect(themeTokens({ ...DEFAULT_THEME, theme: t.id }, dark)['bad-soft']).toMatch(/^#[0-9A-F]{6}$/)
+  const rgbOf = (h: string) => [1, 3, 5].map(i => parseInt(h.slice(i, i + 2), 16))
+  /** `soft` is a tint of `c` toward `card`: every channel between the two, and nearer the card (at most a fifth of the way from it). */
+  const isTintOf = (soft: string, c: string, card: string, what: string) => {
+    const S = rgbOf(soft), C = rgbOf(c), K = rgbOf(card)
+    S.forEach((v, i) => {
+      expect(v, what).toBeGreaterThanOrEqual(Math.min(C[i], K[i]) - 1)
+      expect(v, what).toBeLessThanOrEqual(Math.max(C[i], K[i]) + 1)
+      expect(Math.abs(v - K[i]), what).toBeLessThanOrEqual(Math.abs(C[i] - K[i]) * 0.2 + 1)
+    })
+  }
+  it('includes bad-soft (it was lost to a comment): a light tint of bad, not a copy of another token', () => {
+    for (const t of THEMES) for (const dark of [false, true]) {
+      const tk = themeTokens({ ...DEFAULT_THEME, theme: t.id }, dark), what = `${t.id} ${dark ? 'dark' : 'light'}`
+      for (const k of ['accent-soft', 'ok-soft', 'warn-soft', 'bad-soft']) expect(tk[k], `${what} ${k}`).toMatch(/^#[0-9A-F]{6}$/)
+      for (const k of ['accent', 'ok', 'bad']) isTintOf(tk[`${k}-soft`], tk[k], tk.card, `${what} ${k}-soft`)
+      for (const other of ['bad', 'bg', 'card', 'ok-soft', 'warn-soft', 'accent-soft']) expect(tk['bad-soft'], `${what} bad-soft vs ${other}`).not.toBe(tk[other])
+    }
   })
 })

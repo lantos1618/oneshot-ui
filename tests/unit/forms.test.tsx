@@ -3,7 +3,7 @@
 import { act, fireEvent, render, screen, waitFor, within } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { createRef, useState } from 'react'
-import { describe, expect, it, vi } from 'vitest'
+import { describe, expect, it, onTestFinished, vi } from 'vitest'
 import {
   Checkbox, ColorPicker, Combobox, CurrencyInput, DatePicker, DateRangePicker, Field, FileUpload, Form, FormField, Input, MultiSelect, NumberStepper, OTPInput,
   type Option, PasswordInput, PhoneInput, RadioGroup, RangeSlider, Rating, SegmentedControl, Select, Slider, Switch, TagInput, Textarea, TimePicker,
@@ -88,13 +88,15 @@ describe('FormData from every control', () => {
   })
 
   it('updates the submitted value as the user edits, and fires input/change on the form', async () => {
-    const user = userEvent.setup(), onInput = vi.fn()
+    const user = userEvent.setup(), seen: string[] = []
     const { form, data } = inForm(<Select name="priority" aria-label="Priority" options={PRIORITY} />)
-    form.addEventListener('input', onInput)
+    const log = (e: Event) => seen.push(`${e.type} ${data().get('priority')}`)
+    form.addEventListener('input', log); form.addEventListener('change', log)
     await user.click(screen.getByRole('combobox', { name: 'Priority' }))
     await user.click(await screen.findByRole('option', { name: 'Medium' }))
     expect(data().get('priority')).toBe('medium')
-    expect(onInput).toHaveBeenCalled()
+    // input then change, once each, after the submitted value has changed (like a native <select>)
+    expect(seen).toEqual(['input medium', 'change medium'])
   })
 
   it('a controlled value change from outside does not fire input', () => {
@@ -441,14 +443,17 @@ describe('virtualised OptionList', () => {
     const rendered = screen.getAllByRole('option')
     expect(rendered.length).toBeLessThan(100)
     expect(rendered[0]).toHaveAttribute('aria-setsize', '5000')
-    for (let i = 0; i < 150; i++) fireEvent.keyDown(input, { key: 'ArrowDown' })
+    const far = rendered.length + 10 // past the first window, so the list has to move it into view
+    expect(screen.queryByRole('option', { name: `Option ${far}` })).toBeNull()
+    for (let i = 0; i < far; i++) fireEvent.keyDown(input, { key: 'ArrowDown' })
     const id = input.getAttribute('aria-activedescendant')!
     const active = document.getElementById(id)
     expect(active).not.toBeNull()
-    expect(active).toHaveTextContent('Option 150')
-    expect(active).toHaveAttribute('aria-posinset', '151')
+    expect(active).toHaveTextContent(`Option ${far}`)
+    expect(active).toHaveAttribute('aria-posinset', String(far + 1))
+    expect(screen.getAllByRole('option').length).toBeLessThan(100)
     await user.keyboard('{Enter}')
-    expect(onChange).toHaveBeenLastCalledWith('v150')
+    expect(onChange).toHaveBeenLastCalledWith(`v${far}`)
   })
 
   it('works in Select and MultiSelect too', async () => {
@@ -468,11 +473,30 @@ describe('virtualised OptionList', () => {
 })
 
 describe('FileUpload', () => {
-  it('required blocks submit until a file is added', async () => {
+  it('required blocks submit until a file is added; the native input then carries the file', async () => {
+    // jsdom has no DataTransfer (the component's way to fill the native file input), so a minimal one stands in
+    vi.stubGlobal('DataTransfer', class { list: File[] = []; items = { add: (f: File) => { this.list.push(f) } }; get files() { return Object.assign([...this.list], { fromDataTransfer: true }) } })
+    onTestFinished(() => { vi.unstubAllGlobals() })
     const user = userEvent.setup(), onValues = vi.fn()
     render(<Form onValues={onValues}><FormField label="Receipt" name="receipt" required><FileUpload /></FormField><button type="submit">Send</button></Form>)
     await user.click(screen.getByRole('button', { name: 'Send' }))
     expect(onValues).not.toHaveBeenCalled()
-    expect(document.activeElement).toBe(screen.getByRole('button', { name: /Receipt/ }))
+    const zone = screen.getByRole('button', { name: /Receipt/ })
+    expect(zone).toHaveFocus()
+    expect(zone).toHaveAttribute('aria-invalid', 'true')
+    // picking a file satisfies required and the form submits; removing it blocks the submit again
+    const receipt = new File(['%PDF'], 'receipt.pdf', { type: 'application/pdf' })
+    const native = document.querySelector<HTMLInputElement>('input[type=file][name=receipt]')!
+    fireEvent.change(native, { target: { files: [receipt] } })
+    expect(screen.getByText('receipt.pdf')).toBeInTheDocument()
+    expect(native.files).toMatchObject({ fromDataTransfer: true, 0: receipt, length: 1 }) // what the form submits under "receipt"
+    await user.click(screen.getByRole('button', { name: 'Send' }))
+    expect(onValues).toHaveBeenCalledTimes(1)
+    expect(zone).not.toHaveAttribute('aria-invalid', 'true')
+    await user.click(screen.getByRole('button', { name: 'Remove receipt.pdf' }))
+    expect(native.files).toMatchObject({ fromDataTransfer: true, length: 0 })
+    await user.click(screen.getByRole('button', { name: 'Send' }))
+    expect(onValues).toHaveBeenCalledTimes(1)
+    expect(zone).toHaveFocus()
   })
 })

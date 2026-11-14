@@ -100,6 +100,25 @@ describe('applyAiChunk (reducer)', () => {
     expect(run(['b'], done)).toHaveLength(2)
   })
 
+  it('abort settles the open message as stopped; with no open message it changes nothing', () => {
+    const ms = run(['par', { type: 'reasoning-delta', delta: 'r' }, { type: 'abort' }])
+    expect(last(ms)).toMatchObject({ status: 'done', stopped: true })
+    for (const p of last(ms).parts) expect(p).toMatchObject({ state: 'done' })
+    const done = run(['a', { type: 'finish' }])
+    expect(applyAiChunk(done, { type: 'abort' })).toBe(done)
+  })
+
+  it('caps the parts of a message and the number of messages', () => {
+    const tools = run(Array.from({ length: AI_LIMITS.parts + 10 }, (_, i): AiChunk => ({ type: 'tool-start', id: `t${i}`, name: 'x' })))
+    expect(last(tools).parts).toHaveLength(AI_LIMITS.parts)
+    expect(last(tools).parts.at(-1)).toMatchObject({ id: `t${AI_LIMITS.parts - 1}` }) // the first ones are kept
+    const full = Array.from({ length: AI_LIMITS.messages }, (_, i) => user(`q${i}`, `u${i}`))
+    const ms = run(['reply'], full)
+    expect(ms).toHaveLength(AI_LIMITS.messages)
+    expect(ms[0].id).toBe('u1') // the oldest goes
+    expect(aiMessageText(last(ms))).toBe('reply')
+  })
+
   it('ignores unknown chunks and caps text', () => {
     const ms = run(['x'])
     expect(applyAiChunk(ms, { type: 'nope' } as unknown as AiChunk)).toBe(ms)
@@ -153,6 +172,27 @@ describe('parseAiStream', () => {
     const out = await collect(parseAiStream(bytes(['{"type":"text-del', 'ta","delta":"a"}\n', 'garbage\n\n', '{"type":"reasoning-delta","delta":"b"}']), { onMalformed: bad }))
     expect(out).toEqual([{ type: 'text-delta', delta: 'a' }, { type: 'reasoning-delta', delta: 'b' }])
     expect(bad).toHaveBeenCalledTimes(1)
+  })
+
+  it('drops an SSE event over the size cap', async () => {
+    const huge = 'data: {"type":"text-delta","delta":"' + 'x'.repeat(AI_LIMITS.lineChars + 10) + '"}\n\n'
+    const bad = vi.fn()
+    const out = await collect(parseAiStream(bytes([huge.slice(0, 500_000), huge.slice(500_000), 'data: {"type":"text-delta","delta":"ok"}\n\n']), { format: 'sse', onMalformed: bad }))
+    expect(out).toEqual([{ type: 'text-delta', delta: 'ok' }])
+    expect(bad).toHaveBeenCalledTimes(1)
+  })
+
+  it('says how the stream ended: finished, cancelled, failed, cut off or unreadable', async () => {
+    /** Drains a stream and returns its end. */
+    const endOf = async (parts: string[]) => { const it = parseAiStream(bytes(parts)); let r; while (!(r = await it.next()).done); return r.value }
+    const delta = '{"type":"text-delta","delta":"a"}\n'
+    expect(await endOf([delta, '{"type":"finish"}\n'])).toEqual({ status: 'ok', chunks: 2, malformed: 0 })
+    expect(await endOf([`data: ${delta}\n`, 'data: [DONE]\n\n'])).toMatchObject({ status: 'ok', chunks: 1 })
+    expect(await endOf([delta, '{"type":"abort"}\n'])).toMatchObject({ status: 'cancelled' })
+    expect(await endOf([delta, '{"type":"error","message":"x"}\n'])).toEqual({ status: 'error', chunks: 2, malformed: 0 }) // the server said: no reason of ours
+    expect(await endOf([delta, delta])).toEqual({ status: 'error', reason: 'truncated', chunks: 2, malformed: 0 }) // no finish or [DONE]
+    expect(await endOf(['<html><body>Bad gateway</body></html>\n'])).toMatchObject({ status: 'error', reason: 'unreadable', chunks: 0, malformed: 1 })
+    expect(await endOf(['garbage\n', 'more garbage\n', '{"type":"finish"}\n'])).toMatchObject({ status: 'ok', malformed: 2 })
   })
 
   it('drops a line over the size cap', async () => {
@@ -255,6 +295,52 @@ describe('useAiChat', () => {
     expect(send.mock.calls[1][0]).toHaveLength(1) // the failed reply is not sent back
   })
 
+  it('a byte stream that stops before its end keeps the text, says it was cut off and reports the error', async () => {
+    const onError = vi.fn(), onFinish = vi.fn()
+    const send = () => bytes(['{"type":"text-delta","delta":"Half an ans"}\n'])
+    const { result } = renderHook(() => useAiChat({ send, onError, onFinish }))
+    act(() => { result.current.submit('hi') })
+    await waitFor(() => expect(result.current.status).toBe('error'))
+    const reply = result.current.messages[1]
+    expect(aiMessageText(reply)).toBe('Half an ans')
+    expect(reply).toMatchObject({ truncated: true })
+    expect(reply.parts).toContainEqual({ type: 'error', message: 'The reply was cut off before it finished.' })
+    expect(onError).toHaveBeenCalledWith(expect.objectContaining({ message: 'The reply was cut off before it finished.' }))
+    expect(onFinish).toHaveBeenCalledTimes(1)
+  })
+
+  it('an unreadable reply (an HTML error page) says so, and each bad line reaches onMalformed', async () => {
+    const onError = vi.fn(), onMalformed = vi.fn()
+    const send = () => bytes(['<html>\n', '<h1>502</h1>\n'])
+    const { result } = renderHook(() => useAiChat({ send, onError, onMalformed }))
+    act(() => { result.current.submit('hi') })
+    await waitFor(() => expect(result.current.status).toBe('error'))
+    expect(result.current.messages[1].parts).toContainEqual({ type: 'error', message: 'The reply could not be read.' })
+    expect(result.current.messages[1].truncated).toBeUndefined()
+    expect(onMalformed.mock.calls.map(c => c[0])).toEqual(['<html>', '<h1>502</h1>'])
+    expect(onError).toHaveBeenCalledTimes(1)
+  })
+
+  it('an abort chunk from the server ends the reply as stopped, not failed', async () => {
+    async function* send() { yield 'so far'; yield { type: 'abort' } as AiChunk }
+    const onError = vi.fn()
+    const { result } = renderHook(() => useAiChat({ send, onError }))
+    act(() => { result.current.submit('hi') })
+    await waitFor(() => expect(result.current.status).toBe('ready'))
+    expect(result.current.messages[1]).toMatchObject({ stopped: true, status: 'done' })
+    expect(aiMessageText(result.current.messages[1])).toBe('so far')
+    expect(onError).not.toHaveBeenCalled()
+  })
+
+  it('unmounting aborts the request in flight', async () => {
+    const g = gatedSend(['a', 'b'])
+    const { result, unmount } = renderHook(() => useAiChat({ send: g.send }))
+    act(() => { result.current.submit('go') })
+    expect(g.calls[0].signal.aborted).toBe(false)
+    unmount()
+    expect(g.calls[0].signal.aborted).toBe(true)
+  })
+
   it('an error chunk from the stream also ends in the error state', async () => {
     async function* send() { yield { type: 'error', message: 'quota' } as AiChunk; yield 'not shown' }
     const { result } = renderHook(() => useAiChat({ send }))
@@ -302,6 +388,30 @@ describe('useAiChat', () => {
     // a second decision is ignored
     await act(async () => { await result.current.decideTool('c1', true) })
     expect(host).toHaveBeenCalledTimes(1)
+  })
+
+  it('a host that throws puts the tool in its error state', async () => {
+    const host = vi.fn(async () => { throw new Error('SMTP refused') })
+    async function* send() { yield { type: 'tool-start', id: 'c1', name: 'mail.send', needsApproval: true } as AiChunk; yield { type: 'finish' } as AiChunk }
+    const { result } = renderHook(() => useAiChat({ send, onApprovalRequest: host }))
+    act(() => { result.current.submit('email sam') })
+    await waitFor(() => expect(result.current.status).toBe('ready'))
+    await act(async () => { await result.current.decideTool('c1', true) })
+    expect(result.current.messages[1].parts[0]).toMatchObject({ state: 'error', error: 'SMTP refused', approval: { approved: true } })
+    expect((result.current.messages[1].parts[0] as AiToolPart).result).toBeUndefined()
+  })
+
+  it('continueAfterApproval: false runs the tool but does not ask for a follow-up', async () => {
+    const host = vi.fn(async () => ({ sent: true }))
+    const send = vi.fn(async function* () { yield { type: 'tool-start', id: 'c1', name: 'mail.send', needsApproval: true } as AiChunk; yield { type: 'finish' } as AiChunk })
+    const { result } = renderHook(() => useAiChat({ send, onApprovalRequest: host, continueAfterApproval: false }))
+    act(() => { result.current.submit('email sam') })
+    await waitFor(() => expect(result.current.status).toBe('ready'))
+    await act(async () => { await result.current.decideTool('c1', true) })
+    expect(result.current.messages[1].parts[0]).toMatchObject({ state: 'done', result: { sent: true } })
+    await act(async () => { await Promise.resolve() })
+    expect(send).toHaveBeenCalledTimes(1)
+    expect(result.current.status).toBe('ready')
   })
 
   it('creates object URLs for attachments and revokes them when the messages go away', async () => {
@@ -357,9 +467,15 @@ describe('useStreamedText / StreamingText', () => {
 })
 
 describe('Conversation (stays pinned to the bottom)', () => {
-  it('aiNearBottom', () => {
-    expect(aiNearBottom({ scrollTop: 900, scrollHeight: 1000, clientHeight: 100 })).toBe(true)
-    expect(aiNearBottom({ scrollTop: 500, scrollHeight: 1000, clientHeight: 100 })).toBe(false)
+  it('aiNearBottom: within 32 px of the bottom (inclusive), or a custom threshold', () => {
+    const at = (fromBottom: number) => ({ scrollTop: 900 - fromBottom, scrollHeight: 1000, clientHeight: 100 })
+    expect(aiNearBottom(at(0))).toBe(true)
+    expect(aiNearBottom(at(32))).toBe(true)
+    expect(aiNearBottom(at(33))).toBe(false)
+    expect(aiNearBottom(at(400))).toBe(false)
+    expect(aiNearBottom(at(100), 100)).toBe(true)
+    expect(aiNearBottom(at(101), 100)).toBe(false)
+    expect(aiNearBottom(at(1), 0)).toBe(false)
   })
 
   it('follows new content, stops when scrolled up, and Jump to latest pins it again', async () => {
@@ -460,13 +576,21 @@ describe('AssistantChat with useAiChat', () => {
     return <AssistantChat chat={chat} starters={['Say hi']} />
   }
 
-  it('submits typed text, streams the answer, and offers Regenerate', async () => {
-    async function* send() { yield 'Hi **there**'; yield { type: 'finish' } as AiChunk }
+  it('submits typed text, streams the answer as markdown, and Regenerate asks again from the question', async () => {
+    let n = 0
+    const send = vi.fn(async function* (_m: AiMessage[]) { n++; yield `Hi **there**${n > 1 ? ' again' : ''}`; yield { type: 'finish' } as AiChunk })
     render(<Live send={send} />)
     await userEvent.type(screen.getByRole('combobox', { name: 'Message' }), 'Hello{Enter}')
     expect(await screen.findByText('Hello')).toBeInTheDocument()
-    await waitFor(() => expect(screen.getByRole('log')).toHaveTextContent('Hi'))
-    expect(await screen.findByRole('button', { name: 'Regenerate' })).toBeInTheDocument()
+    const strong = await screen.findByText('there', { selector: 'strong' })
+    expect(screen.getByRole('log')).not.toHaveTextContent('**')
+    expect(strong.parentElement).toHaveTextContent(/^Hi there$/)
+    await userEvent.click(await screen.findByRole('button', { name: 'Regenerate' }))
+    await waitFor(() => expect(screen.getByRole('log')).toHaveTextContent('Hi there again'))
+    expect(send).toHaveBeenCalledTimes(2)
+    // the second request carries the history up to the question, without the first answer
+    expect(send.mock.calls[1][0].map(m => [m.role, aiMessageText(m)])).toEqual([['user', 'Hello']])
+    expect(screen.queryByText(/^Hi there$/)).toBeNull() // the old answer was replaced, not kept beside it
   })
 
   it('starter suggestions submit, and Stop aborts the stream', async () => {
