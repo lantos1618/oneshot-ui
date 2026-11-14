@@ -33,7 +33,13 @@ describe('E-H1: Chart value axis', () => {
   it('`domain` ending at 0 keeps a usable scale', () => {
     const data = [-8, -3].map((v, i) => ({ m: `m${i}`, v }))
     const { container } = render(<Chart data={data} x="m" series={[{ key: 'v' }]} domain={[-10, 0]} zero={false} legend={false} height={200} />)
-    for (const l of container.querySelectorAll('svg line')) expect(Math.abs(Number(l.getAttribute('y1')))).toBeLessThanOrEqual(200)
+    // the value-axis labels span the domain, -10 at the bottom up to 0 at the top, on distinct rows inside the plot
+    const ticks = [...container.querySelectorAll('svg text[text-anchor="end"]')].map(t => ({ v: Number(t.textContent), y: Number(t.getAttribute('y')) }))
+    expect(ticks.length).toBeGreaterThanOrEqual(3)
+    expect(ticks[0].v).toBe(-10)
+    expect(ticks.at(-1)!.v).toBe(0)
+    for (let i = 1; i < ticks.length; i++) { expect(ticks[i].v).toBeGreaterThan(ticks[i - 1].v); expect(ticks[i].y).toBeLessThan(ticks[i - 1].y) }
+    for (const t of ticks) { expect(t.y).toBeGreaterThanOrEqual(0); expect(t.y).toBeLessThanOrEqual(200) }
   })
   it('`zero` puts 0 on the axis for all-negative data', () => {
     const data = [-87, -25].map((v, i) => ({ m: `m${i}`, v }))

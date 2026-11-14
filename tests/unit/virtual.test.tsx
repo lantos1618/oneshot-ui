@@ -137,6 +137,11 @@ describe('useVirtual', () => {
     scrollTo(1900)
     scrollTo(1890)
     expect(more).toHaveBeenCalledTimes(1)
+    // re-renders while the end stays in view (the host re-rendering, a new callback) don't ask again for the same count
+    rerender(<Harness count={100} onEndReached={more} />)
+    rerender(<Harness count={100} onEndReached={(...a: unknown[]) => more(...a)} />)
+    scrollTo(1880)
+    expect(more).toHaveBeenCalledTimes(1)
     rerender(<Harness count={200} onEndReached={more} />)
     expect(more).toHaveBeenCalledTimes(1) // the new end is far away
     scrollTo(3900)

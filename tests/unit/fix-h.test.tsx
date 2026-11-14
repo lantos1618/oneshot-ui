@@ -5,6 +5,7 @@ import { describe, expect, it, vi } from 'vitest'
 import { CodeBlock, CodeTabs, Diff, codeLanguageOf, codeLines, diffHunks, diffStat, codeLineDiff } from '../../src/lib/code'
 import { EmojiPicker, RichTextEditor, richTextHref } from '../../src/lib/editor'
 import { GitGraph, parseGitLog, type GitCommit } from '../../src/lib/gitgraph'
+import { ICONS } from '../../src/lib/icons'
 import { Markdown, parseMarkdown } from '../../src/lib/markdown'
 
 const DAY = 86400e3, T0 = Date.UTC(2026, 0, 1), NOW = T0 + 10 * DAY
@@ -127,11 +128,25 @@ describe('H-H5: GitGraph search position follows the commit', () => {
     expect(screen.getByText('1 match')).toBeInTheDocument()
   })
 
+  it('counts its place among the matches, not among the rows, when a non-match sits above them', () => {
+    const bump = commit('e000000eeee', ['d000000dddd'], 9, { subject: 'Bump deps' })
+    render(<GitGraph commits={[...SMALL, bump]} now={NOW} />)
+    const box = screen.getByRole('searchbox', { name: 'Search commits' })
+    fireEvent.change(box, { target: { value: 'login' } })
+    fireEvent.keyDown(box, { key: 'Enter' })
+    expect(screen.getByText('1 of 3')).toBeInTheDocument()
+    fireEvent.keyDown(box, { key: 'Enter' })
+    fireEvent.keyDown(box, { key: 'Enter' })
+    expect(screen.getByText('3 of 3')).toBeInTheDocument()
+  })
+
   it('Escape in the search clears it; the previous-match button uses the up chevron', () => {
     render(<GitGraph commits={SMALL} now={NOW} />)
     const box = screen.getByRole('searchbox', { name: 'Search commits' })
     fireEvent.change(box, { target: { value: 'login' } })
-    expect(screen.getByRole('button', { name: 'Previous match' })).toBeInTheDocument()
+    const glyph = (name: string) => screen.getByRole('button', { name }).querySelector('svg path')?.getAttribute('d')
+    expect(glyph('Previous match')).toBe(ICONS.chevronUp)
+    expect(glyph('Next match')).toBe(ICONS.chevronDown)
     fireEvent.keyDown(box, { key: 'Escape' })
     expect(box).toHaveValue('')
   })
@@ -147,9 +162,15 @@ describe('H medium fixes', () => {
   })
 
   it('H-M1: an unknown file is plain text with a "Text" badge', () => {
-    const { container } = render(<CodeBlock code="const x = 1" filename="notes.txt" />)
+    // getByText matches an element's own text nodes: the line is found whole only if no token splits it
+    const { unmount } = render(<CodeBlock code="const x = 1" filename="app.js" />)
+    expect(screen.queryByText('const x = 1')).toBeNull() // a known language is highlighted (the control)
+    expect(screen.getByText('const')).toBeInTheDocument()
+    unmount()
+    render(<CodeBlock code="const x = 1" filename="notes.txt" />)
     expect(screen.getByText('Text')).toBeInTheDocument()
-    expect(container.querySelector('pre span span span')).toBeNull()
+    const line = screen.getByText('const x = 1')
+    expect(line.children).toHaveLength(0)
   })
 
   it('H-M2: one Tab stop per emoji grid; ↓ from Recent keeps the column', () => {
@@ -183,7 +204,8 @@ describe('H medium fixes', () => {
   })
 
   it('H-M12: CodeTabs with no tabs renders nothing', () => {
-    expect(() => render(<CodeTabs tabs={[]} />)).not.toThrow()
+    const { container } = render(<CodeTabs tabs={[]} />)
+    expect(container).toBeEmptyDOMElement()
   })
 
   it('H-M13: typed links keep relative paths and tel:, and get https:// otherwise', () => {
@@ -197,8 +219,14 @@ describe('H medium fixes', () => {
 
   it('H-M11: GitGraph announces commits new to the history, not rows a filter brings back', () => {
     const extra = commit('f000000ffff', ['d000000dddd'], 9, { subject: 'Newest' })
-    const { rerender } = render(<GitGraph commits={SMALL} now={NOW} />)
-    rerender(<GitGraph commits={[...SMALL, extra]} now={NOW} />)
+    const feat = commit('e000000eeee', ['b000000bbbb'], 8.5, { subject: 'Feature work', refs: [{ name: 'feat', type: 'head' }] })
+    const all = [...SMALL, feat]
+    const { rerender } = render(<GitGraph commits={all} now={NOW} branches={['main']} />)
+    expect(screen.queryByRole('row', { name: /Feature work/ })).toBeNull()
+    rerender(<GitGraph commits={all} now={NOW} branches={[]} />) // the filter is cleared: the row comes back
+    expect(screen.getByRole('row', { name: /Feature work/ })).toBeInTheDocument()
+    expect(screen.queryByText(/new commit/)).toBeNull()
+    rerender(<GitGraph commits={[...all, extra]} now={NOW} branches={[]} />)
     expect(screen.getByText('1 new commit')).toBeInTheDocument()
   })
 

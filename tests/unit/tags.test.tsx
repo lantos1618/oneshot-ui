@@ -53,9 +53,8 @@ describe('tag vocabulary', () => {
 })
 
 describe('showcase cards', () => {
-  it('finds the cards on the page', () => expect(CARDS_ON_PAGE.length).toBeGreaterThan(150))
-
   it('tags every card on the page, and lists no card that is gone', () => {
+    expect(CARDS_ON_PAGE.length, 'the scan of the section files found the cards').toBeGreaterThan(150)
     const onPage = new Set(CARDS_ON_PAGE.map(([, t]) => t))
     expect(CARDS_ON_PAGE.map(([, t]) => t).filter(t => !TAG_CARDS[t]), 'cards without an entry in TAG_CARDS (src/showcase/tags.ts)').toEqual([])
     expect(Object.keys(TAG_CARDS).filter(t => !onPage.has(t)), 'stale TAG_CARDS entries (no such <Spec title>)').toEqual([])
@@ -82,9 +81,9 @@ describe('showcase cards', () => {
     expect(TAGS.filter(t => !used.has(t.id)).map(t => t.id), 'tags no card carries').toEqual([])
   })
 
-  it('names only registry items that exist', () => {
-    const index = join(ROOT, 'dist-registry/index.json')
-    if (!existsSync(index)) return // built by pnpm build:registry (CI runs the tests after the build)
+  // reads the built registry (pnpm build:registry): reported as skipped, not passed, until one is built
+  const index = join(ROOT, 'dist-registry/index.json')
+  it.skipIf(!existsSync(index))('names only registry items that exist', () => {
     const names = new Set((JSON.parse(readFileSync(index, 'utf8')) as { items: { name: string }[] }).items.map(e => e.name))
     const missing = Object.entries(TAG_CARDS).flatMap(([title, c]) => c.items.filter(i => !names.has(i)).map(i => `${title}: ${i}`))
     expect(missing).toEqual([])
@@ -113,6 +112,8 @@ describe('search', () => {
     expect(find('ai')).not.toContain('Data grid') // "ai" no longer matches inside "detail" or "maintain"
     expect(find('zzqx')).toEqual([])
     expect(find('  ')).toHaveLength(Object.keys(TAG_CARDS).length)
+    expect(find('Sélect')).toContain('Select') // accents in the query are folded
+    expect(find('colöur pïcker')).toContain('Colour picker')
   })
 
   it('suggests a tag when the query is its name or a synonym', () => {
@@ -193,9 +194,17 @@ describe('card chips', () => {
     within(screen.getByRole('toolbar', { name: /Select/ })).getAllByRole('link')[0].click()
     expect(picked).toEqual([tagChipOrder(TAG_CARDS.Select.tags)[0]])
     unmount()
-    card({ tags: ['charts'] })
-    // jsdom has no stylesheet, so look for the utility that hides it (display: none in the page)
-    expect(screen.getByRole('heading', { name: 'Select' }).closest('[data-spec]')).toHaveClass('hidden')
+    // jsdom has no stylesheet: stand in the page's rule for the utility that hides a card (Tailwind's `hidden`)
+    const css = document.head.appendChild(document.createElement('style'))
+    css.textContent = '.hidden { display: none }'
+    try {
+      const other = card({ tags: ['charts'] })
+      expect(screen.queryByRole('heading', { name: 'Select' }), 'a card the filter excludes is hidden').toBeNull()
+      expect(screen.getByRole('heading', { name: 'Select', hidden: true })).not.toBeVisible()
+      other.unmount()
+      card({ tags: [TAG_CARDS.Select.tags[0]] })
+      expect(screen.getByRole('heading', { name: 'Select' })).toBeVisible()
+    } finally { css.remove() }
   })
 })
 
