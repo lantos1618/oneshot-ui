@@ -6,7 +6,8 @@ import { act, fireEvent, render, screen } from '@testing-library/react'
 import { describe, expect, it, vi } from 'vitest'
 import { LaneGraph, LaneGutter, laneAncestry, laneColor, layoutLanes, type LaneLayout, type LaneNode } from '../../src/lib/lanes'
 import { GIT_SAMPLE, gitHistory } from '../../src/examples/git'
-import { AGENT_RUN_SAMPLE, CHAT_TREE_SAMPLE, DEPENDENCY_SAMPLE, agentRunNodes, astLaneNodes, chatBranchGraph, dependencyNodes, parseAst, AST_SAMPLE } from '../../src/examples/graphs'
+import { AGENT_RUN_SAMPLE, CHAT_TREE_SAMPLE, DEPENDENCY_SAMPLE, agentRunNodes, astLaneNodes, dependencyNodes, parseAst, AST_SAMPLE } from '../../src/examples/graphs'
+import { chatBranchGraph } from '../../src/lib/aichat'
 import { expectLinear } from '../helpers'
 
 /** A node: `id`, its parents, a time in days. */

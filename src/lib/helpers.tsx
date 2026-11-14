@@ -63,6 +63,20 @@ export const MOTION = {
 /** Resolves after `ms` milliseconds: await sleep(300). */
 export const sleep = (ms: number) => new Promise<void>(r => setTimeout(r, ms))
 
+/**
+ * Repeatable pseudo-random numbers in [0, 1) (mulberry32): `const r = seededRandom(42); r()` gives the same sequence
+ * every time. Components that jitter take a `seed` prop and use it in place of Math.random.
+ */
+export function seededRandom(seed: number): () => number {
+  let a = seed >>> 0
+  return () => {
+    a = (a + 0x6d2b79f5) >>> 0
+    let t = Math.imul(a ^ (a >>> 15), 1 | a)
+    t = (t + Math.imul(t ^ (t >>> 7), 61 | t)) ^ t
+    return ((t ^ (t >>> 14)) >>> 0) / 4294967296
+  }
+}
+
 /** Keep `n` inside [lo, hi]: clamp(140, 0, 100) → 100. */
 export const clamp = (n: number, lo: number, hi: number) => Math.min(hi, Math.max(lo, n))
 

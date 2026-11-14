@@ -3,6 +3,62 @@
 All notable changes to `@lyndon/ui`, newest first. While on 0.x, a minor release may break APIs; each breaking
 change is listed with how to migrate.
 
+## 0.14.0
+
+Features from the Swift port of this library, brought back: a form draft that saves a snapshot, seeds for the
+components that jitter, late results of superseded host calls dropped, and three components that lived only in the
+showcase (`ScrollSpyNav`, `ChatBranches`, `AgentRunView`).
+
+### Fixed
+
+- `useFormDraft`: edits typed while a save is in flight are no longer marked as saved. `save(fn)` hands `fn` the values
+  as they were when it was called and commits only that snapshot; anything typed meanwhile stays dirty. It resolves
+  `true` when saved, `false` when ignored (a save already running, or unmounted), and passes a rejection on with
+  nothing marked saved. `saving` is true while it runs.
+- `AlertDialog`: a confirm that resolves after the dialog was closed and reopened from outside no longer closes (or
+  shows an error in) the new opening.
+- `AudioPlayer`, `VideoPlayer`: pausing before playback starts no longer reports "Couldn’t play" (the browser aborts the
+  pending `play()`); a refused play still does.
+- `useAiChat`: with several tool calls awaiting approval, the reply continues once, after the last decision settles,
+  instead of after each one; an approval that resolves after Regenerate or a new message started another reply no
+  longer continues anything.
+
+### Added
+
+- `ScrollSpyNav` and `useScrollSpy` (core, `@lyndon/ui/navigation`): an "on this page" list (or a row of chips) that
+  follows the scroll position, with sub-items that open while their group is current, real `#id` links, and `root`
+  for a scroller of its own. The showcase's sidebar and chip bar use them.
+- `ChatBranches` with `chatBranchGraph`, `chatLeafOf`, `chatFork` and the `ChatTreeMessage` / `ChatBranchNode` types
+  (`@lyndon/ui/aichat`): branching chat history as lanes, with `leaf` / `onLeafChange`, and `onRegenerate` / `onEdit`
+  for the host to add a branch.
+- `AgentRunView` and `AgentRunLanes` (`@lyndon/ui/aiagent`): one run behind Waterfall / Transit map / Lanes tabs
+  (`mode`, `defaultMode`, `onModeChange`, `modes`, `stations`, `lanesHeight`), and the run's steps as a lane graph.
+- `seed` on `DataFlow`, `Terminal`, `StreamingText`, `useStreamedText`, `StateDiagram` and `WorkflowEngineOptions`:
+  repeatable particle routing and jitter, typing rhythm, reveal rhythm, auto-play choices and intake timing. Without it
+  they use `Math.random` as before. Their timers are plain `setTimeout` / `setInterval` / frame loops, so fake timers
+  drive them in tests.
+- `seededRandom(seed)` (also in `@lyndon/ui/utils`), `useRandom(seed?)` and `useGeneration()` (generation tokens for host
+  callbacks that can't be aborted).
+- `useFormDraft().commit(values?)` takes the values to mark as saved (default: the current ones).
+
+### Changed
+
+- The `ai` and `agents` extras families may import `lanes` (`ChatBranches`, `AgentRunLanes` draw with `LaneGraph`), so
+  the `aichat` and `aiagent` drop-in files now pull in the lanes file.
+- `PermissionRequest`, `SuggestedEdit` and `ModelComparison` use `useGeneration`: their late results are also dropped
+  after unmount.
+- Showcase: the profile form saves with `useFormDraft().save`; "Live agent run" is an `AgentRunView`; a new "Scroll spy"
+  card.
+
+### Breaking changes
+
+| Before | After |
+|---|---|
+| `AgentRunLanes` from the examples (`src/examples/runs.tsx`) | `import { AgentRunLanes } from '@lyndon/ui/aiagent'` (same props) |
+| `chatBranchGraph`, `chatLeafOf`, `chatFork`, `ChatTreeMessage`, `ChatBranchNode` from the examples (`src/examples/graphs.tsx`) | Import them from `@lyndon/ui/aichat`. `ChatBranchesExample` stays in the examples, now a wrapper around `ChatBranches` |
+| `useAiChat` continues after each approval of several pending ones | It continues once, after the last; nothing to change unless you relied on a continuation per approval |
+| `uiShared` state is keyed by version `0.13` | `0.14`: drop-in files from 0.13 and 0.14 on one page don't share toasts or other page-level state; update them together |
+
 ## 0.13.0
 
 The core tier (`@lyndon/ui`) no longer uses motion. Its animations are CSS keyframes and transitions plus the Web

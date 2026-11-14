@@ -1,6 +1,6 @@
 import { useEffect, useLayoutEffect, useMemo, useRef, useState, useSyncExternalStore, type KeyboardEvent as RKeyboardEvent, type PointerEvent as RPointerEvent, type ReactNode, type RefObject } from 'react'
 import { AnimatePresence, animate, motion, useMotionValue } from './motionkit'
-import { Avatar, Badge, Button, Chip, EASE_OUT, EASE_OUT_CSS, Icon, IconButton, TOUCH, capturePointer, clamp, cn, cssUrl, safeMediaUrl, Spinner, spring, surface, useControllable, useElementSize, useFocusTrap, useWidth, uiShared, plural, fmt, useInView, useReducedMotion } from './core'
+import { Avatar, Badge, Button, Chip, EASE_OUT, EASE_OUT_CSS, Icon, IconButton, TOUCH, capturePointer, clamp, cn, cssUrl, safeMediaUrl, Spinner, spring, surface, useControllable, useElementSize, useGeneration, useFocusTrap, useWidth, uiShared, plural, fmt, useInView, useReducedMotion } from './core'
 import { Slider } from './inputs'
 import { useToast } from './feedback'
 import { OverlayPortal, useScrollLock } from './overlay'
@@ -76,10 +76,13 @@ function mediaPlayError(err: unknown): string {
   if (name === 'AbortError') return 'Playback was interrupted.'
   return err instanceof Error && err.message ? err.message : 'It couldn’t be played.'
 }
-/** A toggle that reports a refused play() as a toast. */
+/** A toggle that reports a refused play() as a toast, unless a later toggle superseded it (pausing aborts a pending play()). */
 function usePlayToggle(toggle: () => Promise<MediaPlayResult>, what: 'audio' | 'video') {
-  const toast = useToast()
-  return () => { void toggle().then(r => { if (!r.ok) toast({ title: `Couldn’t play ${what}`, description: mediaPlayError(r.error), tone: 'bad' }) }) }
+  const toast = useToast(), gen = useGeneration()
+  return () => {
+    const current = gen.next()
+    void toggle().then(r => { if (!r.ok && current()) toast({ title: `Couldn’t play ${what}`, description: mediaPlayError(r.error), tone: 'bad' }) })
+  }
 }
 /** The next item of a list after `cur` (wrapping; the first when `cur` isn't in it). */
 const cycleNext = <T,>(list: readonly T[], cur: T) => list[(list.indexOf(cur) + 1) % list.length]

@@ -25,8 +25,8 @@ export const EXTRAS = {
   collab: { modules: ['collab'], deps: ['motionkit'] },
   data: { modules: ['datagrid', 'scheduler', 'kanban'], deps: ['motionkit'] },
   binary: { modules: ['binary'], deps: ['vizkit'] },
-  ai: { modules: ['aistream', 'ai', 'aichat'], deps: ['content', 'media', 'motionkit'] },
-  agents: { modules: ['agentrun', 'aiagent'], deps: ['ai', 'content', 'diagrams', 'motionkit'] },
+  ai: { modules: ['aistream', 'ai', 'aichat'], deps: ['content', 'lanes', 'media', 'motionkit'] },
+  agents: { modules: ['agentrun', 'aiagent'], deps: ['ai', 'content', 'diagrams', 'lanes', 'motionkit'] },
   theming: { modules: ['themeexport', 'appearance'], deps: ['motionkit'] },
 }
 

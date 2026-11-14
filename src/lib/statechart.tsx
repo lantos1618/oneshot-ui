@@ -1,6 +1,6 @@
 import { useEffect, useId, useLayoutEffect, useMemo, useReducer, useRef, useState, type CSSProperties, type ReactNode } from 'react'
 import { AnimatePresence, motion } from './motionkit'
-import { Badge, Button, Icon, ScrollEdges, TOUCH, clamp, cn, maxOf, spring, surface, useScrollEdges, fmt, useInView, useReducedMotion } from './core'
+import { Badge, Button, Icon, ScrollEdges, TOUCH, clamp, cn, maxOf, seededRandom, spring, surface, useRandom, useScrollEdges, fmt, useInView, useReducedMotion } from './core'
 import { SegmentedControl } from './fields'
 import { play, useFrameLoop } from './motion'
 import { DG_DOTS, DgArrowMarkers, DgDot, dgBez, dgCubicPath, dgSafeId, useDgDots } from './diagramkit'
@@ -172,9 +172,11 @@ export type DiagramTransition = {
  * a dot walks the transition, composites light while any substate is current, and a shallow history state
  * returns to the substate you left. Shows the current state, its context and a history log. Reset restarts.
  */
-export function StateDiagram({ states, transitions, initial, history, width = 940, height = 340, interval = 1600, className }:
+export function StateDiagram({ states, transitions, initial, history, width = 940, height = 340, interval = 1600, seed, className }:
   { states: Record<string, DiagramState>; transitions: DiagramTransition[]; initial: string
-    history?: { of: string; at: [number, number]; default: string; d: string }; width?: number; height?: number; interval?: number; className?: string }) {
+    history?: { of: string; at: [number, number]; default: string; d: string }; width?: number; height?: number; interval?: number
+    /** makes auto-play's weighted choice of transition repeatable (default Math.random) */
+    seed?: number; className?: string }) {
   const fresh = () => ({ cur: initial, hist: history?.default ?? '', log: [] as { k: number; ev: string; from: string; to: string; guard?: string; act?: string }[] })
   const M = useRef(fresh())
   const { ref: box, visible, dots, travel, repaint: force } = useStatechart({ amount: 0.2 })
@@ -183,6 +185,7 @@ export function StateDiagram({ states, transitions, initial, history, width = 94
   const [pulse, setPulse] = useState(0)
   const [auto, setAuto] = useState(false)
   const busy = useRef(false)
+  const rand = useRandom(seed)
   const { cur, hist, log } = M.current
   const within = (s: string, anc: string) => s === anc || states[s]?.parent === anc
   const nice = (s: string) => states[s]?.label ?? (states[s]?.kind === 'final' ? 'Final' : states[s]?.kind === 'initial' ? 'Start' : s)
@@ -213,7 +216,7 @@ export function StateDiagram({ states, transitions, initial, history, width = 94
       const av = availableFrom(m.cur)
       if (!av.length) return
       const w = av.map(([t]) => t.weight ?? 1)
-      let r = Math.random() * w.reduce((a, b) => a + b, 0)
+      let r = rand() * w.reduce((a, b) => a + b, 0)
       fire((av.find((_, k) => (r -= w[k]) <= 0) ?? av[0])[1])
     }
   })
@@ -369,6 +372,8 @@ export type WorkflowEngineOptions = {
   source?: (type: string) => string
   /** queue length; the oldest event is dropped beyond it (default 8) */
   queueMax?: number
+  /** makes the intake timer's jitter repeatable (default Math.random) */
+  seed?: number
 }
 
 const WF_ROUTE_S = 0.3, WF_ORCH_S = 0.45, WF_APPROVED_S = 0.4
@@ -426,7 +431,7 @@ export class WorkflowEngine {
   lap: [number, number]; intake: string | null
   private seq = 0; private uid = 0; private evIdx = 0; private lapT: number; private intakeT = WF_INTAKE_FIRST
   private travelTime: (line: string, from: string, to: string) => number
-  private meter: { tokens: number; usd: number }; private source: (type: string) => string
+  private meter: { tokens: number; usd: number }; private source: (type: string) => string; private random: () => number
   private subs = new Set<(e: WorkflowEvent) => void>()
   constructor(machines: Record<string, WorkflowMachine>, order: string[], o: WorkflowEngineOptions = {}) {
     wfCheck(machines, order)
@@ -434,6 +439,7 @@ export class WorkflowEngine {
     this.maxJobs = o.maxJobs ?? 3; this.speed = o.speed ?? 1; this.hitlWait = o.hitlWait ?? 4; this.queueMax = o.queueMax ?? 8
     this.lap = o.lap ?? [1.2, 7]; this.lapT = this.lap[0]; this.intake = o.intake ?? null
     this.travelTime = o.travelTime ?? (() => 1); this.meter = o.meter ?? { tokens: 0, usd: 0 }
+    this.random = o.seed == null ? Math.random : seededRandom(o.seed)
     this.source = o.source ?? (t => { const m = this.machines[t]; return m.states[m.start].at[0] })
   }
   subscribe(f: (e: WorkflowEvent) => void) { this.subs.add(f); return () => { this.subs.delete(f) } }
@@ -577,7 +583,7 @@ export class WorkflowEngine {
     if (this.intake) {
       this.intakeT -= dt
       if (this.intakeT <= 0) {
-        this.intakeT = WF_INTAKE_EVERY + Math.random() * WF_INTAKE_JITTER
+        this.intakeT = WF_INTAKE_EVERY + this.random() * WF_INTAKE_JITTER
         const t = this.typeOf(this.intake)
         if (t) this.enqueue(this.intake, this.source(t), 'intake'); else this.unmatch(this.intake)
       }

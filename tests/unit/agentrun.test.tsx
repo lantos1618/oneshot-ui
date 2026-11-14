@@ -1,12 +1,12 @@
 import { act, render, screen, waitFor } from '@testing-library/react'
 import { describe, expect, it, vi } from 'vitest'
 import {
-  AgentTransitMap, TraceWaterfall, aiSdkRunMapper, applyRunEvent, fromAiSdkResult, fromAiSdkUIStream, fromLangGraphEvents, fromOtel,
+  AgentRunLanes, AgentTransitMap, TraceWaterfall, aiSdkRunMapper, applyRunEvent, fromAiSdkResult, fromAiSdkUIStream, fromLangGraphEvents, fromOtel,
   langGraphRunMapper, otelToRunEvents, replayRun, runFromEvents, runLaneNodes, runToEvents, runTotals, transitRunStation, useAgentRun,
   type AgentRun, type AgentRunEvent, type AgentRunSource,
 } from '../../src/lib/all'
 import {
-  AGENT_PRICING_SAMPLE, AGENT_RUN_FIXTURES, AI_SDK_RESULT_ENDED, AI_SDK_RESULT_SAMPLE, AI_SDK_STREAM_SAMPLE, AgentRunLanes, LANGGRAPH_EVENTS_SAMPLE, OTEL_TRACE_SAMPLE,
+  AGENT_PRICING_SAMPLE, AGENT_RUN_FIXTURES, AI_SDK_RESULT_ENDED, AI_SDK_RESULT_SAMPLE, AI_SDK_STREAM_SAMPLE, LANGGRAPH_EVENTS_SAMPLE, OTEL_TRACE_SAMPLE,
 } from '../../src/examples'
 import { fakeTimers, tick } from '../helpers'
 

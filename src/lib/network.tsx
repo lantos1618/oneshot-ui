@@ -1,6 +1,6 @@
 import { useEffect, useId, useLayoutEffect, useMemo, useReducer, useRef, useState, type CSSProperties, type PointerEvent as ReactPointerEvent } from 'react'
 import { AnimatePresence, animate, cubicBezier, motion } from './motionkit'
-import { AnimatedNumber, Button, EASE_OUT, ICONS, Icon, StatusIcon, TOUCH, capturePointer, clamp, cn, colorResolver, isTouch, onMouseLeave, safeColor, sleep, spring, surface, useOutside, usePointerDrag, useTouchScrollLock, useLatest, useThemeVersion, useWidth, type IconName, type RGBA, type StatusIconStatus, plural, useActiveIndex, fmt, svgN, svgTranslate, useInView, useReducedMotion } from './core'
+import { AnimatedNumber, Button, EASE_OUT, ICONS, Icon, StatusIcon, TOUCH, capturePointer, clamp, cn, colorResolver, isTouch, onMouseLeave, safeColor, sleep, spring, surface, useOutside, usePointerDrag, useTouchScrollLock, useLatest, useRandom, useThemeVersion, useWidth, type IconName, type RGBA, type StatusIconStatus, plural, useActiveIndex, fmt, svgN, svgTranslate, useInView, useReducedMotion } from './core'
 import { Slider } from './inputs'
 import { PointerTooltip, usePointerTooltip } from './overlay'
 import { useFrameLoop, useViewport, useWheelZoom } from './motion'
@@ -504,12 +504,14 @@ const dfEaseOut = cubicBezier(0, 0, 0.58, 1)
  * Particles are drawn on one canvas from per-path lookup tables (no DOM reads or writes per frame), capped at 120 in
  * flight, and everything pauses while the diagram is off screen.
  */
-export function DataFlow({ sources, targets, engine: engineProp, stages: stagesProp, stats: statsProp, simulate = false, className }:
+export function DataFlow({ sources, targets, engine: engineProp, stages: stagesProp, stats: statsProp, simulate = false, seed, className }:
   { sources: DataFlowSource[]; targets: DataFlowTarget[]; engine?: string; stages?: string[]
     /** measured numbers from your pipeline: events per second, and p95 latency in ms (its tile shows only when given) */
     stats?: { throughput?: number; p95?: number }
     /** demo mode: jitter the throughput and invent a p95 when `stats.p95` is missing */
-    simulate?: boolean; className?: string }) {
+    simulate?: boolean
+    /** makes particle speeds, routing and the `simulate` jitter repeatable (default Math.random) */
+    seed?: number; className?: string }) {
   const [wrapRef, wrapW] = useWidth<HTMLDivElement>()
   const engine = engineProp ?? 'Engine'
   const stagesDefault = ['Ingest', 'Transform', 'Enrich', 'Route'], stages = stagesProp ?? stagesDefault
@@ -534,7 +536,8 @@ export function DataFlow({ sources, targets, engine: engineProp, stages: stagesP
   // per-source and per-target counters are filled on first use, so sources and targets added later just join in
   const sim = useRef({ parts: [] as DfParticle[], acc: [] as number[], processed: 0, delivered: [] as number[] })
   const hlRef = useRef(hl); hlRef.current = hl
-  const latest = useLatest({ sources, targets, statsProp, simulate })
+  const rand = useRandom(seed)
+  const latest = useLatest({ sources, targets, statsProp, simulate, rand })
   const uid = dgSafeId(useId())
   const speedId = `${uid}-speed`
   const sy = (i: number) => 34 + i * ((H - 68 - nh) / Math.max(1, sources.length - 1)), dy = (i: number) => 70 + i * ((H - 140 - nh) / Math.max(1, targets.length - 1))
@@ -555,7 +558,7 @@ export function DataFlow({ sources, targets, engine: engineProp, stages: stagesP
   const geoKey = JSON.stringify([inP, outP])
   // sampled once per geometry (resize between wide and tall, or new sources/targets), never per frame
   const luts = useMemo(() => ({ in: inP.map(dfLut), out: outP.map(dfLut) }), [geoKey]) // eslint-disable-line react-hooks/exhaustive-deps
-  const pickTarget = () => { const tot = targets.reduce((a, t) => a + t.share, 0); let r = Math.random() * tot; return Math.max(0, targets.findIndex(t => (r -= t.share) <= 0)) }
+  const pickTarget = () => { const tot = targets.reduce((a, t) => a + t.share, 0); let r = rand() * tot; return Math.max(0, targets.findIndex(t => (r -= t.share) <= 0)) }
 
   // canvas: sized from a ResizeObserver entry (no layout reads), colours resolved on mount and on theme changes
   const cv = useRef({ w: 0, h: 0, dpr: 1, sprites: [] as HTMLCanvasElement[], srcSprite: [] as number[], dstSprite: [] as number[], accent: '', now: 0 })
@@ -592,7 +595,7 @@ export function DataFlow({ sources, targets, engine: engineProp, stages: stagesP
     c.now = now
     sources.forEach((s, i) => {
       S.acc[i] = (S.acc[i] ?? 0) + (dt * s.rate / DF_EVENTS_PER_PARTICLE) * speed
-      while (S.acc[i] >= 1) { S.acc[i]--; if (S.parts.length < DF_MAX) S.parts.push({ stage: 0, p: i, t: 0, v: 0.35 + Math.random() * 0.25, src: i }) }
+      while (S.acc[i] >= 1) { S.acc[i]--; if (S.parts.length < DF_MAX) S.parts.push({ stage: 0, p: i, t: 0, v: 0.35 + rand() * 0.25, src: i }) }
     })
     const g = el.getContext('2d'); if (!g) return
     const k = (c.w / W) * c.dpr, h = hlRef.current, half = 8 * c.dpr
@@ -640,11 +643,11 @@ export function DataFlow({ sources, targets, engine: engineProp, stages: stagesP
   useEffect(() => {
     if (!visible || paused) return
     const id = setInterval(() => {
-      const S = sim.current, { sources, targets, statsProp, simulate } = latest.current, rate = sources.reduce((a, s) => a + s.rate, 0) * speed
+      const S = sim.current, { sources, targets, statsProp, simulate, rand } = latest.current, rate = sources.reduce((a, s) => a + s.rate, 0) * speed
       setStats({
-        tp: Math.round(statsProp?.throughput ?? rate + (simulate ? (Math.random() - 0.5) * 12 : 0)),
+        tp: Math.round(statsProp?.throughput ?? rate + (simulate ? (rand() - 0.5) * 12 : 0)),
         processed: S.processed * DF_EVENTS_PER_PARTICLE, inflight: S.parts.length,
-        p95: statsProp?.p95 ?? (simulate ? Math.round(42 / Math.max(0.4, speed) + Math.random() * 6) : null),
+        p95: statsProp?.p95 ?? (simulate ? Math.round(42 / Math.max(0.4, speed) + rand() * 6) : null),
         delivered: targets.map((_, i) => (S.delivered[i] ?? 0) * DF_EVENTS_PER_PARTICLE),
       })
     }, 1000)

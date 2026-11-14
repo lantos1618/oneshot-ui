@@ -1,15 +1,14 @@
 import { useCallback, useLayoutEffect, useMemo, useRef, useState } from 'react'
-import { Badge, Icon, IconButton, StatusIcon, cn, fmt, type StatusIconStatus } from '../lib/core'
-import { Switch } from '../lib/forms'
+import { Badge, StatusIcon, cn, fmt, type StatusIconStatus } from '../lib/core'
 import { CodeBlock, type CodeMark, type CodeTokenRange } from '../lib/code'
-import { Message, MessageActions } from '../lib/aichat'
-import { aiMessageText, type AiMessage } from '../lib/aistream'
+import { ChatBranches, chatFork, type ChatTreeMessage } from '../lib/aichat'
+import { aiMessageText } from '../lib/aistream'
 import { LaneGraph, layoutLanes, type LaneGraphHandle, type LaneNode, type LaneRow, type LaneRowState } from '../lib/lanes'
 
 /* Graphs as rows: four small examples that feed different graph data into LaneGraph, each with its own renderRow.
  * The graph is always the same idea (nodes with parents, laid out by layoutLanes); only the rows differ.
  *
- *   chat branches   editing a message or regenerating an answer forks a branch; one message combines two branches
+ *   chat branches   the library's ChatBranches on a sample tree: edits and regenerations fork, one message combines two
  *   AST             a short snippet parsed into a syntax tree, linked both ways with its code (row ↔ the characters it covers)
  *   agent run       steps that fan out and back in, with statuses and durations
  *   dependencies    packages and the packages they need: shared dependencies make diamonds
@@ -17,50 +16,6 @@ import { LaneGraph, layoutLanes, type LaneGraphHandle, type LaneNode, type LaneR
  * (The fifth, git, is the library's own preset: GitGraph.) Each builder is a plain function, tested on its own. */
 
 /* ── chat branches ─────────────────────────────────────────────────────────── */
-
-/**
- * A chat message in a tree: an AiMessage (what useAiChat keeps) plus where it hangs. `parentId` is the message it
- * answers or follows (none for the first); `parents` instead, when it follows more than one (a message combining two
- * branches). An edit of a user message is a sibling of the original (same parent); so is a regenerated answer.
- */
-export type ChatTreeMessage = AiMessage & { parentId?: string | null; parents?: readonly string[] }
-/** A chat message as a lane node: `siblings` are the alternatives at its fork (itself included, oldest first). */
-export type ChatBranchNode = LaneNode & { message: ChatTreeMessage; siblings: readonly string[] }
-
-const chatParentsOf = (m: ChatTreeMessage) => m.parents ?? (m.parentId ? [m.parentId] : [])
-
-/**
- * Lane nodes for a chat tree (messages oldest first) and its active thread: every ancestor of `leaf` (both sides of a
- * combining message), which LaneGraph pins to lane 0 with `pin: ['active'], pinStart: () => leaf`.
- */
-export function chatBranchGraph(messages: readonly ChatTreeMessage[], leaf: string | null) {
-  const kids = new Map<string, string[]>()
-  for (const m of messages) for (const p of chatParentsOf(m)) kids.set(p, [...(kids.get(p) ?? []), m.id])
-  const byId = new Map(messages.map(m => [m.id, m]))
-  // a branch starts wherever a message has more than one child: each child after the first starts a new colour
-  const nodes: ChatBranchNode[] = messages.map(m => {
-    const ps = chatParentsOf(m), siblings = ps.length === 1 ? (kids.get(ps[0]) ?? [m.id]).filter(id => byId.get(id)?.role === m.role) : [m.id]
-    return { id: m.id, parents: ps, group: siblings.length > 1 && siblings[0] !== m.id ? `branch:${m.id}` : undefined, message: m, siblings }
-  })
-  const active = new Set<string>()
-  const stack = leaf && byId.has(leaf) ? [leaf] : []
-  while (stack.length) { const id = stack.pop()!; if (active.has(id)) continue; active.add(id); stack.push(...chatParentsOf(byId.get(id)!).filter(p => byId.has(p))) }
-  return { nodes, active, children: kids }
-}
-
-/** The newest leaf below `id` (following the last child each time): where "continue this branch" picks up. */
-export function chatLeafOf(id: string, children: ReadonlyMap<string, readonly string[]>): string {
-  let at = id
-  for (let guard = 0; guard < 10_000; guard++) { const k = children.get(at); if (!k?.length) return at; at = k[k.length - 1] }
-  return at
-}
-
-/** A new branch: `message` as a sibling of `of` (an edited question or a regenerated answer), appended to the list. */
-export function chatFork(messages: readonly ChatTreeMessage[], of: string, message: Omit<ChatTreeMessage, 'parentId' | 'parents'>): ChatTreeMessage[] {
-  const base = messages.find(m => m.id === of)
-  if (!base) return [...messages]
-  return [...messages, { ...message, ...(base.parents ? { parents: base.parents } : { parentId: base.parentId ?? null }) }]
-}
 
 const chatText = (id: string, role: 'user' | 'assistant', text: string, parent: string | string[] | null, extra: Partial<ChatTreeMessage> = {}): ChatTreeMessage =>
   ({ id, role, status: 'done', parts: [{ type: 'text', text }], ...(Array.isArray(parent) ? { parents: parent } : { parentId: parent }), ...extra })
@@ -130,64 +85,20 @@ export function chatTreeHistory(n = 2000): ChatTreeMessage[] {
   return out
 }
 
-/** The chat branches example: the sample tree as lanes, the active thread pinned left, ‹ n / m › to switch branches, regenerate or edit to fork. */
+/** The chat branches example: the sample tree in ChatBranches; regenerate or edit forks a branch with a canned reply. */
 export function ChatBranchesExample({ height = 560, messages: initial = CHAT_TREE_SAMPLE }: { height?: number; /** the tree to start from (default CHAT_TREE_SAMPLE); its last message is the active one */ messages?: ChatTreeMessage[] }) {
   const [messages, setMessages] = useState<ChatTreeMessage[]>(initial)
   const [leaf, setLeaf] = useState(() => initial[initial.length - 1]?.id ?? '')
-  const [collapse, setCollapse] = useState(false)
-  const [forks, setForks] = useState(0)
-  const { nodes, active, children } = useMemo(() => chatBranchGraph(messages, leaf), [messages, leaf])
-  const pinStart = useCallback(() => leaf, [leaf])
-  const goBranch = useCallback((id: string) => setLeaf(chatLeafOf(id, children)), [children])
+  const forks = useRef(0)
   const fork = (m: ChatTreeMessage) => {
-    const n = forks + 1, id = `${m.id}-fork${n}`
+    const n = ++forks.current, id = `${m.id}-fork${n}`
     const text = m.role === 'user' ? `${aiMessageText(m).replace(/\.$/, '')}, but keep it cheap.` : `Another take (${n}): fewer stops, more time in each place, and lunch somewhere with a view.`
     let next = chatFork(messages, m.id, { id, role: m.role, status: 'done', parts: [{ type: 'text', text }] })
     let tip = id
     if (m.role === 'user') { tip = `${id}-reply`; next = [...next, chatText(tip, 'assistant', 'Budget version: the same route on foot and by tram, lunch at a *tasca* (about €12), and the free-entry Sunday mornings at the national museums.', id)] }
-    setMessages(next); setForks(n); setLeaf(tip)
+    setMessages(next); setLeaf(tip)
   }
-  const renderRow = useCallback((row: LaneRow<ChatBranchNode>) => {
-    const m = row.node.message, on = active.has(m.id), sibs = row.node.siblings, at = sibs.indexOf(m.id)
-    if (collapse && !on) return (
-      <div className="flex h-full min-w-0 items-center gap-2 pe-3 text-xs text-[var(--fg3)]">
-        <span className="flex-none font-medium">{m.role === 'user' ? 'You' : 'Assistant'}</span>
-        <span className="min-w-0 truncate">{aiMessageText(m).split('\n')[0] || m.parts.find(p => p.type === 'tool')?.type}</span>
-      </div>
-    )
-    const switcher = sibs.length > 1 && (
-      <span className="flex items-center gap-0.5 text-[11px] text-[var(--fg3)]">
-        <IconButton size="icon-xs" icon={<Icon name="chevronLeft" size={13} />} label="Previous branch" disabled={at <= 0} onClick={e => { e.stopPropagation(); goBranch(sibs[at - 1]) }} />
-        <span className="ui-num">{at + 1} / {sibs.length}</span>
-        <IconButton size="icon-xs" icon={<Icon name="chevronRight" size={13} />} label="Next branch" disabled={at >= sibs.length - 1} onClick={e => { e.stopPropagation(); goBranch(sibs[at + 1]) }} />
-      </span>
-    )
-    const merge = row.parents.length > 1 && <Badge size="sm" tone="accent" className="me-auto">Combines {row.parents.length} branches</Badge>
-    return (
-      <div className={cn('flex min-w-0 flex-col gap-1.5 py-2 pe-3', !on && 'opacity-60')}>
-        <Message message={m} actions={
-          <MessageActions text={() => aiMessageText(m)} feedback={false} onRetry={() => fork(m)} retryLabel="Regenerate (new branch)">{merge}{switcher}</MessageActions>} />
-        {m.role === 'user' && (
-          <span className="flex items-center justify-end gap-1">
-            {merge}
-            {switcher}
-            <IconButton size="icon-xs" icon="edit" label="Edit (new branch)" onClick={e => { e.stopPropagation(); fork(m) }} />
-          </span>
-        )}
-      </div>
-    )
-  }, [active, collapse, goBranch, messages, forks]) // eslint-disable-line react-hooks/exhaustive-deps
-  return (
-    <div className="flex min-w-0 flex-col gap-2">
-      <div className="flex flex-wrap items-center gap-3 text-xs text-[var(--fg2)]">
-        <Switch label={<span className="text-xs">Collapse other branches</span>} checked={collapse} onChange={setCollapse} />
-        <span>{nodes.length} messages · {[...children.values()].filter(k => k.length > 1).length} forks · click a message to continue its branch</span>
-      </div>
-      <LaneGraph nodes={nodes} order="input" direction="up" pin={['active']} pinStart={pinStart} rowHeight="auto" estimateRowHeight={110} nodeY={18} anchor="end" height={height}
-        aria-label="Conversation branches" selected={leaf} onActivate={row => goBranch(row.node.id)} emphasis={row => row.node.id === leaf}
-        renderRow={renderRow} className="rounded-[var(--r-md)] border border-[var(--line)]" />
-    </div>
-  )
+  return <ChatBranches messages={messages} leaf={leaf} onLeafChange={setLeaf} onRegenerate={fork} onEdit={fork} height={height} />
 }
 
 /* ── AST ───────────────────────────────────────────────────────────────────── */

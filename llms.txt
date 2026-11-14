@@ -4,7 +4,7 @@
 > for animation (no animation library in core; the extras use motion), themes as CSS variables (seven palette families, light and dark). Forms, overlays, navigation, data grid, charts, diagrams, maps,
 > media, AI chat and agent UIs. Every component is also a self-contained .tsx drop-in file.
 
-Version 0.13.0. Source: https://github.com/lantos1618/oneshot-ui. Docs: https://lantos1618.github.io/oneshot-ui/. Licence: MIT with a revenue threshold (free up to USD 200k ARR).
+Version 0.14.0. Source: https://github.com/lantos1618/oneshot-ui. Docs: https://lantos1618.github.io/oneshot-ui/. Licence: MIT with a revenue threshold (free up to USD 200k ARR).
 
 ## Use it
 
@@ -22,8 +22,8 @@ react-dom (core) or those plus motion (most extras). Attach the ones you need pl
 - CLI (offline, from the installed package): `npx @lyndon/ui add data-grid dialog --dir src/components/ui`, `npx @lyndon/ui list`, `npx @lyndon/ui info data-grid`
 - shadcn CLI: `npx shadcn add https://lantos1618.github.io/oneshot-ui/r/data-grid.json` (pulls in ui-provider)
 - Index with sizes, exports and embedded components: https://lantos1618.github.io/oneshot-ui/index.json
-- The same files from npm: https://unpkg.com/@lyndon/ui@0.13.0/dist-registry/files/<name>.tsx
-- Whole library in one file (dist-single/ui-all.tsx, ~662.2k tokens): only for tools with a very large context; prefer the drop-ins
+- The same files from npm: https://unpkg.com/@lyndon/ui@0.14.0/dist-registry/files/<name>.tsx
+- Whole library in one file (dist-single/ui-all.tsx, ~668.3k tokens): only for tools with a very large context; prefer the drop-ins
 
 ## Tags
 
@@ -40,7 +40,7 @@ descriptions and synonyms are in index.json under `vocabulary`; the showcase fil
 Import from: @lyndon/ui.
 
 - [chevron](https://lantos1618.github.io/oneshot-ui/files/chevron.tsx): The disclosure chevron: points down and turns with `open`. (component, ~1.1k tokens)
-- [hooks](https://lantos1618.github.io/oneshot-ui/files/hooks.tsx): Shared hooks: controlled-or-uncontrolled state, outside clicks, disclosure, element size, media queries, pointer drags, long press, hotkeys, focus trap, roving focus, streamed text and scroll edges. (hook, ~6.8k tokens; tags: keyboard, touch, composable)
+- [hooks](https://lantos1618.github.io/oneshot-ui/files/hooks.tsx): Shared hooks: controlled-or-uncontrolled state, outside clicks, disclosure, element size, media queries, pointer drags, long press, hotkeys, focus trap, roving focus, streamed text and scroll edges. (hook, ~7.0k tokens; tags: keyboard, touch, composable)
 - [icon](https://lantos1618.github.io/oneshot-ui/files/icon.tsx): Every icon (inline SVG paths) and <Icon>. (component, ~3.2k tokens; tags: theming)
 - [part-button](https://lantos1618.github.io/oneshot-ui/files/part-button.tsx): A part's trigger: a `<button type="button">` with `after` rendered behind the children, or with `asChild` your element (where `disabled` becomes aria-disabled, since a link or div has no disabled state). (component, ~1.4k tokens)
 - [slot](https://lantos1618.github.io/oneshot-ui/files/slot.tsx): Renders its single child element instead of an element of its own, with its props merged in: the engine behind every `asChild` (`<Button asChild><Link href="/pricing">Pricing</Link></Button>`). (component, ~1.3k tokens; tags: composable, navigation)
@@ -113,6 +113,7 @@ Import from: @lyndon/ui.
 - [mobile-tab-bar](https://lantos1618.github.io/oneshot-ui/files/mobile-tab-bar.tsx): Bottom tab bar for phone layouts (grows by the bottom safe area on notched phones): an accent line slides to the active tab, its icon bounces, count badges pop out when cleared, and an optional raised centre button (`onAction`) sits in the middle. (component, ~4.8k tokens; tags: touch, animated)
 - [nav-list](https://lantos1618.github.io/oneshot-ui/files/nav-list.tsx): Vertical nav (sidebars, settings sections). (component, ~3.7k tokens; tags: keyboard, layout)
 - [pagination](https://lantos1618.github.io/oneshot-ui/files/pagination.tsx): Page numbers with ellipses: 1 … 4 5 6 … 20. (component, ~4.2k tokens; tags: hierarchy, accessible)
+- [scroll-spy-nav](https://lantos1618.github.io/oneshot-ui/files/scroll-spy-nav.tsx): "On this page" navigation that follows the scroll position (useScrollSpy over every item and sub-item). (component, ~3.4k tokens; tags: help, hierarchy, new)
 - [steps](https://lantos1618.github.io/oneshot-ui/files/steps.tsx): Wizard progress: done steps fill, connecting lines draw across. (component, ~3.0k tokens; tags: onboarding, forms)
 - [tabs](https://lantos1618.github.io/oneshot-ui/files/tabs.tsx): Underline travels to the clicked tab; panel fades in. (component, ~8.7k tokens; tags: keyboard, animated, touch, composable)
 - [toggle](https://lantos1618.github.io/oneshot-ui/files/toggle.tsx): A two-state button (aria-pressed): bold, mute, pin. (component, ~2.5k tokens; tags: editing, keyboard, actions)
@@ -124,7 +125,7 @@ Import from: @lyndon/ui.
 
 Import from: @lyndon/ui.
 
-- [alert-dialog](https://lantos1618.github.io/oneshot-ui/files/alert-dialog.tsx): Confirmation for a consequential action (role="alertdialog"). (component, ~11.6k tokens; tags: destructive-actions, async)
+- [alert-dialog](https://lantos1618.github.io/oneshot-ui/files/alert-dialog.tsx): Confirmation for a consequential action (role="alertdialog"). (component, ~11.7k tokens; tags: destructive-actions, async)
 - [command-palette](https://lantos1618.github.io/oneshot-ui/files/command-palette.tsx): ⌘K palette: type to filter (every word must match the label, keywords or hint), arrows to move, Enter to run. (component, ~18.9k tokens; tags: search, keyboard, async, virtualised)
 - [dialog](https://lantos1618.github.io/oneshot-ui/files/dialog.tsx): Modal dialog. (component, ~10.2k tokens; tags: accessible, destructive-actions, composable)
 - [hover-card](https://lantos1618.github.io/oneshot-ui/files/hover-card.tsx): Rich preview on hover or focus (profiles, links, citations). (component, ~7.4k tokens; tags: people, touch)
@@ -239,13 +240,13 @@ Import from: @lyndon/ui/annotate, @lyndon/ui/charts, @lyndon/ui/timeline.
 
 Import from: @lyndon/ui/gantt, @lyndon/ui/statechart, @lyndon/ui/trace, @lyndon/ui/network.
 
-- [data-flow](https://lantos1618.github.io/oneshot-ui/files/data-flow.tsx): Streaming pipeline: particles leave each source at its event rate, pass through the processing engine (its stage label cycles) and fan out to destinations by share. (diagram, ~26.4k tokens; tags: workflows, monitoring, real-time)
+- [data-flow](https://lantos1618.github.io/oneshot-ui/files/data-flow.tsx): Streaming pipeline: particles leave each source at its event rate, pass through the processing engine (its stage label cycles) and fan out to destinations by share. (diagram, ~26.6k tokens; tags: workflows, monitoring, real-time)
 - [gantt](https://lantos1618.github.io/oneshot-ui/files/gantt.tsx): Project plan. (diagram, ~26.6k tokens; tags: planning, drag-and-drop, touch)
 - [network-graph](https://lantos1618.github.io/oneshot-ui/files/network-graph.tsx): Force-directed graph (repulsion, springs, centring) simulated in-file. (diagram, ~11.4k tokens; tags: devtools, drag-and-drop, touch)
 - [process-flow](https://lantos1618.github.io/oneshot-ui/files/process-flow.tsx): Workflow canvas. (diagram, ~14.7k tokens; tags: workflows, drag-and-drop, touch)
 - [sankey](https://lantos1618.github.io/oneshot-ui/files/sankey.tsx): Two-column Sankey: source nodes on the left, targets on the right, ribbons sized by value with % labels. (diagram, ~5.8k tokens; tags: workflows, finance, charts)
-- [state-diagram](https://lantos1618.github.io/oneshot-ui/files/state-diagram.tsx): Interactive UML state diagram. (diagram, ~12.9k tokens; tags: workflows, keyboard)
-- [state-machine](https://lantos1618.github.io/oneshot-ui/files/state-machine.tsx): Live statechart of workflow machines, switchable with a segmented control. (diagram, ~24.2k tokens; tags: workflows, agents, real-time)
+- [state-diagram](https://lantos1618.github.io/oneshot-ui/files/state-diagram.tsx): Interactive UML state diagram. (diagram, ~13.1k tokens; tags: workflows, keyboard)
+- [state-machine](https://lantos1618.github.io/oneshot-ui/files/state-machine.tsx): Live statechart of workflow machines, switchable with a segmented control. (diagram, ~24.3k tokens; tags: workflows, agents, real-time)
 - [statechart](https://lantos1618.github.io/oneshot-ui/files/statechart.tsx): SVG statechart: composite states, states, pseudo states (initial, final, history), labelled transitions, and dots that travel along a transition (each dot calls onDone when it arrives). (diagram, ~7.0k tokens; tags: workflows, keyboard, agents, real-time)
 - [trace-waterfall](https://lantos1618.github.io/oneshot-ui/files/trace-waterfall.tsx): Nested spans on one streaming timeline (agent runs, API requests, jobs). (diagram, ~26.1k tokens; tags: monitoring, agents, streaming)
 
@@ -273,8 +274,8 @@ Import from: @lyndon/ui/code, @lyndon/ui/markdown, @lyndon/ui/editor.
 - [mentions-input](https://lantos1618.github.io/oneshot-ui/files/mentions-input.tsx): Message box with `@` mentions and `/` commands. (component, ~21.9k tokens; tags: chat, keyboard, collaboration)
 - [rich-text-editor](https://lantos1618.github.io/oneshot-ui/files/rich-text-editor.tsx): Rich text editor on contentEditable. (component, ~11.0k tokens; tags: editing, keyboard)
 - [signature-pad](https://lantos1618.github.io/oneshot-ui/files/signature-pad.tsx): Signature pad on a canvas. (component, ~9.0k tokens; tags: legal, touch)
-- [terminal](https://lantos1618.github.io/oneshot-ui/files/terminal.tsx): Terminal: commands type out character by character, output streams in, then a prompt waits with a blinking cursor (paused off screen, steady under reduced motion). (component, ~5.8k tokens; tags: devtools, streaming)
-- [unsaved-changes-bar](https://lantos1618.github.io/oneshot-ui/files/unsaved-changes-bar.tsx): Save bar for a form with unsaved changes: slides up inside its (relative, overflow-hidden) container while `open`. (component, ~5.4k tokens; tags: settings, editing)
+- [terminal](https://lantos1618.github.io/oneshot-ui/files/terminal.tsx): Terminal: commands type out character by character, output streams in, then a prompt waits with a blinking cursor (paused off screen, steady under reduced motion). (component, ~6.0k tokens; tags: devtools, streaming)
+- [unsaved-changes-bar](https://lantos1618.github.io/oneshot-ui/files/unsaved-changes-bar.tsx): Save bar for a form with unsaved changes: slides up inside its (relative, overflow-hidden) container while `open`. (component, ~5.9k tokens; tags: settings, editing)
 
 ## Extras: lanes
 
@@ -287,17 +288,17 @@ Import from: @lyndon/ui/lanes, @lyndon/ui/gitgraph.
 
 Import from: @lyndon/ui/media.
 
-- [audio-player](https://lantos1618.github.io/oneshot-ui/files/audio-player.tsx): Audio player: cover, title, back / forward 10 s, speed cycle and a waveform you click or drag to seek (hovering previews the jump; on touch, tap or swipe sideways along it, while a vertical swipe still scrolls the page). (component, ~26.7k tokens; tags: keyboard, accessible)
+- [audio-player](https://lantos1618.github.io/oneshot-ui/files/audio-player.tsx): Audio player: cover, title, back / forward 10 s, speed cycle and a waveform you click or drag to seek (hovering previews the jump; on touch, tap or swipe sideways along it, while a vertical swipe still scrolls the page). (component, ~26.9k tokens; tags: keyboard, accessible)
 - [avatar-cropper](https://lantos1618.github.io/oneshot-ui/files/avatar-cropper.tsx): Avatar cropper: the photo sits under a circular mask; drag (or arrow keys) to reposition, clamped so the circle stays covered; zoom with the slider, the wheel, a two-finger pinch or + / −. (component, ~17.7k tokens; tags: uploads, settings, touch)
 - [carousel](https://lantos1618.github.io/oneshot-ui/files/carousel.tsx): Scroll-snap carousel with arrows, dots, swipe and ← / → (all wrap around). (component, ~2.7k tokens; tags: marketing, touch, keyboard)
 - [image-compare](https://lantos1618.github.io/oneshot-ui/files/image-compare.tsx): Before / after comparison: drag anywhere (or arrow keys / Home / End on the handle). (component, ~3.5k tokens; tags: comparison, touch)
 - [lightbox](https://lantos1618.github.io/oneshot-ui/files/lightbox.tsx): Full-screen image viewer. (component, ~12.6k tokens; tags: keyboard, touch, marketing, animated)
 - [masonry-gallery](https://lantos1618.github.io/oneshot-ui/files/masonry-gallery.tsx): Pinterest-style masonry: each tile drops into the shortest column; columns follow the width (two on phones). (component, ~26.2k tokens; tags: marketing, animated)
 - [media-card](https://lantos1618.github.io/oneshot-ui/files/media-card.tsx): Article / video card: image with a tag and duration badge, date line, title, description, author and a bookmark toggle. (component, ~7.3k tokens; tags: marketing, people)
-- [mini-audio-player](https://lantos1618.github.io/oneshot-ui/files/mini-audio-player.tsx): Slim pill player: play, title, a thin draggable progress bar (← / → when focused; a 32px touch band on phones) and the time. (component, ~24.5k tokens; tags: chat, touch)
+- [mini-audio-player](https://lantos1618.github.io/oneshot-ui/files/mini-audio-player.tsx): Slim pill player: play, title, a thin draggable progress bar (← / → when focused; a 32px touch band on phones) and the time. (component, ~24.6k tokens; tags: chat, touch)
 - [progressive-image](https://lantos1618.github.io/oneshot-ui/files/progressive-image.tsx): Image that blurs up: a tiny placeholder shows blurred, then the full image crossfades in. (component, ~4.9k tokens; tags: async, accessible)
-- [video-player](https://lantos1618.github.io/oneshot-ui/files/video-player.tsx): Video player with custom controls: big play button, title that fades while playing, seek bar with buffer, hover time and drag, back 5 s, mute + volume, time, speed cycle and fullscreen. (component, ~33.0k tokens; tags: keyboard, touch, accessible)
-- [voice-note](https://lantos1618.github.io/oneshot-ui/files/voice-note.tsx): Chat-style voice note bubble: play, a waveform you tap or drag to seek, elapsed / total time and a speed chip. (component, ~25.2k tokens; tags: chat, touch)
+- [video-player](https://lantos1618.github.io/oneshot-ui/files/video-player.tsx): Video player with custom controls: big play button, title that fades while playing, seek bar with buffer, hover time and drag, back 5 s, mute + volume, time, speed cycle and fullscreen. (component, ~33.1k tokens; tags: keyboard, touch, accessible)
+- [voice-note](https://lantos1618.github.io/oneshot-ui/files/voice-note.tsx): Chat-style voice note bubble: play, a waveform you tap or drag to seek, elapsed / total time and a speed chip. (component, ~25.3k tokens; tags: chat, touch)
 - [waveform](https://lantos1618.github.io/oneshot-ui/files/waveform.tsx): Waveform bars from `peaks` (0..1 each). (component, ~1.6k tokens; tags: animated, keyboard, accessible)
 
 ## Extras: collab
@@ -332,12 +333,13 @@ Import from: @lyndon/ui/binary.
 
 Import from: @lyndon/ui/aistream, @lyndon/ui/ai, @lyndon/ui/aichat.
 
-- [agent-composer](https://lantos1618.github.io/oneshot-ui/files/agent-composer.tsx): Agent composer that doubles as a control panel. (component, ~73.9k tokens; tags: chat, uploads, drag-and-drop, inputs)
+- [agent-composer](https://lantos1618.github.io/oneshot-ui/files/agent-composer.tsx): Agent composer that doubles as a control panel. (component, ~74.1k tokens; tags: chat, uploads, drag-and-drop, inputs)
 - [agent-plan](https://lantos1618.github.io/oneshot-ui/files/agent-plan.tsx): A plan and its progress: each step's status (StatusIcon), a done count and a progress bar. (component, ~5.0k tokens; tags: agents, planning, real-time)
 - [ai-renderers-provider](https://lantos1618.github.io/oneshot-ui/files/ai-renderers-provider.tsx): Supplies AiRenderers to every MessageParts below it (props given to a component win). (component, ~412 tokens; tags: chat, composable)
 - [ai-stream](https://lantos1618.github.io/oneshot-ui/files/ai-stream.tsx): The AI message model with parts (text, reasoning, tools, sources, files, data) and useAiChat, which streams from a ReadableStream, an AsyncIterable or an AI SDK UI message stream, with stop via AbortSignal. (hook, ~9.3k tokens; tags: streaming, async, chat, agents)
 - [approval-card](https://lantos1618.github.io/oneshot-ui/files/approval-card.tsx): An approval prompt for an action the host wants to run: the tool, a summary, recipients and arguments exactly as given (shown as data, never as markup), with Deny and Approve. (component, ~6.8k tokens; tags: review, agents)
-- [assistant-chat](https://lantos1618.github.io/oneshot-ui/files/assistant-chat.tsx): Rich assistant chat. (component, ~52.4k tokens; tags: chat, streaming, animated)
+- [assistant-chat](https://lantos1618.github.io/oneshot-ui/files/assistant-chat.tsx): Rich assistant chat. (component, ~52.6k tokens; tags: chat, streaming, animated)
+- [chat-branches](https://lantos1618.github.io/oneshot-ui/files/chat-branches.tsx): Branching chat history as lanes (LaneGraph): every message is a row, forks fan out into lanes of their own colour, a message that follows two branches merges them, and the active thread (the ancestors of `leaf`) stays in the left lane at full strength. (component, ~53.1k tokens; tags: version-control, keyboard, virtualised, new, code, diagrams)
 - [chat-card](https://lantos1618.github.io/oneshot-ui/files/chat-card.tsx): Card frame for a generated answer part: title, caption, optional badge on the right. (component, ~406 tokens; tags: chat)
 - [chat-checklist](https://lantos1618.github.io/oneshot-ui/files/chat-checklist.tsx): Checklist answer: tick items off; the count updates and confetti fires when everything is done. (component, ~6.5k tokens; tags: chat, planning)
 - [chat-composer](https://lantos1618.github.io/oneshot-ui/files/chat-composer.tsx): Message box: grows with text, Enter sends (never mid IME composition), Shift+Enter adds a line. (component, ~11.4k tokens; tags: chat, uploads)
@@ -349,27 +351,29 @@ Import from: @lyndon/ui/aistream, @lyndon/ui/ai, @lyndon/ui/aichat.
 - [message-actions](https://lantos1618.github.io/oneshot-ui/files/message-actions.tsx): The row under an answer: "Stopped" when it was cut short, Copy (`text`, read when clicked), thumbs up / down (controlled `rating` + `onRate`, or uncontrolled), Regenerate or Retry (`onRetry`), and anything you add (`children`, e.g. (component, ~7.2k tokens; tags: chat, agents, streaming, async)
 - [message-parts](https://lantos1618.github.io/oneshot-ui/files/message-parts.tsx): Renders a message's parts in order: text as Markdown (or through `renderers.text`; links through safeUrl, `[n]` is a Citation of the message's n-th source), reasoning as Reasoning, tool calls as ToolCard (approvals go to `onDecideTool`; data through `renderers.value`), files as attachment tiles, errors with a Retry (`onRetry`), and `data` parts through `renderData` (nothing by default). (component, ~31.1k tokens; tags: chat, agents, streaming, async)
 - [model-comparison](https://lantos1618.github.io/oneshot-ui/files/model-comparison.tsx): Same prompt, several models' answers (`text`, played back at each model's `firstToken` and `speed`) side by side: thinking dots, first-token time, tokens/s and cost. (component, ~18.7k tokens; tags: comparison, data)
-- [permission-request](https://lantos1618.github.io/oneshot-ui/files/permission-request.tsx): Ask before acting: say what, to whom, and why. (component, ~17.1k tokens; tags: agents, review)
+- [permission-request](https://lantos1618.github.io/oneshot-ui/files/permission-request.tsx): Ask before acting: say what, to whom, and why. (component, ~17.2k tokens; tags: agents, review)
 - [prompt-input](https://lantos1618.github.io/oneshot-ui/files/prompt-input.tsx): The prompt box for chats. (component, ~11.8k tokens; tags: chat, agents, streaming, async, uploads, drag-and-drop, inputs)
 - [reasoning](https://lantos1618.github.io/oneshot-ui/files/reasoning.tsx): Collapsible model reasoning in the ThinkingSteps style. (component, ~5.1k tokens; tags: agents, streaming, animated)
 - [shimmer-text](https://lantos1618.github.io/oneshot-ui/files/shimmer-text.tsx): Text with a light sweeping across it. (component, ~1.0k tokens; tags: animated)
 - [source-list](https://lantos1618.github.io/oneshot-ui/files/source-list.tsx): Source chips under an answer: tile, title and domain, numbered, each a link when it has a `url`. (component, ~2.7k tokens; tags: review, chat, search)
 - [sources-panel](https://lantos1618.github.io/oneshot-ui/files/sources-panel.tsx): Answer with numbered citations next to their source cards (stacked below on phones). (component, ~4.6k tokens; tags: search, review)
-- [streaming-text](https://lantos1618.github.io/oneshot-ui/files/streaming-text.tsx): Reveals `text` word by word (useStreamedText as a component). (component, ~1.3k tokens; tags: streaming, animated)
-- [suggested-edit](https://lantos1618.github.io/oneshot-ui/files/suggested-edit.tsx): Proposed rewrite as a word-level diff (struck deletions, green insertions, staggered in) with counts. (component, ~6.7k tokens; tags: editing, review, keyboard)
+- [streaming-text](https://lantos1618.github.io/oneshot-ui/files/streaming-text.tsx): Reveals `text` word by word (useStreamedText as a component). (component, ~1.5k tokens; tags: streaming, animated)
+- [suggested-edit](https://lantos1618.github.io/oneshot-ui/files/suggested-edit.tsx): Proposed rewrite as a word-level diff (struck deletions, green insertions, staggered in) with counts. (component, ~6.8k tokens; tags: editing, review, keyboard)
 - [suggestions](https://lantos1618.github.io/oneshot-ui/files/suggestions.tsx): Suggestion chips (starters, follow-ups). (component, ~1.5k tokens; tags: chat, agents, streaming, async)
 - [thinking-steps](https://lantos1618.github.io/oneshot-ui/files/thinking-steps.tsx): Reasoning as a vertical stepper. (component, ~8.5k tokens; tags: agents, streaming, animated)
 - [tool-call](https://lantos1618.github.io/oneshot-ui/files/tool-call.tsx): Collapsible tool-call row: shimmering label and spinner while running, a check and the past tense when done. (component, ~3.7k tokens; tags: agents)
 - [tool-card](https://lantos1618.github.io/oneshot-ui/files/tool-card.tsx): A tool call from a message: status icon, tool name and state, and (click to open) its arguments and result, as data (indented JSON, or `renderValue`, e.g. (component, ~9.6k tokens; tags: agents)
-- [voice-input](https://lantos1618.github.io/oneshot-ui/files/voice-input.tsx): Mic button with a live waveform. (component, ~6.5k tokens; tags: chat, animated, inputs)
+- [voice-input](https://lantos1618.github.io/oneshot-ui/files/voice-input.tsx): Mic button with a live waveform. (component, ~6.6k tokens; tags: chat, animated, inputs)
 
 ## Extras: agents
 
 Import from: @lyndon/ui/agentrun, @lyndon/ui/aiagent.
 
 - [agent-run](https://lantos1618.github.io/oneshot-ui/files/agent-run.tsx): One model of an agent run (spans, events, tokens, cost) with a streaming reducer and useAgentRun, plus adapters from OpenTelemetry GenAI traces (OTLP/JSON), Vercel AI SDK results and UI streams, and LangGraph astream_events. (hook, ~18.6k tokens; tags: agents, monitoring, streaming, real-time, new)
+- [agent-run-lanes](https://lantos1618.github.io/oneshot-ui/files/agent-run-lanes.tsx): A run's steps as a lane graph (runLaneNodes into LaneGraph): each step links to the steps it waited for, takes its agent's lane colour, and shows its status, model or kind, error, tokens and time. (component, ~22.7k tokens; tags: agents, monitoring, streaming, real-time, new)
+- [agent-run-view](https://lantos1618.github.io/oneshot-ui/files/agent-run-view.tsx): One agent run (finished or live, e.g. (component, ~59.8k tokens; tags: agents, monitoring, streaming, real-time, new)
 - [agent-transit-map](https://lantos1618.github.io/oneshot-ui/files/agent-transit-map.tsx): A multi-agent "transit map": agent teams are lines, agents and tools are stations, orchestrators are hubs. (diagram, ~17.8k tokens; tags: agents, workflows, real-time, experimental, ai)
-- [ai-canvas](https://lantos1618.github.io/oneshot-ui/files/ai-canvas.tsx): Chat on the left, a living document on the right. (component, ~26.1k tokens; tags: editing, experimental, code)
+- [ai-canvas](https://lantos1618.github.io/oneshot-ui/files/ai-canvas.tsx): Chat on the left, a living document on the right. (component, ~26.3k tokens; tags: editing, experimental, code)
 
 ## Extras: theming
 

@@ -1,6 +1,6 @@
 import { memo, useCallback, useEffect, useId, useLayoutEffect, useMemo, useRef, useState, type RefObject } from 'react'
 import { AnimatePresence, motion } from 'motion/react'
-import { ActiveIndicator, Badge, Button, Collapse, type Command, CommandPalette, Dialog, Icon, type IconName, Kbd, Sheet, THEMES, ThemeToggle, UIProvider, cn, useHotkey, useRoving, useTheme, useToast, fmt } from '../lib'
+import { Badge, Button, Collapse, type Command, CommandPalette, Dialog, Icon, type IconName, Kbd, ScrollSpyNav, Sheet, THEMES, ThemeToggle, UIProvider, cn, useHotkey, useMediaQuery, useRoving, useScrollSpy, useTheme, useToast, fmt } from '../lib'
 import { AppearanceMenu } from '../lib/appearance'
 import { AISection } from './AISection'
 import { ButtonsSection } from './ButtonsSection'
@@ -76,29 +76,8 @@ const shellTagsInUse = (specs: SpecEntry[]): [TagId, number][] => {
 }
 const shellJump = (id: string) => document.getElementById(id)?.scrollIntoView({ behavior: shellReduce() ? 'auto' : 'smooth' })
 
-/** The section on screen, from one IntersectionObserver over the 16 sections (no scroll listeners). */
-function useShellActiveSection() {
-  const [active, setActive] = useState<string>('buttons')
-  useEffect(() => {
-    const io = new IntersectionObserver(es => es.forEach(e => e.isIntersecting && setActive(e.target.id)), { rootMargin: '-40% 0px -55% 0px' })
-    SECTIONS.forEach(([id]) => { const el = document.getElementById(id); if (el) io.observe(el) })
-    return () => io.disconnect()
-  }, [])
-  return active
-}
-
-/** One section link. Memoised so the sliding highlight (a layoutId animation, which makes motion re-project every
- * layout node on the page) only re-renders when the active section really changes, not on every card change. */
-const ShellSectionLink = memo(function ShellSectionLink({ id, label, on, group, chip }: { id: string; label: string; on: boolean; group: string; chip?: boolean }) {
-  return (
-    <a href={`#${id}`} data-chip={chip ? id : undefined} onClick={e => { e.preventDefault(); shellJump(id) }} aria-current={on ? 'true' : undefined}
-      className={chip
-        ? cn('relative flex-none rounded-[var(--r-md)] border border-[var(--line)] px-2.5 py-1.5 text-[13px] whitespace-nowrap no-underline', on ? 'font-medium text-[var(--fg)]' : 'text-[var(--fg2)]')
-        : cn('relative rounded-[var(--r-md)] px-2.5 py-1.5 text-[13px] no-underline', on ? 'font-medium text-[var(--fg)]' : 'text-[var(--fg2)] hover:bg-[var(--muted)] hover:text-[var(--fg)]')}>
-      {on && <ActiveIndicator group={group} className={chip ? 'rounded-[calc(var(--r-md)-2px)] bg-[var(--muted)]' : 'rounded-[var(--r-md)] bg-[var(--muted)]'} />}<span className="relative">{label}</span>
-    </a>
-  )
-})
+const SHELL_SECTION_IDS = SECTIONS.map(([id]) => id)
+const SHELL_SECTION_ITEMS = SECTIONS.map(([id, label]) => ({ id, label }))
 
 /* Tag filter (0.9) ───────────────────────────────────────────────────────────────────────────────────────────── */
 
@@ -185,16 +164,13 @@ type ShellNavProps = { ordered: SpecEntry[]; f: ShellFilter; filterRef: RefObjec
  */
 const ShellSideNav = memo(function ShellSideNav({ ordered, f, filterRef, goSpec, tagsOpen, setTagsOpen }: ShellNavProps) {
   const { query, setQuery, total } = f
-  const active = useShellActiveSection()
-  const [activeSpec, setActiveSpec] = useState('')
+  const active = useScrollSpy(SHELL_SECTION_IDS) ?? ''
+  // hidden on phones (min-[900px]:flex): don't track; a media query, not offsetParent, which forced a layout of the whole page before the first paint
+  const wide = useMediaQuery('(min-width: 900px)')
+  const specIds = useMemo(() => ordered.map(s => s.id), [ordered])
+  const activeSpec = useScrollSpy(specIds, { rootMargin: '-35% 0px -60% 0px', initial: '', enabled: wide })
   const sideRef = useRef<HTMLElement>(null), subRef = useRef<HTMLDivElement>(null)
-  const group = useId(), subId = useId(), panelId = useId()
-  useEffect(() => { // which card is on screen: one observer for all cards
-    if (!matchMedia('(min-width: 900px)').matches) return // hidden on phones (min-[900px]:flex): don't track; a media query, not offsetParent, which forced a layout of the whole page before the first paint
-    const io = new IntersectionObserver(es => es.forEach(e => e.isIntersecting && setActiveSpec(e.target.id)), { rootMargin: '-35% 0px -60% 0px' })
-    ordered.forEach(s => { const el = document.getElementById(s.id); if (el) io.observe(el) })
-    return () => io.disconnect()
-  }, [ordered])
+  const subId = useId(), panelId = useId()
   const q = query.trim(), filtering = !!q || f.tags.length > 0
   const subs = filtering ? ordered.filter(s => specMatches(s, query, f.tags)) : ordered.filter(s => s.section === active)
   useEffect(() => { // keep the current card's link in view, scrolling only the panel
@@ -229,13 +205,9 @@ const ShellSideNav = memo(function ShellSideNav({ ordered, f, filterRef, goSpec,
           <Collapse open={tagsOpen}><div className="pt-1 pb-2"><ShellTagPanel f={f} /></div></Collapse>
         </div>
       </div>
-      <div className="flex flex-none flex-col gap-0.5">
-        {SECTIONS.map(([id, label]) => {
-          const none = filtering && !ordered.some(s => s.section === id && specMatches(s, query, f.tags))
-          // a section with no matches greys out (in --fg3, which still reads at 4.5:1, rather than at 40% opacity)
-          return <div key={id} className={cn('flex flex-col', none && '[&>a]:!text-[var(--fg3)]')}><ShellSectionLink id={id} label={label} on={active === id} group={group} /></div>
-        })}
-      </div>
+      {/* a section with no matches greys out (in --fg3, which still reads at 4.5:1, rather than at 40% opacity) */}
+      <ScrollSpyNav as="div" aria-label={'Sections'} value={active} className="flex-none"
+        items={SECTIONS.map(([id, label]) => ({ id, label, muted: filtering && !ordered.some(s => s.section === id && specMatches(s, query, f.tags)) }))} />
       <div className="mt-3 flex min-h-[120px] flex-1 flex-col border-t border-[var(--line)] pt-2.5">
         <h2 id={subId} className="m-0 mb-1 flex flex-none items-baseline justify-between px-2.5 text-[11px] font-medium tracking-wide text-[var(--fg3)] uppercase">
           <span className="truncate">{filtering ? 'Matches' : sectionLabel[active]}</span><span className="ui-num w-8 flex-none text-end normal-case">{subs.length}</span>
@@ -266,23 +238,8 @@ const ShellSideNav = memo(function ShellSideNav({ ordered, f, filterRef, goSpec,
 const ShellChipNav = memo(function ShellChipNav({ f, searching, setSearching, filterRef }:
   Pick<ShellNavProps, 'f' | 'filterRef'> & { searching: boolean; setSearching: (v: boolean) => void }) {
   const { query, setQuery, total } = f
-  const active = useShellActiveSection()
-  const chipsRef = useRef<HTMLDivElement>(null)
-  const group = useId()
   const [sheet, setSheet] = useState(false)
   const q = query.trim(), filtering = searching || !!q || f.tags.length > 0
-  useEffect(() => {
-    // in the next frame, with the layout the browser makes for it anyway: measuring here, right after the first commit,
-    // forced an extra layout of the whole page before the first paint (a third of a second on a phone)
-    const raf = requestAnimationFrame(() => {
-      const row = chipsRef.current, chip = row?.querySelector<HTMLElement>(`[data-chip="${active}"]`)
-      if (!row || !chip || !row.offsetParent) return
-      // centre the chip
-      const left = chip.offsetLeft - row.clientWidth / 2 + chip.offsetWidth / 2
-      row.scrollTo({ left, behavior: shellReduce() ? 'auto' : 'smooth' })
-    })
-    return () => cancelAnimationFrame(raf)
-  }, [active, filtering])
   const done = () => { f.clear(); setSearching(false) }
   return (
     <nav aria-label={'Sections'} className="sticky top-[calc(env(safe-area-inset-top,0px)+57px)] z-30 -mx-4 -mt-4 min-w-0 bg-[var(--bg)] px-[max(16px,env(safe-area-inset-left))] py-2 sm:-mx-5 sm:px-5 min-[900px]:hidden">
@@ -310,13 +267,12 @@ const ShellChipNav = memo(function ShellChipNav({ f, searching, setSearching, fi
           )}
         </div>
       ) : (
-        <div ref={chipsRef} className="-mx-[max(16px,env(safe-area-inset-left))] flex gap-1.5 overflow-x-auto px-[max(16px,env(safe-area-inset-left))] [scrollbar-width:none] sm:-mx-5 sm:px-5">
-          <button type="button" onClick={() => { setSearching(true); requestAnimationFrame(() => filterRef.current?.focus()) }} aria-label={'Filter components'}
-            className="inline-flex flex-none cursor-pointer items-center gap-1.5 rounded-[var(--r-md)] border border-[var(--line)] bg-[var(--card)] px-2.5 py-1.5 text-[13px] whitespace-nowrap text-[var(--fg2)]">
+        <ScrollSpyNav as="div" variant="chips" aria-label={'Sections'} items={SHELL_SECTION_ITEMS}
+          className="-mx-[max(16px,env(safe-area-inset-left))] px-[max(16px,env(safe-area-inset-left))] sm:-mx-5 sm:px-5"
+          start={<button type="button" onClick={() => { setSearching(true); requestAnimationFrame(() => filterRef.current?.focus()) }} aria-label={'Filter components'}
+            className="inline-flex h-8 flex-none cursor-pointer items-center gap-1.5 rounded-[var(--r-md)] border border-[var(--line)] bg-[var(--card)] px-2.5 text-[13px] whitespace-nowrap text-[var(--fg2)]">
             <Icon name="search" size={14} />{'Filter'}
-          </button>
-          {SECTIONS.map(([id, label]) => <ShellSectionLink key={id} id={id} label={label} on={active === id} group={group} chip />)}
-        </div>
+          </button>} />
       )}
       <Sheet open={sheet} onOpenChange={setSheet} title={'Filter by tag'} footer={
         <div className="flex w-full items-center gap-2">

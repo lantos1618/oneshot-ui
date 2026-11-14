@@ -174,6 +174,7 @@ export const TAG_CARDS: Readonly<Record<string, TagCard>> = {
   'Toolbar and toggle group': tagCard(C, ['navigation', 'actions', 'editing', 'keyboard'], ['toolbar', 'toggle-group', 'toggle'], ['formatting bar', 'toggle', 'button group', 'pressed']),
   'Links as buttons (asChild)': tagCard(P, ['navigation', 'foundation', 'composable'], ['slot', 'button'], ['asChild', 'Slot', 'router link', 'Next.js Link', 'anchor']),
   'Wizard stepper': tagCard(C, ['navigation', 'onboarding', 'forms'], ['wizard', 'steps'], ['stepper', 'multi-step form', 'steps', 'progress steps']),
+  'Scroll spy': tagCard(C, ['navigation', 'help', 'hierarchy', 'new'], ['scroll-spy-nav'], ['scrollspy', 'table of contents', 'TOC', 'on this page', 'anchor links', 'docs navigation']),
   'Breadcrumbs and pagination': tagCard(C, ['navigation', 'hierarchy', 'accessible'], ['breadcrumbs', 'pagination'], ['breadcrumb', 'pager', 'paging', 'page numbers']),
   'Collapsible sidebar': tagCard(C, ['navigation', 'layout', 'keyboard'], ['collapsible-sidebar', 'nav-list'], ['sidebar', 'app shell', 'nav rail', 'side navigation']),
   'Mobile tab bar': tagCard(C, ['navigation', 'touch', 'animated'], ['mobile-tab-bar'], ['bottom navigation', 'bottom tabs', 'tab bar', 'app shell']),
@@ -286,7 +287,7 @@ export const TAG_CARDS: Readonly<Record<string, TagCard>> = {
   'Diff': tagCard(C, ['code', 'version-control', 'review'], ['diff'], ['changes', 'patch', 'pull request', 'code review', 'compare']),
   'Markdown': tagCard(C, ['code', 'ai', 'editing', 'streaming'], ['markdown'], ['md', 'GFM', 'markdown renderer', 'rich text', 'prose']),
   'Binary explorer': tagCard(C, ['code', 'data', 'devtools', 'keyboard', 'virtualised', 'new'], ['binary-view', 'hex-editor', 'byte-map', 'entropy-map', 'binary-section-list'], ['hex editor', 'hex viewer', 'hexdump', 'byte map', 'Hilbert curve', 'entropy', 'file inspector', 'reverse engineering', 'data inspector', 'ELF', 'PE']),
-  'Graphs as rows': tagCard(C, ['code', 'diagrams', 'version-control', 'keyboard', 'virtualised', 'new'], ['lanes', 'git-graph'], ['DAG', 'lane graph', 'LaneGraph', 'git graph', 'commit graph', 'branches', 'AST', 'syntax tree', 'dependency graph', 'chat branches', 'agent run']),
+  'Graphs as rows': tagCard(C, ['code', 'diagrams', 'version-control', 'keyboard', 'virtualised', 'new'], ['lanes', 'git-graph', 'chat-branches'], ['DAG', 'lane graph', 'LaneGraph', 'git graph', 'commit graph', 'branches', 'AST', 'syntax tree', 'dependency graph', 'chat branches', 'agent run']),
   // media
   'Video player': tagCard(C, ['media', 'keyboard', 'touch', 'accessible'], ['video-player'], ['video', 'player', 'chapters', 'captions', 'fullscreen']),
   'Audio player': tagCard(C, ['media', 'keyboard', 'accessible'], ['audio-player', 'waveform'], ['podcast', 'music', 'waveform', 'chapters', 'playback speed']),
@@ -312,7 +313,7 @@ export const TAG_CARDS: Readonly<Record<string, TagCard>> = {
   'Sources panel': tagCard(C, ['ai', 'search', 'review'], ['sources-panel', 'source-list'], ['research', 'citations', 'references', 'web results']),
   'Model comparison': tagCard(C, ['ai', 'data', 'comparison'], ['model-comparison'], ['evals', 'benchmarks', 'LLM comparison', 'side by side', 'arena']),
   'AI canvas': tagCard(C, ['ai', 'editing', 'code', 'experimental'], ['ai-canvas'], ['artifacts', 'canvas', 'document editor', 'side by side editing']),
-  'Live agent run': tagCard('hook', ['ai', 'agents', 'monitoring', 'streaming', 'real-time', 'new'], ['agent-run', 'trace-waterfall', 'agent-transit-map', 'lanes'], ['useAgentRun', 'OpenTelemetry', 'OTLP', 'AI SDK', 'LangGraph', 'tracing', 'adapters', 'live data', 'replay']),
+  'Live agent run': tagCard('hook', ['ai', 'agents', 'monitoring', 'streaming', 'real-time', 'new'], ['agent-run', 'agent-run-view', 'agent-run-lanes', 'trace-waterfall', 'agent-transit-map', 'lanes'], ['useAgentRun', 'AgentRunView', 'OpenTelemetry', 'OTLP', 'AI SDK', 'LangGraph', 'tracing', 'adapters', 'live data', 'replay']),
   'Agent transit map': tagCard('diagram', ['ai', 'diagrams', 'agents', 'workflows', 'real-time', 'experimental'], ['agent-transit-map'], ['orchestration', 'subway map', 'metro map', 'multi-agent', 'pipeline']),
 }
 

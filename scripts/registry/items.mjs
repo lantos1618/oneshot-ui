@@ -37,6 +37,8 @@ export const FAMILIES = {
   'time-picker': { roots: ['TimePicker', 'timeOptions'] },
   'date-picker': { roots: ['DatePicker', 'formatDate'] },
   'file-upload': { roots: ['FileUpload', 'fileAccepts'] },
+  // navigation
+  'scroll-spy-nav': { roots: ['ScrollSpyNav', 'useScrollSpy'] },
   // feedback
   toast: { roots: ['ToastProvider', 'useToast', 'toast'], title: 'Toast' },
   progress: { roots: ['Progress', 'ProgressRing'] },

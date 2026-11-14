@@ -1,6 +1,6 @@
 import { useEffect, useId, useLayoutEffect, useMemo, useRef, useState, type ReactNode, type RefObject } from 'react'
 import { AnimatePresence, motion, useAnimate } from './motionkit'
-import { AnimatedNumber, Avatar, Badge, Button, Chevron, EASE_OUT, Icon, IconButton, Kbd, REDUCED_MOTION_Q, Spinner, StatusIcon, TOUCH, cn, cssUrl, inputClass, safeColor, safeUrl, sleep, spring, surface, useControllable, useLatest, useLive, useOutside, useMediaQuery, useRoving, type IconName, plural, fmt, useInView, useReducedMotion } from './core'
+import { AnimatedNumber, Avatar, Badge, Button, Chevron, EASE_OUT, Icon, IconButton, Kbd, REDUCED_MOTION_Q, Spinner, StatusIcon, TOUCH, cn, cssUrl, inputClass, safeColor, safeUrl, sleep, spring, surface, useControllable, useGeneration, useLatest, useLive, useRandom, useOutside, useMediaQuery, useRoving, type IconName, plural, fmt, useInView, useReducedMotion } from './core'
 import { AutoHeight, Collapse, Progress, TypingDots, useToast } from './feedback'
 import { CheckMark, Checkbox, type Option } from './fields'
 import { OptionList } from './select'
@@ -35,9 +35,12 @@ export function ShimmerText({ children, active = true, className }: { children: 
  * other change to `text` replays from the start. `start: false` pauses it. Under reduced motion it shows everything.
  * Returns `{ text: shown so far, done, shown: chars shown, total }`. StreamingText is this hook as a component.
  */
-export function useStreamedText(text: string, { cps = 60, start = true, unit = 'char', wordDelay = 45, live = false, onProgress }:
-  { cps?: number; start?: boolean; unit?: 'char' | 'word'; wordDelay?: number; live?: boolean; onProgress?: () => void } = {}) {
+export function useStreamedText(text: string, { cps = 60, start = true, unit = 'char', wordDelay = 45, live = false, seed, onProgress }:
+  { cps?: number; start?: boolean; unit?: 'char' | 'word'; wordDelay?: number; live?: boolean
+    /** makes the uneven reveal rhythm repeatable (default Math.random) */
+    seed?: number; onProgress?: () => void } = {}) {
   const reduce = useMediaQuery(REDUCED_MOTION_Q)
+  const rand = useRandom(seed)
   const [st, setSt] = useState(() => ({ src: text, pos: 0 }))
   const progress = useLatest(onProgress), src = useLatest(text)
   let { pos } = st
@@ -57,7 +60,7 @@ export function useStreamedText(text: string, { cps = 60, start = true, unit = '
     // one interval while it is behind (reading the latest text from a ref, so a stream of updates doesn't reset it);
     // it stops once caught up and starts again when more text arrives
     const id = setInterval(() => {
-      if (word && Math.random() < 0.2) return // ~20% of ticks are skipped for an uneven word rhythm
+      if (word && rand() < 0.2) return // ~20% of ticks are skipped for an uneven word rhythm
       setSt(s => {
         const text = src.current, total = text.length
         if (s.src !== text || s.pos >= total) return s
@@ -67,13 +70,13 @@ export function useStreamedText(text: string, { cps = 60, start = true, unit = '
           const from = live && lag > 400 ? s.pos + Math.floor(lag / 10) : s.pos + 1 // live and far behind: catch up
           const sp = text.indexOf(' ', from)
           to = sp < 0 ? total : sp
-        } else to = s.pos + 2 + Math.floor(Math.random() * 3) + (live ? Math.floor(lag / 12) : 0)
+        } else to = s.pos + 2 + Math.floor(rand() * 3) + (live ? Math.floor(lag / 12) : 0)
         return { src: s.src, pos: Math.min(total, to) }
       })
       progress.current?.()
     }, word ? Math.max(8, wordDelay * 0.85) : 1000 / (Math.max(1, cps) / 3))
     return () => clearInterval(id)
-  }, [behind, cps, unit, wordDelay, live, progress, src])
+  }, [behind, cps, unit, wordDelay, live, progress, src, rand])
   return { text: text.slice(0, shown), done: !live && shown >= total, shown, total }
 }
 
@@ -83,9 +86,11 @@ export function useStreamedText(text: string, { cps = 60, start = true, unit = '
  * large chunk lands. Calls `onDone(text shown)` when it finishes (for `live`, once `live` is false and it caught up)
  * or is stopped.
  */
-export function StreamingText({ text, playing = true, live = false, wordDelay = 45, onDone, onProgress, className, caret = true }:
-  { text: string; playing?: boolean; live?: boolean; wordDelay?: number; onDone?: (shown: string) => void; onProgress?: () => void; className?: string; caret?: boolean }) {
-  const { text: shown, done } = useStreamedText(text, { unit: 'word', wordDelay, start: playing, live, onProgress })
+export function StreamingText({ text, playing = true, live = false, wordDelay = 45, seed, onDone, onProgress, className, caret = true }:
+  { text: string; playing?: boolean; live?: boolean; wordDelay?: number
+    /** makes the word rhythm repeatable (default Math.random) */
+    seed?: number; onDone?: (shown: string) => void; onProgress?: () => void; className?: string; caret?: boolean }) {
+  const { text: shown, done } = useStreamedText(text, { unit: 'word', wordDelay, start: playing, live, seed, onProgress })
   const doneRef = useRef(false), cb = useLatest(onDone)
   const finished = done || !playing
   const shownRef = useLatest(shown)
@@ -552,7 +557,7 @@ export function PermissionRequest({ title, app = 'inbox', reason, recipients = A
   const [confirmed, setConfirmed] = useState(false) // the host said it finished (allow) or that nothing ran (deny)
   const [settled, setSettled] = useState(false) // onDecide's promise (if any) has resolved
   const [say, liveRegion] = useLive()
-  const gen = useRef(0)
+  const gen = useGeneration()
   const sent = Math.min(progress?.sent ?? 0, progress?.total ?? total), of = progress?.total ?? total
   const finish = (ok: boolean, sure: boolean) => {
     if (!ok) { setState('failed'); say(copy.failedTitle); return }
@@ -560,18 +565,18 @@ export function PermissionRequest({ title, app = 'inbox', reason, recipients = A
     say(onUndo ? `${sure ? copy.done(of) : 'Approved'}. Undo is available for ${undoSeconds} seconds.` : sure ? copy.done(of) : 'Approved')
   }
   /** onDecide's outcome: true / false, or undefined when it returned nothing to wait on; throws when it failed. */
-  const outcome = async (allowed: boolean, g: number): Promise<boolean | undefined | null> => {
+  const outcome = async (allowed: boolean, current: () => boolean): Promise<boolean | undefined | null> => {
     const out = onDecide?.(allowed, always, draft)
     const r = out && typeof (out as Promise<unknown>).then === 'function' ? await out : out
-    return g === gen.current ? (r === undefined ? undefined : r !== false) : null
+    return current() ? (r === undefined ? undefined : r !== false) : null
   }
   const send = async () => {
-    const g = ++gen.current; setState('sending'); setSettled(false)
+    const current = gen.next(); setState('sending'); setSettled(false)
     const promised = (() => { try { const o = onDecide?.(true, always, draft); return o } catch { return false as const } })()
     if (promised && typeof (promised as Promise<unknown>).then === 'function') {
       let r: void | boolean
-      try { r = await promised } catch { if (g === gen.current) finish(false, false); return }
-      if (g !== gen.current) return
+      try { r = await promised } catch { if (current()) finish(false, false); return }
+      if (!current()) return
       if (r === false) return finish(false, false)
       if (!progress || progress.sent >= progress.total) finish(true, true); else setSettled(true)
     } else if (promised === false) finish(false, false)
@@ -579,10 +584,10 @@ export function PermissionRequest({ title, app = 'inbox', reason, recipients = A
     else setSettled(true)
   }
   const deny = async () => {
-    const g = ++gen.current; setState('denying')
+    const current = gen.next(); setState('denying')
     let sure = false
-    try { sure = (await outcome(false, g)) === true } catch { sure = false }
-    if (g !== gen.current) return
+    try { sure = (await outcome(false, current)) === true } catch { sure = false }
+    if (!current()) return
     setConfirmed(sure); setState('denied'); say('Declined')
   }
   useEffect(() => { // with progress: done when every item is reported (and onDecide's promise, if any, resolved)
@@ -594,12 +599,12 @@ export function PermissionRequest({ title, app = 'inbox', reason, recipients = A
   }, [state, left, onUndo])
   const undo = async () => {
     if (!onUndo) return
-    const g = ++gen.current; setState('undoing')
+    const current = gen.next(); setState('undoing')
     let ok = false; try { ok = (await onUndo()) === true } catch { ok = false }
-    if (g !== gen.current) return
+    if (!current()) return
     setState(ok ? 'undone' : 'undo-failed'); say(ok ? copy.undone : 'Couldn’t undo')
   }
-  const reset = () => { gen.current++; setState('ask'); setPreview(false) }
+  const reset = () => { gen.invalidate(); setState('ask'); setPreview(false) }
   const C = 2 * Math.PI * 8
   let body: ReactNode
   if (state === 'ask') body = (
@@ -840,14 +845,13 @@ export function SuggestedEdit({ before, after: given, onRequest, action, onResol
   { before: string; after?: string; /** fetches the rewrite when the person asks for it */ onRequest?: () => Promise<string>; action?: string; onResolve?: (accepted: boolean) => void; className?: string }) {
   const [after, setAfter] = useState(given)
   const [state, setState] = useState<'idle' | 'rewriting' | 'review' | 'applied' | 'failed'>(given !== undefined ? 'review' : 'idle')
-  const gen = useRef(0)
-  useEffect(() => () => { gen.current++ }, [])
+  const gen = useGeneration()
   const segs = useMemo(() => after === undefined ? [] : wordDiff(before, after), [before, after])
   const dels = segs.filter(s => s.t === '-').length, ins = segs.filter(s => s.t === '+').length
   const go = async () => {
     if (!onRequest) return
-    const g = ++gen.current; setState('rewriting')
-    try { const r = await onRequest(); if (g === gen.current) { setAfter(r); setState('review') } } catch { if (g === gen.current) setState('failed') }
+    const current = gen.next(); setState('rewriting')
+    try { const r = await onRequest(); if (current()) { setAfter(r); setState('review') } } catch { if (current()) setState('failed') }
   }
   const back = () => setState(onRequest ? 'idle' : 'review')
   let n = 0
@@ -1033,28 +1037,27 @@ export function ModelComparison({ prompt, models, autoRun = false, onVote, class
   const toast = useToast()
   const [st, setSt] = useState<McState[]>(models.map(() => ({ phase: 'idle', words: 0 })))
   const [win, setWin] = useState(-1)
-  const gen = useRef(0), voteGen = useRef(0)
+  const gen = useGeneration(), voteGen = useGeneration()
   const vote = async (m: CompareModel, i: number) => {
     setWin(i)
     if (!onVote) return
-    const g = ++voteGen.current
+    const current = voteGen.next()
     let ok: void | boolean
-    try { ok = await onVote(m, i) } catch { if (g === voteGen.current) toast({ title: 'Vote not recorded', description: 'The app reported a problem.', tone: 'bad' }); return }
-    if (ok === true && g === voteGen.current) toast({ title: 'Vote recorded', description: `${m.name} wins this round`, tone: 'ok' })
+    try { ok = await onVote(m, i) } catch { if (current()) toast({ title: 'Vote not recorded', description: 'The app reported a problem.', tone: 'bad' }); return }
+    if (ok === true && current()) toast({ title: 'Vote recorded', description: `${m.name} wins this round`, tone: 'ok' })
   }
   const reduce = useReducedMotion()
   const run = () => {
-    const g = ++gen.current; setWin(-1)
+    const current = gen.next(); setWin(-1)
     setSt(models.map(() => ({ phase: 'thinking', words: 0 })))
     models.forEach(async (m, i) => {
       const set = (s: McState) => setSt(a => a.map((x, k) => k === i ? s : x))
-      await sleep(reduce ? 0 : m.firstToken * 1000); if (g !== gen.current) return
+      await sleep(reduce ? 0 : m.firstToken * 1000); if (!current()) return
       const W = m.text.split(' ').length
-      for (let w = 1; w <= W; w++) { set({ phase: 'streaming', words: w }); await sleep(reduce ? 0 : 1000 / m.speed); if (g !== gen.current) return }
+      for (let w = 1; w <= W; w++) { set({ phase: 'streaming', words: w }); await sleep(reduce ? 0 : 1000 / m.speed); if (!current()) return }
       set({ phase: 'done', words: W })
     })
   }
-  useEffect(() => () => { gen.current++ }, [])
   const { ref: box, seen } = useViewport<HTMLDivElement>(null, { amount: 0.3 })
   const ran = useRef(false)
   useEffect(() => { if (autoRun && seen && !ran.current) { ran.current = true; run() } }, [autoRun, seen]) // eslint-disable-line react-hooks/exhaustive-deps

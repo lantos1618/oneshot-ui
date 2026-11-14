@@ -134,6 +134,7 @@ export const CARD_HEIGHTS: Readonly<Record<string, readonly [phone: number, desk
   'c-rich-text-editor': [438, 320],
   'c-sankey': [324, 301],
   'c-scatter': [260, 253],
+  'c-scroll-spy': [304, 260],
   'c-segmented-control': [154, 199],
   'c-select': [268, 268],
   'c-settings-page': [438, 400],

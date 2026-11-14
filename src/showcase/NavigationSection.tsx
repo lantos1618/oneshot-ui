@@ -1,6 +1,6 @@
 import { useRef, useState, type AnchorHTMLAttributes, type Ref } from 'react'
 import { AnimatePresence, motion, useInView } from 'motion/react'
-import { Badge, Breadcrumbs, Button, CollapsibleSidebar, ContextMenu, type ContextMenuEntry, DropdownMenu, Icon, IconButton, type IconName, MegaMenu, type MegaMenuItem, MobileTabBar, Pagination, type SidebarEntry, Switch, type TabBarItem, Tabs, Toggle, ToggleGroup, Toolbar, Wizard, cn, spring, useToast } from '../lib'
+import { Badge, Breadcrumbs, Button, CollapsibleSidebar, ContextMenu, type ContextMenuEntry, DropdownMenu, Icon, IconButton, type IconName, MegaMenu, type MegaMenuItem, MobileTabBar, Pagination, ScrollSpyNav, type ScrollSpyItem, type SidebarEntry, Switch, type TabBarItem, Tabs, Toggle, ToggleGroup, Toolbar, Wizard, cn, spring, useToast } from '../lib'
 import { PhoneFrame, SidebarPage } from '../examples'
 import { Section, Spec } from './kit'
 
@@ -281,6 +281,43 @@ function NavContextPartsDemo() {
   )
 }
 
+type NavSpySection = { id: string; title: string; body: string; sub?: NavSpySection[] }
+/** A short "getting started" page for the scroll-spy card. */
+const NAV_SPY_DOC: NavSpySection[] = [
+  { id: 'spy-install', title: 'Install', body: 'Add the package with your package manager, then wrap the app once in UIProvider. It injects the theme tokens, applies the saved theme and hosts the toast region, so every component on the page can use them.' },
+  { id: 'spy-theme', title: 'Theme', body: 'Seven palettes ship with the library, and each one has a light and a dark mode. Pick one in UIProvider or let people choose it in the appearance menu.', sub: [
+    { id: 'spy-tokens', title: 'Tokens', body: 'Colours, radii and type sizes are CSS variables. Use them in Tailwind classes such as bg-[var(--card)] so a custom theme reaches every component.' },
+    { id: 'spy-dark', title: 'Dark mode', body: 'Dark mode follows the system setting until someone picks one. Add ThemeScript to the head of the document to apply the saved choice before the first paint.' },
+  ] },
+  { id: 'spy-forms', title: 'Forms', body: 'Every control takes a name and joins a native form, so FormData and server actions work without glue code. Field adds the label, the hint and the error message.' },
+  { id: 'spy-deploy', title: 'Deploy', body: 'The components render on the server and hydrate without a layout shift. Drop-in files work too: copy one next to ui-provider.tsx and import it.' },
+]
+const NAV_SPY_BAND = '0px 0px -70% 0px'
+const NAV_SPY_ITEMS: ScrollSpyItem[] = NAV_SPY_DOC.map(s => ({ id: s.id, label: s.title, items: s.sub?.map(x => ({ id: x.id, label: x.title })) }))
+
+/** A guide that scrolls inside the card, with its table of contents following along (chips on phones). */
+function NavScrollSpyDemo() {
+  const box = useRef<HTMLDivElement>(null)
+  const part = (s: NavSpySection, sub = false) => (
+    <section key={s.id} id={s.id} aria-labelledby={`${s.id}-h`} className="pt-3">
+      {sub ? <h5 id={`${s.id}-h`} className="m-0 text-[13px] font-semibold">{s.title}</h5> : <h4 id={`${s.id}-h`} className="m-0 text-sm font-semibold">{s.title}</h4>}
+      <p className="m-0 mt-1 text-[13px] leading-relaxed text-[var(--fg2)]">{s.body}</p>
+      {s.sub?.map(x => part(x, true))}
+    </section>
+  )
+  return (
+    <div className="grid gap-3 sm:grid-cols-[132px_minmax(0,1fr)]">
+      {/* the band is the top 30% of the guide, so a short section counts once a link has scrolled it to the top */}
+      <ScrollSpyNav items={NAV_SPY_ITEMS} root={box} rootMargin={NAV_SPY_BAND} aria-label="Guide" className="max-sm:hidden" />
+      <ScrollSpyNav items={NAV_SPY_ITEMS} root={box} rootMargin={NAV_SPY_BAND} variant="chips" aria-label="Guide" className="sm:hidden" />
+      <div ref={box} role="region" aria-label="Getting started" tabIndex={0}
+        className="h-[260px] overflow-y-auto overscroll-contain rounded-[var(--r-md)] border border-[var(--line)] px-4 pb-[180px] outline-none focus-visible:ring-2 focus-visible:ring-[var(--accent)]">
+        {NAV_SPY_DOC.map(s => part(s))}
+      </div>
+    </div>
+  )
+}
+
 export function NavigationSection() {
   const [page, setPage] = useState(5)
   return (
@@ -301,6 +338,9 @@ export function NavigationSection() {
       </Spec>
       <Spec title="Wizard stepper" desc="Progress line fills between steps">
         <Wizard steps={[{ label: 'Account', description: 'Create your account.' }, { label: 'Details', description: 'Tell us about your team.' }, { label: 'Done', description: 'All set. Welcome aboard.' }]} />
+      </Spec>
+      <Spec title="Scroll spy" desc="An on-this-page list that follows the scroll position. Click a link to scroll there; a section's sub-items open while it is current. On phones it is a row of chips." span={2}>
+        <NavScrollSpyDemo />
       </Spec>
       <Spec title="Breadcrumbs and pagination" desc="Depth and long lists">
         <Breadcrumbs items={[{ label: 'Home', href: '#navigation' }, { label: 'Projects', href: '#navigation' }, { label: 'Website redesign' }]} />

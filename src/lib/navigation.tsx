@@ -1,4 +1,4 @@
-import { createContext, useCallback, useContext, useEffect, useId, useLayoutEffect, useMemo, useRef, useState, type ButtonHTMLAttributes, type CSSProperties, type HTMLAttributes, type ReactNode, type Ref, type KeyboardEvent as RKeyboardEvent, type MouseEvent as ReactMouseEvent } from 'react'
+import { createContext, useCallback, useContext, useEffect, useId, useLayoutEffect, useMemo, useRef, useState, type ButtonHTMLAttributes, type CSSProperties, type HTMLAttributes, type ReactNode, type Ref, type RefObject, type KeyboardEvent as RKeyboardEvent, type MouseEvent as ReactMouseEvent } from 'react'
 import { type AsChildProps, Avatar, Button, type ButtonProps, Icon, IconButton, type IconName, ScrollEdges, StatusIcon, cn, prefersReducedMotion, safeUrl, spring, useCoarsePointer, useComposedRefs, useControllable, useHotkey, useOutside, useScrollEdges, fmt, useResizeObserver, useRequiredContext, PartButton, focusStep, focusables, idPart, useChanged, useLatest } from './core'
 import { ActiveIndicator, Presence, Swap, play } from './motion'
 import { Tooltip } from './overlay'
@@ -755,3 +755,97 @@ export function ToolbarSeparator({ className }: { className?: string }) {
 export const Toolbar = Object.assign(ToolbarRoot, {
   Root: ToolbarRoot, Button: ToolbarButton, Link: ToolbarLink, Separator: ToolbarSeparator, Toggle, ToggleGroup: ToggleGroupRoot, ToggleItem: ToggleGroupItem,
 })
+
+/**
+ * Scroll spy: the id (one of `ids`, found with getElementById) of the element crossing the band that `rootMargin`
+ * leaves of the viewport (default 40% from the top to 55% from the bottom); when several do (nested sections), the
+ * last in `ids`. One IntersectionObserver, no scroll listeners. `root` watches a scrolling element instead of the page.
+ * Starts at `initial` (default `ids[0]`) and keeps the last match while the band is between elements. The elements are
+ * looked up when `ids` changes, so render them first; `enabled: false` stops watching.
+ */
+export function useScrollSpy(ids: readonly string[], { root, rootMargin = '-40% 0px -55% 0px', initial, enabled = true }:
+  { root?: RefObject<Element | null>; rootMargin?: string; initial?: string; enabled?: boolean } = {}): string | undefined {
+  const [active, setActive] = useState(initial ?? ids[0])
+  const key = ids.join('\u0000')
+  useEffect(() => {
+    if (!enabled || !key || typeof IntersectionObserver === 'undefined') return
+    const list = key.split('\u0000'), inBand = new Set<string>()
+    const io = new IntersectionObserver(es => {
+      for (const e of es) { if (e.isIntersecting) inBand.add(e.target.id); else inBand.delete(e.target.id) }
+      for (let i = list.length - 1; i >= 0; i--) if (inBand.has(list[i])) { setActive(list[i]); return }
+    }, { root: root?.current ?? null, rootMargin })
+    for (const id of list) { const el = document.getElementById(id); if (el) io.observe(el) }
+    return () => io.disconnect()
+  }, [key, root, rootMargin, enabled])
+  return active
+}
+
+/** A ScrollSpyNav link: the id of the element it scrolls to, its label, and optional sub-items shown while it is current. */
+export type ScrollSpyItem = { id: string; label: ReactNode; items?: readonly ScrollSpyItem[]; /** drawn in the faint text colour (e.g. nothing in it matches a filter) */ muted?: boolean }
+
+const SPY_LINK = {
+  list: 'relative flex h-8 items-center rounded-[var(--r-md)] px-2.5 text-[13px] no-underline outline-none focus-visible:ring-2 focus-visible:ring-[var(--accent)]',
+  chips: 'relative flex h-8 flex-none items-center rounded-[var(--r-md)] border border-[var(--line)] px-2.5 text-[13px] whitespace-nowrap no-underline outline-none focus-visible:ring-2 focus-visible:ring-[var(--accent)]',
+} as const
+
+/**
+ * "On this page" navigation that follows the scroll position (useScrollSpy over every item and sub-item). Each link is
+ * a real `#id` anchor, so it works without script and a modified click opens it as usual; a plain click scrolls the
+ * target into view (smoothly unless reduced motion is on) and calls `onNavigate`. A group's sub-items show while it or
+ * one of them is current. `value` sets the current id from outside instead of spying. `variant="chips"` is a row of
+ * chips that scrolls sideways and keeps the current one centred; `start` goes before the chips (a filter button).
+ * Renders a <nav> named by `aria-label` (default "On this page"), or a <div> with `as="div"` inside your own landmark.
+ */
+export function ScrollSpyNav({ items, value, onNavigate, variant = 'list', root, rootMargin, as: Tag = 'nav', start, className, 'aria-label': label = 'On this page' }:
+  { items: readonly ScrollSpyItem[]; value?: string; onNavigate?: (id: string) => void; variant?: 'list' | 'chips'
+    /** the scrolling element the sections live in (default the page) */ root?: RefObject<Element | null>
+    /** the band an element must cross to be current (useScrollSpy's, default '-40% 0px -55% 0px') */ rootMargin?: string
+    as?: 'nav' | 'div'; start?: ReactNode; className?: string; 'aria-label'?: string }) {
+  const ids = useMemo(() => items.flatMap(it => [it.id, ...(it.items ?? []).map(s => s.id)]), [items])
+  const spied = useScrollSpy(ids, { root, rootMargin, enabled: value === undefined })
+  const chips = variant === 'chips', current = value ?? spied
+  // chips show no sub-items: a current sub-item lights its group's chip
+  const active = chips ? items.find(it => it.id === current || it.items?.some(s => s.id === current))?.id ?? current : current
+  const group = useId(), row = useRef<HTMLDivElement>(null)
+  useEffect(() => {
+    if (!chips) return
+    // in the next frame, with the layout the browser makes anyway (measuring right after a commit forces one)
+    const raf = requestAnimationFrame(() => {
+      const box = row.current, chip = box?.querySelector<HTMLElement>(`[data-spy="${CSS.escape(active ?? '')}"]`)
+      if (!box || !chip || !box.offsetParent) return
+      box.scrollTo({ left: chip.offsetLeft - box.clientWidth / 2 + chip.offsetWidth / 2, behavior: prefersReducedMotion() ? 'auto' : 'smooth' })
+    })
+    return () => cancelAnimationFrame(raf)
+  }, [active, chips])
+  const go = (e: ReactMouseEvent<HTMLAnchorElement>, id: string) => {
+    if (e.button !== 0 || e.metaKey || e.ctrlKey || e.shiftKey || e.altKey) return
+    e.preventDefault()
+    const el = document.getElementById(id), box = root?.current, behavior = prefersReducedMotion() ? 'auto' : 'smooth'
+    // inside a scroller only the scroller moves (scrollIntoView would scroll the page to it too)
+    if (el && box) box.scrollTo({ top: box.scrollTop + el.getBoundingClientRect().top - box.getBoundingClientRect().top, behavior })
+    else el?.scrollIntoView({ behavior })
+    onNavigate?.(id)
+  }
+  const link = (it: ScrollSpyItem, sub = false) => {
+    const on = it.id === active
+    return (
+      <a key={it.id} href={`#${it.id}`} data-spy={it.id} aria-current={on ? 'location' : undefined} onClick={e => go(e, it.id)}
+        className={cn(SPY_LINK[variant], sub && 'ms-3 !h-7 border-s border-[var(--line)] !rounded-s-none text-xs',
+          on ? 'font-medium text-[var(--fg)]' : it.muted ? 'text-[var(--fg3)]' : 'text-[var(--fg2)]', !on && !chips && 'hover:bg-[var(--muted)] hover:text-[var(--fg)]')}>
+        {on && <ActiveIndicator group={group} className={chips ? 'rounded-[calc(var(--r-md)-2px)] bg-[var(--muted)]' : 'rounded-[var(--r-md)] bg-[var(--muted)]'} />}
+        <span className="relative min-w-0 truncate">{it.label}</span>
+      </a>
+    )
+  }
+  return (
+    <Tag ref={row} aria-label={label} className={cn(chips ? 'flex gap-1.5 overflow-x-auto [scrollbar-width:none]' : 'flex flex-col gap-0.5', className)}>
+      {chips && start}
+      {items.map(it => {
+        const subs = chips ? undefined : it.items
+        return subs?.length && (it.id === active || subs.some(s => s.id === active))
+          ? <div key={it.id} className="flex flex-col gap-0.5">{link(it)}<div className="ui-in flex flex-col [--ui-y:-4px]">{subs.map(s => link(s, true))}</div></div>
+          : link(it)
+      })}
+    </Tag>
+  )
+}

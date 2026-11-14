@@ -1,4 +1,4 @@
-import { Children, Fragment, createContext, isValidElement, useCallback, useContext, useEffect, useId, useLayoutEffect, useRef, useState, type KeyboardEvent as RKeyboardEvent, type ReactNode } from 'react'
+import { Children, Fragment, createContext, isValidElement, useCallback, useContext, useEffect, useId, useLayoutEffect, useMemo, useRef, useState, type KeyboardEvent as RKeyboardEvent, type ReactNode } from 'react'
 import { AnimatePresence, motion } from './motionkit'
 import { Badge, Button, Chip, Icon, IconButton, RUN_STATUS, Spinner, TOUCH, cn, inputClass, menuItemClass, safeColor, sleep, spring, surface, useCoarsePointer, useControllable, useFlash, useLatest, useListbox, useMediaQuery, useOutside, useRoving, type IconName, type Tone, plural, fmt, useLive, useReducedMotion } from './core'
 import { Collapse, CopyButton, TypingDots, confetti, EmptyState } from './feedback'
@@ -9,6 +9,7 @@ import { FloatingPanel, MenuItem, MenuLabel } from './overlay'
 import { AttachmentChip, Citation, PromptInput, SendButton, SourceList, attachmentRejectNote, sourceDomain, ShimmerText, StreamingText, ToolCall, useAttachments, type Attachment } from './ai'
 import { JsonViewer } from './data'
 import { useVirtual } from './virtual'
+import { LaneGraph, type LaneNode, type LaneRow } from './lanes'
 import { Markdown, type MarkdownCodeRenderer } from './markdown'
 import { markdownCodeBlock } from './code'
 import { aiMessageText, valueText, type AiChat, type AiDataPart, type AiFilePart, type AiMessage, type AiSourcePart, type AiToolPart, type AiToolState } from './aistream'
@@ -1109,6 +1110,111 @@ export function AgentComposer({ chat: live, onSend, onApprovalRequest, onError, 
           className="fixed z-[60] cursor-pointer rounded-full border-0 bg-[var(--primary)] px-3 py-1 text-xs font-medium text-[var(--on-primary)] shadow-[var(--shadow)] [@media(pointer:coarse)]:min-h-10 [@media(pointer:coarse)]:px-4 [@media(pointer:coarse)]:text-[13px]">{'Add to chat'}</motion.button>
       )}</AnimatePresence>
 
+    </div>
+  )
+}
+
+/**
+ * A chat message in a tree: an AiMessage plus where it hangs. `parentId` is the message it answers or follows (none for
+ * the first); `parents` instead, when it follows more than one (a message combining two branches). An edited question
+ * is a sibling of the original (same parent); so is a regenerated answer.
+ */
+export type ChatTreeMessage = AiMessage & { parentId?: string | null; parents?: readonly string[] }
+/** A chat message as a lane node: `siblings` are the alternatives at its fork (itself included, oldest first). */
+export type ChatBranchNode = LaneNode & { message: ChatTreeMessage; siblings: readonly string[] }
+
+const chatParentsOf = (m: ChatTreeMessage) => m.parents ?? (m.parentId ? [m.parentId] : [])
+
+/**
+ * Lane nodes for a chat tree (messages oldest first), the active thread (every ancestor of `leaf`, both sides of a
+ * combining message) and each message's children. Each alternative after the first at a fork starts a branch colour.
+ */
+export function chatBranchGraph(messages: readonly ChatTreeMessage[], leaf: string | null) {
+  const kids = new Map<string, string[]>()
+  for (const m of messages) for (const p of chatParentsOf(m)) kids.set(p, [...(kids.get(p) ?? []), m.id])
+  const byId = new Map(messages.map(m => [m.id, m]))
+  const nodes: ChatBranchNode[] = messages.map(m => {
+    const ps = chatParentsOf(m), siblings = ps.length === 1 ? (kids.get(ps[0]) ?? [m.id]).filter(id => byId.get(id)?.role === m.role) : [m.id]
+    return { id: m.id, parents: ps, group: siblings.length > 1 && siblings[0] !== m.id ? `branch:${m.id}` : undefined, message: m, siblings }
+  })
+  const active = new Set<string>()
+  const stack = leaf && byId.has(leaf) ? [leaf] : []
+  while (stack.length) { const id = stack.pop()!; if (active.has(id)) continue; active.add(id); stack.push(...chatParentsOf(byId.get(id)!).filter(p => byId.has(p))) }
+  return { nodes, active, children: kids }
+}
+
+/** The newest leaf below `id` (following the last child each time): where "continue this branch" picks up. */
+export function chatLeafOf(id: string, children: ReadonlyMap<string, readonly string[]>): string {
+  let at = id
+  for (let guard = 0; guard < 10_000; guard++) { const k = children.get(at); if (!k?.length) return at; at = k[k.length - 1] }
+  return at
+}
+
+/** A new branch: `message` as a sibling of `of` (an edited question or a regenerated answer), appended to the list. */
+export function chatFork(messages: readonly ChatTreeMessage[], of: string, message: Omit<ChatTreeMessage, 'parentId' | 'parents'>): ChatTreeMessage[] {
+  const base = messages.find(m => m.id === of)
+  if (!base) return [...messages]
+  return [...messages, { ...message, ...(base.parents ? { parents: base.parents } : { parentId: base.parentId ?? null }) }]
+}
+
+/**
+ * Branching chat history as lanes (LaneGraph): every message is a row, forks fan out into lanes of their own colour, a
+ * message that follows two branches merges them, and the active thread (the ancestors of `leaf`) stays in the left lane
+ * at full strength. ‹ n / m › at a fork, a click or Enter on a message continues that branch at its newest leaf
+ * (`onLeafChange`); arrow keys move along the tree. `onRegenerate` and `onEdit` add "Regenerate (new branch)" to
+ * answers and "Edit (new branch)" to questions: the host adds the new message (chatFork) and sets `leaf` to it. The
+ * "Collapse other branches" switch shrinks messages off the thread to one line. Rows are virtualised.
+ */
+export function ChatBranches({ messages, leaf: leafProp, defaultLeaf, onLeafChange, onRegenerate, onEdit, height = 560, defaultCollapsed = false, renderers, className, 'aria-label': label = 'Conversation branches' }:
+  { messages: readonly ChatTreeMessage[]
+    /** the last message of the thread shown (default: the last message) */ leaf?: string; defaultLeaf?: string; onLeafChange?: (id: string) => void
+    onRegenerate?: (message: ChatTreeMessage) => void; onEdit?: (message: ChatTreeMessage) => void
+    height?: number; defaultCollapsed?: boolean; renderers?: AiRenderers; className?: string; 'aria-label'?: string }) {
+  const [leaf, setLeaf] = useControllable(leafProp, defaultLeaf ?? messages[messages.length - 1]?.id ?? '', onLeafChange)
+  const [collapse, setCollapse] = useState(defaultCollapsed)
+  const { nodes, active, children } = useMemo(() => chatBranchGraph(messages, leaf), [messages, leaf])
+  const forks = useMemo(() => [...children.values()].filter(k => k.length > 1).length, [children])
+  const pinStart = useCallback(() => leaf, [leaf])
+  const goBranch = useCallback((id: string) => setLeaf(chatLeafOf(id, children)), [children, setLeaf])
+  const renderRow = useCallback((row: LaneRow<ChatBranchNode>) => {
+    const m = row.node.message, on = active.has(m.id), sibs = row.node.siblings, at = sibs.indexOf(m.id)
+    if (collapse && !on) return (
+      <div className="flex h-full min-w-0 items-center gap-2 pe-3 text-xs text-[var(--fg3)]">
+        <span className="flex-none font-medium">{m.role === 'user' ? 'You' : 'Assistant'}</span>
+        <span className="min-w-0 truncate">{aiMessageText(m).split('\n')[0] || m.parts.find(p => p.type === 'tool')?.name}</span>
+      </div>
+    )
+    const switcher = sibs.length > 1 && (
+      <span className="flex items-center gap-0.5 text-[11px] text-[var(--fg3)]">
+        <IconButton size="icon-xs" icon={<Icon name="chevronLeft" size={13} />} label={'Previous branch'} disabled={at <= 0} onClick={e => { e.stopPropagation(); goBranch(sibs[at - 1]) }} />
+        <span className="ui-num">{`${at + 1} / ${sibs.length}`}</span>
+        <IconButton size="icon-xs" icon={<Icon name="chevronRight" size={13} />} label={'Next branch'} disabled={at >= sibs.length - 1} onClick={e => { e.stopPropagation(); goBranch(sibs[at + 1]) }} />
+      </span>
+    )
+    const merge = row.parents.length > 1 && <Badge size="sm" tone="accent" className="me-auto">{`Combines ${row.parents.length} branches`}</Badge>
+    return (
+      <div className={cn('flex min-w-0 flex-col gap-1.5 py-2 pe-3', !on && 'opacity-60')}>
+        <Message message={m} renderers={renderers} actions={
+          <MessageActions text={() => aiMessageText(m)} feedback={false} onRetry={onRegenerate && (() => onRegenerate(m))} retryLabel={'Regenerate (new branch)'}>{merge}{switcher}</MessageActions>} />
+        {m.role === 'user' && (merge || switcher || onEdit) && (
+          <span className="flex items-center justify-end gap-1">
+            {merge}
+            {switcher}
+            {onEdit && <IconButton size="icon-xs" icon="edit" label={'Edit (new branch)'} onClick={e => { e.stopPropagation(); onEdit(m) }} />}
+          </span>
+        )}
+      </div>
+    )
+  }, [active, collapse, goBranch, renderers, onRegenerate, onEdit])
+  return (
+    <div className={cn('flex min-w-0 flex-col gap-2', className)}>
+      <div className="flex flex-wrap items-center gap-3 text-xs text-[var(--fg2)]">
+        <Switch label={<span className="text-xs">{'Collapse other branches'}</span>} checked={collapse} onChange={setCollapse} />
+        <span>{`${plural(nodes.length, 'message')} · ${plural(forks, 'fork')} · click a message to continue its branch`}</span>
+      </div>
+      <LaneGraph nodes={nodes} order="input" direction="up" pin={['active']} pinStart={pinStart} rowHeight="auto" estimateRowHeight={110} nodeY={18} anchor="end" height={height}
+        aria-label={label} selected={leaf} onActivate={row => goBranch(row.node.id)} emphasis={row => row.node.id === leaf}
+        renderRow={renderRow} className="rounded-[var(--r-md)] border border-[var(--line)]" />
     </div>
   )
 }

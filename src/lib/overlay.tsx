@@ -1,6 +1,6 @@
 import { Fragment, createContext, isValidElement, useCallback, useContext, useEffect, useId, useLayoutEffect, useMemo, useRef, useState, type ButtonHTMLAttributes, type CSSProperties, type HTMLAttributes, type ReactNode, type Ref, type RefObject, type KeyboardEvent as RKeyboardEvent, type MouseEvent as ReactMouseEvent, type PointerEvent as ReactPointerEvent } from 'react'
 import { createPortal } from 'react-dom'
-import { type AsChildProps, Button, type ButtonProps, Icon, IconButton, type IconName, Kbd, Slot, cn, isTouch, menuItemClass, prefersReducedMotion, presenceProps, composeRefs, spring, useControllable, usePresence, useFocusTrap, useLongPress, useMediaQuery, useOutside, useRoving, AnimatedNumber, Spinner, TOUCH, uiShared, surface, focusStep, useRequiredContext, PartButton, FOCUSABLE, Z, haptic, isEditableTarget, plural, useCoarsePointer, useLatest, useTypeahead, typeaheadIndex } from './core'
+import { type AsChildProps, Button, type ButtonProps, Icon, IconButton, type IconName, Kbd, Slot, cn, isTouch, menuItemClass, prefersReducedMotion, presenceProps, composeRefs, spring, useControllable, useGeneration, usePresence, useFocusTrap, useLongPress, useMediaQuery, useOutside, useRoving, AnimatedNumber, Spinner, TOUCH, uiShared, surface, focusStep, useRequiredContext, PartButton, FOCUSABLE, Z, haptic, isEditableTarget, plural, useCoarsePointer, useLatest, useTypeahead, typeaheadIndex } from './core'
 import { EmptyState } from './feedback'
 import { ActiveIndicator, Presence, PresenceList, Swap, play, shake, useSwipe } from './motion'
 import { useVirtual, virtualSetAria } from './virtual'
@@ -1329,20 +1329,21 @@ export function AlertDialogContent({ className, children, onCancel, 'aria-label'
   const [pending, setPending] = useState(false)
   const [err, setErr] = useState<string | null>(null)
   const panel = useRef<HTMLDivElement>(null)
-  const alive = useRef(true)
-  useEffect(() => { alive.current = true; return () => { alive.current = false } }, [])
-  useEffect(() => { if (open) { setErr(null); setPending(false) } }, [open])
+  const gen = useGeneration()
+  // closed and reopened from outside while an action was pending: that action's late result belongs to the old opening
+  useEffect(() => { gen.invalidate(); if (open) { setErr(null); setPending(false) } }, [open, gen])
   const cancel = () => { if (pending) return; onCancel?.(); setOpen(false) }
   const confirm = async (fn: () => void | Promise<unknown>) => {
     if (pending) return
     setErr(null)
+    const current = gen.next()
     try {
       const r = fn()
       if (r && typeof (r as Promise<unknown>).then === 'function') { setPending(true); panel.current?.focus({ preventScroll: true }); await r } // the buttons disable while it waits: keep focus in the dialog
-      if (!alive.current) return
+      if (!current()) return
       setPending(false); setOpen(false)
     } catch (e) {
-      if (!alive.current) return
+      if (!current()) return
       setPending(false); setErr((e instanceof Error ? e.message : String(e ?? '')) || 'Something went wrong. Try again.')
     }
   }

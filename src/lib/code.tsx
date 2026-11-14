@@ -1,6 +1,6 @@
 import { memo, useCallback, useEffect, useId, useMemo, useRef, useState, type CSSProperties, type ReactNode, type Ref } from 'react'
 import { motion } from './motionkit'
-import { Button, Icon, IconButton, ScrollEdges, cn, sleep, spring, useControllable, useMediaQuery, useRoving, useScrollEdges, useSize, useWidth, useResizeObserver, useStableArray, useReducedMotion } from './core'
+import { Button, Icon, IconButton, ScrollEdges, cn, sleep, spring, useControllable, useMediaQuery, useRandom, useRoving, useScrollEdges, useSize, useWidth, useResizeObserver, useStableArray, useReducedMotion } from './core'
 import { SegmentedControl } from './fields'
 import { CopyButton } from './feedback'
 import { ActiveIndicator, useViewport } from './motion'
@@ -501,10 +501,13 @@ const TERM_CURSOR = 'inline-block h-3.5 w-[7px] bg-[var(--fg)] align-[-2px] anim
  * blinking cursor (paused off screen, steady under reduced motion). Starts when scrolled into view; the header button
  * replays it. The box reserves the height of the finished session up front, so typing never pushes the page.
  */
-export function Terminal({ lines, title = 'zsh', className }: { lines: TerminalLine[]; title?: string; className?: string }) {
+export function Terminal({ lines, title = 'zsh', seed, className }: { lines: TerminalLine[]; title?: string
+  /** makes the typing rhythm repeatable (default Math.random) */
+  seed?: number; className?: string }) {
   const { ref: box, seen: inView, visible: onScreen } = useViewport<HTMLDivElement>(null, { amount: 0.5 })
   const cursor = cn(TERM_CURSOR, !onScreen && '[animation-play-state:paused]')
   const reduce = useReducedMotion()
+  const rand = useRandom(seed)
   const [shown, setShown] = useState<TerminalShown[]>([])
   const [done, setDone] = useState(false)
   const gen = useRef(0)
@@ -519,7 +522,7 @@ export function Terminal({ lines, title = 'zsh', className }: { lines: TerminalL
           if (!alive()) return
           const text = l.cmd.slice(0, i)
           setShown(s => s.map((x, k) => k === s.length - 1 ? { ...x, cmd: text } : x))
-          if (!reduce) await sleep(28 + Math.random() * 40)
+          if (!reduce) await sleep(28 + rand() * 40)
         }
         if (!reduce) await sleep(350)
         if (!alive()) return

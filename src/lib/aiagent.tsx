@@ -1,13 +1,16 @@
-import { memo, useEffect, useLayoutEffect, useMemo, useRef, useState, type ReactNode } from 'react'
+import { memo, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type ReactNode } from 'react'
 import { AnimatePresence, motion } from './motionkit'
-import { Badge, Button, Chip, FONT_CSS, Icon, IconButton, RUN_STATUS, Spinner, TOUCH, cn, ScrollEdges, onColorLabel, spring, surface, themeCSS, uid, useLatest, useMediaQuery, useRoving, useScrollEdges, useTheme, plural, fmt, svgN, svgTranslate, useReducedMotion } from './core'
+import { Badge, Button, Chip, FONT_CSS, Icon, IconButton, RUN_STATUS, Spinner, StatusIcon, TOUCH, cn, ScrollEdges, onColorLabel, spring, surface, themeCSS, uid, useLatest, useControllable, useMediaQuery, useRoving, useScrollEdges, useTheme, plural, fmt, svgN, svgTranslate, useReducedMotion, type StatusIconStatus } from './core'
 import { CopyButton, TypingDots, EmptyState } from './feedback'
 import { SegmentedControl } from './fields'
 import { SendButton, StreamingText } from './ai'
 import { lcsDiff } from './code'
 import type { WorkflowMachine } from './statechart'
 import { useFrameLoop, useViewport } from './motion'
-import { nearestAgent, runLatestMs, runTotals, type AgentRun, type AgentSpan } from './agentrun'
+import { nearestAgent, runLaneNodes, runLatestMs, runTotals, type AgentRun, type AgentRunLaneNode, type AgentSpan, type AgentSpanStatus } from './agentrun'
+import { TabsContent, TabsList, TabsRoot, TabsTrigger } from './navigation'
+import { TraceWaterfall } from './trace'
+import { LaneGraph, type LaneRow } from './lanes'
 
 /* Tiny HTML/CSS highlighter for the canvas (code's highlightCode has no HTML/CSS mode yet) ─ */
 
@@ -874,5 +877,58 @@ function AtRunMap({ run, stations, className }: { run: AgentRun; stations?: Tran
         </div>
       </AtTraceFrame>
     </div>
+  )
+}
+
+const AR_LANE_STATUS: Record<AgentSpanStatus, StatusIconStatus> = { running: 'active', ok: 'done', error: 'failed', cancelled: 'pending' }
+/**
+ * A run's steps as a lane graph (runLaneNodes into LaneGraph): each step links to the steps it waited for, takes its
+ * agent's lane colour, and shows its status, model or kind, error, tokens and time. A running step is emphasised.
+ */
+export function AgentRunLanes({ run, height = 420, className }: { run: AgentRun; height?: number; className?: string }) {
+  const nodes = useMemo(() => runLaneNodes(run), [run])
+  const renderRow = useCallback((row: LaneRow<AgentRunLaneNode>) => {
+    const s = row.node.span, tok = s.tokens ? s.tokens.input + s.tokens.output : 0
+    return (
+      <div className="flex h-full min-w-0 items-center gap-2 pe-3 text-[13px]">
+        <StatusIcon status={AR_LANE_STATUS[s.status]} size={16} className="flex-none" />
+        <span className={cn('min-w-[9ch] truncate', s.status === 'error' ? 'text-[var(--bad)]' : 'text-[var(--fg)]')}>{s.name}</span>
+        {row.parents.length > 1 && <Badge size="sm" className="flex-none max-sm:hidden">{`waits for ${row.parents.length}`}</Badge>}
+        <Badge size="sm" tone={s.kind === 'llm' ? 'accent' : s.kind === 'human' ? 'warn' : 'neutral'} className="flex-none font-[family-name:var(--mono)] max-sm:hidden">{s.model ?? s.kind}</Badge>
+        {s.status === 'error' && s.error && <Badge size="sm" tone="bad" className="min-w-0 truncate"><span className="truncate">{s.error}</span></Badge>}
+        <span className="flex-1" />
+        {tok > 0 && <span className="ui-num flex-none text-xs text-[var(--fg3)] max-sm:hidden">{`${fmt.compact(tok)} tok`}</span>}
+        <span className="ui-num flex-none text-xs text-[var(--fg3)]">{s.endMs != null ? `${fmt.number((s.endMs - s.startMs) / 1000, { minimumFractionDigits: 1, maximumFractionDigits: 1 })} s` : 'running'}</span>
+      </div>
+    )
+  }, [])
+  return <LaneGraph nodes={nodes} order="input" direction="up" height={height} aria-label={`${run.name} steps`} renderRow={renderRow} emphasis={row => row.node.span.status === 'running'}
+    empty={<span className="p-3 text-xs text-[var(--fg3)]">{'No steps yet.'}</span>} className={cn('rounded-[var(--r-md)] border border-[var(--line)]', className)} />
+}
+
+/** The views AgentRunView switches between. */
+export type AgentRunViewMode = 'waterfall' | 'transit' | 'lanes'
+const AR_VIEW_LABEL: Record<AgentRunViewMode, string> = { waterfall: 'Waterfall', transit: 'Transit map', lanes: 'Lanes' }
+const AR_VIEW_MODES: readonly AgentRunViewMode[] = ['waterfall', 'transit', 'lanes']
+
+/**
+ * One agent run (finished or live, e.g. from useAgentRun) drawn three ways behind tabs: the timeline (TraceWaterfall),
+ * the transit map (AgentTransitMap, with `stations`) and the step graph (AgentRunLanes, `lanesHeight` tall). Every view
+ * reads the same `run`, so a live run grows in whichever is open. `mode` / `defaultMode` / `onModeChange` pick the
+ * view and `modes` limits the tabs; only the open view is mounted. The tabs are one Tab stop (← / →, Home / End).
+ */
+export function AgentRunView({ run, mode, defaultMode = 'waterfall', onModeChange, modes = AR_VIEW_MODES, subtitle, stations, lanesHeight = 440, className, 'aria-label': label = 'View' }:
+  { run: AgentRun; mode?: AgentRunViewMode; defaultMode?: AgentRunViewMode; onModeChange?: (mode: AgentRunViewMode) => void; modes?: readonly AgentRunViewMode[]
+    /** the waterfall's subtitle (e.g. where the run came from) */ subtitle?: ReactNode
+    stations?: TransitRunStations; lanesHeight?: number; className?: string; 'aria-label'?: string }) {
+  const [cur, setCur] = useControllable<AgentRunViewMode>(mode, defaultMode, onModeChange)
+  const pick = (v: string) => { const m = modes.find(x => x === v); if (m) setCur(m) }
+  return (
+    <TabsRoot value={cur} onValueChange={pick} className={className}>
+      <TabsList aria-label={label}>{modes.map(m => <TabsTrigger key={m} value={m}>{AR_VIEW_LABEL[m]}</TabsTrigger>)}</TabsList>
+      <TabsContent value="waterfall"><TraceWaterfall run={run} subtitle={subtitle} /></TabsContent>
+      <TabsContent value="transit"><AgentTransitMap run={run} stations={stations} /></TabsContent>
+      <TabsContent value="lanes"><AgentRunLanes run={run} height={lanesHeight} /></TabsContent>
+    </TabsRoot>
   )
 }

@@ -1,6 +1,6 @@
 /** State and DOM hooks: controllable state, outside clicks, presence and in-view (for the CSS animations), an active index, flashes, a live region, sizes, media queries, touch, pointer drag, long press, hotkeys, focus trap, roving focus, scroll edges, clocks, debouncing, object URLs, canvas sizing. Part of @lyndon/ui/core. */
 import { type Context, type CSSProperties, type FocusEvent as ReactFocusEvent, type ReactNode, type PointerEvent as ReactPointerEvent, type RefObject, type KeyboardEvent as RKeyboardEvent, useCallback, useEffect, useContext, useId, useLayoutEffect, useMemo, useRef, useState, useSyncExternalStore } from 'react'
-import { clamp, focusables } from './helpers'
+import { clamp, focusables, seededRandom } from './helpers'
 import { uiShared } from './shared'
 
 /** Controlled-or-uncontrolled state, the pattern every input here uses: `[value, set, reset]` (reset returns to the latest `defaultValue`, e.g. on a form reset). */
@@ -598,6 +598,25 @@ export function useLatest<T>(value: T): { readonly current: T } {
   const ref = useRef(value)
   useLayoutEffect(() => { ref.current = value })
   return ref
+}
+
+/** Math.random, or the repeatable seededRandom(seed) stream when `seed` is given (a new stream when it changes). */
+export function useRandom(seed?: number): () => number {
+  return useMemo(() => (seed == null ? Math.random : seededRandom(seed)), [seed])
+}
+
+/**
+ * Generation tokens for host callbacks that can't be aborted (save, vote and approval promises): `const current =
+ * gen.next()` before the call, `if (!current()) return` after it. A later `next()`, `invalidate()` or unmount makes the
+ * earlier call stale, so its late result is dropped.
+ */
+export function useGeneration() {
+  const n = useRef(0)
+  useEffect(() => () => { n.current++ }, [])
+  return useMemo(() => ({
+    next: () => { const g = ++n.current; return () => g === n.current },
+    invalidate: () => { n.current++ },
+  }), [])
 }
 
 /**

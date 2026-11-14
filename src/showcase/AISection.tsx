@@ -1,18 +1,17 @@
 import { useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
 import { Badge, sleep, useToast, useViewport, fmt } from '../lib'
 import { PromptInput, AgentPlan, SourceList, Citation, sourceDomain, ConfidenceField, GhostTextInput, ModelComparison, PermissionRequest, type Source, SourcesPanel, SuggestedEdit, ThinkingSteps, VoiceInput, type StepStatus } from '../lib/ai'
-import { AICanvas, AgentTransitMap } from '../lib/aiagent'
+import { AICanvas, AgentRunView, type AgentRunViewMode } from '../lib/aiagent'
 import { AI_RICH_RENDERERS, AgentComposer, Conversation, Message, MessageActions, Suggestions, AssistantChat, ChatCard, ChatChecklist, type ChatScript, type ComposerModel, type ComposerAction, type ComposerReply, type ComposerSample, type ComposerSendMeta, type Connector, type SlashCommand, type WorkspaceItem } from '../lib/aichat'
 import { type AiChunk, type AiMessage, type AiToolPart, aiMessageText, useAiChat } from '../lib/aistream'
 import { Chart } from '../lib/charts'
 import { CodeBlock } from '../lib/code'
 import { AI_DEMO_RISKY, ChatApproval } from '../examples/ai-demo'
-import { AGENT_WORKFLOWS, AGENT_WORKFLOW_ORDER, AGENT_RUN_FIXTURES, AgentRunLanes, type AgentRunFixture } from '../examples'
+import { AGENT_WORKFLOWS, AGENT_WORKFLOW_ORDER, AGENT_RUN_FIXTURES, type AgentRunFixture } from '../examples'
 import { canvasDemoProps } from '../examples/canvas-demo'
 import { TransitSimMap } from '../examples/transit-sim'
-import { Button, Icon, SegmentedControl, TabsContent, TabsList, TabsRoot, TabsTrigger } from '../lib'
+import { Button, Icon, SegmentedControl } from '../lib'
 import { replayRun, useAgentRun, type AgentRunSource } from '../lib/agentrun'
-import { TraceWaterfall } from '../lib/trace'
 import { Section, Spec, SpecAction } from './kit'
 
 export type Invoice = { id: string; customer: string; status: string; amount: number }
@@ -308,7 +307,7 @@ function CanvasDemo() {
 /** One run model, three recorded sources, three views; Replay as stream feeds the run back through useAgentRun. */
 function LiveAgentRunDemo() {
   const [srcKey, setSrcKey] = useState<AgentRunFixture['key']>('otel')
-  const [view, setView] = useState('waterfall')
+  const [view, setView] = useState<AgentRunViewMode>('waterfall')
   const [replay, setReplay] = useState(0)
   const fixture = AGENT_RUN_FIXTURES.find(f => f.key === srcKey) ?? AGENT_RUN_FIXTURES[0]
   const recorded = useMemo(() => fixture.run(), [fixture])
@@ -326,18 +325,9 @@ function LiveAgentRunDemo() {
         <span className="text-xs text-[var(--fg3)]" aria-live="polite">{streaming ? `Streaming at ${LIVE_RUN_SPEED}×…` : replay ? 'Replayed' : 'Recorded'}</span>
         <Button size="sm" onClick={() => setReplay(n => n + 1)}><Icon name="play" size={12} filled />Replay as stream</Button>
       </div>
-      <TabsRoot value={view} onValueChange={setView}>
-        <TabsList aria-label="View">
-          <TabsTrigger value="waterfall">Waterfall</TabsTrigger>
-          <TabsTrigger value="transit">Transit map</TabsTrigger>
-          <TabsTrigger value="lanes">Lanes</TabsTrigger>
-        </TabsList>
-        <div ref={panel.ref} style={{ minHeight: panel.minHeight }}>
-          <TabsContent value="waterfall"><TraceWaterfall run={shown} subtitle={fixture.label} /></TabsContent>
-          <TabsContent value="transit"><AgentTransitMap run={shown} /></TabsContent>
-          <TabsContent value="lanes"><AgentRunLanes run={shown} height={440} /></TabsContent>
-        </div>
-      </TabsRoot>
+      <div ref={panel.ref} style={{ minHeight: panel.minHeight }}>
+        <AgentRunView run={shown} mode={view} onModeChange={setView} subtitle={fixture.label} />
+      </div>
     </div>
   )
 }

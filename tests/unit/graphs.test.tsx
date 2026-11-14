@@ -5,8 +5,9 @@ import { act, fireEvent, render, screen, within } from '@testing-library/react'
 import { describe, expect, it } from 'vitest'
 import { codeMarkRanges } from '../../src/lib/code'
 import { layoutLanes } from '../../src/lib/lanes'
+import { chatBranchGraph, chatFork, chatLeafOf } from '../../src/lib/aichat'
 import {
-  AGENT_RUN_SAMPLE, AST_SAMPLE, AstGraphExample, CHAT_TREE_SAMPLE, ChatBranchesExample, DEPENDENCY_SAMPLE, agentRunNodes, astLaneNodes, astNodeAt, chatBranchGraph, chatFork, chatLeafOf, chatTreeHistory, dependencyNodes, parseAst,
+  AGENT_RUN_SAMPLE, AST_SAMPLE, AstGraphExample, CHAT_TREE_SAMPLE, ChatBranchesExample, DEPENDENCY_SAMPLE, agentRunNodes, astLaneNodes, astNodeAt, chatTreeHistory, dependencyNodes, parseAst,
   type AstNode,
 } from '../../src/examples/graphs'
 

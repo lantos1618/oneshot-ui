@@ -18,7 +18,7 @@ const FORMS_ADDRESSES: AddressRecord[] = ([
 function ProfileForm() {
   const toast = useToast()
   const f = useFormDraft({ name: 'Alex Lee', email: 'alex@northwind.io', role: 'Admin', tz: 'Europe/Zurich', bio: 'Design engineer. Calm interfaces, fast feedback.', notify: true })
-  const [bad, setBad] = useState(false), [shake, setShake] = useState(0), [saving, setSaving] = useState(false)
+  const [bad, setBad] = useState(false), [shake, setShake] = useState(0)
   const mailRef = useRef<HTMLDivElement>(null)
   const save = async () => {
     if (!/^\S+@\S+\.\S+$/.test(f.values.email)) {
@@ -26,8 +26,8 @@ function ProfileForm() {
       mailRef.current?.animate([0, -6, 6, -3, 3, 0].map(x => ({ transform: `translateX(${x}px)` })), { duration: 350 })
       return
     }
-    setBad(false); setSaving(true); await sleep(800); setSaving(false); f.commit()
-    toast({ title: 'Profile saved', description: 'Changes are live', tone: 'ok' })
+    setBad(false)
+    if (await f.save(() => sleep(800))) toast({ title: 'Profile saved', description: 'Changes are live', tone: 'ok' })
   }
   const reset = () => { f.reset(); setBad(false) }
   return (
@@ -42,7 +42,7 @@ function ProfileForm() {
         <Field label="Bio" htmlFor="sf-bio" className="sm:col-span-2"><Textarea id="sf-bio" rows={2} value={f.values.bio} onChange={e => f.set('bio', e.target.value)} /></Field>
       </div>
       <Switch label={<span className="text-[var(--fg2)]">Email notifications</span>} checked={f.values.notify} onChange={v => f.set('notify', v)} />
-      <UnsavedChangesBar open={f.dirty || saving} message={bad ? 'Check the email address' : 'Unsaved changes'} onReset={reset} onSave={save} saving={saving} shake={shake} />
+      <UnsavedChangesBar open={f.dirty || f.saving} message={bad ? 'Check the email address' : 'Unsaved changes'} onReset={reset} onSave={save} saving={f.saving} shake={shake} />
     </div>
   )
 }

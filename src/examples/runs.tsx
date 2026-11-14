@@ -1,9 +1,6 @@
-import { useCallback, useMemo } from 'react'
-import { Badge, StatusIcon, cn, fmt, type StatusIconStatus } from '../lib/core'
-import { LaneGraph, type LaneRow } from '../lib/lanes'
 import {
-  fromAiSdkResult, fromLangGraphEvents, fromOtel, runLaneNodes,
-  type AgentPricing, type AgentRun, type AgentSpanStatus, type AiSdkResultLike, type LangGraphStreamEvent, type OtlpTraceExport,
+  fromAiSdkResult, fromLangGraphEvents, fromOtel,
+  type AgentPricing, type AgentRun, type AiSdkResultLike, type LangGraphStreamEvent, type OtlpTraceExport,
 } from '../lib/agentrun'
 
 /* Agent runs from three real sources, recorded: an OTLP/JSON export of OpenTelemetry GenAI spans (a support agent that
@@ -247,28 +244,3 @@ export const AGENT_RUN_FIXTURES: AgentRunFixture[] = [
   { key: 'ai-sdk', label: 'AI SDK', run: () => fromAiSdkResult(AI_SDK_RESULT_SAMPLE, { name: 'Research assistant', pricing: AGENT_PRICING_SAMPLE, endedAt: AI_SDK_RESULT_ENDED }) },
   { key: 'langgraph', label: 'LangGraph', run: () => fromLangGraphEvents(LANGGRAPH_EVENTS_SAMPLE, { pricing: AGENT_PRICING_SAMPLE, agentNodes: ['planner', 'writer'], name: 'Trip planner' }) },
 ]
-
-/* ── A run as lanes ────────────────────────────────────────────────────────── */
-
-const RUN_LANE_STATUS: Record<AgentSpanStatus, StatusIconStatus> = { running: 'active', ok: 'done', error: 'failed', cancelled: 'pending' }
-/** A run's steps as a lane graph (runLaneNodes): what each step waited for, its agent's lane colour, status, model or tool, tokens and time. */
-export function AgentRunLanes({ run, height = 420, className }: { run: AgentRun; height?: number; className?: string }) {
-  const nodes = useMemo(() => runLaneNodes(run), [run])
-  const renderRow = useCallback((row: LaneRow<(typeof nodes)[number]>) => {
-    const s = row.node.span, tok = s.tokens ? s.tokens.input + s.tokens.output : 0
-    return (
-      <div className="flex h-full min-w-0 items-center gap-2 pe-3 text-[13px]">
-        <StatusIcon status={RUN_LANE_STATUS[s.status]} size={16} className="flex-none" />
-        <span className={cn('min-w-[9ch] truncate', s.status === 'error' ? 'text-[var(--bad)]' : 'text-[var(--fg)]')}>{s.name}</span>
-        {row.parents.length > 1 && <Badge size="sm" className="flex-none max-sm:hidden">waits for {row.parents.length}</Badge>}
-        <Badge size="sm" tone={s.kind === 'llm' ? 'accent' : s.kind === 'human' ? 'warn' : 'neutral'} className="flex-none font-[family-name:var(--mono)] max-sm:hidden">{s.model ?? s.kind}</Badge>
-        {s.status === 'error' && s.error && <Badge size="sm" tone="bad" className="min-w-0 truncate"><span className="truncate">{s.error}</span></Badge>}
-        <span className="flex-1" />
-        {tok > 0 && <span className="ui-num flex-none text-xs text-[var(--fg3)] max-sm:hidden">{fmt.compact(tok)} tok</span>}
-        <span className="ui-num flex-none text-xs text-[var(--fg3)]">{s.endMs != null ? `${fmt.number((s.endMs - s.startMs) / 1000, { minimumFractionDigits: 1, maximumFractionDigits: 1 })} s` : 'running'}</span>
-      </div>
-    )
-  }, [fmt])
-  return <LaneGraph nodes={nodes} order="input" direction="up" height={height} aria-label={`${run.name} steps`} renderRow={renderRow} emphasis={row => row.node.span.status === 'running'}
-    empty={<span className="p-3 text-xs text-[var(--fg3)]">No steps yet.</span>} className={cn('rounded-[var(--r-md)] border border-[var(--line)]', className)} />
-}

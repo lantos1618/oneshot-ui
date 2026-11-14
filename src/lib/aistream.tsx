@@ -397,7 +397,7 @@ export type AiChat = {
   stop: () => void
   /** Drops the last assistant reply and asks again (also Retry after an error). */
   regenerate: () => void
-  /** Approve or deny a tool call that is awaiting approval. Resolves once the host's handler finished. */
+  /** Approve or deny a tool call that is awaiting approval. Resolves once the host's handler finished. The reply continues after the last pending decision, unless a new reply started meanwhile. */
   decideTool: (toolId: string, approved: boolean) => Promise<void>
   /** Replaces the messages. Outside a reply this also clears an error status. */
   setMessages: (m: AiMessage[] | ((m: AiMessage[]) => AiMessage[])) => void
@@ -532,6 +532,7 @@ export function useAiChat({ send, initialMessages = [], onFinish, onError, onMal
     const hit = find()
     if (!hit || hit.p.state !== 'awaiting-approval' || deciding.current.has(toolId)) return
     deciding.current.add(toolId)
+    const g = gen.current
     const patch = (f: (t: AiToolPart) => AiToolPart) => {
       live.current = live.current.map(m => m.parts.some(x => x.type === 'tool' && x.id === toolId) ? { ...m, parts: m.parts.map(x => x.type === 'tool' && x.id === toolId ? f(x) : x) } : m)
       flush()
@@ -545,7 +546,8 @@ export function useAiChat({ send, initialMessages = [], onFinish, onError, onMal
       }
     } catch (err) { patch(t => ({ ...t, state: 'error', error: aiStr(err) || 'Tool failed' })) }
     finally { deciding.current.delete(toolId) }
-    if (!alive.current) return
+    // continue once, after the last pending decision, and never when a reply started since (Regenerate, a new message)
+    if (!alive.current || g !== gen.current || deciding.current.size) return
     const after = find()
     const waiting = !!after && live.current[after.i].parts.some(x => x.type === 'tool' && x.state === 'awaiting-approval')
     if (!waiting && cb.current.continueAfterApproval && !isBusy() && after?.i === live.current.length - 1) void run(true)

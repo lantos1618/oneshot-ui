@@ -1,6 +1,6 @@
 import { useEffect, useId, useLayoutEffect, useRef, useState, type ReactNode, type KeyboardEvent as RKeyboardEvent, type RefObject } from 'react'
 import { AnimatePresence, motion } from './motionkit'
-import { Avatar, Button, Icon, type IconName, Spinner, TEXT_LINK_SCHEMES, clamp, cn, formatHotkey, inputClass, isCoarsePointer, safeUrl, spring, useLatest, useOutside, useRoving, plural, resolveColor, useResizeObserver, useListbox, useThemeVersion, gridKeyMove } from './core'
+import { Avatar, Button, Icon, type IconName, Spinner, TEXT_LINK_SCHEMES, clamp, cn, formatHotkey, inputClass, isCoarsePointer, safeUrl, spring, useGeneration, useLatest, useLatestState, useOutside, useRoving, plural, resolveColor, useResizeObserver, useListbox, useThemeVersion, gridKeyMove } from './core'
 import { play, shake } from './motion'
 import { FloatingPanel, MenuLabel } from './overlay'
 import { OptionList } from './select'
@@ -459,15 +459,32 @@ export function MentionsInput({ people = [], commands = [], placeholder: ph, onS
   )
 }
 
-/** Form state with a saved snapshot: `dirty` is true while any field differs. `reset()` restores the snapshot, `commit()` makes the current values the new one. */
+/**
+ * Form state with a saved snapshot: `dirty` is true while any field differs from it. `save(fn)` passes `fn` the values
+ * as they are when it is called and, once `fn` resolves, makes that snapshot the saved one, so edits typed during the
+ * save stay dirty. It resolves true when saved and false when ignored (a save is already running, or the form
+ * unmounted); a rejection is passed on and nothing is marked saved. `saving` is true meanwhile. `reset()` restores the
+ * saved values; `commit(values?)` marks `values` (default: the current ones) as saved without a save.
+ */
 export function useFormDraft<T extends object>(initial: T) {
   const [saved, setSaved] = useState(initial)
-  const [values, setValues] = useState(initial)
+  const [values, setValues, getValues] = useLatestState(initial)
+  const [saving, setSaving] = useState(false)
+  const busy = useRef(false), gen = useGeneration()
   const dirty = (Object.keys(values) as (keyof T)[]).some(k => values[k] !== saved[k])
+  const save = async (fn: (values: T) => unknown): Promise<boolean> => {
+    if (busy.current) return false
+    const snapshot = getValues(), current = gen.next()
+    busy.current = true; setSaving(true)
+    try { await fn(snapshot) } finally { if (current()) { busy.current = false; setSaving(false) } }
+    if (!current()) return false
+    setSaved(snapshot)
+    return true
+  }
   return {
-    values, dirty, saved,
+    values, dirty, saved, saving, save,
     set: <K extends keyof T>(k: K, v: T[K]) => setValues(x => ({ ...x, [k]: v })),
-    reset: () => setValues(saved), commit: () => setSaved(values),
+    reset: () => setValues(saved), commit: (v: T = getValues()) => setSaved(v),
   }
 }
 

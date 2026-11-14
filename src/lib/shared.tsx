@@ -7,7 +7,7 @@
 import { type ComponentType, useLayoutEffect, useState, useSyncExternalStore } from 'react'
 
 /** The library version (the one source; scripts/registry/stamp.mjs checks it against package.json). */
-export const UI_VERSION = '0.13.0'
+export const UI_VERSION = '0.14.0'
 /** Minor version in the globalThis keys: copies of the same minor share state; other versions keep their own. */
 export const UI_SHARED_VERSION = UI_VERSION.split('.').slice(0, 2).join('.')
 
