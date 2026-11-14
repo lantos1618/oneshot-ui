@@ -282,16 +282,17 @@ describe('typed input: TagInput', () => {
 })
 
 describe('C-M1: async loader states', () => {
-  it('a cancelled request leaves no spinner; a rejection reaches onLoadError', async () => {
+  it('a cancelled request leaves no loading state shown or announced; a rejection reaches onLoadError', async () => {
     const user = userEvent.setup()
-    const { container } = render(<Combobox aria-label="Slow" loadOptions={() => new Promise(() => {})} debounce={0} minChars={2} />)
+    render(<Combobox aria-label="Slow" loadOptions={() => new Promise(() => {})} debounce={0} minChars={2} />)
     const input = screen.getByRole('combobox', { name: 'Slow' })
-    const spinning = () => container.ownerDocument.querySelector('.animate-spin')
     await user.type(input, 'ab')
-    await waitFor(() => expect(spinning()).not.toBeNull())
+    await waitFor(() => expect(screen.getByRole('status')).toHaveTextContent('Loading…'))
+    expect(screen.getByText('Loading results')).toBeInTheDocument() // the live region
     await user.keyboard('{Backspace}') // below minChars: the request is cancelled
     expect(input).toHaveAttribute('aria-expanded', 'true')
-    await waitFor(() => expect(spinning()).toBeNull())
+    await waitFor(() => expect(screen.queryByText('Loading…')).toBeNull())
+    expect(screen.queryByText('Loading results')).toBeNull()
     expect(screen.getByText('Type at least 2 characters')).toBeInTheDocument()
 
     const onLoadError = vi.fn(), err = new Error('down')
@@ -362,14 +363,19 @@ describe('C-M8 / C-M9: steps without float drift; values on the grid', () => {
     expect(sb).toHaveAttribute('aria-valuenow', '0.3')
   })
 
-  it('Slider and RangeSlider defaults land on the step grid inside min/max', () => {
-    const { data } = inForm(<><Slider name="s" defaultValue={7} step={5} /><RangeSlider name="r" min={0} max={10} /><RangeSlider name="g" min={0} max={10} step={3} defaultValue={[8, 1]} minGap={4} /></>)
+  it('Slider and RangeSlider default and controlled values land on the step grid inside min/max', () => {
+    const { data } = inForm(<>
+      <Slider name="s" defaultValue={7} step={5} />
+      <RangeSlider name="r" min={0} max={10} />
+      <RangeSlider name="o" min={0} max={20} step={5} defaultValue={[3, 14]} />
+      <RangeSlider name="g" min={0} max={10} step={3} defaultValue={[8, 1]} minGap={4} />
+      <RangeSlider name="c" min={0} max={20} step={5} value={[7, 18]} />
+    </>)
     expect(data().get('s')).toBe('5')
     expect(data().getAll('r')).toEqual(['0', '10'])
-    const [lo, hi] = data().getAll('g').map(Number)
-    expect(lo).toBeLessThanOrEqual(hi - 4)
-    expect(lo).toBeGreaterThanOrEqual(0)
-    expect(hi).toBeLessThanOrEqual(10)
+    expect(data().getAll('o')).toEqual(['5', '15'])
+    expect(data().getAll('g')).toEqual(['0', '9']) // sorted, snapped to 0/3/6/9, at least minGap apart
+    expect(data().getAll('c')).toEqual(['5', '20'])
   })
 })
 

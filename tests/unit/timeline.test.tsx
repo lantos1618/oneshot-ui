@@ -3,6 +3,7 @@
 // a chart and its journal, the keyboard model, and flags that never move the trace's rows. Queried by role and name.
 import { act, fireEvent, render, screen, within } from '@testing-library/react'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
+import { fakeScroller } from '../helpers'
 import { ChartWithJournal, StateRibbon, Swimlanes, TagJournal, TraceWaterfall, clusterTimeMarks, ribbonSegments, type TimeTag, type TimeTagKind, type TraceSpan } from '../../src/lib/all'
 
 const at = (h: number, m = 0) => new Date(2026, 10, 9, h, m).getTime()
@@ -122,13 +123,21 @@ describe('Swimlanes', () => {
     expect(screen.getByRole('button', { name: 'Water, 11:05' })).toHaveAttribute('data-active', 'true')
     expect(screen.getByRole('button', { name: 'Water, 11:05' }).tabIndex).toBe(0)
   })
-  it('caps the height and scrolls when there are more lanes than maxLanes', () => {
+  it('caps the height at maxLanes lanes; the lanes past the cap are still there and reachable by keyboard', () => {
     const many: TimeTagKind[] = Array.from({ length: 12 }, (_, i) => ({ kind: `k${i}`, label: `Kind ${i}` }))
-    render(<Swimlanes tags={TAGS} kinds={many} start={START} end={END} maxLanes={5} />)
-    const lane = screen.getByRole('group', { name: 'Kind 0: no tags' })
-    const scroller = lane.parentElement!.parentElement!
-    expect(scroller.style.maxHeight).toBe(`${5 * 26 + 4}px`)
-    expect(scroller.className).toMatch(/overflow-y-auto/)
+    const tags: TimeTag[] = [{ id: 'a', at: at(9, 40), kind: 'k0', label: 'First' }, { id: 'z', at: at(10), kind: 'k11', label: 'Last' }]
+    const { rerender } = render(<Swimlanes tags={tags} kinds={many} start={START} end={END} maxLanes={5} />)
+    const lanes = within(screen.getByRole('group', { name: 'Tags by kind' })).getAllByRole('group')
+    expect(lanes.map(l => l.getAttribute('aria-label'))).toEqual(many.map((k, i) => `${k.label}: ${i === 0 || i === 11 ? '1 tag' : 'no tags'}`))
+    const capped = lanes[0].closest<HTMLElement>('[style*="max-height"]')!
+    expect(capped.style.maxHeight).toBe(`${5 * 26 + 4}px`) // five lanes of 26 px
+    expect(capped).toContainElement(lanes[11])
+    const first = screen.getByRole('button', { name: 'First, 9:40' })
+    act(() => first.focus())
+    fireEvent.keyDown(first, { key: 'ArrowDown' }) // past the empty lanes, below the cap
+    expect(document.activeElement).toBe(screen.getByRole('button', { name: 'Last, 10:00' }))
+    rerender(<Swimlanes tags={tags} kinds={many} start={START} end={END} maxLanes={12} />)
+    expect(document.querySelector('[style*="max-height"]')).toBeNull() // all fit: no cap
   })
 })
 
@@ -179,27 +188,36 @@ describe('TagJournal and ChartWithJournal', () => {
     expect(onEdit).toHaveBeenCalledWith(expect.objectContaining({ id: 'w3' }))
   })
   it('links both ways: hovering the list lights the chart, the chart lights and scrolls the list without moving focus', () => {
-    const scroll = vi.spyOn(Element.prototype, 'scrollTo')
     const Fake = ({ link }: { link: { activeId: string | null; onActiveChange: (id: string | null) => void } }) => (
       <div>
         <output aria-label="chart active">{link.activeId ?? 'none'}</output>
         <button onClick={() => link.onActiveChange('w3')}>chart tag w3</button>
       </div>
     )
+    // the list is 60 px tall (jsdom has no layout), so the last rows are below its fold
+    vi.spyOn(HTMLElement.prototype, 'clientHeight', 'get').mockImplementation(function (this: HTMLElement) { return this.getAttribute('aria-label') === 'Journal' ? 60 : 0 })
     render(<ChartWithJournal tags={TAGS} kinds={KINDS} chart={link => <Fake link={link} />} />)
-    // list → chart
+    const list = screen.getByRole('list', { name: 'Journal' })
+    const box = fakeScroller(list, { height: 60, content: () => parseFloat((list.firstElementChild as HTMLElement).style.height) })
+    // list → chart: hovering a row lights the chart, and the list does not scroll itself
     const row = (name: RegExp) => screen.getByRole('button', { name })
     fireEvent.pointerEnter(row(/^10:50\s*Snack/).parentElement!, { pointerType: 'mouse' })
     expect(screen.getByRole('status', { name: 'chart active' })).toHaveTextContent('s1')
     expect(row(/^10:50\s*Snack/)).toHaveAttribute('aria-current', 'true')
-    // chart → list: the row lights and is scrolled to, focus stays on the chart
+    expect(box.top).toBe(0)
+    // chart → list: the row lights and is scrolled into view, focus stays on the chart
     const chartTag = screen.getByRole('button', { name: 'chart tag w3' })
     act(() => chartTag.focus())
-    scroll.mockClear()
     fireEvent.click(chartTag)
     expect(row(/^14:20\s*Water/)).toHaveAttribute('aria-current', 'true')
     expect(document.activeElement).toBe(chartTag)
     expect(row(/^14:20\s*Water/).tabIndex).toBe(0)
+    const item = row(/^14:20\s*Water/).closest<HTMLElement>('[data-index]')!
+    const start = Number(/translateY\(([\d.]+)px\)/.exec(item.style.transform)![1])
+    expect(start).toBeGreaterThan(60) // it was below the fold
+    expect(box.top).toBeGreaterThan(0)
+    expect(box.top).toBeLessThanOrEqual(start)
+    expect(start).toBeLessThan(box.top + 60)
   })
   it('ignores rows sliding under a resting cursor after the list scrolls itself, until the pointer moves', () => {
     const onActive = vi.fn()
@@ -254,16 +272,24 @@ describe('TraceWaterfall flags', () => {
     { id: 'b', parent: 'root', name: 'Search', kind: 'tool', start: 4, duration: 5 },
   ]
   const events = (n: number): TimeTag[] => Array.from({ length: n }, (_, i) => ({ id: `e${i}`, at: 500 + i * 700, kind: 'deploy', label: `Deploy ${i + 1}` }))
-  const plot = (container: HTMLElement) => container.querySelector('.min-w-\\[560px\\]')!
   it('reserves the flag row, so switching from a few events to many never moves the rows', () => {
-    const { container, rerender } = render(<TraceWaterfall spans={spans} total={10} annotations={[]} />)
-    expect(screen.getByRole('listbox', { name: 'Events' })).toBeInTheDocument()
-    // every row of the plot (header, flag row, span rows) in order, with its height class
-    const shape = () => [...plot(container).querySelectorAll('.grid')].map(d => d.className.match(/\bh-(9|10)\b/)?.[0] ?? '?')
-    const before = shape()
+    const { rerender } = render(<TraceWaterfall spans={spans} total={10} />)
+    expect(screen.queryByRole('listbox', { name: 'Events' })).toBeNull() // no annotations prop: no row
+    rerender(<TraceWaterfall spans={spans} total={10} annotations={[]} />)
+    // with the prop set, the row is there before any event is
+    const box = screen.getByRole('listbox', { name: 'Events' })
+    const flagRow = box.parentElement!
+    // the rows of the plot in order (flag row, then the span rows; the decorative grid and rules aside): the same
+    // elements, nothing added above the spans
+    const rows = () => [...flagRow.parentElement!.children].filter(r => !r.hasAttribute('aria-hidden'))
+    const before = rows(), names = ['Run', 'Plan', 'Search'].map(n => screen.getByText(n))
+    expect(before.indexOf(flagRow)).toBeLessThan(before.findIndex(r => r.contains(names[0])))
     rerender(<TraceWaterfall spans={spans} total={10} annotations={events(12)} />)
-    expect(shape()).toEqual(before)
-    expect(within(screen.getByRole('listbox', { name: 'Events' })).getAllByRole('option', { hidden: true })).toHaveLength(12)
+    expect(screen.getByRole('listbox', { name: 'Events' })).toBe(box)
+    expect(rows()).toEqual(before)
+    rows().forEach((r, i) => expect(r).toBe(before[i]))
+    for (const [i, n] of ['Run', 'Plan', 'Search'].entries()) expect(screen.getByText(n)).toBe(names[i])
+    expect(within(box).getAllByRole('option', { hidden: true })).toHaveLength(12) // the flags live inside the reserved row
   })
   it('flags drop out when crowded, and the row is one Tab stop with ←/→', () => {
     width = 400

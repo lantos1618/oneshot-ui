@@ -216,10 +216,15 @@ describe('Slider with magnets', () => {
   })
 
   it('draws ticks and bands only with magnets, and leaves a plain Slider alone', () => {
-    const { container, rerender } = render(<Slider label="Volume" defaultValue={30} />)
+    const onChange = vi.fn()
+    const { container, rerender } = render(<Slider label="Volume" defaultValue={30} onChange={onChange} />)
     const input = screen.getByRole('slider', { name: 'Volume' })
     expect(container.querySelector('[data-magnet-tick]')).toBeNull()
+    expect(container.querySelector('[aria-live]')).toBeNull()
+    expect(input).not.toHaveAttribute('aria-keyshortcuts')
     expect(fire.pointerDown(input, pointer(50))).toBe(true) // the native drag is untouched
+    expect(fire.keyDown(input, { key: 'PageUp' })).toBe(true) // and so is the native PageUp
+    expect(onChange).not.toHaveBeenCalled()
     rerender(<Slider label="Volume" defaultValue={30} magnets={[...MARKS, { from: 40, to: 60 }]} />)
     expect(container.querySelectorAll('[data-magnet-tick]')).toHaveLength(5)
     expect(container.querySelectorAll('[data-magnet-zone]')).toHaveLength(1)
@@ -270,11 +275,22 @@ describe('RangeSlider with magnets', () => {
 
 describe('MagnetMarks', () => {
   it('positions ticks logically and highlights the one the value is on', () => {
-    const { container } = render(<div><MagnetMarks magnets={[25, 50]} min={0} max={100} value={50} inset={8} /></div>)
-    const ticks = container.querySelectorAll<HTMLElement>('[data-magnet-tick]')
-    expect(ticks[0].style.insetInlineStart).toMatch(/^calc\(/)
-    expect(ticks[0].style.insetInlineStart).toContain('25%')
-    expect(ticks[1].className).toContain('bg-[var(--accent)]')
+    const marks = (value?: number) => <div><MagnetMarks magnets={[25, 50, 75]} min={0} max={100} value={value} inset={8} /></div>
+    const { container, rerender } = render(marks(50))
+    const ticks = () => [...container.querySelectorAll<HTMLElement>('[data-magnet-tick]')]
+    expect(ticks()).toHaveLength(3)
+    for (const t of ticks()) expect(t.style.left).toBe('') // inline-start, so RTL mirrors it
+    expect(ticks()[0].style.insetInlineStart).toContain('25%')
+    expect(ticks()[2].style.insetInlineStart).toContain('75%')
+    // the tick the value is on looks different from the others; which one follows the value, and none without one
+    const looks = () => ticks().map(t => t.className)
+    const [a, on, c] = looks()
+    expect(a).toBe(c)
+    expect(on).not.toBe(a)
+    rerender(marks(75))
+    expect(looks()).toEqual([a, a, on])
+    rerender(marks(60))
+    expect(looks()).toEqual([a, a, a])
   })
 })
 
@@ -315,14 +331,5 @@ describe('Gantt with magnets', () => {
     stubRect(420)
     render(<Gantt phases={phases} dependencies={[]} start={new Date(2026, 10, 2)} magnets />)
     expect(drag()).toHaveAttribute('aria-valuenow', '5')
-  })
-})
-
-describe('no magnets, no change', () => {
-  it('a plain Slider renders no live region and keeps its native look', () => {
-    const { container } = render(<Slider label="Volume" defaultValue={30} />)
-    expect(container.querySelector('[aria-live]')).toBeNull()
-    expect(screen.getByRole('slider', { name: 'Volume' })).not.toHaveAttribute('aria-keyshortcuts')
-    act(() => {})
   })
 })

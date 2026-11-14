@@ -177,6 +177,20 @@ describe('run model', () => {
     expect(applyRunEvent(f, { type: 'nonsense' } as never)).toBe(f)
     expect(applyRunEvent(f, { type: 'span-end', id: 'missing', endMs: 1 })).toBe(f)
   })
+  it('runTotals counts failed spans as errors, not error events', () => {
+    const run: AgentRun = {
+      id: 'r', name: 'Run', startedAt: 0, endedAt: 1000, status: 'ok',
+      spans: [
+        { id: 'a', kind: 'tool', name: 'fetch', startMs: 0, endMs: 300, status: 'error', error: 'HTTP 500', attributes: {} }, // failed, no event for it
+        { id: 'b', kind: 'tool', name: 'fetch', startMs: 400, endMs: 900, status: 'ok', attributes: {} },
+      ],
+      events: [ // an error that was retried away on an ok span, twice
+        { id: 'e1', kind: 'error', atMs: 500, label: 'timeout', spanId: 'b' },
+        { id: 'e2', kind: 'error', atMs: 600, label: 'timeout', spanId: 'b' },
+      ],
+    }
+    expect(runTotals(run)).toMatchObject({ errors: 1, toolCalls: 2, running: 0, durationMs: 1000 })
+  })
   it('round-trips a run through runToEvents without duplicating events', () => {
     for (const fx of AGENT_RUN_FIXTURES) {
       const run = fx.run(), back = runFromEvents(runToEvents(run))!
@@ -285,7 +299,14 @@ describe('visuals with a run', () => {
     expect(screen.getByRole('listbox', { name: 'Events' }).querySelectorAll('[data-ann]')).toHaveLength(1)
   })
   it('TraceWaterfall without a run is unchanged (spans + total)', () => {
-    render(<TraceWaterfall spans={[{ id: 'r', name: 'Run', kind: 'agent', start: 0, duration: 4 }]} total={4} />)
+    render(<TraceWaterfall spans={[{ id: 'r', name: 'Run', kind: 'agent', start: 0, duration: 4 }, { id: 'q', name: 'query', kind: 'tool', start: 1, duration: 2, parent: 'r' }]} total={8} />)
+    // the given spans are the rows (the parent one collapsible), on an axis that runs to `total`, not to the last span
+    expect(screen.getByText('Run')).toBeInTheDocument()
+    expect(screen.getByText('query')).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: 'Toggle Run' })).toBeInTheDocument()
+    expect(screen.getByText('8s')).toBeInTheDocument()
+    expect(screen.queryByText('10s')).toBeNull()
+    expect(screen.getByRole('button', { name: 'Replay' })).toBeInTheDocument()
     expect(screen.queryByRole('button', { name: 'Simulate failure' })).toBeNull()
     expect(screen.queryByRole('listbox', { name: 'Events' })).toBeNull()
   })

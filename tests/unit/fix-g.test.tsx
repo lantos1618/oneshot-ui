@@ -132,16 +132,29 @@ describe('DataGrid infinite loading (G-H5)', () => {
     expect(more).toHaveBeenCalled()
   })
 
-  it('does not chain page after page when each page arrives', () => {
+  it('asks once per row count: not again while the page is pending, nor when it arrives, only at the new end', () => {
     vi.spyOn(console, 'warn').mockImplementation(() => {})
-    let calls = 0
+    const onLoadMore = vi.fn()
+    let deliver = () => {}, rerender = () => {}
     function Host() {
-      const [rows, setRows] = useState(makeRows(50))
-      return <DataGrid server aria-label="Customers" columns={columns} rows={rows} rowKey={r => r.id} virtualize={false} hasMore={rows.length < 1000}
-        onLoadMore={() => { calls++; setRows(r => makeRows(r.length + 50)) }} />
+      const [rows, setRows] = useState(makeRows(50)), [, setN] = useState(0)
+      deliver = () => setRows(r => makeRows(r.length + 50))
+      rerender = () => setN(n => n + 1)
+      return <DataGrid server aria-label="Customers" columns={columns} rows={rows} rowKey={r => r.id} hasMore={rows.length < 1000} onLoadMore={onLoadMore} />
     }
     render(<Host />)
-    expect(calls).toBeLessThanOrEqual(1)
+    const scrollTo = (top: number) => act(() => { scroller().scrollTop = top; fireEvent.scroll(scroller()) })
+    expect(onLoadMore).not.toHaveBeenCalled()
+    scrollTo(38 * 47) // the last of 50 rows comes into view
+    expect(onLoadMore).toHaveBeenCalledTimes(1)
+    scrollTo(38 * 48); scrollTo(38 * 47) // still at the end, the page not here yet
+    act(() => rerender())
+    expect(onLoadMore).toHaveBeenCalledTimes(1)
+    act(() => deliver()) // 100 rows: the end moved away, nothing chains
+    act(() => rerender())
+    expect(onLoadMore).toHaveBeenCalledTimes(1)
+    scrollTo(38 * 97) // the new end
+    expect(onLoadMore).toHaveBeenCalledTimes(2)
   })
 })
 
