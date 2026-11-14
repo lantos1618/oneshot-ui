@@ -23,7 +23,7 @@ react-dom (core) or those plus motion (most extras). Attach the ones you need pl
 - shadcn CLI: `npx shadcn add https://lantos1618.github.io/oneshot-ui/r/data-grid.json` (pulls in ui-provider)
 - Index with sizes, exports and embedded components: https://lantos1618.github.io/oneshot-ui/index.json
 - The same files from npm: https://unpkg.com/@lyndon/ui@0.14.0/dist-registry/files/<name>.tsx
-- Whole library in one file (dist-single/ui-all.tsx, ~668.3k tokens): only for tools with a very large context; prefer the drop-ins
+- Whole library in one file (dist-single/ui-all.tsx, ~668.4k tokens): only for tools with a very large context; prefer the drop-ins
 
 ## Tags
 
