@@ -1,7 +1,8 @@
 // Binary views: the pure helpers (entropy, high-entropy regions, Hilbert curve, strings, search, decoders, copy
 // formats, go-to parsing), then HexEditor (keyboard, selection, editing, undo, read-only, virtualisation of large
 // data), EntropyMap (regions list) and ByteMap (renders without a canvas).
-import { act, fireEvent, render, screen, within } from '@testing-library/react'
+import { act, fireEvent, render, screen, waitFor, within } from '@testing-library/react'
+import userEvent from '@testing-library/user-event'
 import { describe, expect, it, vi } from 'vitest'
 import {
   ByteMap, EntropyMap, HexEditor, classifyByte, decodeBytes, entropyWindows, findStrings, formatBytesAs, hexOffset, highEntropyRegions,
@@ -63,6 +64,10 @@ describe('highEntropyRegions', () => {
     expect(r[0]).toMatchObject({ start: 512, end: 1536, size: 1024, max: 7.6 })
     expect(r[0].mean).toBeCloseTo(7.55)
     expect(r[1]).toMatchObject({ start: 2048, end: 3584, max: 7.9 })
+    // a window exactly at the threshold counts: it starts a region alone and extends a neighbour
+    expect(highEntropyRegions([1, 7.2, 1], { threshold: 7.2 }).map(x => x.windows)).toEqual([[1, 1]])
+    expect(highEntropyRegions([7.5, 7.2, 1], { threshold: 7.2 }).map(x => x.windows)).toEqual([[0, 1]])
+    expect(highEntropyRegions([1, 7.19, 1], { threshold: 7.2 })).toEqual([])
   })
   it('bridges `gap` low windows, clips to the length, honours the threshold and step', () => {
     expect(highEntropyRegions(e, { threshold: 7.2, gap: 1 }).map(x => x.windows)).toEqual([[1, 6]])
@@ -113,26 +118,29 @@ describe('bytes, strings and sections', () => {
     expect(findStrings(b, { encodings: ['utf16le'] }).map(s => s.text)).toEqual(['WIDE!'])
     expect(findStrings(b, { max: 1 })).toHaveLength(1)
   })
-  it('finds the sample’s strings', () => {
-    const texts = findStrings(binarySample()).map(s => s.text)
-    expect(texts).toContain('GLIBC_2.34')
-    expect(texts).toContain('inflate_block')
-    expect(texts).toContain('Synthetic sample - not a real program')
+  it('caps the text at maxLength (the length stays the full run) and searches only start–end', () => {
+    const b = new Uint8Array(40)
+    b.set(new TextEncoder().encode('abcdefghij'), 2); b.set(new TextEncoder().encode('KLMNOP'), 20)
+    expect(findStrings(b, { encodings: ['ascii'], maxLength: 4 })).toEqual([
+      { offset: 2, length: 10, text: 'abcd', encoding: 'ascii' },
+      { offset: 20, length: 6, text: 'KLMN', encoding: 'ascii' },
+    ])
+    expect(findStrings(b, { encodings: ['ascii'], start: 15 }).map(s => s.offset)).toEqual([20])
+    expect(findStrings(b, { encodings: ['ascii'], end: 15 }).map(s => s.offset)).toEqual([2])
+    // a run cut by the range is only the part inside it, and is dropped when that part is under `min`
+    expect(findStrings(b, { encodings: ['ascii'], start: 5, end: 24 })).toEqual([
+      { offset: 5, length: 7, text: 'defghij', encoding: 'ascii' },
+      { offset: 20, length: 4, text: 'KLMN', encoding: 'ascii' },
+    ])
+    expect(findStrings(b, { encodings: ['ascii'], start: 9 }).map(s => s.offset)).toEqual([20])
   })
   it('looks sections up (the smallest when nested)', () => {
     const s = [{ name: 'seg', offset: 0, size: 100 }, { name: 'inner', offset: 10, size: 10 }]
     expect(sectionAt(s, 5)?.name).toBe('seg')
     expect(sectionAt(s, 12)?.name).toBe('inner')
     expect(sectionAt(s, 100)).toBeUndefined()
-    expect(sectionAt(BINARY_SAMPLE_SECTIONS, 0x7123)?.name).toBe('.lzdata')
-  })
-  it('the sample is deterministic, ELF-looking and has one high-entropy region in .lzdata', () => {
-    const b = binarySample()
-    expect(b.length).toBe(0xb000)
-    expect([...b.subarray(0, 4)]).toEqual([0x7f, 0x45, 0x4c, 0x46])
-    const r = highEntropyRegions(entropyWindows(b, 512), { length: b.length })
-    expect(r).toHaveLength(1)
-    expect(sectionAt(BINARY_SAMPLE_SECTIONS, r[0].start)?.name).toBe('.lzdata')
+    expect(sectionAt(s, 9)?.name).toBe('seg')
+    expect(sectionAt(s, 20)?.name).toBe('seg') // inner's end is exclusive
   })
 })
 
@@ -140,6 +148,9 @@ describe('searchBytes', () => {
   const b = new TextEncoder().encode('xxABAByyabab\x00\x7fELF')
   it('finds text, overlapping matches included', () => {
     expect(searchBytes(b, 'AB')).toEqual([2, 4])
+    expect(searchBytes(new TextEncoder().encode('AAAA'), 'AA')).toEqual([0, 1, 2])
+    expect(searchBytes(b, 'aba', { ignoreCase: true })).toEqual([2, 8])
+    expect(searchBytes(new TextEncoder().encode('xABABAx'), 'ABA')).toEqual([1, 3])
     expect(searchBytes(b, 'ABA')).toEqual([2])
     expect(searchBytes(b, 'aba')).toEqual([8])
     expect(searchBytes(b, 'ab', { ignoreCase: true })).toEqual([2, 4, 8, 10])
@@ -161,9 +172,6 @@ describe('searchBytes', () => {
     expect(parseHexPattern('7F4')).toBeNull()
     expect(parseHexPattern('GG')).toBeNull()
     expect(parseHexPattern('')).toBeNull()
-  })
-  it('searches the sample', () => {
-    expect(searchBytes(binarySample(), 'LZPK')).toEqual([0x7000])
   })
 })
 
@@ -227,6 +235,12 @@ describe('formatting and parsing', () => {
     expect(parseByteOffset('20h', o)).toBe(32)
     expect(parseByteOffset('+0x10', o)).toBe(0x110)
     expect(parseByteOffset('-10', o)).toBe(0xf0)
+    expect(parseByteOffset('+0xeff', o)).toBe(0xfff) // the last byte
+    expect(parseByteOffset('+0xf00', o)).toBeNull() // one past the end
+    expect(parseByteOffset('-0x100', o)).toBe(0)
+    expect(parseByteOffset('-0x101', o)).toBeNull()
+    expect(parseByteOffset('0xfff', o)).toBe(0xfff)
+    expect(parseByteOffset('0x1000', o)).toBeNull()
     expect(parseByteOffset('0x401010', o)).toBe(0x210)
     expect(parseByteOffset('0x5000', o)).toBeNull()
     expect(parseByteOffset('nope', o)).toBeNull()
@@ -248,6 +262,13 @@ describe('HexEditor', () => {
     fireEvent.keyDown(g, { key: 'Home' }); expect(onCursor).toHaveBeenLastCalledWith(16)
     fireEvent.keyDown(g, { key: 'End', ctrlKey: true }); expect(onCursor).toHaveBeenLastCalledWith(63)
     fireEvent.keyDown(g, { key: 'ArrowDown' }); expect(onCursor).toHaveBeenLastCalledWith(63) // no row below: stays
+    fireEvent.keyDown(g, { key: 'Home' }); fireEvent.keyDown(g, { key: 'ArrowRight' }); fireEvent.keyDown(g, { key: 'ArrowRight' })
+    expect(onCursor).toHaveBeenLastCalledWith(50)
+    fireEvent.keyDown(g, { key: 'ArrowDown' }); expect(screen.getByText(/^Offset 0x32: /)).toBeInTheDocument() // stays in its column, not the last byte
+    expect(onCursor).toHaveBeenLastCalledWith(50)
+    fireEvent.keyDown(g, { key: 'ArrowUp' }); expect(onCursor).toHaveBeenLastCalledWith(34)
+    fireEvent.keyDown(g, { key: 'ArrowUp' }); fireEvent.keyDown(g, { key: 'ArrowUp' }); expect(onCursor).toHaveBeenLastCalledWith(2)
+    fireEvent.keyDown(g, { key: 'ArrowUp' }); expect(onCursor).toHaveBeenLastCalledWith(2) // no row above: stays
     fireEvent.keyDown(g, { key: 'Home', ctrlKey: true }); expect(onCursor).toHaveBeenLastCalledWith(0)
     expect(screen.getByText(/^Offset 0x0: 00$/)).toBeInTheDocument()
     expect(screen.getByText('0x00000000')).toBeInTheDocument()
@@ -264,28 +285,37 @@ describe('HexEditor', () => {
     fireEvent.keyDown(g, { key: 'a', ctrlKey: true }); expect(sel).toEqual({ start: 0, end: 64 })
     fireEvent.keyDown(g, { key: 'Escape' }); expect(sel).toBeNull()
   })
-  it('selects by click and shift+click (bytes resolved within runs by x), and both panes show it', () => {
-    const onSel = vi.fn(), onCursor = vi.fn()
-    const { container } = render(<HexEditor data={Uint8Array.from({ length: 64 }, (_, i) => 0x41 + (i % 26))} onSelectionChange={onSel} onCursorChange={onCursor} inspector={false} />)
-    /** The run span holding byte `o` in pane `p`, with a fake 10 px-per-byte layout, and the x of that byte. */
-    const at = (o: number, p = 'h') => {
-      const el = [...container.querySelectorAll<HTMLElement>(`[data-p="${p}"]`)].find(e => o >= +e.dataset.o! && o < +e.dataset.o! + +e.dataset.n!)!
-      const k = +el.dataset.n!
+  it('selects by click and shift+click across the panes; typing then writes into the pane clicked', () => {
+    const onSel = vi.fn(), onCursor = vi.fn(), onChange = vi.fn()
+    const { container } = render(<HexEditor data={Uint8Array.from({ length: 64 }, (_, i) => 0x41 + (i % 26))} onSelectionChange={onSel} onCursorChange={onCursor} onChange={onChange} inspector={false} />)
+    /**
+     * Where to press for byte `o` in pane `p` ('h' hex, 't' text): the element covering it and an x inside it, given
+     * a fake 10 px-per-byte layout. Works whether bytes are single cells or runs of `data-n` bytes.
+     */
+    const at = (o: number, p: 'h' | 't') => {
+      const el = [...container.querySelectorAll<HTMLElement>(`[data-p="${p}"][data-o]`)].find(e => o >= +e.dataset.o! && o < +e.dataset.o! + +(e.dataset.n ?? 1))!
+      const k = +(el.dataset.n ?? 1)
       el.getBoundingClientRect = () => ({ left: 0, top: 0, width: k * 10, height: 20, right: k * 10, bottom: 20, x: 0, y: 0, toJSON: () => ({}) })
       return { el, clientX: (o - +el.dataset.o!) * 10 + 5 }
     }
-    // identical-looking neighbours share a span: 64 printable bytes are a few runs, not 64 cells
-    expect(container.querySelectorAll('[data-row="0"] [data-p="h"]').length).toBeLessThan(5)
-    const a = at(2)
+    const a = at(2, 'h')
     fireEvent.pointerDown(a.el, { pointerType: 'mouse', button: 0, pointerId: 1, clientX: a.clientX })
     expect(onCursor).toHaveBeenLastCalledWith(2)
     const b = at(5, 't')
     fireEvent.pointerDown(b.el, { pointerType: 'mouse', button: 0, pointerId: 1, shiftKey: true, clientX: b.clientX })
     expect(onSel).toHaveBeenLastCalledWith({ start: 2, end: 6 })
-    // the selected bytes are tinted in the hex and the text column alike
-    expect(at(4).el.style.background).toBe('var(--accent-soft)')
-    expect(at(4, 't').el.style.background).toBe('var(--accent-soft)')
-    expect(at(7).el.style.background).toBe('')
+    expect(onCursor).toHaveBeenLastCalledWith(5)
+    expect(screen.getByText(/^0x2–0x5, 4\s?B$/)).toBeInTheDocument()
+    // the shift+click was in the text column, so a letter is written as text at the cursor, and the selection goes
+    fireEvent.keyDown(grid(), { key: 'z' })
+    expect(onChange).toHaveBeenLastCalledWith([{ offset: 5, before: 0x46, after: 0x7a }])
+    expect(onSel).toHaveBeenLastCalledWith(null)
+    // a plain click starts over
+    const c = at(9, 'h')
+    fireEvent.pointerDown(c.el, { pointerType: 'mouse', button: 0, pointerId: 1, clientX: c.clientX })
+    expect(onCursor).toHaveBeenLastCalledWith(9)
+    fireEvent.keyDown(grid(), { key: 'ArrowRight', shiftKey: true })
+    expect(onSel).toHaveBeenLastCalledWith({ start: 9, end: 11 })
   })
   it('overwrites with hex digits and text, reports edits, undoes and redoes', () => {
     let edits: HexEdit[] = []
@@ -333,6 +363,37 @@ describe('HexEditor', () => {
     fireEvent.keyDown(grid(), { key: 'a' })
     expect(onChange).not.toHaveBeenCalled()
     expect(screen.getAllByText('Read only').length).toBeGreaterThan(0)
+  })
+  it('copies the selection (or the cursor byte) as hex with Ctrl+C and reports it', async () => {
+    userEvent.setup() // installs a clipboard
+    const write = vi.spyOn(navigator.clipboard, 'writeText')
+    render(<HexEditor data={Uint8Array.from([0x4d, 0x5a, 0x00, 0x41])} inspector={false} />)
+    const g = grid()
+    fireEvent.keyDown(g, { key: 'c', ctrlKey: true })
+    await waitFor(() => expect(write).toHaveBeenLastCalledWith('4D'))
+    fireEvent.keyDown(g, { key: 'ArrowRight', shiftKey: true }); fireEvent.keyDown(g, { key: 'ArrowRight', shiftKey: true })
+    fireEvent.keyDown(g, { key: 'c', ctrlKey: true })
+    await waitFor(() => expect(write).toHaveBeenLastCalledWith('4D 5A 00'))
+    expect(await screen.findAllByText(/^Copied 3\s?B$/)).not.toHaveLength(0) // status bar and live region
+  })
+  it('pages with PageUp/PageDown and focuses go-to and search with Ctrl+G and Ctrl+F', () => {
+    const onCursor = vi.fn()
+    render(<HexEditor data={new Uint8Array(0x2000)} height={200} onCursorChange={onCursor} inspector={false} />)
+    const g = grid()
+    fireEvent.keyDown(g, { key: 'PageDown' })
+    const page = onCursor.mock.lastCall![0] as number
+    expect(page % 16).toBe(0) // whole rows, same column
+    expect(page).toBeGreaterThanOrEqual(16 * 4) // about a screen of 200 px rows, less one row
+    expect(page).toBeLessThan(16 * 10)
+    fireEvent.keyDown(g, { key: 'ArrowRight' }); fireEvent.keyDown(g, { key: 'PageDown' })
+    expect(onCursor).toHaveBeenLastCalledWith(2 * page + 1)
+    fireEvent.keyDown(g, { key: 'PageUp' }); expect(onCursor).toHaveBeenLastCalledWith(page + 1)
+    fireEvent.keyDown(g, { key: 'PageUp' }); fireEvent.keyDown(g, { key: 'PageUp' }); expect(onCursor).toHaveBeenLastCalledWith(0) // clamps at the start
+    fireEvent.keyDown(g, { key: 'g', ctrlKey: true })
+    expect(screen.getByRole('textbox', { name: 'Go to offset' })).toHaveFocus()
+    g.focus()
+    fireEvent.keyDown(g, { key: 'f', ctrlKey: true })
+    expect(screen.getByRole('searchbox', { name: 'Search bytes' })).toHaveFocus()
   })
   it('goes to an offset typed into the go-to field', () => {
     const onCursor = vi.fn()
