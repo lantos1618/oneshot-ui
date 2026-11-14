@@ -191,7 +191,8 @@ describe('D-M7: HoldToConfirm announces its own outcome', () => {
     expect(status).toHaveTextContent(/^$/)
     fireEvent.pointerDown(screen.getByRole('button', { name: /Hold to archive/ }), { button: 0 })
     await vi.waitFor(() => expect(onConfirm).toHaveBeenCalled(), { timeout: 3000 })
-    expect(status).toHaveTextContent('Archived')
+    // onConfirm fires before the status re-renders; under CPU load the gap is visible
+    await vi.waitFor(() => expect(status).toHaveTextContent('Archived'), { timeout: 3000 })
     expect(status).not.toHaveTextContent('Deleted')
   })
 })
