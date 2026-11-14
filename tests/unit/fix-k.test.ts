@@ -2,7 +2,7 @@
 import { readFileSync } from 'node:fs'
 import { join } from 'node:path'
 import { describe, expect, it } from 'vitest'
-import { THEME_EXPORT_FORMATS, themeExport, themeToCSS, themeToDTCGTokens, themeToShadcn } from '../../src/lib/themeexport'
+import { THEME_EXPORT_FORMATS, themeExport, themeToCSS, themeToDTCG, themeToDTCGTokens, themeToShadcn, themeToTailwind, themeToTokensStudio } from '../../src/lib/themeexport'
 import { themeScriptSource } from '../../src/lib/provider'
 import { TAG_CARDS } from '../../src/showcase/tags'
 import { codeExampleFor } from '../../scripts/showcase-code'
@@ -42,6 +42,7 @@ describe('docs demos (build-docs-data)', () => {
 
   it('scores a helper-rendered card by its own children, not by the card before it', () => {
     const { demos: scored } = docsDemos([{ name: 'x', title: 'Unrelated title', exports: ['SparkChart'] }], sections, {})
+    expect(scored.x?.titles).toContain('Sparklines')
     expect(scored.x?.titles).not.toContain('Candlestick')
   })
 })
@@ -92,9 +93,24 @@ describe('theme export', () => {
     expect(themeToShadcn(source('#FFFFFF80', '#000'))).toContain('--background: oklch(1 0 0 / 50.2%);')
   })
 
-  it('has an exporter for every format: none falls back to CSS', () => {
+  it('has its own exporter for every format, each in that format', () => {
     const input = source('#FFFFFF', '#000000')
-    for (const { id } of THEME_EXPORT_FORMATS) if (id !== 'css') expect(themeExport(id, input), id).not.toBe(themeToCSS(input))
+    expect(THEME_EXPORT_FORMATS.map(f => f.id)).toEqual(['css', 'tailwind', 'shadcn', 'dtcg', 'tokens-studio'])
+    const out = Object.fromEntries(THEME_EXPORT_FORMATS.map(({ id }) => [id, themeExport(id, input)]))
+    expect(out.css).toBe(themeToCSS(input))
+    expect(out.css).toContain('--bg: #FFFFFF;')
+    expect(out.tailwind).toBe(themeToTailwind(input))
+    expect(out.tailwind).toMatch(/@theme\b/)
+    expect(out.tailwind).toMatch(/--color-[\w-]+: /)
+    expect(out.shadcn).toBe(themeToShadcn(input))
+    expect(out.shadcn).toContain('--background: oklch(1 0 0);')
+    expect(out.dtcg).toBe(themeToDTCG(input))
+    const dtcg = JSON.parse(out.dtcg) as { color: Record<string, { $value: { hex: string } }> }
+    expect(dtcg.color.bg).toMatchObject({ $value: { hex: '#ffffff' } })
+    expect(out['tokens-studio']).toBe(themeToTokensStudio(input))
+    const studio = JSON.parse(out['tokens-studio']) as { light: { color: Record<string, { value: string; type: string }> }; $themes: unknown[] }
+    expect(studio.light.color.bg).toEqual({ value: '#FFFFFF', type: 'color' })
+    expect(Array.isArray(studio.$themes)).toBe(true)
     expect(() => themeExport('nope' as never, input)).toThrow(/nope/)
   })
 })

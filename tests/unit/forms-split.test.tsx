@@ -1,5 +1,5 @@
 // The forms split (barrel and subpaths), DateTimePicker's own zone field, InlineDatePicker in pickers, the merged
-// ShortcutSheet, and sample data out of the library.
+// ShortcutSheet. (Sample data staying out of the library is checked in consolidated.test.tsx.)
 import { render, screen, within } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { useState } from 'react'
@@ -11,7 +11,6 @@ import * as select from '../../src/lib/select'
 import * as pickers from '../../src/lib/pickers'
 import * as upload from '../../src/lib/upload'
 import * as lib from '../../src/lib'
-import * as examples from '../../src/examples'
 import { ShortcutSheet } from '../../src/lib/data'
 
 const { DateTimePicker, InlineDatePicker } = pickers
@@ -25,20 +24,6 @@ describe('forms split', () => {
       }
     }
     expect(Object.keys(forms).sort()).toEqual([...new Set([fields, inputs, select, pickers, upload].flatMap(m => Object.keys(m)))].sort())
-  })
-
-  it('InlineDatePicker now lives in pickers; ShortcutOverlay is gone', () => {
-    expect(pickers.InlineDatePicker).toBe(lib.InlineDatePicker)
-    expect('ShortcutOverlay' in lib).toBe(false)
-  })
-
-  it('sample editor content is only in the showcase examples', () => {
-    for (const n of ['RTE_SAMPLE', 'MENTION_PEOPLE', 'MENTION_COMMANDS']) {
-      expect(lib).not.toHaveProperty(n)
-      expect(examples).toHaveProperty(n)
-    }
-    expect(examples.RTE_SAMPLE).toContain('<h2>Launch notes</h2>')
-    expect(examples.MENTION_PEOPLE.map(p => p.name)).toContain('Alex Lee')
   })
 })
 

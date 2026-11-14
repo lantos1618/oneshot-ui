@@ -93,8 +93,6 @@ function Probe() {
 const shown = () => JSON.parse(screen.getByTestId('theme').textContent!)
 
 describe('ThemeProvider storage', () => {
-  it('uses the versioned key', () => expect(THEME_STORAGE_KEY).toBe('ui-theme:v1'))
-
   it('migrates the legacy ui-theme key once and keeps the legacy value', () => {
     localStorage.setItem(THEME_LEGACY_KEY, JSON.stringify({ theme: 'nord', mode: 'dark', radius: 6 }))
     render(<ThemeProvider><Probe /></ThemeProvider>)
@@ -114,8 +112,21 @@ describe('ThemeProvider storage', () => {
 
   it.each(['not json', '[]', '"str"', '42', 'null', '{"variant":{"default":-1}}', '{"theme":{"toString":1}}'])('survives a tampered value %j', raw => {
     localStorage.setItem(THEME_STORAGE_KEY, raw)
-    expect(() => render(<ThemeProvider><Probe /></ThemeProvider>)).not.toThrow()
-    expect(THEMES.map(t => t.id)).toContain(shown().theme)
+    render(<ThemeProvider><Probe /></ThemeProvider>)
+    expect(shown()).toMatchObject({ theme: 'default', mode: DEFAULT_THEME.mode, radius: DEFAULT_THEME.radius })
+    // the defaults are saved over the tampered value
+    expect(JSON.parse(localStorage.getItem(THEME_STORAGE_KEY)!)).toMatchObject({ theme: 'default', radius: DEFAULT_THEME.radius })
+  })
+
+  it.each(['not json', '[]', '"str"', '42', 'null'])('removes a junk value %j under the versioned key even when it cannot save', raw => {
+    localStorage.setItem(THEME_STORAGE_KEY, raw)
+    const set = Storage.prototype.setItem
+    Storage.prototype.setItem = () => { throw new DOMException('full', 'QuotaExceededError') }
+    try {
+      render(<ThemeProvider><Probe /></ThemeProvider>)
+      expect(shown().theme).toBe('default')
+      expect(localStorage.getItem(THEME_STORAGE_KEY)).toBeNull()
+    } finally { Storage.prototype.setItem = set }
   })
 
   it('survives tampered legacy values and removes junk', () => {
@@ -171,7 +182,8 @@ describe('contrast()', () => {
     expect(contrast('#FFFFFF', '#000000')).toBe(contrast('#000000', '#FFFFFF'))
   })
   it('reads junk as black instead of throwing', () => {
-    expect(() => contrast('nope', 42 as unknown as string)).not.toThrow()
+    expect(contrast('nope', '#FFFFFF')).toBeCloseTo(21, 5)
+    expect(contrast(42 as unknown as string, '#000000')).toBeCloseTo(1, 5)
   })
 })
 

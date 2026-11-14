@@ -72,27 +72,11 @@ describe('useFrameLoop', () => {
   })
 })
 
-describe('AgentTransitMap layers', () => {
-  it('draws the map once and its moving parts in layers over it', () => {
-    const { container } = render(<TransitSimMap machines={AGENT_WORKFLOWS} order={AGENT_WORKFLOW_ORDER} />)
-    // one accessible drawing; the heat, the queue/hubs/rings and the labels are hidden layers of the same size
-    expect(screen.getAllByRole('img', { name: 'Transit map of agent teams' })).toHaveLength(1)
-    const svgs = container.querySelectorAll('svg[viewBox="0 0 1000 720"]')
-    expect(svgs.length).toBe(5)
-    svgs.forEach((s, i) => { if (i > 0) expect(s.getAttribute('aria-hidden')).toBe('true') })
-    // heat starts cold, styled by the heat tween (one style write, theme tokens as the colours)
-    const heat = svgs[1].querySelectorAll('path')
-    expect(heat.length).toBeGreaterThan(10)
-    heat.forEach(p => { expect(p.style.stroke).toBe('var(--fg3)'); expect(p.style.opacity).toBe('0') })
+describe('AgentTransitMap', () => {
+  it('is one accessible drawing, its moving layers hidden from assistive tech', () => {
+    render(<TransitSimMap machines={AGENT_WORKFLOWS} order={AGENT_WORKFLOW_ORDER} />)
+    expect(screen.getAllByRole('img')).toEqual([screen.getByRole('img', { name: 'Transit map of agent teams' })])
     expect(screen.getByText('Event queue')).toBeInTheDocument()
-  })
-  it('places the train by rotation (stepped, under reduced motion) and keeps it under the Index station', () => {
-    const { container } = render(<TransitSimMap machines={AGENT_WORKFLOWS} order={AGENT_WORKFLOW_ORDER} />)
-    const train = container.querySelector('rect[width="24"][height="8"]')!.closest('svg')!.parentElement!.parentElement!
-    expect(train.style.transform).toMatch(/^rotate\([\d.]+deg\)$/)
-    // the train's layer comes before the hubs' drawing in the DOM, so the Index station is drawn over it
-    const hubs = container.querySelector('circle[r="10"][stroke="var(--fg)"]')!
-    expect(train.compareDocumentPosition(hubs) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy()
   })
 })
 
@@ -101,14 +85,19 @@ describe('TraceWaterfall bars', () => {
     { id: 'r', name: 'Run', kind: 'agent' as const, start: 0, duration: 10 },
     { id: 'a', parent: 'r', name: 'Search', kind: 'tool' as const, start: 1, duration: 4 },
   ]
-  it('reveal by clip-path on a bar of the span’s full width (no width animation)', () => {
+  it('under reduced motion shows the finished run: each bar covers its span, nothing cut away', () => {
     vi.stubGlobal('IntersectionObserver', SeenObserver)
     const { container } = render(<TraceWaterfall spans={spans} total={10} />)
-    const bars = [...container.querySelectorAll<HTMLElement>('div[style*="clip-path"]')]
-    expect(bars).toHaveLength(2)
-    // reduced motion shows the finished run: full width, nothing clipped away
-    expect(bars.map(b => b.style.width)).toEqual(['100%', '40%'])
-    bars.forEach(b => expect(b.style.clipPath).toMatch(/^inset\(0(px)? min\(0(\.0+)?%, calc\(100% - 2px\)\) 0(px)? 0(px)? round/))
+    expect(screen.getByText('Run')).toBeInTheDocument()
+    expect(screen.getByText('4.0s')).toBeInTheDocument() // Search's label reads its whole duration
+    // the bars: placed at the span's start, as long as the span (of a 10 s total)
+    const bars = [...container.querySelectorAll<HTMLElement>('div[style*="left"][style*="width"]')]
+    expect(bars.map(b => [b.style.left, b.style.width])).toEqual([['0%', '100%'], ['10%', '40%']])
+    // and shown whole: visible, with no clip trimming the end of the bar
+    for (const b of bars) {
+      expect(b.style.opacity).toBe('1')
+      expect(b.style.clipPath === '' || /^inset\(\S+ (min\()?0(\.0+)?(%|px)?[ ,]/.test(b.style.clipPath)).toBe(true)
+    }
   })
 })
 

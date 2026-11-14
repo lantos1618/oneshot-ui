@@ -5,6 +5,7 @@ import userEvent from '@testing-library/user-event'
 import { useState } from 'react'
 import { describe, expect, it, vi } from 'vitest'
 import { AlertDialog, type Command, type CommandLoader, CommandPalette } from '../../src/lib/overlay'
+import { fakeScroller } from '../helpers'
 
 describe('AlertDialog', () => {
   function Harness({ onConfirm, onOpenChange = () => {} }: { onConfirm: () => void | Promise<unknown>; onOpenChange?: (v: boolean) => void }) {
@@ -134,16 +135,32 @@ describe('CommandPalette', () => {
     expect(await screen.findByRole('alert')).toHaveTextContent('Search is down')
   })
 
-  it('remembers recently run entries as a Recent group', async () => {
+  it('remembers recently run entries as a Recent group, newest first and capped at `recents`', async () => {
     const user = userEvent.setup()
-    const { unmount } = render(<Palette recents={2} recentKey="test-recents" />)
-    await user.type(await screen.findByRole('combobox'), 'inbox')
-    await user.keyboard('{Enter}')
-    unmount()
-    render(<Palette recents={2} recentKey="test-recents" />)
-    const list = await screen.findByRole('listbox')
-    expect(within(list).getByText('Recent')).toBeInTheDocument()
-    expect(options()[0]).toBe('Go to inbox')
+    const runOnce = async (recents: number, query: string) => {
+      const { unmount } = render(<Palette recents={recents} recentKey={`test-recents-${recents}`} />)
+      await user.type(await screen.findByRole('combobox'), query)
+      await user.keyboard('{Enter}')
+      unmount()
+    }
+    const recentOptions = async (recents: number) => {
+      const { unmount } = render(<Palette recents={recents} recentKey={`test-recents-${recents}`} />)
+      const list = await screen.findByRole('listbox')
+      expect(within(list).getByText('Recent')).toBeInTheDocument()
+      // the recent rows come first, then every command again under its own group
+      const all = options()
+      unmount()
+      return all.slice(0, all.length - 3)
+    }
+    await runOnce(2, 'inbox')
+    expect(await recentOptions(2)).toEqual(['Go to inbox'])
+    await runOnce(2, 'new issue')
+    expect(await recentOptions(2)).toEqual(['New issue', 'Go to inbox'])
+    await runOnce(2, 'inbox') // run again: moves to the front, not listed twice
+    expect(await recentOptions(2)).toEqual(['Go to inbox', 'New issue'])
+    await runOnce(1, 'inbox')
+    await runOnce(1, 'new issue')
+    expect(await recentOptions(1)).toEqual(['New issue'])
   })
 
   it('virtualises long result lists, keeping the active option rendered and counted', async () => {
@@ -158,5 +175,24 @@ describe('CommandPalette', () => {
     const active = document.getElementById(input.getAttribute('aria-activedescendant')!)
     expect(active).toHaveTextContent('Command 60')
     expect(active).toHaveAttribute('aria-posinset', '61')
+  })
+
+  it('keeps the active option rendered when the list is scrolled away from it', async () => {
+    const user = userEvent.setup()
+    const many: Command[] = Array.from({ length: 500 }, (_, i) => ({ id: `c${i}`, label: `Command ${i}`, group: 'All', run }))
+    render(<CommandPalette open onOpenChange={() => {}} commands={many} />)
+    const input = await screen.findByRole('combobox')
+    const list = screen.getByRole('listbox')
+    const scroller = fakeScroller(list, { height: 340, content: 6 + 29 + 500 * 36 + 6 })
+    input.focus()
+    for (let i = 0; i < 60; i++) await user.keyboard('{ArrowDown}')
+    const id = input.getAttribute('aria-activedescendant')!
+    expect(document.getElementById(id)).toHaveTextContent('Command 60')
+    act(() => list.scrollTo({ top: 0 })) // the reader scrolls back to the top with the wheel
+    expect(scroller.top).toBe(0)
+    expect(screen.getByRole('option', { name: /^Command 0/ })).toBeInTheDocument()
+    expect(screen.queryByRole('option', { name: /^Command 40/ })).toBeNull() // far rows are not rendered...
+    expect(document.getElementById(id)).toHaveTextContent('Command 60') // ...but the active one still is
+    expect(input).toHaveAttribute('aria-activedescendant', id)
   })
 })

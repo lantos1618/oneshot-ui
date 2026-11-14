@@ -41,7 +41,7 @@ function Toggle({ initial = true }: { initial?: boolean }) {
   return (
     <>
       <button onClick={() => setShow(s => !s)}>toggle</button>
-      {p.mounted && <div ref={p.ref} data-testid="box" data-exiting={p.exiting || undefined}>box</div>}
+      {p.mounted && <div ref={p.ref} data-testid="box" data-exiting={p.exiting || undefined} data-enter={p.enter || undefined}>box</div>}
     </>
   )
 }
@@ -53,17 +53,36 @@ describe('usePresence', () => {
     expect(screen.queryByTestId('box')).toBeNull()
   })
 
-  it('waits for the exit animations, and showing again cancels the exit', async () => {
+  it('waits for the exit animations before unmounting', async () => {
     const { anim, end } = pendingAnimation()
     stubAnimations(anim)
     render(<Toggle />)
     act(() => screen.getByText('toggle').click())
     expect(screen.getByTestId('box')).toHaveAttribute('data-exiting')
-    act(() => screen.getByText('toggle').click())
-    expect(screen.getByTestId('box')).not.toHaveAttribute('data-exiting')
-    act(() => screen.getByText('toggle').click())
+    await act(async () => { await Promise.resolve() })
+    expect(screen.getByTestId('box')).toBeInTheDocument() // still leaving
     await act(async () => { end(); await anim.finished })
     expect(screen.queryByTestId('box')).toBeNull()
+  })
+
+  it('showing again cancels the exit: the old exit animation finishing later neither unmounts nor replays the entrance', async () => {
+    const first = pendingAnimation(), second = pendingAnimation()
+    let current = first.anim
+    const proto = Element.prototype as { getAnimations?: () => Animation[] }
+    proto.getAnimations = () => [current]
+    onTestFinished(() => { delete proto.getAnimations })
+    render(<Toggle />)
+    act(() => screen.getByText('toggle').click()) // hide: the first exit starts
+    act(() => screen.getByText('toggle').click()) // show again before it ends
+    expect(screen.getByTestId('box')).not.toHaveAttribute('data-exiting')
+    current = second.anim
+    act(() => screen.getByText('toggle').click()) // hide again: a second exit
+    await act(async () => { first.end(); await first.anim.finished })
+    expect(screen.getByTestId('box')).toHaveAttribute('data-exiting') // the cancelled exit did not end this one
+    act(() => screen.getByText('toggle').click()) // show again
+    await act(async () => { second.end(); await second.anim.finished })
+    expect(screen.getByTestId('box')).not.toHaveAttribute('data-enter') // no entrance replay for a box that never left
+    expect(screen.getByTestId('box')).not.toHaveAttribute('data-exiting')
   })
 })
 
@@ -151,8 +170,33 @@ describe('useInView and ActiveIndicator', () => {
     vi.unstubAllGlobals()
   })
 
-  it('ActiveIndicator renders one decorative span', () => {
-    const { container } = render(<div><ActiveIndicator group="g" className="bg-red-500" /></div>)
-    expect(container.querySelectorAll('span[aria-hidden]')).toHaveLength(1)
+  it('ActiveIndicator is decorative and slides from the old item to the new one', () => {
+    withMotion()
+    // each item reports its own place; the indicator fills the item it is in
+    const rects: Record<string, DOMRect> = { a: new DOMRect(0, 0, 60, 30), b: new DOMRect(100, 0, 80, 30) }
+    vi.spyOn(HTMLElement.prototype, 'getBoundingClientRect').mockImplementation(function (this: HTMLElement) {
+      return rects[(this.closest('[data-item]') as HTMLElement | null)?.dataset.item ?? ''] ?? new DOMRect()
+    })
+    const animate = vi.fn(() => ({ finished: Promise.resolve(), cancel() {} }) as unknown as Animation)
+    const proto = Element.prototype as { animate?: unknown }
+    proto.animate = animate
+    onTestFinished(() => { delete proto.animate })
+    function Tabs() {
+      const [on, setOn] = useState('a')
+      return <div role="tablist">{['a', 'b'].map(k => (
+        <button key={k} role="tab" aria-selected={on === k} data-item={k} onClick={() => setOn(k)}>{k}{on === k && <ActiveIndicator group="g" />}</button>
+      ))}</div>
+    }
+    render(<Tabs />)
+    expect(screen.getByRole('tab', { name: 'a' }).querySelectorAll('span[aria-hidden]')).toHaveLength(1)
+    expect(animate).not.toHaveBeenCalled() // nothing to slide from on the first render
+    act(() => screen.getByRole('tab', { name: 'b' }).click())
+    expect(screen.getByRole('tab', { name: 'a' }).querySelector('span[aria-hidden]')).toBeNull()
+    expect(screen.getByRole('tab', { name: 'b' }).querySelectorAll('span[aria-hidden]')).toHaveLength(1)
+    expect(animate).toHaveBeenCalledTimes(1)
+    expect(animate).toHaveBeenCalledWith([
+      { transform: 'translate(-100px,0px)', width: '60px', height: '30px' },
+      { transform: 'none', width: '80px', height: '30px' },
+    ], expect.objectContaining({ duration: expect.any(Number) }))
   })
 })

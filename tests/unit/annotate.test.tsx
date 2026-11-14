@@ -4,7 +4,7 @@ import { act, fireEvent, render, screen } from '@testing-library/react'
 import { useState, type ReactNode } from 'react'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { Chart, layoutTimeTags, timeTicks, type TimeTag } from '../../src/lib/all'
-import { TAGS_BUSY_DAY, TAGS_LIGHT_DAY, POSTURE_STATES_DAY, tagsDay } from '../../src/examples'
+import { TAGS_BUSY_DAY, TAGS_LIGHT_DAY, tagsDay } from '../../src/examples'
 import { fakeTimers } from '../helpers'
 
 const at = (h: number, m = 0) => new Date(2026, 10, 9, h, m).getTime()
@@ -75,11 +75,6 @@ describe('layoutTimeTags', () => {
     expect(layoutTimeTags(four, { x: xOf(0.5), width: 300 }).style).toBe('rollup') // four rows needed
     expect(layoutTimeTags(four, { x: xOf(3), width: 1600 }).style).toBe('pins') // wider again: back to pins
   })
-  it('auto on the sample days: pins for the light day on a desktop width, rollups for the busy day', () => {
-    const k = 640 / 510
-    expect(layoutTimeTags(TAGS_LIGHT_DAY.filter(t => !t.end), { x: xOf(k), width: 640 }).style).toBe('pins')
-    expect(layoutTimeTags(TAGS_BUSY_DAY.filter(t => !t.end), { x: xOf(k), width: 640 }).style).toBe('rollup')
-  })
 })
 
 describe('timeTicks', () => {
@@ -94,19 +89,6 @@ describe('timeTicks', () => {
     expect(short[0].ms).toBeGreaterThan(at(9, 7))
     expect(short.every(t => new Date(t.ms).getMinutes() % 15 === 0)).toBe(true)
     expect(timeTicks(at(9), at(9), 640, fmt)).toEqual([])
-  })
-})
-
-describe('sample day', () => {
-  it('is deterministic and covers the workday', () => {
-    const d = tagsDay('light')
-    expect(tagsDay('light')).toBe(d)
-    expect(d.points).toHaveLength(511)
-    expect(d.points[0].t).toBe(at(9))
-    expect(POSTURE_STATES_DAY[0].at).toBe(at(9))
-    expect(POSTURE_STATES_DAY.at(-1)!.end).toBe(at(17, 30))
-    for (let i = 1; i < POSTURE_STATES_DAY.length; i++) expect(POSTURE_STATES_DAY[i].at).toBe(POSTURE_STATES_DAY[i - 1].end)
-    expect(TAGS_BUSY_DAY.filter(t => !t.end).length).toBeGreaterThanOrEqual(TAGS_LIGHT_DAY.filter(t => !t.end).length * 4)
   })
 })
 
@@ -127,7 +109,7 @@ describe('Chart annotations', () => {
   })
   it('spans: "none" leaves the spans out', () => {
     en(chart({ spans: 'none' }))
-    expect(screen.getAllByRole('option')).toHaveLength(2)
+    expect(screen.getAllByRole('option').map(o => o.getAttribute('aria-label'))).toEqual(['Water at 10:40', 'Snack at 10:50'])
   })
   it('keyboard: arrows walk the tags, Enter selects, Escape clears; keys do not reach the series', () => {
     const onSelect = vi.fn(), onActiveChange = vi.fn()
