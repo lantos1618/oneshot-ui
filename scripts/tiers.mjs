@@ -25,7 +25,7 @@ export const EXTRAS = {
   collab: { modules: ['collab'], deps: ['motionkit'] },
   data: { modules: ['datagrid', 'scheduler', 'kanban'], deps: ['motionkit'] },
   binary: { modules: ['binary'], deps: ['vizkit'] },
-  ai: { modules: ['aistream', 'ai', 'aichat'], deps: ['content', 'lanes', 'media', 'motionkit'] },
+  ai: { modules: ['stream-transport', 'aistream', 'ai', 'aichat'], deps: ['content', 'lanes', 'media', 'motionkit'] },
   agents: { modules: ['agentrun', 'aiagent'], deps: ['ai', 'content', 'diagrams', 'lanes', 'motionkit'] },
   theming: { modules: ['themeexport', 'appearance'], deps: ['motionkit'] },
 }
@@ -34,7 +34,7 @@ export const EXTRAS = {
 export const BARRELS = ['core', 'forms', 'diagrams']
 
 /** Modules with no subpath export of their own (internal plumbing of their tier). */
-export const INTERNAL = ['formkit', 'diagramkit', 'motionkit']
+export const INTERNAL = ['formkit', 'diagramkit', 'motionkit', 'stream-transport']
 
 /** Data that geo loads on demand: a subpath of its own, never in a barrel. */
 export const LAZY = ['geoworld', 'geoland']

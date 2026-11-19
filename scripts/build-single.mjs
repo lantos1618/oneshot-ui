@@ -17,11 +17,11 @@
 // Modules were split from one file and every top-level name is unique, so concatenation is safe;
 // we only rewrite imports. An add-on imports from another bundle only what it uses.
 import { readFileSync, writeFileSync, mkdirSync, readdirSync } from 'node:fs'
-import { join, relative } from 'node:path'
+import { basename, dirname, join, relative } from 'node:path'
 import { libModuleOf } from './registry/analyze.mjs'
 import { assertProvenance, commit, dirty, header, pkg, sha256 } from './registry/stamp.mjs'
 import { libFiles, root } from './paths.mjs'
-import { BUNDLES, assertPlaced, bundleOf } from './tiers.mjs'
+import { BUNDLES, INTERNAL, assertPlaced, bundleOf } from './tiers.mjs'
 
 const LIB = Object.values(BUNDLES).flat()
 assertProvenance()
@@ -45,7 +45,10 @@ function load(file) {
   const imports = []
   // intra-library re-exports (`export { x } from './core'`, `export * from './y'`): in the concatenated
   // output those names already exist, so the line is dropped
-  const body = src.replace(REEXPORT, '').replace(IMPORT, (_, typeOnly, named, star, def, _q, from) => {
+  // A local export list in an internal module links its siblings without adding single-file entry points.
+  const internal = dirname(file) === join(root, 'src/lib') && INTERNAL.includes(basename(file, '.tsx'))
+  const declarations = internal ? src.replace(/^export \{[^}]*\};?[ \t]*$/gm, '') : src
+  const body = declarations.replace(REEXPORT, '').replace(IMPORT, (_, typeOnly, named, star, def, _q, from) => {
     if (named) imports.push({ from, names: named.split(',').map(s => s.trim()).filter(Boolean).map(n => (typeOnly && !n.startsWith('type ') ? `type ${n}` : n)) })
     else imports.push({ from, raw: `import ${typeOnly ?? ''}${star ?? def} from '${from}'` })
     return ''
