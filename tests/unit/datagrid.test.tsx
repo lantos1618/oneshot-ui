@@ -131,11 +131,14 @@ describe('DataGrid: server mode', () => {
       const rows = makeRows(200)
       const renderGrid = (state: typeof blocked) => <DataGrid server aria-label="Customers" columns={columns} rows={rows}
         rowKey={r => r.id} onLoadMore={more} {...state} />
+      const ready = { loading: false, hasMore: true }
       const { rerender } = render(renderGrid(blocked))
       act(() => { scroller().scrollTop = 38 * 195; fireEvent.scroll(scroller()) })
       expect(more).not.toHaveBeenCalled()
-      rerender(renderGrid({ loading: false, hasMore: true }))
+      rerender(renderGrid(ready))
       expect(more).toHaveBeenCalledTimes(1)
+      rerender(renderGrid(blocked))
+      rerender(renderGrid(ready))
       act(() => { scroller().scrollTop += 38; fireEvent.scroll(scroller()) })
       expect(more).toHaveBeenCalledTimes(1)
     },
@@ -183,16 +186,16 @@ describe('DataGrid: selection API', () => {
   it('passes full server selection separately from loaded rows to Export and Delete', async () => {
     const user = userEvent.setup()
     const onExport = vi.fn(), onDelete = vi.fn()
-    const selection: GridSelection = { mode: 'exclude', keys: new Set([2]) }
+    const selection: GridSelection = { mode: 'exclude', keys: new Set([2, 42]) }
     const rows = makeRows(3)
     render(<DataGrid server aria-label="Customers" columns={columns} rows={rows} rowKey={r => r.id} rowCount={900} pageSize={3}
       selection={selection} onExport={onExport} onDelete={onDelete} />)
 
     await user.click(screen.getByRole('button', { name: 'Export' }))
-    expect(onExport).toHaveBeenCalledExactlyOnceWith([rows[0], rows[2]], { mode: 'exclude', keys: new Set([2]) })
+    expect(onExport).toHaveBeenCalledExactlyOnceWith([rows[0], rows[2]], { mode: 'exclude', keys: new Set([2, 42]) })
 
     await user.click(screen.getByRole('button', { name: 'Delete' }))
-    expect(onDelete).toHaveBeenCalledExactlyOnceWith({ mode: 'exclude', keys: new Set([2]) }, [rows[0], rows[2]])
+    expect(onDelete).toHaveBeenCalledExactlyOnceWith({ mode: 'exclude', keys: new Set([2, 42]) }, [rows[0], rows[2]])
   })
 
   it('shift-click selects a range in uncontrolled mode, as before', async () => {
