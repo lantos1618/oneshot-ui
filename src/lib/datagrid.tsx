@@ -863,13 +863,11 @@ export function DataGrid<T extends object>(props: DataGridProps<T>) {
   const tabAt = tab ? nav.at[nav.index.get(tab.id)!] : -1
   const estimate = useMemo(() => disp ? (i: number) => disp[i]?.g !== undefined ? GRID_GROUP_H : rowH : rowH, [disp, rowH])
   const keep = useMemo(() => tabAt >= 0 ? [tabAt] : undefined, [tabAt])
-  const loadingRef = useRef(loading); loadingRef.current = loading
-  const hasMoreRef = useRef(hasMore); hasMoreRef.current = hasMore
   const v = useVirtual({
     count: dispCount, estimateSize: estimate, scrollRef: scrollEl, enabled: virtualOn, paddingStart: rowH, scrollPaddingStart: rowH,
     getItemKey: i => { const d = disp?.[i]; return d ? (d.g !== undefined ? `g:${d.g}` : rowKey(d.r)) : rowKey(pageRows[i]) },
     initialRect: { width: 800, height: maxHeight }, keep,
-    onEndReached: onLoadMore ? () => { if (hasMoreRef.current && !loadingRef.current) onLoadMore() } : undefined,
+    onEndReached: hasMore && !loading ? onLoadMore : undefined,
   })
   const vRef = useRef(v); vRef.current = v
   const firstScroll = useRef(true)

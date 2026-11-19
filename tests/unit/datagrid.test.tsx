@@ -123,6 +123,23 @@ describe('DataGrid: server mode', () => {
     expect(more).toHaveBeenCalledTimes(1)
     expect(grid()).toHaveAttribute('aria-rowcount', '-1') // total unknown
   })
+
+  it.each([{ loading: true, hasMore: true }, { loading: false, hasMore: false }])(
+    'requests more when the visible end becomes loadable (initial state: %j)',
+    blocked => {
+      const more = vi.fn()
+      const rows = makeRows(200)
+      const renderGrid = (state: typeof blocked) => <DataGrid server aria-label="Customers" columns={columns} rows={rows}
+        rowKey={r => r.id} onLoadMore={more} {...state} />
+      const { rerender } = render(renderGrid(blocked))
+      act(() => { scroller().scrollTop = 38 * 195; fireEvent.scroll(scroller()) })
+      expect(more).not.toHaveBeenCalled()
+      rerender(renderGrid({ loading: false, hasMore: true }))
+      expect(more).toHaveBeenCalledTimes(1)
+      act(() => { scroller().scrollTop += 38; fireEvent.scroll(scroller()) })
+      expect(more).toHaveBeenCalledTimes(1)
+    },
+  )
 })
 
 describe('DataGrid: selection API', () => {
@@ -161,6 +178,21 @@ describe('DataGrid: selection API', () => {
     expect(screen.getByRole('region', { name: 'Selection' })).toHaveTextContent('All 899 selected')
     await user.type(screen.getByRole('textbox', { name: /Search rows/ }), 'x')
     await waitFor(() => expect(latest).toEqual(GRID_NO_SELECTION))
+  })
+
+  it('passes full server selection separately from loaded rows to Export and Delete', async () => {
+    const user = userEvent.setup()
+    const onExport = vi.fn(), onDelete = vi.fn()
+    const selection: GridSelection = { mode: 'exclude', keys: new Set([2]) }
+    const rows = makeRows(3)
+    render(<DataGrid server aria-label="Customers" columns={columns} rows={rows} rowKey={r => r.id} rowCount={900} pageSize={3}
+      selection={selection} onExport={onExport} onDelete={onDelete} />)
+
+    await user.click(screen.getByRole('button', { name: 'Export' }))
+    expect(onExport).toHaveBeenCalledExactlyOnceWith([rows[0], rows[2]], { mode: 'exclude', keys: new Set([2]) })
+
+    await user.click(screen.getByRole('button', { name: 'Delete' }))
+    expect(onDelete).toHaveBeenCalledExactlyOnceWith({ mode: 'exclude', keys: new Set([2]) }, [rows[0], rows[2]])
   })
 
   it('shift-click selects a range in uncontrolled mode, as before', async () => {
