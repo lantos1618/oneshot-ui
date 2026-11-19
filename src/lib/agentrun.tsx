@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
-import { tryJson } from './core'
+import { readJsonStream, readStreamSource } from './stream-transport'
 
 export type AgentSpanKind = 'agent' | 'llm' | 'tool' | 'retrieval' | 'chain' | 'human'
 export type AgentSpanStatus = 'running' | 'ok' | 'error' | 'cancelled'
@@ -337,29 +337,10 @@ export function runLaneNodes(run: AgentRun, { include }: { include?: (span: Agen
 /**
  * Decodes a byte (or string) stream of JSON values: Server-Sent Events (`data: {…}`, events end at a blank line,
  * `[DONE]` ends the stream) or NDJSON (one value per line), told apart by the first line. Malformed lines are skipped;
- * a line longer than AGENT_RUN_LIMITS.lineChars is dropped. Leaving the loop early cancels the stream.
+ * a line or SSE payload longer than AGENT_RUN_LIMITS.lineChars is dropped. Leaving the loop early cancels the stream.
  */
 export async function* parseRunStream(stream: ReadableStream<Uint8Array | string>): AsyncGenerator<unknown> {
-  const reader = stream.getReader(), dec = new TextDecoder()
-  let buf = '', mode: 'sse' | 'ndjson' | null = null, data: string[] = [], ended = false
-  function* line(raw: string): Generator<unknown> {
-    const l = raw.endsWith('\r') ? raw.slice(0, -1) : raw
-    if (!mode) { if (!l.trim()) return; mode = /^(data|event|id|retry):|^:/.test(l) ? 'sse' : 'ndjson' }
-    if (mode === 'ndjson') { if (!l.trim() || l.length > AGENT_RUN_LIMITS.lineChars) return; const j = tryJson(l); if (j.ok) yield j.v; return }
-    if (!l) { const s = data.join('\n'); data = []; if (!s) return; if (s.trim() === '[DONE]') { ended = true; return } const j = tryJson(s); if (j.ok) yield j.v; return }
-    if (l.startsWith('data:') && data.join('').length < AGENT_RUN_LIMITS.lineChars) data.push(l.slice(5).replace(/^ /, ''))
-  }
-  try {
-    while (!ended) {
-      const { value, done } = await reader.read()
-      if (done) break
-      buf += typeof value === 'string' ? value : dec.decode(value, { stream: true })
-      let i: number
-      while (!ended && (i = buf.indexOf('\n')) >= 0) { const l = buf.slice(0, i); buf = buf.slice(i + 1); yield* line(l) }
-      if (buf.length > AGENT_RUN_LIMITS.lineChars) buf = ''
-    }
-    if (!ended) { buf += dec.decode(); if (buf) yield* line(buf); if (mode === 'sse') yield* line('') }
-  } finally { try { await reader.cancel() } catch { /* closed */ } }
+  yield* readJsonStream(stream, { maxChars: AGENT_RUN_LIMITS.lineChars })
 }
 
 /** Something that turns one item of a source (your server's event, an AI SDK part, a LangGraph event) into updates. */
@@ -407,29 +388,7 @@ export class AgentRunClosedEarlyError extends Error {
 const arIsPoll = (v: unknown): v is AgentRunPoll => !!arObj(v) && typeof (v as AgentRunPoll).fetchRun === 'function'
 /** Every item of a source, bytes decoded. */
 async function* arItems(src: ArStreamish | ((signal: AbortSignal) => ArStreamish | Promise<ArStreamish>), signal: AbortSignal): AsyncGenerator<unknown> {
-  const s = typeof src === 'function' ? await src(signal) : src
-  if (typeof Response !== 'undefined' && s instanceof Response) {
-    if (!s.ok) throw new Error(`Request failed (${s.status})`)
-    if (!s.body) throw new Error('The response has no body')
-    yield* parseRunStream(s.body); return
-  }
-  if (typeof ReadableStream !== 'undefined' && s instanceof ReadableStream) {
-    const reader = (s as ReadableStream<unknown>).getReader()
-    const first = await reader.read()
-    if (first.done) return
-    const v = first.value
-    if (ArrayBuffer.isView(v) || typeof v === 'string') {
-      let sent = false
-      const rest = new ReadableStream<Uint8Array | string>({
-        async pull(ctl) { if (!sent) { sent = true; ctl.enqueue(v as Uint8Array | string); return } const r = await reader.read(); if (r.done) ctl.close(); else ctl.enqueue(r.value as Uint8Array | string) },
-        cancel() { return reader.cancel() },
-      })
-      yield* parseRunStream(rest); return
-    }
-    try { for (let r: ReadableStreamReadResult<unknown> = first; !r.done; r = await reader.read()) yield r.value } finally { try { await reader.cancel() } catch { /* closed */ } }
-    return
-  }
-  yield* s as AsyncIterable<unknown>
+  yield* readStreamSource(typeof src === 'function' ? await src(signal) : src, { maxChars: AGENT_RUN_LIMITS.lineChars })
 }
 /** One item as updates: through the mapper, else taken as an update or a whole run. */
 function arMapItem(item: unknown, map: AgentRunMapper | undefined): readonly AgentRunEvent[] {

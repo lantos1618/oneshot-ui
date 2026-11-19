@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
 import { tryJson, uiShared, useLatest, type RunStatus } from './core'
+import { readJsonStream, readStreamSource, type JsonStreamEnd, type JsonStreamFormat } from './stream-transport'
 
 /** Version of the AiChunk protocol. */
 export const AI_STREAM_VERSION = 1
@@ -219,9 +220,9 @@ export function toAiChunk(e: unknown): AiChunk | null {
   }
 }
 
-export type AiStreamFormat = 'auto' | 'sse' | 'ndjson'
+export type AiStreamFormat = JsonStreamFormat
 /** How a byte stream ended: `done` when it sent `[DONE]`; the values it decoded and the lines it could not read. */
-export type JsonLinesEnd = { done: boolean; values: number; malformed: number }
+export type JsonLinesEnd = JsonStreamEnd
 /**
  * Decodes a byte (or string) stream of JSON values: Server-Sent Events (`data: {…}` lines, events end at a blank line,
  * `[DONE]` ends the stream) or NDJSON (one value per line). `auto` decides from the first non-empty line. Reads may split
@@ -231,40 +232,7 @@ export type JsonLinesEnd = { done: boolean; values: number; malformed: number }
  */
 export async function* parseJsonLines(stream: ReadableStream<Uint8Array | string>, { format = 'auto', maxChars = AI_LIMITS.lineChars, onMalformed }:
   { format?: AiStreamFormat; maxChars?: number; onMalformed?: (line: string) => void } = {}): AsyncGenerator<unknown, JsonLinesEnd> {
-  const reader = stream.getReader()
-  const dec = new TextDecoder()
-  let buf = '', mode: 'sse' | 'ndjson' | null = format === 'auto' ? null : format, data: string[] = [], dataLen = 0, over = false, done = false, values = 0, malformed = 0
-  const bad = (s: string) => { malformed++; onMalformed?.(valueText(s, 201)) }
-  function* value(s: string): Generator<unknown> { const j = tryJson(s); if (!j.ok) { bad(s); return } values++; yield j.v }
-  function* line(raw: string): Generator<unknown> {
-    const l = raw.endsWith('\r') ? raw.slice(0, -1) : raw
-    if (!mode) { if (!l.trim()) return; mode = /^(data|event|id|retry):|^:/.test(l) ? 'sse' : 'ndjson' }
-    if (mode === 'ndjson') { if (!l.trim()) return; if (l.length > maxChars) { bad(l); return } yield* value(l); return }
-    if (!l) { // end of an SSE event
-      if (data.length && !over) { const s = data.join('\n'); if (s.trim() === '[DONE]') done = true; else yield* value(s) }
-      data = []; dataLen = 0; over = false; return
-    }
-    if (l.startsWith(':')) return // comment or keep-alive
-    if (!l.startsWith('data:')) { if (!/^(event|id|retry)(:|$)/.test(l)) bad(l); return }
-    const v = l.slice(5).replace(/^ /, '')
-    dataLen += v.length
-    if (dataLen > maxChars) { if (!over) bad(v); over = true; return }
-    data.push(v)
-  }
-  try {
-    while (!done) {
-      const { value, done: end } = await reader.read()
-      if (end) break
-      buf += typeof value === 'string' ? value : dec.decode(value as Uint8Array, { stream: true })
-      let i: number
-      while (!done && (i = buf.indexOf('\n')) >= 0) { const l = buf.slice(0, i); buf = buf.slice(i + 1); yield* line(l) }
-      if (buf.length > maxChars) { bad(buf); buf = ''; if (mode === 'sse') over = true } // a runaway line: drop it
-    }
-    if (!done) { buf += dec.decode(); if (buf) yield* line(buf); if (mode === 'sse') yield* line('') }
-  } finally {
-    try { await reader.cancel() } catch { /* already closed */ }
-  }
-  return { done, values, malformed }
+  return yield* readJsonStream(stream, { format, maxChars, onMalformed: onMalformed && (line => onMalformed(valueText(line, 201))) })
 }
 
 /** Anything a stream source may be: a fetch Response, a ReadableStream (of bytes, text or items) or an async iterable. */
@@ -275,32 +243,8 @@ export type StreamSource<T = unknown> = Response | ReadableStream<T | Uint8Array
  * when the source was items.
  */
 export async function* streamItems(src: StreamSource, opts: { format?: AiStreamFormat; onMalformed?: (line: string) => void } = {}): AsyncGenerator<unknown, JsonLinesEnd | null> {
-  if (typeof Response !== 'undefined' && src instanceof Response) {
-    if (!src.ok) throw new Error(`Request failed (${src.status})`)
-    if (!src.body) throw new Error('The response has no body')
-    return yield* parseJsonLines(src.body, opts)
-  }
-  if (typeof ReadableStream !== 'undefined' && src instanceof ReadableStream) {
-    const reader = (src as ReadableStream<unknown>).getReader()
-    let first: ReadableStreamReadResult<unknown>
-    try { first = await reader.read() } catch (e) { reader.releaseLock(); throw e }
-    if (first.done) return null
-    const v = first.value
-    if (ArrayBuffer.isView(v) || typeof v === 'string') { // bytes or text: hand the rest to the decoder
-      let sent = false
-      const rest = new ReadableStream<Uint8Array | string>({
-        async pull(ctl) { if (!sent) { sent = true; ctl.enqueue(v as Uint8Array | string); return } const r = await reader.read(); if (r.done) ctl.close(); else ctl.enqueue(r.value as Uint8Array | string) },
-        cancel() { return reader.cancel() },
-      })
-      return yield* parseJsonLines(rest, opts)
-    }
-    try {
-      for (let r: ReadableStreamReadResult<unknown> = first; !r.done; r = await reader.read()) yield r.value
-    } finally { try { await reader.cancel() } catch { /* closed */ } }
-    return null
-  }
-  yield* src as AsyncIterable<unknown>
-  return null
+  const { format, onMalformed } = opts
+  return yield* readStreamSource(src, { format, maxChars: AI_LIMITS.lineChars, onMalformed: onMalformed && (line => onMalformed(valueText(line, 201))) })
 }
 
 /**
