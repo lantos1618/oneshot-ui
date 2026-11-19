@@ -143,11 +143,51 @@ describe('J-H3: audio players follow src', () => {
   })
 })
 
-describe('J-M15: VideoPlayer without a source', () => {
+describe('VideoPlayer', () => {
   it('says there is no video, not that the browser is at fault', () => {
     render(<VideoPlayer />)
     expect(screen.getByText('No video')).toBeInTheDocument()
     expect(screen.queryByText(/browser/)).toBeNull()
+  })
+
+  it('seeks the video element when the focused player receives arrow keys', () => {
+    const { container } = render(<VideoPlayer src="https://x.example/demo.mp4" duration={30} />)
+    const video = container.querySelector('video')!
+    const player = screen.getByLabelText('Video player')
+    video.currentTime = 10
+    player.focus()
+    expect(player).toHaveFocus()
+
+    fireEvent.keyDown(player, { key: 'ArrowRight' })
+    expect(video.currentTime).toBe(12)
+    fireEvent.keyDown(player, { key: 'ArrowLeft' })
+    expect(video.currentTime).toBe(10)
+  })
+
+  it('plays a queued request once when metadata arrives for the new source', async () => {
+    const { container, rerender } = render(<VideoPlayer preparing />)
+    const video = container.querySelector('video')!
+    let paused = true
+    vi.spyOn(video, 'paused', 'get').mockImplementation(() => paused)
+    const play = vi.spyOn(video, 'play').mockImplementation(async () => { paused = false })
+    const pause = vi.spyOn(video, 'pause').mockImplementation(() => { paused = true })
+
+    await act(async () => { fireEvent.click(screen.getAllByRole('button', { name: 'Play' })[0]) })
+    expect(screen.getByRole('button', { name: 'Starting… press to cancel' })).toBeInTheDocument()
+    expect(play).not.toHaveBeenCalled()
+
+    const src = 'https://x.example/demo.mp4'
+    await act(async () => { rerender(<VideoPlayer src={src} />) })
+    expect(video).toHaveAttribute('src', src)
+    expect(play).not.toHaveBeenCalled()
+
+    vi.spyOn(video, 'duration', 'get').mockReturnValue(30)
+    await act(async () => { fireEvent.loadedMetadata(video) })
+    expect(play).toHaveBeenCalledTimes(1)
+
+    await act(async () => { fireEvent.loadedMetadata(video) })
+    expect(play).toHaveBeenCalledTimes(1)
+    expect(pause).not.toHaveBeenCalled()
   })
 })
 

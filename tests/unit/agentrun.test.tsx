@@ -1,4 +1,4 @@
-import { act, render, screen, waitFor } from '@testing-library/react'
+import { act, render, renderHook, screen, waitFor } from '@testing-library/react'
 import { describe, expect, it, vi } from 'vitest'
 import {
   AgentRunLanes, AgentTransitMap, TraceWaterfall, aiSdkRunMapper, applyRunEvent, fromAiSdkResult, fromAiSdkUIStream, fromLangGraphEvents, fromOtel,
@@ -263,6 +263,29 @@ describe('useAgentRun', () => {
     expect(screen.getByTestId('probe').textContent).toBe('done:12:ok')
     await tick(1000)
     expect(poll.fetchRun).toHaveBeenCalledTimes(2) // stops polling once the run ends
+  })
+
+  it('keeps the current run when a superseded poll resolves late', async () => {
+    fakeTimers()
+    const oldRun = AGENT_RUN_FIXTURES[0].run()
+    const currentRun = AGENT_RUN_FIXTURES[1].run()
+    let resolveOldRun!: (run: AgentRun) => void
+    const oldResponse = new Promise<AgentRun>(resolve => { resolveOldRun = resolve })
+    const oldPoll = { fetchRun: vi.fn((_signal: AbortSignal) => oldResponse) }
+    const currentPoll = { fetchRun: async () => currentRun }
+    const initialProps: { source: AgentRunSource } = { source: oldPoll }
+    const { result, rerender } = renderHook(({ source }) => useAgentRun(source), { initialProps })
+    expect(oldPoll.fetchRun).toHaveBeenCalledTimes(1)
+    const [[oldSignal]] = oldPoll.fetchRun.mock.calls
+
+    rerender({ source: currentPoll })
+    expect(oldSignal.aborted).toBe(true)
+    await tick(16) // commit the current result on the next frame
+    expect(result.current.run?.id).toBe(currentRun.id)
+
+    await act(async () => { resolveOldRun(oldRun) })
+    await tick(16)
+    expect(result.current.run?.id).toBe(currentRun.id)
   })
 })
 
