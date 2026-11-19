@@ -5,7 +5,7 @@ import userEvent from '@testing-library/user-event'
 import { useState } from 'react'
 import { describe, expect, it, vi } from 'vitest'
 import { AlertDialog, type Command, type CommandLoader, CommandPalette } from '../../src/lib/overlay'
-import { fakeScroller } from '../helpers'
+import { fakeScroller, fakeTimers, tick } from '../helpers'
 
 describe('AlertDialog', () => {
   function Harness({ onConfirm, onOpenChange = () => {} }: { onConfirm: () => void | Promise<unknown>; onOpenChange?: (v: boolean) => void }) {
@@ -107,26 +107,32 @@ describe('CommandPalette', () => {
     expect(options()).toEqual(['Change status…'])
   })
 
-  it('loads async results debounced, aborting the superseded request, and ignores stale answers', async () => {
-    const user = userEvent.setup()
+  it('keeps the current options when a superseded request resolves late', async () => {
+    fakeTimers()
     const calls: { q: string; signal: AbortSignal; resolve: (c: Command[]) => void }[] = []
     const load: CommandLoader = (q, { signal }) => new Promise(resolve => { calls.push({ q, signal, resolve }) })
     render(<Palette loadItems={load} debounce={10} />)
-    const input = await screen.findByRole('combobox')
-    await waitFor(() => expect(calls).toHaveLength(1)) // the empty query
-    await user.type(input, 'fi')
-    await waitFor(() => expect(calls.at(-1)!.q).toBe('fi'))
-    expect(calls.slice(0, -1).every(c => c.signal.aborted)).toBe(true)
+    const input = screen.getByRole('combobox')
+    await tick(9)
+    expect(calls).toHaveLength(0)
+    await tick(1)
+    expect(calls.map(c => c.q)).toEqual([''])
+    fireEvent.change(input, { target: { value: 'fi' } })
+    await tick(10)
+    expect(calls.map(c => c.q)).toEqual(['', 'fi'])
     expect(screen.getByRole('status', { name: 'Loading results' })).toBeInTheDocument()
-    await user.type(input, 'x')
-    await waitFor(() => expect(calls.at(-1)!.q).toBe('fix'))
-    const fi = calls.find(c => c.q === 'fi')!
-    expect(fi.signal.aborted).toBe(true)
-    await act(async () => fi.resolve([{ id: 'stale', label: 'Stale result', run }])) // too late: ignored
-    expect(screen.queryByText('Stale result')).not.toBeInTheDocument()
-    await act(async () => calls.at(-1)!.resolve([{ id: 'i1', label: 'Fix login', group: 'Issues', run }]))
+    fireEvent.change(input, { target: { value: 'fix' } })
+    await tick(10)
+    expect(calls.map(c => c.q)).toEqual(['', 'fi', 'fix'])
+    const [initial, old, current] = calls
+    expect(initial.signal.aborted).toBe(true)
+    expect(old.signal.aborted).toBe(true)
+    await act(async () => current.resolve([{ id: 'i1', label: 'Fix login', group: 'Issues', run }]))
     expect(options()).toEqual(['Fix login'])
     expect(within(screen.getByRole('listbox')).getByText('Issues')).toBeInTheDocument()
+
+    await act(async () => old.resolve([{ id: 'stale', label: 'Stale result', run }]))
+    expect(options()).toEqual(['Fix login'])
   })
 
   it('shows a loader’s error', async () => {
